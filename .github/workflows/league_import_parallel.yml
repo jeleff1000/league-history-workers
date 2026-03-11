@@ -361,6 +361,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh workflow run playoff_odds_worker.yml \
+            --repo ${{ github.repository }} \
             -f database_name="${{ needs.setup.outputs.database_name }}" \
             -f n_sims="10000" \
             -f user_id="${{ github.event.inputs.user_id }}"

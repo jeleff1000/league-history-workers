@@ -68,6 +68,7 @@ runs:
           echo "========================================"
 
           gh workflow run playoff_odds_worker.yml \
+            --repo "${{ github.repository }}" \
             -f database_name="${DATABASE_NAME}" \
             -f n_sims="${N_SIMS}" \
             -f user_id="${USER_ID}"
@@ -202,6 +203,7 @@ runs:
               echo "Using workflow: ${FULL_WORKFLOW}"
 
               gh workflow run "${FULL_WORKFLOW}" \
+                --repo "${{ github.repository }}" \
                 -f league_data_b64="${FULL_IMPORT_DATA}" \
                 -f user_id="${USER_ID}_full"
 
