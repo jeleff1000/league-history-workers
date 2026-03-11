@@ -5,9 +5,9 @@ name: Update NFL Super Table
 # League imports read from this table - they no longer fetch from NFLverse directly.
 
 on:
-  schedule:
-    # 8 AM UTC on Tuesdays = 3 AM EST
-    - cron: '0 8 * * 2'
+  # schedule:
+  #   # 8 AM UTC on Tuesdays = 3 AM EST
+  #   - cron: '0 8 * * 2'
 
   workflow_dispatch:
     inputs:
