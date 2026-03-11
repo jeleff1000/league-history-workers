@@ -1,0 +1,96 @@
+name: 'Upload to MotherDuck'
+description: 'Upload parquet files to MotherDuck with merge support'
+
+inputs:
+  database_name:
+    description: 'Target MotherDuck database name'
+    required: true
+  data_directory:
+    description: 'Directory containing parquet files'
+    required: false
+    default: 'fantasy_football_data'
+  motherduck_token:
+    description: 'MotherDuck authentication token'
+    required: true
+  import_mode:
+    description: 'Import mode: quick=replace tables, full/playoff=merge with existing'
+    required: false
+    default: ''
+
+outputs:
+  upload_success:
+    description: 'Whether upload succeeded'
+    value: ${{ steps.upload.outputs.upload_success }}
+  tables_uploaded:
+    description: 'Number of tables uploaded'
+    value: ${{ steps.upload.outputs.tables_uploaded }}
+  total_rows:
+    description: 'Total rows uploaded'
+    value: ${{ steps.upload.outputs.total_rows }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Upload to MotherDuck
+      id: upload
+      shell: bash
+      env:
+        MOTHERDUCK_TOKEN: ${{ inputs.motherduck_token }}
+        DATABASE_NAME: ${{ inputs.database_name }}
+        DATA_DIRECTORY: ${{ inputs.data_directory }}
+        IMPORT_MODE: ${{ inputs.import_mode }}
+      run: |
+        echo "========================================"
+        echo "Uploading to MotherDuck"
+        echo "Database: ${DATABASE_NAME}"
+        echo "Data dir: ${DATA_DIRECTORY}"
+        echo "Import mode: ${IMPORT_MODE:-default (merge)}"
+        echo "========================================"
+
+        # Ensure Python can find streamlit_helpers from repo root
+        export PYTHONPATH="${GITHUB_WORKSPACE}:${PYTHONPATH}"
+
+        # Use the existing motherduck_upload.py script
+        cd "${DATA_DIRECTORY}"
+
+        # Build command with optional import mode
+        UPLOAD_CMD="python motherduck_upload.py \"${DATABASE_NAME}\" ."
+        if [ -n "${IMPORT_MODE}" ]; then
+          UPLOAD_CMD="${UPLOAD_CMD} --import-mode ${IMPORT_MODE}"
+        fi
+
+        # Capture output to parse results (write to root level for artifact pickup)
+        eval "${UPLOAD_CMD}" 2>&1 | tee ../motherduck.log
+        UPLOAD_EXIT=${PIPESTATUS[0]}
+
+        if [ $UPLOAD_EXIT -eq 0 ]; then
+          echo "upload_success=true" >> $GITHUB_OUTPUT
+
+          # Parse upload results from log
+          TABLES=$(grep -c "  - " ../motherduck.log || echo "0")
+          echo "tables_uploaded=${TABLES}" >> $GITHUB_OUTPUT
+
+          # Extract total rows (sum all row counts)
+          TOTAL_ROWS=$(grep "  - " ../motherduck.log | grep -oP '\d+(?= rows)' | paste -sd+ | bc || echo "0")
+          echo "total_rows=${TOTAL_ROWS}" >> $GITHUB_OUTPUT
+
+          echo "Upload complete: ${TABLES} tables"
+        else
+          echo "upload_success=false" >> $GITHUB_OUTPUT
+          echo "tables_uploaded=0" >> $GITHUB_OUTPUT
+          echo "total_rows=0" >> $GITHUB_OUTPUT
+
+          echo "Upload failed - last 50 lines:"
+          tail -50 ../motherduck.log
+          exit $UPLOAD_EXIT
+        fi
+
+    - name: Cleanup deprecated columns
+      if: steps.upload.outputs.upload_success == 'true'
+      shell: bash
+      env:
+        MOTHERDUCK_TOKEN: ${{ inputs.motherduck_token }}
+        DATABASE_NAME: ${{ inputs.database_name }}
+      run: |
+        echo "Cleaning up deprecated columns..."
+        python -c "import os; import sys; sys.path.insert(0, '.'); from streamlit_helpers.database import drop_deprecated_columns; db=os.environ.get('DATABASE_NAME',''); tok=os.environ.get('MOTHERDUCK_TOKEN',''); dropped=drop_deprecated_columns(db,tok,dry_run=False) if db and tok else []; print(f'Dropped {len(dropped)} deprecated columns') if dropped else print('No deprecated columns to drop')"

@@ -1,0 +1,752 @@
+name: Playoff Odds & Expected Record Calculator
+
+# Separate workflow for playoff odds + expected record calculation with full Monte Carlo simulations
+# This runs AFTER the main import completes, using the existing parquet files
+# Both modules use schedule simulations and are computationally intensive
+
+on:
+  workflow_dispatch:
+    inputs:
+      database_name:
+        description: 'MotherDuck database name (e.g., kmffl_2025)'
+        required: true
+        type: string
+      n_sims:
+        description: 'Number of Monte Carlo simulations (default: 10000)'
+        required: false
+        default: '10000'
+        type: string
+      user_id:
+        description: 'User ID (for artifact naming)'
+        required: false
+        type: string
+
+jobs:
+  calculate-playoff-odds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180  # 3 hours for full simulations
+
+    env:
+      PYTHONUNBUFFERED: 1
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "requirements.txt"
+
+      - name: Install dependencies
+        run: uv pip install --system -r requirements.txt
+
+      - name: Download existing data from MotherDuck
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_NAME: ${{ github.event.inputs.database_name }}
+        run: |
+          echo "========================================"
+          echo "Downloading data from MotherDuck"
+          echo "Database: ${DATABASE_NAME}"
+          echo "========================================"
+
+          mkdir -p fantasy_football_data/league_settings
+
+          python - <<'PYEOF'
+          import duckdb
+          import os
+          import sys
+
+          db_name = os.environ['DATABASE_NAME']
+          token = os.environ['MOTHERDUCK_TOKEN']
+
+          # Connect to MotherDuck
+          print(f"Connecting to MotherDuck database: {db_name}")
+          try:
+              conn = duckdb.connect(f'md:{db_name}?motherduck_token={token}')
+          except Exception as e:
+              print(f"ERROR: Failed to connect to MotherDuck: {e}")
+              sys.exit(1)
+
+          # Download required tables (from public schema)
+          # NOTE: player_fantasy needed for clutch equity calculation - only rostered players needed
+          tables = ['matchup', 'schedule']
+          failed_tables = []
+
+          for table in tables:
+              print(f"Downloading {table}...")
+              try:
+                  df = conn.execute(f"SELECT * FROM public.{table}").fetchdf()
+                  df.to_parquet(f"fantasy_football_data/{table}.parquet", index=False)
+                  print(f"  ✓ {table}: {len(df):,} rows")
+              except Exception as e:
+                  print(f"  ✗ {table}: {e}")
+                  failed_tables.append(table)
+
+          # Download player_fantasy with filter - only rostered players needed for clutch equity
+          # This reduces download from 1.4M+ rows to ~50-100k rows (massive performance improvement)
+          print(f"Downloading player_fantasy (rostered only)...")
+          try:
+              df = conn.execute("""
+                  SELECT * FROM public.player_fantasy
+                  WHERE manager IS NOT NULL
+                    AND manager <> ''
+                    AND LOWER(TRIM(manager)) <> 'unrostered'
+              """).fetchdf()
+              df.to_parquet(f"fantasy_football_data/player_fantasy.parquet", index=False)
+              print(f"  ✓ player_fantasy: {len(df):,} rows (rostered only)")
+          except Exception as e:
+              print(f"  ✗ player_fantasy: {e}")
+              failed_tables.append('player_fantasy')
+
+          # Exit if required tables failed
+          if 'matchup' in failed_tables:
+              print("\nERROR: Required table 'matchup' could not be downloaded!")
+              print("Make sure the main import has completed and uploaded data to MotherDuck.")
+              sys.exit(1)
+
+          # player_fantasy is optional (needed for clutch calc but not critical)
+          if 'player_fantasy' in failed_tables:
+              print("\n⚠ Warning: player_fantasy not downloaded - clutch equity will be skipped")
+
+          # Download league settings and extract to JSON files
+          try:
+              # Check if league_settings table exists in public schema
+              result = conn.execute("SELECT table_name FROM information_schema.tables WHERE table_catalog = ? AND table_schema = 'public'", [db_name]).fetchall()
+              table_names = [r[0] for r in result]
+
+              if 'league_settings' in table_names:
+                  print("Downloading league_settings...")
+                  settings_df = conn.execute("SELECT * FROM public.league_settings").fetchdf()
+                  print(f"  ✓ league_settings: {len(settings_df):,} rows")
+
+                  # Extract each year's settings from the settings_json column
+                  import json
+                  from pathlib import Path
+
+                  settings_dir = Path("fantasy_football_data/league_settings")
+                  settings_dir.mkdir(parents=True, exist_ok=True)
+
+                  for _, row in settings_df.iterrows():
+                      year = row.get('year', 'unknown')
+                      league_key = row.get('league_key', 'unknown')
+                      settings_json = row.get('settings_json')
+
+                      if settings_json:
+                          try:
+                              settings_data = json.loads(settings_json)
+                              safe_key = str(league_key).replace(".", "_")
+                              output_file = settings_dir / f"league_settings_{year}_{safe_key}.json"
+                              with open(output_file, 'w', encoding='utf-8') as f:
+                                  json.dump(settings_data, f, indent=2)
+                              print(f"    ✓ Extracted settings for {year}")
+                          except json.JSONDecodeError as je:
+                              print(f"    ✗ Invalid JSON for {year}: {je}")
+                      else:
+                          print(f"    ⚠ No settings_json for {year}")
+              else:
+                  print("  ⚠ league_settings table not found - using defaults")
+          except Exception as e:
+              print(f"  Note: Could not download league_settings: {e}")
+
+          conn.close()
+          print("\n✓ Download complete")
+          PYEOF
+
+      - name: Download league context from MotherDuck
+        env:
+          DATABASE_NAME: ${{ github.event.inputs.database_name }}
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          echo "========================================"
+          echo "Downloading league context"
+          echo "========================================"
+
+          python - <<'PYEOF'
+          import duckdb
+          import os
+          import sys
+          import json
+          from pathlib import Path
+          import pandas as pd
+
+          db_name = os.environ['DATABASE_NAME']
+          token = os.environ['MOTHERDUCK_TOKEN']
+
+          # Connect to MotherDuck
+          print(f"Connecting to MotherDuck database: {db_name}")
+          try:
+              conn = duckdb.connect(f'md:{db_name}?motherduck_token={token}')
+          except Exception as e:
+              print(f"ERROR: Failed to connect to MotherDuck: {e}")
+              sys.exit(1)
+
+          # Try to download league_context.parquet from public schema
+          context_downloaded = False
+          try:
+              # Check if league_context table exists
+              result = conn.execute("SELECT table_name FROM information_schema.tables WHERE table_catalog = ? AND table_schema = 'public'", [db_name]).fetchall()
+              table_names = [r[0] for r in result]
+              
+              if 'league_context' in table_names:
+                  print("Downloading league_context.parquet...")
+                  df = conn.execute("SELECT * FROM public.league_context").fetchdf()
+                  
+                  if not df.empty:
+                      # The parquet file should have a single row with all context fields
+                      context_row = df.iloc[0]
+                      
+                      # Convert to dictionary and write as JSON
+                      context_data = context_row.to_dict()
+                      
+                      # Clean up the context data (convert numpy types to native Python types)
+                      import numpy as np
+                      for key, value in context_data.items():
+                          if isinstance(value, (np.integer, np.int64)):
+                              context_data[key] = int(value)
+                          elif isinstance(value, (np.floating, np.float64)):
+                              context_data[key] = float(value)
+                          elif isinstance(value, np.bool_):
+                              context_data[key] = bool(value)
+                          elif pd.isna(value):
+                              context_data[key] = None
+                      
+                      # Parse JSON fields - handle both direct names and _json suffix versions
+                      # The league_import_worker saves as *_json columns in MotherDuck
+                      json_field_mappings = {
+                          'league_ids_json': 'league_ids',
+                          'manager_name_overrides_json': 'manager_name_overrides',
+                          'keeper_rules_json': 'keeper_rules',
+                          'league_rules_json': 'league_rules',
+                          'standings_weights_json': 'standings_weights',
+                      }
+
+                      for json_col, target_field in json_field_mappings.items():
+                          if json_col in context_data and context_data[json_col]:
+                              try:
+                                  if isinstance(context_data[json_col], str):
+                                      context_data[target_field] = json.loads(context_data[json_col])
+                                  else:
+                                      context_data[target_field] = context_data[json_col]
+                                  # Remove the _json version to avoid passing unknown keys
+                                  del context_data[json_col]
+                              except (json.JSONDecodeError, TypeError):
+                                  pass
+
+                      # Also handle direct field names (for backward compatibility)
+                      for json_field in ['league_ids', 'manager_name_overrides', 'keeper_rules', 'league_rules', 'standings_weights']:
+                          if json_field in context_data and isinstance(context_data[json_field], str):
+                              try:
+                                  context_data[json_field] = json.loads(context_data[json_field])
+                              except (json.JSONDecodeError, TypeError):
+                                  pass
+
+                      # CRITICAL: Override data_directory to use current working directory
+                      # The original data_directory from import runner is no longer valid
+                      # on this new runner - data was downloaded to ./fantasy_football_data/
+                      context_data['data_directory'] = str(Path("fantasy_football_data").resolve())
+                      print(f"  Data directory: {context_data['data_directory']}")
+
+                      # Write to league_context.json
+                      with open("league_context.json", 'w', encoding='utf-8') as f:
+                          json.dump(context_data, f, indent=2)
+                      
+                      print("✓ Downloaded league_context.parquet from MotherDuck")
+                      print(f"  League: {context_data.get('league_name', 'Unknown')}")
+                      print(f"  Years: {context_data.get('start_year', '?')}-{context_data.get('end_year', '?')}")
+                      context_downloaded = True
+                  else:
+                      print("⚠ league_context table is empty")
+              else:
+                  print("⚠ No league_context table found in public schema")
+          except Exception as e:
+              print(f"⚠ Could not download league_context from MotherDuck: {e}")
+              import traceback
+              traceback.print_exc()
+
+          conn.close()
+
+          # If context wasn't downloaded, we'll create it from matchup data in next step
+          if not context_downloaded:
+              print("\n⚠ Will create league_context from matchup data (fallback)")
+              sys.exit(0)  # Don't fail - let the next step handle it
+          PYEOF
+
+      - name: Create league context (fallback)
+        if: always()
+        env:
+          DATABASE_NAME: ${{ github.event.inputs.database_name }}
+        run: |
+          # Only create context if it doesn't exist from previous step
+          if [ -f "league_context.json" ]; then
+            echo "✓ Using league_context.json from MotherDuck"
+            cat league_context.json
+            exit 0
+          fi
+
+          echo "Creating league context from matchup data (fallback)..."
+          
+          python - <<'PYEOF'
+          import json
+          import pandas as pd
+          from pathlib import Path
+          import os
+
+          # Read matchup data to infer context
+          matchup_df = pd.read_parquet("fantasy_football_data/matchup.parquet")
+
+          years = sorted(matchup_df['year'].unique())
+          managers = matchup_df['manager'].unique()
+
+          # Get league_id from data (use most recent year's league_id as primary)
+          league_id = 'unknown'
+          if 'league_id' in matchup_df.columns:
+              max_year = max(years)
+              max_year_data = matchup_df[matchup_df['year'] == max_year]
+              if not max_year_data.empty:
+                  league_id = max_year_data['league_id'].iloc[0]
+
+          # Build league_ids mapping (year -> league_id) for proper isolation
+          league_ids = {}
+          if 'league_id' in matchup_df.columns:
+              for year in years:
+                  year_data = matchup_df[matchup_df['year'] == year]
+                  if not year_data.empty:
+                      lid = year_data['league_id'].iloc[0]
+                      if pd.notna(lid):
+                          league_ids[str(int(year))] = str(lid)
+
+          # Format league name for display (strip l_ prefix if present for digit-starting names)
+          db_name = os.environ['DATABASE_NAME']
+          display_name = db_name
+          if db_name.startswith('l_') and len(db_name) > 2 and db_name[2].isdigit():
+              display_name = db_name[2:]  # Strip the l_ prefix
+          league_name = display_name.replace('_', ' ').title()
+
+          context = {
+              "league_id": str(league_id),
+              "league_name": league_name,
+              "game_code": "nfl",
+              "start_year": int(min(years)),
+              "end_year": int(max(years)),
+              "num_teams": len(managers),
+              "data_directory": str(Path("fantasy_football_data").resolve()),
+              "league_ids": league_ids,
+              "require_oauth": False,  # Read-only operations don't need OAuth
+          }
+
+          with open("league_context.json", 'w') as f:
+              json.dump(context, f, indent=2)
+
+          print("✓ League context created (fallback)")
+          print(json.dumps(context, indent=2))
+          PYEOF
+
+      - name: Run Expected Record Calculator
+        env:
+          N_SIMS: ${{ github.event.inputs.n_sims }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          echo "========================================"
+          echo "Running Expected Record Calculator"
+          echo "Simulations: ${N_SIMS}"
+          echo "========================================"
+
+          # Expected record uses Monte Carlo simulations for schedule-independent analysis
+          # This runs BEFORE playoff odds since both update matchup.parquet
+          python multi_league/transformations/matchup/expected_record_v2.py \
+            --context ../league_context.json \
+            --n-sims ${N_SIMS} \
+            2>&1 | tee ../expected_record.log
+
+          EXIT_CODE=${PIPESTATUS[0]}
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "✓ Expected record calculation complete"
+          else
+            echo "✗ Expected record calculation failed"
+            tail -50 ../expected_record.log
+            exit $EXIT_CODE
+          fi
+
+      - name: Run Playoff Odds Calculator
+        env:
+          N_SIMS: ${{ github.event.inputs.n_sims }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          echo "========================================"
+          echo "Running Playoff Odds Calculator"
+          echo "Simulations: ${N_SIMS}"
+          echo "========================================"
+
+          python multi_league/transformations/matchup/playoff_odds_import.py \
+            --context ../league_context.json \
+            --n-sims ${N_SIMS} \
+            2>&1 | tee ../playoff_odds.log
+
+          EXIT_CODE=${PIPESTATUS[0]}
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "✓ Playoff odds calculation complete"
+          else
+            echo "✗ Playoff odds calculation failed"
+            tail -50 ../playoff_odds.log
+            exit $EXIT_CODE
+          fi
+
+      - name: Verify results
+        run: |
+          python - <<'PYEOF'
+          import pandas as pd
+
+          df = pd.read_parquet("fantasy_football_data/matchup.parquet")
+
+          # Check for expected record columns
+          expected_record_cols = ['shuffle_avg_wins', 'shuffle_avg_seed', 'wins_vs_shuffle_wins', 'seed_vs_shuffle_seed']
+          print("Expected record columns check:")
+          for col in expected_record_cols:
+              if col in df.columns:
+                  non_null = df[col].notna().sum()
+                  print(f"  ✓ {col}: {non_null:,} non-null values")
+              else:
+                  print(f"  ✗ {col}: MISSING")
+
+          # Check for playoff odds columns
+          playoff_cols = ['p_playoffs', 'p_bye', 'p_champ', 'avg_seed', 'p_semis', 'p_final']
+          print("\nPlayoff odds columns check:")
+          for col in playoff_cols:
+              if col in df.columns:
+                  non_null = df[col].notna().sum()
+                  print(f"  ✓ {col}: {non_null:,} non-null values")
+              else:
+                  print(f"  ✗ {col}: MISSING")
+
+          print(f"\nTotal rows: {len(df):,}")
+          PYEOF
+
+      - name: Upload updated data to MotherDuck
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_NAME: ${{ github.event.inputs.database_name }}
+        run: |
+          echo "========================================"
+          echo "Uploading updated data to MotherDuck"
+          echo "========================================"
+
+          # Upload matchup.parquet (with playoff odds) and player_fantasy.parquet (with clutch equity)
+          python - <<'PYEOF'
+          import duckdb
+          import os
+          import sys
+          from pathlib import Path
+
+          db_name = os.environ['DATABASE_NAME']
+          token = os.environ['MOTHERDUCK_TOKEN']
+          data_dir = Path("fantasy_football_data")
+
+          print(f"Connecting to MotherDuck database: {db_name}")
+          try:
+              conn = duckdb.connect(f'md:{db_name}?motherduck_token={token}')
+          except Exception as e:
+              print(f"ERROR: Failed to connect to MotherDuck: {e}")
+              sys.exit(1)
+
+          # Upload matchup.parquet - MERGE with existing data to preserve columns from main import
+          # The main import adds cumulative stats (wins_to_date, etc.) and this worker adds
+          # playoff odds (p_playoffs, etc.) - we need to preserve BOTH sets of columns
+          matchup_file = data_dir / "matchup.parquet"
+          if not matchup_file.exists():
+              print(f"ERROR: {matchup_file} not found!")
+              sys.exit(1)
+
+          print(f"Uploading matchup.parquet (MERGE mode to preserve existing columns)...")
+          try:
+              # Get columns from new parquet file (these are guaranteed unique)
+              new_cols_result = conn.execute(f"SELECT * FROM read_parquet('{matchup_file}') LIMIT 0").description
+              new_cols = [c[0] for c in new_cols_result]
+              row_count = conn.execute(f"SELECT COUNT(*) FROM read_parquet('{matchup_file}')").fetchone()[0]
+              print(f"  New file has {len(new_cols)} columns, {row_count:,} rows")
+
+              # Check if table exists and get ACTUAL column names from the table itself
+              # Using SELECT * LIMIT 0 instead of information_schema avoids stale metadata issues
+              existing_cols = []
+              try:
+                  result = conn.execute("SELECT * FROM public.matchup LIMIT 0").description
+                  # Deduplicate column names (some tables may have duplicate columns from bugs)
+                  seen = set()
+                  existing_cols = []
+                  for c in result:
+                      if c[0] not in seen:
+                          existing_cols.append(c[0])
+                          seen.add(c[0])
+                  print(f"  Existing table has {len(existing_cols)} unique columns")
+              except:
+                  print(f"  No existing table found - will create new")
+
+              # If existing table has columns we don't have, we need to preserve them
+              missing_cols = set(existing_cols) - set(new_cols)
+              # Overlapping columns exist in BOTH new parquet and existing table.
+              # Use COALESCE(new, existing) to avoid overwriting SQL-enriched values
+              # (like optimal_points) with NULL from the local parquet.
+              overlap_cols = set(new_cols) & set(existing_cols) - {'year', 'week', 'manager'}
+              if missing_cols or overlap_cols:
+                  print(f"  Preserving {len(missing_cols)} columns from existing table: {list(missing_cols)[:5]}...")
+                  if overlap_cols:
+                      print(f"  COALESCE on {len(overlap_cols)} overlapping columns to preserve enriched values")
+
+                  # Build explicit column list - use only columns that actually exist in the table
+                  all_existing_cols = ", ".join([f'"{c}"' for c in existing_cols])
+                  preserved_cols = ", ".join([f'e."{c}"' for c in missing_cols]) if missing_cols else ""
+
+                  # For overlapping columns, use COALESCE(new, existing) so NULL in new
+                  # doesn't overwrite enriched values in existing
+                  new_cols_parts = []
+                  # Build type map from new parquet for safe COALESCE casting
+                  new_type_map = {c[0]: c[1] for c in new_cols_result}
+                  for c in new_cols:
+                      if c in overlap_cols:
+                          # TRY_CAST handles type mismatches (e.g., DOUBLE vs BOOLEAN)
+                          ctype = new_type_map.get(c, 'VARCHAR')
+                          new_cols_parts.append(f'COALESCE(n."{c}", TRY_CAST(e."{c}" AS {ctype})) AS "{c}"')
+                      else:
+                          new_cols_parts.append(f'n."{c}"')
+                  new_cols_select = ", ".join(new_cols_parts)
+
+                  select_clause = new_cols_select
+                  if preserved_cols:
+                      select_clause += ", " + preserved_cols
+
+                  conn.execute(f"""
+                      CREATE OR REPLACE TABLE public.matchup AS
+                      WITH existing_clean AS (
+                          -- Dedupe existing table to handle any duplicate columns
+                          SELECT DISTINCT {all_existing_cols}
+                          FROM public.matchup
+                      )
+                      SELECT {select_clause}
+                      FROM read_parquet('{matchup_file}') n
+                      LEFT JOIN existing_clean e
+                        ON n.year = e.year AND n.week = e.week AND n.manager = e.manager
+                  """)
+              else:
+                  # No columns to preserve, just replace with clean data
+                  conn.execute(f"CREATE OR REPLACE TABLE public.matchup AS SELECT * FROM read_parquet('{matchup_file}')")
+
+              final_count = conn.execute("SELECT COUNT(*) FROM public.matchup").fetchone()[0]
+              final_cols = conn.execute("DESCRIBE public.matchup").fetchdf()
+              print(f"  ✓ matchup: {final_count:,} rows, {len(final_cols)} columns")
+          except Exception as e:
+              print(f"  ✗ matchup upload failed: {e}")
+              import traceback
+              traceback.print_exc()
+              sys.exit(1)
+
+          # Update player_fantasy clutch_equity column (UPDATE, not replace!)
+          # This preserves the full NFL dataset and only updates clutch_equity for rostered players
+          player_file = data_dir / "player_fantasy.parquet"
+          if player_file.exists():
+              print(f"Updating player_fantasy clutch_equity column...")
+              try:
+                  # Check if clutch_equity column exists in the parquet file
+                  parquet_cols = conn.execute(f"SELECT * FROM read_parquet('{player_file}') LIMIT 0").description
+                  parquet_col_names = [c[0] for c in parquet_cols]
+
+                  if 'clutch_equity' not in parquet_col_names:
+                      print(f"  ⚠ clutch_equity column not in parquet file (clutch calc may not have run)")
+                      print(f"    Available columns: {parquet_col_names[:10]}...")
+                  else:
+                      # First ensure clutch_equity column exists in MotherDuck table
+                      conn.execute("""
+                          ALTER TABLE public.player_fantasy
+                          ADD COLUMN IF NOT EXISTS clutch_equity DOUBLE
+                      """)
+
+                      # Create temp table from parquet with just the columns we need for update
+                      conn.execute(f"""
+                          CREATE OR REPLACE TEMP TABLE clutch_updates AS
+                          SELECT player_week, clutch_equity
+                          FROM read_parquet('{player_file}')
+                          WHERE clutch_equity IS NOT NULL
+                      """)
+
+                      # Update existing rows with clutch_equity values
+                      result = conn.execute("""
+                          UPDATE public.player_fantasy pf
+                          SET clutch_equity = cu.clutch_equity
+                          FROM clutch_updates cu
+                          WHERE pf.player_week = cu.player_week
+                      """)
+
+                      updated_count = conn.execute("SELECT COUNT(*) FROM clutch_updates").fetchone()[0]
+                      print(f"  ✓ player_fantasy: updated clutch_equity for {updated_count:,} rows")
+
+                      conn.execute("DROP TABLE IF EXISTS clutch_updates")
+              except Exception as e:
+                  print(f"  ⚠ player_fantasy clutch_equity update failed (non-critical): {e}")
+          else:
+              print(f"  ⚠ player_fantasy.parquet not found (skipping clutch update)")
+
+          conn.close()
+          print("\n✓ MotherDuck upload complete")
+          PYEOF
+
+          if [ $? -eq 0 ]; then
+            echo "✓ MotherDuck upload complete"
+          else
+            echo "✗ MotherDuck upload failed"
+            exit 1
+          fi
+
+      - name: Re-aggregate season/career tables
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_NAME: ${{ github.event.inputs.database_name }}
+        run: |
+          echo "========================================"
+          echo "Re-aggregating season/career tables"
+          echo "(Updating with clutch_equity values)"
+          echo "========================================"
+
+          # Create minimal context for aggregation script
+          python - <<'PYEOF'
+          import json
+          import os
+
+          db_name = os.environ['DATABASE_NAME']
+
+          # Format league name for display
+          display_name = db_name
+          if db_name.startswith('l_') and len(db_name) > 2 and db_name[2].isdigit():
+              display_name = db_name[2:]
+          league_name = display_name.replace('_', ' ').title()
+
+          context = {
+              "league_name": league_name,
+              "motherduck_db_name": db_name,
+          }
+
+          with open("aggregation_context.json", 'w') as f:
+              json.dump(context, f, indent=2)
+
+          print(f"Created aggregation context for {db_name}")
+          PYEOF
+
+          # Run the aggregation script
+          cd fantasy_football_data_scripts
+          python multi_league/transformations/aggregation/aggregate_fantasy_context.py \
+            --context ../aggregation_context.json \
+            2>&1 | tee ../aggregation.log
+
+          EXIT_CODE=${PIPESTATUS[0]}
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "✓ Season/career aggregation complete"
+          else
+            echo "✗ Season/career aggregation failed"
+            tail -30 ../aggregation.log
+            exit $EXIT_CODE
+          fi
+
+      - name: Re-aggregate matchup tables
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_NAME: ${{ github.event.inputs.database_name }}
+        run: |
+          echo "========================================"
+          echo "Re-aggregating matchup season/career/H2H tables"
+          echo "(Includes playoff odds + expected record)"
+          echo "========================================"
+
+          cd fantasy_football_data_scripts
+          python multi_league/transformations/aggregation/aggregate_matchup_context.py \
+            --context ../league_context.json \
+            2>&1 | tee ../matchup_aggregation.log
+
+          EXIT_CODE=${PIPESTATUS[0]}
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "✓ Matchup aggregation complete"
+          else
+            echo "✗ Matchup aggregation failed (non-critical)"
+            tail -30 ../matchup_aggregation.log
+          fi
+
+      - name: Compute homepage summary
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_NAME: ${{ github.event.inputs.database_name }}
+        run: |
+          echo "========================================"
+          echo "Computing precomputed homepage summary"
+          echo "(Includes clutch_equity data)"
+          echo "========================================"
+
+          # Run the homepage summary script (uses aggregation_context.json)
+          cd fantasy_football_data_scripts
+          python multi_league/transformations/aggregation/homepage_summary.py \
+            --context ../aggregation_context.json --upload \
+            2>&1 | tee ../homepage_summary.log
+
+          EXIT_CODE=${PIPESTATUS[0]}
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "✓ Homepage summary complete"
+          elif [ $EXIT_CODE -eq 139 ]; then
+            echo "⚠️ DuckDB segfault on shutdown (exit 139) — data already uploaded, ignoring"
+          else
+            echo "✗ Homepage summary failed"
+            tail -30 ../homepage_summary.log
+            exit $EXIT_CODE
+          fi
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playoff-odds-${{ github.event.inputs.user_id || github.event.inputs.database_name }}
+          path: |
+            expected_record.log
+            playoff_odds.log
+            motherduck_upload.log
+            aggregation.log
+            matchup_aggregation.log
+            homepage_summary.log
+            fantasy_football_data/matchup.parquet
+            fantasy_football_data/player_fantasy.parquet
+          retention-days: 7
+
+      - name: Create workflow summary
+        if: always()
+        run: |
+          echo "# Playoff Odds Calculation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Database**: ${{ github.event.inputs.database_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Simulations**: ${{ github.event.inputs.n_sims }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "fantasy_football_data/matchup.parquet" ]; then
+            echo "## ✅ Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Completed Steps:" >> $GITHUB_STEP_SUMMARY
+            echo "1. Expected record (shuffle_avg_wins, wins_vs_shuffle_wins, etc.) calculated for matchup table" >> $GITHUB_STEP_SUMMARY
+            echo "2. Playoff odds (p_playoffs, p_bye, p_champ, etc.) calculated for matchup table" >> $GITHUB_STEP_SUMMARY
+            echo "3. Clutch equity calculated for player_fantasy table" >> $GITHUB_STEP_SUMMARY
+            echo "4. Season/career tables re-aggregated with clutch_equity values" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "All data uploaded to MotherDuck." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ Status: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Check the logs for details." >> $GITHUB_STEP_SUMMARY
+          fi

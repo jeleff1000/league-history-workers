@@ -1,0 +1,113 @@
+name: 'Cleanup Staging'
+description: 'Clean up staging tables and temporary data from MotherDuck'
+
+inputs:
+  database_name:
+    description: 'MotherDuck database name'
+    required: true
+  motherduck_token:
+    description: 'MotherDuck authentication token'
+    required: true
+  has_external_data:
+    description: 'Whether external data was uploaded to staging'
+    required: false
+    default: 'false'
+
+outputs:
+  cleanup_success:
+    description: 'Whether cleanup succeeded'
+    value: ${{ steps.cleanup.outputs.cleanup_success }}
+  tables_dropped:
+    description: 'Number of staging tables dropped'
+    value: ${{ steps.cleanup.outputs.tables_dropped }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Cleanup staging data
+      id: cleanup
+      shell: bash
+      env:
+        MOTHERDUCK_TOKEN: ${{ inputs.motherduck_token }}
+        DATABASE_NAME: ${{ inputs.database_name }}
+        HAS_EXTERNAL_DATA: ${{ inputs.has_external_data }}
+      run: |
+        echo "========================================"
+        echo "Cleaning up staging tables"
+        echo "Database: ${DATABASE_NAME}"
+        echo "========================================"
+
+        python - <<'PYEOF'
+        import os
+        import duckdb
+
+        has_external_data = os.environ.get('HAS_EXTERNAL_DATA', 'false').lower() == 'true'
+        db_name = os.environ.get('DATABASE_NAME', '')
+        token = os.environ.get('MOTHERDUCK_TOKEN', '')
+
+        # Default outputs
+        tables_dropped = 0
+        cleanup_success = True
+
+        if not has_external_data:
+            print("No external data - no staging cleanup needed")
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                f.write("cleanup_success=true\n")
+                f.write("tables_dropped=0\n")
+            exit(0)
+
+        if not token or not db_name:
+            print("WARNING: Missing token or database name")
+            with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                f.write("cleanup_success=false\n")
+                f.write("tables_dropped=0\n")
+            exit(0)
+
+        print(f"Cleaning up staging tables for: {db_name}")
+
+        try:
+            con = duckdb.connect(f"md:?motherduck_token={token}")
+
+            # Check for staging tables
+            try:
+                staging_tables = con.execute(f"""
+                    SELECT table_name
+                    FROM information_schema.tables
+                    WHERE table_catalog = '{db_name}'
+                    AND table_schema = 'staging'
+                """).fetchall()
+            except Exception as e:
+                print(f"Could not query staging tables: {e}")
+                staging_tables = []
+
+            if not staging_tables:
+                print("No staging tables to clean up")
+            else:
+                print(f"Found {len(staging_tables)} staging tables to clean up")
+
+                for (table_name,) in staging_tables:
+                    try:
+                        con.execute(f"DROP TABLE IF EXISTS {db_name}.staging.{table_name}")
+                        print(f"  Dropped {table_name}")
+                        tables_dropped += 1
+                    except Exception as e:
+                        print(f"  WARNING: Could not drop {table_name}: {e}")
+
+                # Drop the empty staging schema
+                try:
+                    con.execute(f"DROP SCHEMA IF EXISTS {db_name}.staging")
+                    print("  Dropped empty staging schema")
+                except Exception as e:
+                    print(f"  WARNING: Could not drop staging schema: {e}")
+
+            con.close()
+            print(f"Cleanup complete: {tables_dropped} tables dropped")
+
+        except Exception as e:
+            print(f"ERROR: Cleanup failed: {e}")
+            cleanup_success = False
+
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f"cleanup_success={'true' if cleanup_success else 'false'}\n")
+            f.write(f"tables_dropped={tables_dropped}\n")
+        PYEOF

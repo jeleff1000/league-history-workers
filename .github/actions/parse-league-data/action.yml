@@ -1,0 +1,292 @@
+name: 'Parse League Data'
+description: 'Parse and validate league data from base64-encoded input'
+
+inputs:
+  league_data_b64:
+    description: 'Base64-encoded JSON with league configuration'
+    required: true
+  import_mode:
+    description: 'Import mode: quick or full'
+    required: false
+    default: 'full'
+  yahoo_client_id:
+    description: 'Yahoo OAuth client ID'
+    required: true
+  yahoo_client_secret:
+    description: 'Yahoo OAuth client secret'
+    required: true
+  motherduck_token:
+    description: 'MotherDuck authentication token'
+    required: false
+
+outputs:
+  user_id:
+    description: 'Unique identifier for this import job'
+    value: ${{ steps.parse.outputs.user_id }}
+  league_id:
+    description: 'Yahoo league ID'
+    value: ${{ steps.parse.outputs.league_id }}
+  league_name:
+    description: 'Human-readable league name'
+    value: ${{ steps.parse.outputs.league_name }}
+  season:
+    description: 'End year (current season)'
+    value: ${{ steps.parse.outputs.season }}
+  start_year:
+    description: 'Start year for this import'
+    value: ${{ steps.parse.outputs.start_year }}
+  actual_start_year:
+    description: 'Original start year (for historical import trigger)'
+    value: ${{ steps.parse.outputs.actual_start_year }}
+  database_name:
+    description: 'MotherDuck database name'
+    value: ${{ steps.parse.outputs.database_name }}
+  import_mode:
+    description: 'Resolved import mode'
+    value: ${{ steps.parse.outputs.import_mode }}
+  validation_warnings:
+    description: 'Any validation warnings (JSON array)'
+    value: ${{ steps.parse.outputs.validation_warnings }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Parse and validate league data
+      id: parse
+      shell: bash
+      env:
+        YAHOO_CLIENT_ID: ${{ inputs.yahoo_client_id }}
+        YAHOO_CLIENT_SECRET: ${{ inputs.yahoo_client_secret }}
+        MOTHERDUCK_TOKEN: ${{ inputs.motherduck_token }}
+        LEAGUE_DATA_B64: ${{ inputs.league_data_b64 }}
+        IMPORT_MODE: ${{ inputs.import_mode }}
+      run: |
+        python - <<'PYEOF'
+        import json
+        import os
+        import sys
+        import base64
+        import re
+        import hashlib
+        import time
+        from datetime import datetime
+
+        # ============================================================
+        # INPUT VALIDATION
+        # ============================================================
+
+        validation_errors = []
+        validation_warnings = []
+
+        def validate_year(year, field_name):
+            """Validate a year value is reasonable."""
+            current_year = datetime.now().year
+            if not isinstance(year, (int, float)):
+                try:
+                    year = int(year)
+                except (ValueError, TypeError):
+                    validation_errors.append(f"{field_name} must be a number, got: {type(year).__name__}")
+                    return None
+            year = int(year)
+            if year < 2000:
+                validation_errors.append(f"{field_name} ({year}) is before fantasy football era (2000+)")
+                return None
+            if year > current_year + 1:
+                validation_errors.append(f"{field_name} ({year}) is too far in the future")
+                return None
+            return year
+
+        def validate_league_id(league_id):
+            """Validate Yahoo league ID format."""
+            if not league_id:
+                validation_errors.append("league_id is required")
+                return None
+            # Yahoo league IDs are typically like "449.l.123456" or just numeric
+            if not re.match(r'^(\d+\.l\.\d+|\d+)$', str(league_id)):
+                validation_warnings.append(f"league_id '{league_id}' has unusual format (expected: 449.l.123456)")
+            return str(league_id)
+
+        def validate_oauth_token(oauth_raw):
+            """Validate OAuth token structure."""
+            if not oauth_raw:
+                validation_errors.append("oauth_token is required")
+                return None
+            if not isinstance(oauth_raw, dict):
+                validation_errors.append("oauth_token must be an object")
+                return None
+            if not oauth_raw.get('refresh_token'):
+                validation_errors.append("oauth_token.refresh_token is required")
+                return None
+            if not oauth_raw.get('access_token'):
+                validation_warnings.append("oauth_token.access_token missing - will use refresh_token")
+            return oauth_raw
+
+        # ============================================================
+        # PARSE INPUT
+        # ============================================================
+
+        league_data_b64 = os.environ.get('LEAGUE_DATA_B64', '').strip()
+        import_mode = os.environ.get('IMPORT_MODE', 'full').strip().lower()
+
+        # Validate import mode
+        if import_mode not in ('quick', 'full'):
+            validation_warnings.append(f"Invalid import_mode '{import_mode}', defaulting to 'full'")
+            import_mode = 'full'
+
+        print(f"[PARSE] Received league_data_b64 length: {len(league_data_b64)}")
+        print(f"[PARSE] Import mode: {import_mode}")
+
+        # Decode base64 league data
+        if not league_data_b64:
+            validation_errors.append("No league_data_b64 provided")
+            print(f"VALIDATION ERRORS: {validation_errors}")
+            sys.exit(1)
+
+        try:
+            league_data_json = base64.b64decode(league_data_b64).decode('utf-8')
+            league_data = json.loads(league_data_json)
+            print(f"[PARSE] Successfully decoded league data")
+        except Exception as e:
+            validation_errors.append(f"Failed to decode league data: {e}")
+            print(f"VALIDATION ERRORS: {validation_errors}")
+            sys.exit(1)
+
+        # ============================================================
+        # VALIDATE FIELDS
+        # ============================================================
+
+        league_id = validate_league_id(league_data.get('league_id'))
+        oauth_raw = validate_oauth_token(league_data.get('oauth_token'))
+
+        league_name = league_data.get('league_name', '').strip()
+        if not league_name:
+            league_name = f"League {league_id}" if league_id else "Unknown League"
+            validation_warnings.append(f"No league_name provided, using: {league_name}")
+
+        season = validate_year(
+            league_data.get('season', league_data.get('end_year', datetime.now().year)),
+            'season'
+        )
+        actual_start_year = validate_year(
+            league_data.get('start_year', season),
+            'start_year'
+        )
+
+        # Check for validation errors
+        if validation_errors:
+            print("=" * 60)
+            print("VALIDATION ERRORS:")
+            for err in validation_errors:
+                print(f"  - {err}")
+            print("=" * 60)
+            sys.exit(1)
+
+        # Print warnings
+        if validation_warnings:
+            print("=" * 60)
+            print("VALIDATION WARNINGS:")
+            for warn in validation_warnings:
+                print(f"  - {warn}")
+            print("=" * 60)
+
+        # ============================================================
+        # DETERMINE YEAR RANGE
+        # ============================================================
+
+        if import_mode == 'quick':
+            start_year = season  # Only import current season
+            print(f"QUICK MODE: Importing only {season} (full history will run separately)")
+        else:
+            start_year = actual_start_year
+            if start_year > season:
+                print(f"WARNING: start_year ({start_year}) > season ({season}), swapping")
+                start_year, season = season, start_year
+            print(f"FULL MODE: Importing {start_year}-{season}")
+
+        # ============================================================
+        # BUILD OAUTH DATA
+        # ============================================================
+
+        consumer_key = os.environ.get('YAHOO_CLIENT_ID')
+        consumer_secret = os.environ.get('YAHOO_CLIENT_SECRET')
+
+        if not consumer_key or not consumer_secret:
+            validation_warnings.append("YAHOO_CLIENT_ID and YAHOO_CLIENT_SECRET not set")
+
+        oauth_data = {
+            'access_token': oauth_raw.get('access_token') if oauth_raw else None,
+            'refresh_token': oauth_raw.get('refresh_token') if oauth_raw else None,
+            'consumer_key': consumer_key,
+            'consumer_secret': consumer_secret,
+            'token_type': oauth_raw.get('token_type', 'bearer') if oauth_raw else 'bearer',
+            'expires_in': oauth_raw.get('expires_in', 3600) if oauth_raw else 3600,
+            'token_time': oauth_raw.get('token_time', time.time()) if oauth_raw else time.time(),
+            'guid': (oauth_raw.get('xoauth_yahoo_guid') or oauth_raw.get('guid')) if oauth_raw else None,
+        }
+
+        # ============================================================
+        # RESOLVE DATABASE NAME
+        # ============================================================
+
+        import subprocess
+        pre_computed_db = league_data.get('database_name', '').strip()
+        resolve_result = subprocess.run(
+            ['python', '.github/scripts/resolve_db_name.py',
+             '--league-id', str(league_id),
+             '--league-name', league_name,
+             '--platform', 'yahoo',
+             '--database-name', pre_computed_db],
+            capture_output=True, text=True
+        )
+        if resolve_result.returncode != 0:
+            print(f"WARNING: resolve_db_name.py failed: {resolve_result.stderr}")
+            final_db_name = re.sub(r"[^a-zA-Z0-9]+", "_", league_name.strip().lower()).strip("_")
+            if not final_db_name:
+                final_db_name = "league"
+            if final_db_name[0].isdigit():
+                final_db_name = f"l_{final_db_name}"
+            final_db_name = final_db_name[:63]
+        else:
+            final_db_name = resolve_result.stdout.strip().split('\n')[-1]
+        print(f"Using database name: {final_db_name}")
+
+        # ============================================================
+        # GENERATE USER ID
+        # ============================================================
+
+        input_str = f"{league_id}_{season}_{time.time()}"
+        user_id = hashlib.sha256(input_str.encode()).hexdigest()[:16]
+
+        # ============================================================
+        # WRITE OUTPUTS
+        # ============================================================
+
+        with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+            f.write(f"user_id={user_id}\n")
+            f.write(f"league_id={league_id}\n")
+            f.write(f"league_name={league_name}\n")
+            f.write(f"season={season}\n")
+            f.write(f"start_year={start_year}\n")
+            f.write(f"actual_start_year={actual_start_year}\n")
+            f.write(f"database_name={final_db_name}\n")
+            f.write(f"import_mode={import_mode}\n")
+            f.write(f"validation_warnings={json.dumps(validation_warnings)}\n")
+
+        # Save OAuth token to file
+        os.makedirs("oauth", exist_ok=True)
+        with open("oauth/Oauth.json", 'w') as f:
+            json.dump(oauth_data, f, indent=2)
+
+        # Save league data for context creation (with adjusted start_year)
+        league_data['start_year'] = start_year
+        league_data['actual_start_year'] = actual_start_year
+        with open("league_data_input.json", 'w') as f:
+            json.dump(league_data, f, indent=2)
+
+        print(f"[PARSE] League: {league_name} ({season})")
+        print(f"[PARSE] League ID: {league_id}")
+        print(f"[PARSE] Database: {final_db_name}")
+        print(f"[PARSE] User ID: {user_id}")
+        print(f"[PARSE] Import Mode: {import_mode}")
+        print(f"[PARSE] Years: {start_year}-{season}")
+        PYEOF

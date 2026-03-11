@@ -1,0 +1,291 @@
+name: Refresh OAuth Tokens
+
+# Manual workflow to refresh/update OAuth tokens for leagues
+# Use this when tokens expire or after changing Yahoo app credentials
+
+on:
+  workflow_dispatch:
+    inputs:
+      refresh_token:
+        description: 'Refresh token from local Streamlit auth (paste from oauth/Oauth.json)'
+        required: true
+        type: string
+      target_database:
+        description: 'Target database (leave empty for ALL leagues)'
+        required: false
+        type: string
+      update_master_secret:
+        description: 'Also show instructions to update YAHOO_MASTER_REFRESH_TOKEN'
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  refresh-tokens:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install duckdb requests cryptography yahoo_oauth
+
+      - name: Validate and refresh token
+        id: validate
+        env:
+          YAHOO_CLIENT_ID: ${{ secrets.YAHOO_CLIENT_ID }}
+          YAHOO_CLIENT_SECRET: ${{ secrets.YAHOO_CLIENT_SECRET }}
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+          INPUT_REFRESH_TOKEN: ${{ github.event.inputs.refresh_token }}
+          TARGET_DB: ${{ github.event.inputs.target_database }}
+        run: |
+          python - <<'PYEOF'
+          import os
+          import sys
+          import json
+          import time
+          import requests
+          import duckdb
+
+          # Get inputs
+          refresh_token = os.environ.get('INPUT_REFRESH_TOKEN', '').strip()
+          consumer_key = os.environ.get('YAHOO_CLIENT_ID')
+          consumer_secret = os.environ.get('YAHOO_CLIENT_SECRET')
+          md_token = os.environ.get('MOTHERDUCK_TOKEN')
+          encryption_key = os.environ.get('CREDENTIAL_ENCRYPTION_KEY')
+          target_db = os.environ.get('TARGET_DB', '').strip()
+
+          if not refresh_token:
+              print("❌ No refresh token provided")
+              sys.exit(1)
+
+          if not consumer_key or not consumer_secret:
+              print("❌ YAHOO_CLIENT_ID or YAHOO_CLIENT_SECRET not set in secrets")
+              sys.exit(1)
+
+          print("=" * 60)
+          print("STEP 1: Validating refresh token with Yahoo")
+          print("=" * 60)
+
+          # Use direct HTTP request to refresh token (avoids yahoo_oauth interactive fallback)
+          token_url = "https://api.login.yahoo.com/oauth2/get_token"
+
+          try:
+              response = requests.post(
+                  token_url,
+                  data={
+                      'grant_type': 'refresh_token',
+                      'refresh_token': refresh_token,
+                      'client_id': consumer_key,
+                      'client_secret': consumer_secret,
+                  },
+                  headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                  timeout=30
+              )
+
+              if response.status_code != 200:
+                  print(f"❌ Token refresh failed: {response.status_code}")
+                  print(f"   Response: {response.text[:500]}")
+                  print("\nCommon causes:")
+                  print("  1. Refresh token was created with different Yahoo app credentials")
+                  print("  2. Refresh token has expired")
+                  print("  3. Yahoo app was deleted or modified")
+                  sys.exit(1)
+
+              tokens = response.json()
+              new_access_token = tokens.get('access_token')
+              new_refresh_token = tokens.get('refresh_token', refresh_token)
+
+              if not new_access_token:
+                  print(f"❌ No access_token in response: {tokens}")
+                  sys.exit(1)
+
+              print(f"✅ Token validated successfully!")
+              print(f"   Access token: {new_access_token[:30]}...")
+              print(f"   Refresh token: {new_refresh_token[:30]}...")
+
+              # Test an API call
+              print("\n   Testing Yahoo API call...")
+              test_url = "https://fantasysports.yahooapis.com/fantasy/v2/users;use_login=1/games?format=json"
+              test_resp = requests.get(
+                  test_url,
+                  headers={'Authorization': f'Bearer {new_access_token}'},
+                  timeout=30
+              )
+              if test_resp.status_code == 200:
+                  print("   ✅ API call successful - token is fully working!")
+              else:
+                  print(f"   ⚠️ API call returned {test_resp.status_code} - token may have limited access")
+
+          except Exception as e:
+              print(f"❌ Token validation failed: {e}")
+              sys.exit(1)
+
+          print("\n" + "=" * 60)
+          print("STEP 2: Discovering league databases")
+          print("=" * 60)
+
+          if not md_token:
+              print("⚠️ MOTHERDUCK_TOKEN not set - cannot update stored credentials")
+              print("   Token is valid but won't be stored in MotherDuck")
+              sys.exit(0)
+
+          # Find all league databases
+          conn = duckdb.connect(f"md:?motherduck_token={md_token}")
+
+          dbs = conn.execute("""
+              SELECT DISTINCT catalog_name
+              FROM information_schema.schemata
+              WHERE schema_name = 'public'
+          """).fetchall()
+
+          # Filter to fantasy football databases
+          league_dbs = []
+          for (db_name,) in dbs:
+              if db_name in ('information_schema', 'my_db', 'sample_data', 'system', 'temp', 'memory'):
+                  continue
+              try:
+                  conn.execute(f"SELECT 1 FROM {db_name}.public.matchup LIMIT 1")
+                  league_dbs.append(db_name)
+              except:
+                  pass
+
+          conn.close()
+
+          print(f"Found {len(league_dbs)} league databases: {league_dbs}")
+
+          # Filter to target if specified
+          if target_db:
+              if target_db in league_dbs:
+                  league_dbs = [target_db]
+                  print(f"Targeting specific database: {target_db}")
+              else:
+                  print(f"⚠️ Target database '{target_db}' not found in league list")
+                  print(f"   Available: {league_dbs}")
+                  sys.exit(1)
+
+          print("\n" + "=" * 60)
+          print("STEP 3: Updating credentials in MotherDuck")
+          print("=" * 60)
+
+          if not encryption_key:
+              print("⚠️ CREDENTIAL_ENCRYPTION_KEY not set - cannot encrypt tokens")
+              print("   Token is valid but won't be stored securely")
+              sys.exit(0)
+
+          # Import credential store
+          sys.path.insert(0, 'fantasy_football_data_scripts')
+          from multi_league.utils.credential_store import store_league_credentials
+
+          success_count = 0
+          for db_name in league_dbs:
+              try:
+                  # Get league info from the database
+                  conn = duckdb.connect(f"md:{db_name}?motherduck_token={md_token}")
+
+                  # Try to get league_id from various sources
+                  league_id = db_name
+                  league_name = db_name.replace('_', ' ').title()
+
+                  try:
+                      result = conn.execute("SELECT league_key FROM league_settings ORDER BY year DESC LIMIT 1").fetchone()
+                      if result:
+                          league_id = result[0]
+                  except:
+                      pass
+
+                  try:
+                      result = conn.execute("SELECT league_id, league_name FROM league_context LIMIT 1").fetchone()
+                      if result:
+                          league_id = result[0] or league_id
+                          league_name = result[1] or league_name
+                  except:
+                      pass
+
+                  conn.close()
+
+                  # Store the credentials
+                  success = store_league_credentials(
+                      database_name=db_name,
+                      refresh_token=new_refresh_token,
+                      league_id=league_id,
+                      league_name=league_name
+                  )
+
+                  if success:
+                      print(f"✅ {db_name}: Credentials updated")
+                      success_count += 1
+                  else:
+                      print(f"❌ {db_name}: Failed to store credentials")
+
+              except Exception as e:
+                  print(f"❌ {db_name}: Error - {e}")
+
+          print("\n" + "=" * 60)
+          print("SUMMARY")
+          print("=" * 60)
+          print(f"✅ Updated {success_count}/{len(league_dbs)} league databases")
+
+          # Save new refresh token for output
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"new_refresh_token={new_refresh_token}\n")
+              f.write(f"leagues_updated={success_count}\n")
+
+          PYEOF
+
+      - name: Create summary
+        if: always()
+        env:
+          UPDATE_MASTER: ${{ github.event.inputs.update_master_secret }}
+          NEW_TOKEN: ${{ steps.validate.outputs.new_refresh_token }}
+        run: |
+          echo "# OAuth Token Refresh Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.validate.outcome }}" == "success" ]; then
+            echo "## ✅ Token Refresh Successful" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "- **Leagues Updated**: ${{ steps.validate.outputs.leagues_updated }}" >> $GITHUB_STEP_SUMMARY
+            echo "- **Token Source**: Manual input" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+
+            if [ "$UPDATE_MASTER" == "true" ]; then
+              echo "## 📝 Update YAHOO_MASTER_REFRESH_TOKEN" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "To update your master fallback token:" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "1. Go to **Settings → Secrets and variables → Actions**" >> $GITHUB_STEP_SUMMARY
+              echo "2. Edit \`YAHOO_MASTER_REFRESH_TOKEN\`" >> $GITHUB_STEP_SUMMARY
+              echo "3. Paste your refresh token (same one you used here)" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "> This ensures weekly updates have a fallback if per-league tokens fail" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "## Next Steps" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Your weekly updates should now work! The tokens will auto-refresh each week." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ Token Refresh Failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Check the logs above for details." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Common Solutions" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "1. **Get a fresh token**: Run Streamlit locally, authenticate with Yahoo" >> $GITHUB_STEP_SUMMARY
+            echo "2. **Check Yahoo app**: Make sure YAHOO_CLIENT_ID and YAHOO_CLIENT_SECRET match your app" >> $GITHUB_STEP_SUMMARY
+            echo "3. **Re-import leagues**: If tokens are completely dead, re-import via Streamlit" >> $GITHUB_STEP_SUMMARY
+          fi

@@ -1,0 +1,149 @@
+name: Update NFL Super Table
+
+# Updates the NFL super table in MotherDuck with latest NFLverse data.
+# Runs Tuesdays at 8 AM UTC (3 AM EST), then triggers weekly_update_worker.yml.
+# League imports read from this table - they no longer fetch from NFLverse directly.
+
+on:
+  schedule:
+    # 8 AM UTC on Tuesdays = 3 AM EST
+    - cron: '0 8 * * 2'
+
+  workflow_dispatch:
+    inputs:
+      year:
+        description: 'NFL season year (leave empty for current)'
+        required: false
+        type: string
+      week:
+        description: 'Specific week to update (leave empty for all weeks of current year)'
+        required: false
+        type: string
+      skip_league_updates:
+        description: 'Skip triggering league updates after super table update'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  actions: write  # Required to trigger other workflows
+
+jobs:
+  update-super-table:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install pandas duckdb pyarrow requests
+
+      - name: Update NFL Super Table
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          GITHUB_ACTIONS: 'true'
+        run: |
+          cd fantasy_football_data_scripts/multi_league/data_fetchers
+
+          # Build command with optional parameters
+          CMD="python update_nfl_super_table.py"
+
+          if [ -n "${{ github.event.inputs.year }}" ]; then
+            CMD="$CMD --year ${{ github.event.inputs.year }}"
+          fi
+
+          if [ -n "${{ github.event.inputs.week }}" ]; then
+            CMD="$CMD --week ${{ github.event.inputs.week }}"
+          fi
+
+          # If no year specified, use --auto to detect current NFL week
+          if [ -z "${{ github.event.inputs.year }}" ]; then
+            CMD="$CMD --auto"
+          fi
+
+          echo "Running: $CMD"
+          $CMD
+
+      - name: Update Season/Career Aggregations
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          cd fantasy_football_data_scripts/multi_league/data_fetchers
+
+          # Aggregate stats for the year being updated
+          if [ -n "${{ github.event.inputs.year }}" ]; then
+            python aggregate_nfl_stats.py --year ${{ github.event.inputs.year }}
+          else
+            # Default: current year
+            python aggregate_nfl_stats.py
+          fi
+
+      - name: Verify update
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          python - <<'PYEOF'
+          import duckdb
+          import os
+          from datetime import datetime
+
+          token = os.environ.get('MOTHERDUCK_TOKEN', '')
+          if not token:
+              print("No MOTHERDUCK_TOKEN - skipping verification")
+              exit(0)
+
+          conn = duckdb.connect(f"md:___ops?motherduck_token={token}")
+
+          # Get current year stats
+          current_year = datetime.now().year
+          result = conn.execute(f"""
+              SELECT year, COUNT(*) as rows, MAX(week) as max_week
+              FROM nfl_historical.nfl_player_stats_all
+              WHERE year = {current_year}
+              GROUP BY year
+          """).fetchone()
+
+          if result:
+              print(f"Super table {current_year}: {result[1]:,} rows, through week {result[2]}")
+          else:
+              print(f"WARNING: No data found for {current_year}")
+
+          conn.close()
+          PYEOF
+
+  # Trigger the weekly league updates after super table is ready
+  trigger-league-updates:
+    needs: update-super-table
+    if: github.event.inputs.skip_league_updates != 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Weekly Update Worker
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Triggering weekly_update_worker.yml..."
+
+          # Pass the week if it was specified
+          WEEK_INPUT=""
+          if [ -n "${{ github.event.inputs.week }}" ]; then
+            WEEK_INPUT="-f week=${{ github.event.inputs.week }}"
+          fi
+
+          gh workflow run weekly_update_worker.yml \
+            --repo ${{ github.repository }} \
+            $WEEK_INPUT
+
+          echo "✅ Weekly Update Worker triggered successfully"

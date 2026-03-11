@@ -1,0 +1,650 @@
+name: Sleeper Quick Import Worker (Current Year Only)
+
+# This workflow imports ONLY the current year for fast startup (~5 min).
+# After completion, it triggers sleeper_full_import_worker.yml to import historical years.
+# Called from: Streamlit UI via trigger_import_workflow.py
+
+on:
+  workflow_dispatch:
+    inputs:
+      league_data_b64:
+        description: 'Base64-encoded JSON with Sleeper league configuration'
+        required: false
+        type: string
+      league_data:
+        description: 'DEPRECATED - raw JSON (for backward compat)'
+        required: false
+        type: string
+      user_id:
+        description: 'Unique identifier for this user/import job'
+        required: true
+        type: string
+
+  repository_dispatch:
+    types: [sleeper_quick_import]
+
+# Prevent multiple imports for the same user running simultaneously
+concurrency:
+  group: sleeper-import-${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  import-sleeper-league:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60  # Sleeper imports are faster (no OAuth, public API)
+
+    env:
+      PYTHONUNBUFFERED: 1
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Cache Python virtualenv
+        uses: actions/cache@v5
+        id: cache-venv
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py3.11-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            venv-${{ runner.os }}-py3.11-
+
+      - name: Cache NFLverse data
+        uses: actions/cache@v5
+        with:
+          path: ~/.nflverse
+          key: nflverse-${{ runner.os }}-${{ hashFiles('fantasy_football_data_scripts/multi_league/data_fetchers/nfl_data.py') }}
+          restore-keys: |
+            nflverse-${{ runner.os }}-
+
+      - name: Install dependencies
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Activate venv
+        run: |
+          echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
+
+      # ==================== PARSE INPUT ====================
+      - name: Parse league data
+        id: parse
+        run: |
+          source .venv/bin/activate
+          python - <<'PYEOF'
+          import json
+          import os
+          import base64
+          import re
+
+          # Get input from either workflow_dispatch or repository_dispatch
+          league_data_b64 = os.environ.get('LEAGUE_DATA_B64', '')
+          league_data_raw = os.environ.get('LEAGUE_DATA_RAW', '')
+          user_id = os.environ.get('USER_ID', '')
+          import_mode = 'quick'  # ALWAYS quick - this is the quick import worker
+
+          # Decode base64 if provided
+          if league_data_b64:
+              try:
+                  league_data = json.loads(base64.b64decode(league_data_b64).decode('utf-8'))
+              except:
+                  league_data = json.loads(league_data_b64)
+          elif league_data_raw:
+              league_data = json.loads(league_data_raw)
+          else:
+              print("ERROR: No league data provided")
+              exit(1)
+
+          # Extract Sleeper-specific fields
+          sleeper_league_id = league_data.get('sleeper_league_id') or league_data.get('league_id')
+          league_name = league_data.get('league_name', 'Sleeper League')
+          username = league_data.get('username', '').strip()  # Optional - not used in import
+          start_year = int(league_data.get('start_year', 2024))
+          end_year = int(league_data.get('end_year') or league_data.get('season', 2025))
+
+          # Validate required fields
+          if not sleeper_league_id:
+              print("ERROR: sleeper_league_id (or league_id) is required")
+              exit(1)
+
+          # Resolve database name using shared resolver
+          import subprocess
+          pre_computed_db = league_data.get('database_name', '').strip()
+          result = subprocess.run(
+              ['python', '.github/scripts/resolve_db_name.py',
+               '--league-id', str(sleeper_league_id),
+               '--league-name', league_name,
+               '--platform', 'sleeper',
+               '--database-name', pre_computed_db],
+              capture_output=True, text=True
+          )
+          if result.returncode != 0:
+              print(f"WARNING: resolve_db_name.py failed: {result.stderr}")
+              # Fallback to simple slugify
+              db_name = re.sub(r'[^a-zA-Z0-9]+', '_', league_name.strip().lower()).strip('_') or 'sleeper_league'
+              if db_name[0].isdigit():
+                  db_name = 'l_' + db_name
+              db_name = db_name[:63]
+          else:
+              db_name = result.stdout.strip().split('\n')[-1]  # Last line is the resolved name
+          print(f"Using database name: {db_name}")
+
+          # Save parsed data for next steps
+          with open("league_data_input.json", 'w') as f:
+              json.dump(league_data, f, indent=2)
+
+          # Output for GitHub Actions
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"sleeper_league_id={sleeper_league_id}\n")
+              f.write(f"league_name={league_name}\n")
+              f.write(f"username={username}\n")
+              f.write(f"database_name={db_name}\n")
+              f.write(f"user_id={user_id}\n")
+              f.write(f"import_mode={import_mode}\n")
+              f.write(f"start_year={start_year}\n")
+              f.write(f"end_year={end_year}\n")
+
+          print(f"Parsed Sleeper league: {league_name}")
+          print(f"  League ID: {sleeper_league_id}")
+          print(f"  Username: {username}")
+          print(f"  Years: {start_year}-{end_year}")
+          print(f"  Database: {db_name}")
+          print(f"  Import mode: {import_mode}")
+          PYEOF
+        env:
+          LEAGUE_DATA_B64: ${{ github.event.inputs.league_data_b64 || github.event.client_payload.league_data_b64 }}
+          LEAGUE_DATA_RAW: ${{ github.event.inputs.league_data || github.event.client_payload.league_data }}
+          USER_ID: ${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
+          IMPORT_MODE: ${{ github.event.inputs.import_mode || github.event.client_payload.import_mode || 'full' }}
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+
+      # ==================== CREATE DATA DIRECTORY ====================
+      - name: Create data directory
+        run: |
+          # Create directory structure for Sleeper data
+          DATA_DIR="fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}"
+          mkdir -p "$DATA_DIR"/{league_settings,rosters,matchups,drafts,transactions}
+          echo "data_directory=$DATA_DIR" >> $GITHUB_OUTPUT
+          echo "Created data directory: $DATA_DIR"
+        id: datadir
+
+      # ==================== CREATE SLEEPER CONTEXT ====================
+      - name: Create Sleeper context
+        env:
+          IMPORT_MODE: ${{ steps.parse.outputs.import_mode }}
+        run: |
+          source .venv/bin/activate
+          python - <<'PYEOF'
+          import json
+          import os
+          from pathlib import Path
+          from datetime import datetime
+
+          with open("league_data_input.json") as f:
+              league_data = json.load(f)
+
+          import_mode = 'quick'  # ALWAYS quick - this is the quick import worker
+          data_dir = Path("fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}").resolve()
+
+          # Extract playoff settings from UI (if passed) or use defaults
+          playoff_teams = league_data.get('playoff_teams', 6)
+          playoff_round_type = league_data.get('playoff_round_type', 0)
+          playoff_start_week = league_data.get('playoff_week_start') or league_data.get('playoff_start_week')
+
+          # Calculate bye_teams from bracket math (standard tournament structure)
+          # NOTE: playoff_round_type is about multi-week rounds (0=single, 1=2-week champ),
+          # NOT about byes. Byes are determined by bracket structure.
+          import math
+          if playoff_teams > 1:
+              next_power_of_2 = 2 ** math.ceil(math.log2(playoff_teams))
+              bye_teams = next_power_of_2 - playoff_teams
+          else:
+              bye_teams = 0
+
+          # Detect H2H+Median from standings_weights or explicit flag
+          standings_weights = league_data.get('standings_weights')
+          uses_median_scoring = league_data.get('uses_median_scoring', False)
+
+          # If standings_weights has above_median_wins, mark as median scoring
+          if standings_weights and standings_weights.get('weights', {}).get('above_median_wins', 0) > 0:
+              uses_median_scoring = True
+
+          # If uses_median_scoring is True but no standings_weights passed, auto-generate
+          if uses_median_scoring and not standings_weights:
+              standings_weights = {
+                  "enabled": True,
+                  "weights": {
+                      "h2h_wins": 1.0,
+                      "above_median_wins": 1.0,
+                      "all_play_wins": 0.0,
+                      "total_points": 0.0,
+                      "optimal_points": 0.0,
+                      "lineup_efficiency": 0.0,
+                  },
+                  "preset": "h2h_median",
+              }
+
+          # Create Sleeper context (matches SleeperContext format)
+          context = {
+              "league_id": "${{ steps.parse.outputs.sleeper_league_id }}",
+              "league_name": "${{ steps.parse.outputs.league_name }}",
+              "motherduck_db_name": "${{ steps.parse.outputs.database_name }}",
+              "username": "${{ steps.parse.outputs.username }}",
+              "sport": "nfl",
+              "start_year": int("${{ steps.parse.outputs.start_year }}"),
+              "end_year": int("${{ steps.parse.outputs.end_year }}"),
+              "num_teams": league_data.get('num_teams'),
+              "playoff_teams": playoff_teams,
+              "bye_teams": bye_teams,
+              "playoff_start_week": playoff_start_week,
+              "regular_season_weeks": league_data.get('regular_season_weeks'),
+              "uses_median_scoring": uses_median_scoring,
+              "data_directory": str(data_dir),
+              "max_workers": 3,
+              "enable_caching": True,
+              "rate_limit_per_min": 1000,  # Sleeper has generous rate limits
+              "roster_to_manager": {},
+              "roster_to_guid": {},
+              "manager_name_overrides": league_data.get('manager_name_overrides', {}),
+              "league_ids": league_data.get('league_ids', {}),  # Pre-seeded if combining, else populated by fetcher
+              "user_id": None,  # Will be populated by fetcher
+              "created_at": datetime.now().isoformat(),
+              "updated_at": datetime.now().isoformat(),
+              "platform": "sleeper",
+              "import_mode": import_mode,
+              "require_oauth": False,
+              # Advanced settings (same as Yahoo)
+              "keeper_rules": league_data.get('keeper_rules'),
+              "league_rules": league_data.get('league_rules'),
+              "standings_weights": standings_weights,
+          }
+
+          context_path = data_dir / "sleeper_context.json"
+          with open(context_path, 'w') as f:
+              json.dump(context, f, indent=2)
+
+          # Also save to root for import script
+          with open("sleeper_context.json", 'w') as f:
+              json.dump(context, f, indent=2)
+
+          print(f"Sleeper context created: {context['start_year']}-{context['end_year']} (mode: {import_mode})")
+          print(f"Context path: {context_path}")
+          PYEOF
+
+      # ==================== RUN SLEEPER IMPORT ====================
+      - name: Run Sleeper import
+        id: import
+        env:
+          AUTO_CONFIRM: "1"
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          source ../.venv/bin/activate
+          echo "========================================"
+          echo "Starting Sleeper import for ${{ steps.parse.outputs.league_name }}"
+          echo "League ID: ${{ steps.parse.outputs.sleeper_league_id }}"
+          echo "Years: ${{ steps.parse.outputs.start_year }}-${{ steps.parse.outputs.end_year }}"
+          echo "Import Mode: ${{ steps.parse.outputs.import_mode }}"
+          echo "========================================"
+
+          # Run Sleeper import with detailed error capture
+          set +e
+          python sleeper_initial_import.py \
+            --context ../sleeper_context.json \
+            --import-mode ${{ steps.parse.outputs.import_mode }} \
+            2>&1 | tee ../import.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+
+          echo "exit_code=${EXIT_CODE}" >> $GITHUB_OUTPUT
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo "========================================"
+            echo "SLEEPER IMPORT FAILED (exit code ${EXIT_CODE})"
+            echo "========================================"
+            echo ""
+
+            echo "=== LAST 200 LINES OF IMPORT LOG ==="
+            tail -200 ../import.log
+            echo ""
+
+            echo "=== SEARCHING FOR ERRORS ==="
+            grep -i "error\|exception\|traceback\|failed" ../import.log | head -30 || echo "No obvious errors found"
+
+            exit $EXIT_CODE
+          fi
+
+          echo ""
+          echo "Sleeper import completed successfully"
+
+      # ==================== VERIFY PARQUET FILES ====================
+      - name: Verify parquet files
+        if: steps.import.outputs.exit_code == '0'
+        id: verify
+        run: |
+          DATA_DIR="fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}"
+          PARQUET_COUNT=$(find "$DATA_DIR" -name "*.parquet" -type f | wc -l)
+          echo "Found ${PARQUET_COUNT} parquet files"
+
+          if [ "$PARQUET_COUNT" -eq 0 ]; then
+            echo "ERROR: No parquet files created!"
+            exit 1
+          fi
+
+          echo "=== Canonical Files ==="
+          ls -lh "$DATA_DIR"/{player_fantasy,matchup,draft,transactions}.parquet 2>/dev/null || echo "Some canonical files missing"
+
+          echo ""
+          echo "=== All Parquet Files ==="
+          find "$DATA_DIR" -name "*.parquet" -type f -exec ls -lh {} \;
+
+          echo "file_count=${PARQUET_COUNT}" >> $GITHUB_OUTPUT
+
+      # ==================== CONSOLIDATE LEAGUE SETTINGS ====================
+      - name: Consolidate league settings
+        if: steps.import.outputs.exit_code == '0'
+        run: |
+          source .venv/bin/activate
+          python - <<'PYEOF'
+          import json
+          import math
+          from pathlib import Path
+          import pandas as pd
+
+          data_dir = Path("fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}")
+          settings_dir = data_dir / "league_settings"
+
+          if not settings_dir.exists():
+              print("No league_settings directory")
+              exit(0)
+
+          settings_files = list(settings_dir.glob("league_settings_*.json"))
+          if not settings_files:
+              print("No settings files found")
+              exit(0)
+
+          rows = []
+          for sf in sorted(settings_files):
+              try:
+                  with open(sf, 'r', encoding='utf-8') as f:
+                      data = json.load(f)
+
+                  # Extract playoff settings correctly
+                  metadata = data.get('metadata', data)
+                  # league_average_match can be at top-level or nested in 'settings'
+                  settings_nested = data.get('settings', {})
+                  # Check top-level first, then nested (use None check, not falsy check)
+                  league_avg_match = data.get('league_average_match')
+                  if league_avg_match is None or league_avg_match == 0:
+                      league_avg_match = settings_nested.get('league_average_match', 0)
+
+                  # Get playoff settings
+                  playoff_start = metadata.get('playoff_start_week') or data.get('playoff_start_week', 15)
+                  num_playoff = metadata.get('num_playoff_teams') or data.get('num_playoff_teams') or data.get('playoff_teams', 6)
+
+                  # Calculate end_week dynamically if missing (instead of hardcoding 17)
+                  stored_end_week = metadata.get('end_week') or data.get('end_week')
+                  if stored_end_week:
+                      end_week = stored_end_week
+                  else:
+                      # Calculate from bracket structure: playoff_start + rounds - 1
+                      playoff_rounds = math.ceil(math.log2(num_playoff)) if num_playoff > 1 else 1
+                      end_week = playoff_start + playoff_rounds - 1
+
+                  rows.append({
+                      'year': data.get('season'),
+                      'league_id': data.get('league_id'),
+                      'num_teams': data.get('num_teams') or data.get('total_rosters'),
+                      'num_playoff_teams': num_playoff,
+                      'bye_teams': metadata.get('bye_teams') or data.get('bye_teams', 0),
+                      'playoff_start_week': playoff_start,
+                      'end_week': end_week,
+                      'league_average_match': league_avg_match,
+                      'settings_json': json.dumps(data)
+                  })
+              except Exception as e:
+                  print(f"Error reading {sf.name}: {e}")
+
+          if rows:
+              pd.DataFrame(rows).to_parquet(data_dir / "league_settings.parquet", index=False)
+              print(f"Created league_settings.parquet with {len(rows)} years")
+          PYEOF
+
+      # ==================== SAVE LEAGUE CONTEXT TO PARQUET ====================
+      - name: Save league context to parquet
+        if: steps.import.outputs.exit_code == '0'
+        run: |
+          source .venv/bin/activate
+          python - <<'PYEOF'
+          import json
+          import pandas as pd
+          from pathlib import Path
+          from datetime import datetime
+
+          data_dir = Path("fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}")
+
+          with open("sleeper_context.json") as f:
+              context = json.load(f)
+
+          now = datetime.now().isoformat()
+          # Get standings_weights for storing
+          standings_weights = context.get('standings_weights')
+          standings_weights_json = json.dumps(standings_weights) if standings_weights else None
+
+          row = {
+              'league_id': context.get('league_id'),
+              'league_name': context.get('league_name'),
+              'platform': 'sleeper',
+              'username': context.get('username'),
+              'start_year': context.get('start_year'),
+              'end_year': context.get('end_year'),
+              'num_teams': context.get('num_teams'),
+              'playoff_teams': context.get('playoff_teams'),
+              'bye_teams': context.get('bye_teams'),
+              'playoff_start_week': context.get('playoff_start_week'),
+              'uses_median_scoring': context.get('uses_median_scoring', False),
+              'standings_weights_json': standings_weights_json,
+              'league_ids_json': json.dumps(context.get('league_ids', {})),
+              'keeper_rules_json': json.dumps(context.get('keeper_rules')) if context.get('keeper_rules') else None,
+              'created_at': context.get('created_at') or now,
+              'updated_at': now,
+          }
+
+          pd.DataFrame([row]).to_parquet(data_dir / "league_context.parquet", index=False)
+          print("Saved league_context.parquet")
+          PYEOF
+
+      # ==================== VALIDATE CRITICAL TABLES ====================
+      # Note: Upload, SQL enrichments, and aggregation are already handled by the import pipeline
+      # (PHASE 4: Upload, PHASE 4.5: SQL Enrichments, PHASE 5: Aggregation)
+      - name: Validate critical tables
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
+        run: |
+          source .venv/bin/activate
+          echo "========================================"
+          echo "Validating critical tables in MotherDuck"
+          echo "========================================"
+
+          python - <<'PYEOF'
+          import duckdb
+          import os
+          import re
+
+          db_name = os.environ['DATABASE_NAME']
+          token = os.environ['MOTHERDUCK_TOKEN']
+
+          # Sanitize database name
+          db = re.sub(r'[^a-zA-Z0-9]+', '_', db_name.strip().lower()).strip('_')
+          if not db:
+              db = 'sleeper_league'
+          if db[0].isdigit():
+              db = 'l_' + db
+          db = db[:63]
+
+          # Sleeper critical tables (same as Yahoo)
+          CRITICAL_TABLES = ['matchup', 'player_fantasy', 'draft', 'transactions', 'schedule']
+
+          conn = duckdb.connect(f'md:?motherduck_token={token}')
+
+          print(f"Validating database: {db}")
+
+          for table in CRITICAL_TABLES:
+              try:
+                  result = conn.execute(f'SELECT COUNT(*) FROM {db}.public.{table}').fetchone()
+                  count = result[0] if result else 0
+                  status = "OK" if count > 0 else "EMPTY"
+                  print(f"  {table}: {count:,} rows [{status}]")
+              except Exception as e:
+                  print(f"  {table}: ERROR - {e}")
+
+          conn.close()
+          print("\nValidation complete!")
+          PYEOF
+
+      # ==================== CLEANUP DEPRECATED COLUMNS ====================
+      - name: Cleanup deprecated columns
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
+        run: |
+          source .venv/bin/activate
+          echo "Cleaning up deprecated columns..."
+          python -c "import os; import sys; sys.path.insert(0, '.'); from streamlit_helpers.database import drop_deprecated_columns; db=os.environ.get('DATABASE_NAME',''); tok=os.environ.get('MOTHERDUCK_TOKEN',''); dropped=drop_deprecated_columns(db,tok,dry_run=False) if db and tok else []; print(f'Dropped {len(dropped)} deprecated columns') if dropped else print('No deprecated columns to drop')"
+
+      # ==================== COMPUTE HOMEPAGE SUMMARY ====================
+      # Basic homepage summary after quick import (LAMAR only, no clutch yet)
+      - name: Compute homepage summary
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          source .venv/bin/activate
+          echo "Computing precomputed homepage summary tables..."
+          python fantasy_football_data_scripts/multi_league/transformations/aggregation/homepage_summary.py \
+            --context sleeper_context.json --upload || {
+            exit_code=$?
+            if [ "$exit_code" -eq 139 ]; then
+              echo "⚠️ DuckDB segfault on shutdown (exit 139) — data already uploaded, ignoring"
+            else
+              exit $exit_code
+            fi
+          }
+          echo "Homepage summary complete!"
+
+      # ==================== UPDATE LEAGUE DATA WITH DISCOVERED IDS ====================
+      # The import discovers year-specific league_ids which are critical for
+      # historical imports to fetch bracket/championship data correctly
+      - name: Update league data with discovered league_ids
+        if: steps.import.outputs.exit_code == '0'
+        run: |
+          source .venv/bin/activate
+          python - <<'PYEOF'
+          import json
+          from pathlib import Path
+
+          # Read the updated context (has discovered league_ids)
+          context_path = Path("sleeper_context.json")
+          if not context_path.exists():
+              print("WARNING: sleeper_context.json not found, skipping league_ids update")
+              exit(0)
+
+          with open(context_path) as f:
+              context = json.load(f)
+
+          league_ids = context.get('league_ids', {})
+          if not league_ids:
+              print("WARNING: No league_ids in context, skipping update")
+              exit(0)
+
+          # Update the league_data_input.json for downstream workflows
+          input_path = Path("league_data_input.json")
+          if not input_path.exists():
+              print("WARNING: league_data_input.json not found")
+              exit(0)
+
+          with open(input_path) as f:
+              league_data = json.load(f)
+
+          league_data['league_ids'] = league_ids
+          print(f"Adding {len(league_ids)} discovered league_ids to input data")
+          print(f"Years: {sorted(league_ids.keys())}")
+
+          with open(input_path, 'w') as f:
+              json.dump(league_data, f, indent=2)
+
+          print("Updated league_data_input.json with discovered league_ids")
+          PYEOF
+
+      # ==================== TRIGGER DOWNSTREAM WORKFLOWS ====================
+      - name: Trigger downstream workflows
+        if: steps.import.outputs.exit_code == '0'
+        uses: ./.github/actions/trigger-downstream
+        with:
+          database_name: ${{ steps.parse.outputs.database_name }}
+          user_id: ${{ steps.parse.outputs.user_id }}
+          import_mode: ${{ steps.parse.outputs.import_mode }}
+          season: ${{ steps.parse.outputs.end_year }}
+          actual_start_year: ${{ steps.parse.outputs.start_year }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          n_sims: '10000'
+          platform: 'sleeper'
+
+      # ==================== STORE SLEEPER LEAGUE INFO ====================
+      - name: Store Sleeper league info
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          SLEEPER_LEAGUE_ID: ${{ steps.parse.outputs.sleeper_league_id }}
+          LEAGUE_NAME: ${{ steps.parse.outputs.league_name }}
+          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
+        run: |
+          source .venv/bin/activate
+          python - <<'PYEOF'
+          import sys
+          sys.path.insert(0, 'fantasy_football_data_scripts')
+          import os
+
+          from multi_league.utils.credential_store import store_sleeper_league
+
+          store_sleeper_league(
+              sleeper_league_id=os.environ['SLEEPER_LEAGUE_ID'],
+              league_name=os.environ['LEAGUE_NAME'],
+              database_name=os.environ['DATABASE_NAME']
+          )
+          print("Sleeper league info stored")
+          PYEOF
+
+      # ==================== SUMMARY ====================
+      - name: Print summary
+        if: always()
+        run: |
+          echo "========================================"
+          echo "SLEEPER IMPORT SUMMARY"
+          echo "========================================"
+          echo "League: ${{ steps.parse.outputs.league_name }}"
+          echo "Sleeper ID: ${{ steps.parse.outputs.sleeper_league_id }}"
+          echo "Database: ${{ steps.parse.outputs.database_name }}"
+          echo "Import exit code: ${{ steps.import.outputs.exit_code }}"
+          echo "Import status: ${{ steps.import.outputs.exit_code == '0' && 'SUCCESS' || 'FAILED' }}"
+          echo "Parquet files: ${{ steps.verify.outputs.file_count }}"
+          echo "========================================"

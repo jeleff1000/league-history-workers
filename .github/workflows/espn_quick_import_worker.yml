@@ -1,0 +1,482 @@
+name: ESPN Quick Import Worker (Current Year Only)
+
+# This workflow imports ONLY the current year for fast startup (~5 min).
+# After completion, it triggers espn_full_import_worker.yml to import historical years.
+# Called from: Streamlit UI via trigger_import_workflow.py
+
+on:
+  workflow_dispatch:
+    inputs:
+      league_data_b64:
+        description: 'Base64-encoded JSON with ESPN league configuration'
+        required: false
+        type: string
+      user_id:
+        description: 'Unique identifier for this user/import job'
+        required: true
+        type: string
+
+  repository_dispatch:
+    types: [espn_quick_import]
+
+# Prevent multiple imports for the same user running simultaneously
+concurrency:
+  group: espn-import-${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  import-espn-league:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      PYTHONUNBUFFERED: 1
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Cache Python virtualenv
+        uses: actions/cache@v5
+        id: cache-venv
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py3.11-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            venv-${{ runner.os }}-py3.11-
+
+      - name: Cache NFLverse data
+        uses: actions/cache@v5
+        with:
+          path: ~/.nflverse
+          key: nflverse-${{ runner.os }}-${{ hashFiles('fantasy_football_data_scripts/multi_league/data_fetchers/nfl_data.py') }}
+          restore-keys: |
+            nflverse-${{ runner.os }}-
+
+      - name: Install dependencies
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Activate venv
+        run: |
+          echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
+
+      # ==================== PARSE INPUT ====================
+      - name: Parse league data
+        id: parse
+        run: |
+          source .venv/bin/activate
+          python - <<'PYEOF'
+          import json
+          import os
+          import base64
+          import re
+
+          # Get input from either workflow_dispatch or repository_dispatch
+          league_data_b64 = os.environ.get('LEAGUE_DATA_B64', '')
+          user_id = os.environ.get('USER_ID', '')
+          import_mode = 'quick'  # ALWAYS quick - this is the quick import worker
+
+          # Decode base64 if provided
+          if league_data_b64:
+              try:
+                  league_data = json.loads(base64.b64decode(league_data_b64).decode('utf-8'))
+              except:
+                  league_data = json.loads(league_data_b64)
+          else:
+              print("ERROR: No league data provided")
+              exit(1)
+
+          # Extract ESPN-specific fields
+          espn_league_id = league_data.get('espn_league_id') or league_data.get('league_id')
+          league_name = league_data.get('league_name', 'ESPN League')
+          espn_s2 = league_data.get('espn_s2', '')
+          swid = league_data.get('swid', '')
+          start_year = int(league_data.get('start_year', 2024))
+          end_year = int(league_data.get('end_year') or league_data.get('season', 2025))
+          # Combined league support: year -> league_id mapping
+          league_ids = league_data.get('league_ids', {})
+
+          # Validate required fields
+          if not espn_league_id:
+              print("ERROR: espn_league_id (or league_id) is required")
+              exit(1)
+
+          # Resolve database name using shared resolver
+          import subprocess
+          pre_computed_db = league_data.get('database_name', '').strip()
+          result = subprocess.run(
+              ['python', '.github/scripts/resolve_db_name.py',
+               '--league-id', str(espn_league_id),
+               '--league-name', league_name,
+               '--platform', 'espn',
+               '--database-name', pre_computed_db],
+              capture_output=True, text=True
+          )
+          if result.returncode != 0:
+              print(f"WARNING: resolve_db_name.py failed: {result.stderr}")
+              db_name = re.sub(r'[^a-zA-Z0-9]+', '_', league_name.strip().lower()).strip('_') or 'espn_league'
+              if db_name[0].isdigit():
+                  db_name = 'l_' + db_name
+              db_name = db_name[:63]
+          else:
+              db_name = result.stdout.strip().split('\n')[-1]
+          print(f"Using database name: {db_name}")
+
+          # Save parsed data for next steps
+          with open("league_data_input.json", 'w') as f:
+              json.dump(league_data, f, indent=2)
+
+          # Output for GitHub Actions
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"espn_league_id={espn_league_id}\n")
+              f.write(f"league_name={league_name}\n")
+              f.write(f"database_name={db_name}\n")
+              f.write(f"user_id={user_id}\n")
+              f.write(f"import_mode={import_mode}\n")
+              f.write(f"start_year={start_year}\n")
+              f.write(f"end_year={end_year}\n")
+
+          # Save ESPN cookies to files (avoid exposing in env vars/logs)
+          with open(".espn_s2", 'w') as f:
+              f.write(espn_s2)
+          with open(".espn_swid", 'w') as f:
+              f.write(swid)
+
+          print(f"Parsed ESPN league: {league_name}")
+          print(f"  League ID: {espn_league_id}")
+          print(f"  Years: {start_year}-{end_year}")
+          print(f"  Database: {db_name}")
+          print(f"  Import mode: {import_mode}")
+          print(f"  Has espn_s2: {'yes' if espn_s2 else 'no'}")
+          print(f"  Has SWID: {'yes' if swid else 'no'}")
+          PYEOF
+        env:
+          LEAGUE_DATA_B64: ${{ github.event.inputs.league_data_b64 || github.event.client_payload.league_data_b64 }}
+          USER_ID: ${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+
+      # ==================== CREATE DATA DIRECTORY ====================
+      - name: Create data directory
+        run: |
+          DATA_DIR="fantasy_football_data/espn_${{ steps.parse.outputs.database_name }}"
+          mkdir -p "$DATA_DIR"/{league_settings,rosters,matchups,drafts,transactions,schedules,box_scores}
+          echo "data_directory=$DATA_DIR" >> $GITHUB_OUTPUT
+          echo "Created data directory: $DATA_DIR"
+        id: datadir
+
+      # ==================== CREATE ESPN CONTEXT ====================
+      - name: Create ESPN context
+        env:
+          IMPORT_MODE: ${{ steps.parse.outputs.import_mode }}
+        run: |
+          source .venv/bin/activate
+          python - <<'PYEOF'
+          import json
+          import os
+          import math
+          from pathlib import Path
+          from datetime import datetime
+
+          with open("league_data_input.json") as f:
+              league_data = json.load(f)
+
+          import_mode = 'quick'  # ALWAYS quick - this is the quick import worker
+          # Quick import: only current year (same as Yahoo quick import)
+          season = int("${{ steps.parse.outputs.end_year }}")
+          data_dir = Path("fantasy_football_data/espn_${{ steps.parse.outputs.database_name }}").resolve()
+
+          # Read ESPN cookies from files
+          espn_s2 = ''
+          swid = ''
+          try:
+              with open('.espn_s2') as f:
+                  espn_s2 = f.read().strip()
+              with open('.espn_swid') as f:
+                  swid = f.read().strip()
+          except FileNotFoundError:
+              pass
+
+          # Extract settings
+          playoff_teams = league_data.get('playoff_teams', 6)
+          playoff_start_week = league_data.get('playoff_start_week')
+
+          # Calculate bye_teams
+          if playoff_teams and playoff_teams > 1:
+              next_power_of_2 = 2 ** math.ceil(math.log2(playoff_teams))
+              bye_teams = next_power_of_2 - playoff_teams
+          else:
+              bye_teams = 0
+
+          # Create ESPN context
+          context = {
+              "league_id": int("${{ steps.parse.outputs.espn_league_id }}"),
+              "league_name": "${{ steps.parse.outputs.league_name }}",
+              "motherduck_db_name": "${{ steps.parse.outputs.database_name }}",
+              "espn_s2": espn_s2,
+              "swid": swid,
+              "sport": "nfl",
+              "start_year": season,  # Quick = current year only
+              "end_year": season,
+              "num_teams": league_data.get('num_teams'),
+              "playoff_teams": playoff_teams,
+              "bye_teams": bye_teams,
+              "playoff_start_week": playoff_start_week,
+              "regular_season_weeks": league_data.get('regular_season_weeks'),
+              "uses_median_scoring": league_data.get('uses_median_scoring', False),
+              "data_directory": str(data_dir),
+              "max_workers": 3,
+              "enable_caching": True,
+              "team_to_manager": {},
+              "team_to_guid": {},
+              "team_to_team_name": {},
+              "manager_name_overrides": league_data.get('manager_name_overrides', {}),
+              "created_at": datetime.now().isoformat(),
+              "updated_at": datetime.now().isoformat(),
+              "platform": "espn",
+              "import_mode": import_mode,
+              "require_oauth": False,
+              "keeper_rules": league_data.get('keeper_rules'),
+              "league_rules": league_data.get('league_rules'),
+              "standings_weights": league_data.get('standings_weights'),
+              "league_ids": league_data.get('league_ids', {}),
+          }
+
+          context_path = data_dir / "espn_context.json"
+          with open(context_path, 'w') as f:
+              json.dump(context, f, indent=2)
+
+          with open("espn_context.json", 'w') as f:
+              json.dump(context, f, indent=2)
+
+          print(f"[QUICK IMPORT] ESPN context created for year {season}")
+          print(f"Context path: {context_path}")
+          PYEOF
+
+      # ==================== RUN ESPN IMPORT ====================
+      - name: Run ESPN import
+        id: import
+        env:
+          AUTO_CONFIRM: "1"
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          source ../.venv/bin/activate
+          echo "========================================"
+          echo "Starting ESPN QUICK import for ${{ steps.parse.outputs.league_name }}"
+          echo "League ID: ${{ steps.parse.outputs.espn_league_id }}"
+          echo "Year: ${{ steps.parse.outputs.end_year }} (current year only)"
+          echo "Import Mode: ${{ steps.parse.outputs.import_mode }}"
+          echo "========================================"
+
+          set +e
+          python espn_initial_import.py \
+            --context ../espn_context.json \
+            --import-mode ${{ steps.parse.outputs.import_mode }} \
+            2>&1 | tee ../import.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+
+          echo "exit_code=${EXIT_CODE}" >> $GITHUB_OUTPUT
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo "========================================"
+            echo "ESPN IMPORT FAILED (exit code ${EXIT_CODE})"
+            echo "========================================"
+            echo ""
+            echo "=== LAST 200 LINES OF IMPORT LOG ==="
+            tail -200 ../import.log
+            echo ""
+            echo "=== SEARCHING FOR ERRORS ==="
+            grep -i "error\|exception\|traceback\|failed" ../import.log | head -30 || echo "No obvious errors found"
+            exit $EXIT_CODE
+          fi
+
+          echo ""
+          echo "ESPN import completed successfully"
+
+      # ==================== VERIFY PARQUET FILES ====================
+      - name: Verify parquet files
+        if: steps.import.outputs.exit_code == '0'
+        id: verify
+        run: |
+          DATA_DIR="fantasy_football_data/espn_${{ steps.parse.outputs.database_name }}"
+          PARQUET_COUNT=$(find "$DATA_DIR" -name "*.parquet" -type f | wc -l)
+          echo "Found ${PARQUET_COUNT} parquet files"
+
+          if [ "$PARQUET_COUNT" -eq 0 ]; then
+            echo "ERROR: No parquet files created!"
+            exit 1
+          fi
+
+          echo "=== Canonical Files ==="
+          ls -lh "$DATA_DIR"/{player_fantasy,matchup,draft,transactions}.parquet 2>/dev/null || echo "Some canonical files missing"
+
+          echo ""
+          echo "=== All Parquet Files ==="
+          find "$DATA_DIR" -name "*.parquet" -type f -exec ls -lh {} \;
+
+          echo "file_count=${PARQUET_COUNT}" >> $GITHUB_OUTPUT
+
+      # ==================== VALIDATE CRITICAL TABLES ====================
+      - name: Validate critical tables
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
+        run: |
+          source .venv/bin/activate
+          python - <<'PYEOF'
+          import duckdb
+          import os
+          import re
+
+          db_name = os.environ['DATABASE_NAME']
+          token = os.environ['MOTHERDUCK_TOKEN']
+          db = re.sub(r'[^a-zA-Z0-9]+', '_', db_name.strip().lower()).strip('_')
+          if not db:
+              db = 'espn_league'
+          if db[0].isdigit():
+              db = 'l_' + db
+          db = db[:63]
+
+          CRITICAL_TABLES = ['matchup', 'player_fantasy', 'draft', 'transactions', 'schedule']
+          conn = duckdb.connect(f'md:?motherduck_token={token}')
+          print(f"Validating database: {db}")
+          for table in CRITICAL_TABLES:
+              try:
+                  result = conn.execute(f'SELECT COUNT(*) FROM {db}.public.{table}').fetchone()
+                  count = result[0] if result else 0
+                  status = "OK" if count > 0 else "EMPTY"
+                  print(f"  {table}: {count:,} rows [{status}]")
+              except Exception as e:
+                  print(f"  {table}: ERROR - {e}")
+          conn.close()
+          print("\nValidation complete!")
+          PYEOF
+
+      # ==================== CLEANUP DEPRECATED COLUMNS ====================
+      - name: Cleanup deprecated columns
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
+        run: |
+          source .venv/bin/activate
+          echo "Cleaning up deprecated columns..."
+          python -c "import os; import sys; sys.path.insert(0, '.'); from streamlit_helpers.database import drop_deprecated_columns; db=os.environ.get('DATABASE_NAME',''); tok=os.environ.get('MOTHERDUCK_TOKEN',''); dropped=drop_deprecated_columns(db,tok,dry_run=False) if db and tok else []; print(f'Dropped {len(dropped)} deprecated columns') if dropped else print('No deprecated columns to drop')"
+
+      # ==================== COMPUTE HOMEPAGE SUMMARY ====================
+      - name: Compute homepage summary
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          source .venv/bin/activate
+          echo "Computing precomputed homepage summary tables..."
+          python fantasy_football_data_scripts/multi_league/transformations/aggregation/homepage_summary.py \
+            --context espn_context.json --upload || {
+            exit_code=$?
+            if [ "$exit_code" -eq 139 ]; then
+              echo "⚠️ DuckDB segfault on shutdown (exit 139) — data already uploaded, ignoring"
+            else
+              exit $exit_code
+            fi
+          }
+          echo "Homepage summary complete!"
+
+      # ==================== TRIGGER DOWNSTREAM WORKFLOWS ====================
+      - name: Trigger downstream workflows
+        if: steps.import.outputs.exit_code == '0'
+        uses: ./.github/actions/trigger-downstream
+        with:
+          database_name: ${{ steps.parse.outputs.database_name }}
+          user_id: ${{ steps.parse.outputs.user_id }}
+          import_mode: ${{ steps.parse.outputs.import_mode }}
+          season: ${{ steps.parse.outputs.end_year }}
+          actual_start_year: ${{ steps.parse.outputs.start_year }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          n_sims: '10000'
+          platform: 'espn'
+
+      # ==================== STORE ESPN LEAGUE INFO ====================
+      - name: Store ESPN league info
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+          ESPN_LEAGUE_ID: ${{ steps.parse.outputs.espn_league_id }}
+          LEAGUE_NAME: ${{ steps.parse.outputs.league_name }}
+          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
+        run: |
+          source .venv/bin/activate
+          python - <<'PYEOF'
+          import sys
+          sys.path.insert(0, 'fantasy_football_data_scripts')
+          import os
+
+          from multi_league.utils.credential_store import store_espn_league
+
+          # Read ESPN cookies from files (written to repo root by parse step)
+          espn_s2 = ''
+          swid = ''
+          try:
+              with open('.espn_s2') as f:
+                  espn_s2 = f.read().strip()
+              with open('.espn_swid') as f:
+                  swid = f.read().strip()
+          except FileNotFoundError:
+              print("NOTE: ESPN cookie files not found (public league)")
+
+          store_espn_league(
+              espn_league_id=int(os.environ['ESPN_LEAGUE_ID']),
+              league_name=os.environ['LEAGUE_NAME'],
+              database_name=os.environ['DATABASE_NAME'],
+              espn_s2=espn_s2,
+              swid=swid
+          )
+          if espn_s2 and swid:
+              print("ESPN league info stored (cookies encrypted)")
+          else:
+              print("ESPN league info stored (public league, no cookies)")
+          PYEOF
+
+      # ==================== CLEANUP SENSITIVE FILES ====================
+      - name: Cleanup sensitive files
+        if: always()
+        run: |
+          rm -f .espn_s2 .espn_swid
+          echo "Cleaned up sensitive files"
+
+      # ==================== SUMMARY ====================
+      - name: Print summary
+        if: always()
+        run: |
+          echo "========================================"
+          echo "ESPN IMPORT SUMMARY"
+          echo "========================================"
+          echo "League: ${{ steps.parse.outputs.league_name }}"
+          echo "ESPN ID: ${{ steps.parse.outputs.espn_league_id }}"
+          echo "Database: ${{ steps.parse.outputs.database_name }}"
+          echo "Import exit code: ${{ steps.import.outputs.exit_code }}"
+          echo "Import status: ${{ steps.import.outputs.exit_code == '0' && 'SUCCESS' || 'FAILED' }}"
+          echo "Parquet files: ${{ steps.verify.outputs.file_count }}"
+          echo "========================================"

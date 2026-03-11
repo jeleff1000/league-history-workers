@@ -1,0 +1,366 @@
+name: League Import (Parallel)
+
+# Parallel import workflow for large historical imports
+# Splits years into batches and runs them concurrently
+
+on:
+  workflow_dispatch:
+    inputs:
+      league_data_b64:
+        description: 'Base64-encoded JSON with league configuration'
+        required: true
+        type: string
+      user_id:
+        description: 'Unique identifier for this user/import job'
+        required: true
+        type: string
+      batch_size:
+        description: 'Years per batch (default: 3)'
+        required: false
+        type: number
+        default: 3
+      max_parallel:
+        description: 'Maximum parallel batches (default: 3)'
+        required: false
+        type: number
+        default: 3
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  # First job: Parse data and create batch matrix
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.create-matrix.outputs.matrix }}
+      database_name: ${{ steps.parse.outputs.database_name }}
+      league_name: ${{ steps.parse.outputs.league_name }}
+      start_year: ${{ steps.parse.outputs.start_year }}
+      season: ${{ steps.parse.outputs.season }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Parse league data
+        id: parse
+        uses: ./.github/actions/parse-league-data
+        with:
+          league_data_b64: ${{ github.event.inputs.league_data_b64 }}
+          import_mode: 'full'
+          yahoo_client_id: ${{ secrets.YAHOO_CLIENT_ID }}
+          yahoo_client_secret: ${{ secrets.YAHOO_CLIENT_SECRET }}
+          motherduck_token: ${{ secrets.MOTHERDUCK_TOKEN }}
+
+      - name: Create batch matrix
+        id: create-matrix
+        run: |
+          python - <<'PYEOF'
+          import json
+          import os
+          import math
+
+          start_year = int("${{ steps.parse.outputs.start_year }}")
+          end_year = int("${{ steps.parse.outputs.season }}")
+          batch_size = int("${{ github.event.inputs.batch_size }}" or "3")
+
+          years = list(range(start_year, end_year + 1))
+          batches = []
+
+          for i in range(0, len(years), batch_size):
+              batch_years = years[i:i + batch_size]
+              batches.append({
+                  "batch_id": i // batch_size,
+                  "start_year": min(batch_years),
+                  "end_year": max(batch_years),
+                  "years": batch_years,
+              })
+
+          matrix = {"include": batches}
+          print(f"Created {len(batches)} batches:")
+          for b in batches:
+              print(f"  Batch {b['batch_id']}: {b['start_year']}-{b['end_year']}")
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"matrix={json.dumps(matrix)}\n")
+          PYEOF
+
+  # Parallel batch imports
+  import-batch:
+    needs: setup
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+      max-parallel: ${{ fromJson(github.event.inputs.max_parallel || '3') }}
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore league data
+        run: |
+          echo '${{ github.event.inputs.league_data_b64 }}' | base64 -d > league_data_input.json
+
+          # Update year range for this batch
+          python - <<'PYEOF'
+          import json
+
+          with open('league_data_input.json', 'r') as f:
+              data = json.load(f)
+
+          data['start_year'] = ${{ matrix.start_year }}
+          data['season'] = ${{ matrix.end_year }}
+
+          with open('league_data_input.json', 'w') as f:
+              json.dump(data, f, indent=2)
+
+          print(f"Batch ${{ matrix.batch_id }}: {data['start_year']}-{data['season']}")
+          PYEOF
+
+      - name: Setup OAuth
+        env:
+          YAHOO_CLIENT_ID: ${{ secrets.YAHOO_CLIENT_ID }}
+          YAHOO_CLIENT_SECRET: ${{ secrets.YAHOO_CLIENT_SECRET }}
+        run: |
+          python - <<'PYEOF'
+          import json
+          import os
+          import time
+
+          with open('league_data_input.json') as f:
+              data = json.load(f)
+
+          oauth_raw = data.get('oauth_token', {})
+
+          oauth_data = {
+              'access_token': oauth_raw.get('access_token'),
+              'refresh_token': oauth_raw.get('refresh_token'),
+              'consumer_key': os.environ.get('YAHOO_CLIENT_ID'),
+              'consumer_secret': os.environ.get('YAHOO_CLIENT_SECRET'),
+              'token_type': 'bearer',
+              'expires_in': 3600,
+              'token_time': time.time(),
+          }
+
+          os.makedirs('oauth', exist_ok=True)
+          with open('oauth/Oauth.json', 'w') as f:
+              json.dump(oauth_data, f, indent=2)
+          PYEOF
+
+      - name: Create league context for batch
+        run: |
+          python - <<'PYEOF'
+          import json
+          from pathlib import Path
+
+          with open('league_data_input.json') as f:
+              data = json.load(f)
+
+          context = {
+              "league_id": data.get('league_id'),
+              "league_name": data.get('league_name'),
+              "oauth_file_path": str(Path('oauth/Oauth.json').resolve()),
+              "game_code": data.get('game_code', 'nfl'),
+              "start_year": ${{ matrix.start_year }},
+              "end_year": ${{ matrix.end_year }},
+              "num_teams": data.get('num_teams', 10),
+              "playoff_teams": data.get('playoff_teams', 6),
+              "regular_season_weeks": data.get('regular_season_weeks', 14),
+              "data_directory": str(Path('fantasy_football_data').resolve()),
+              "max_workers": 5,
+              "enable_caching": True,
+              "rate_limit_per_sec": 4.0,
+          }
+
+          with open('league_context.json', 'w') as f:
+              json.dump(context, f, indent=2)
+
+          print(f"Created context for batch: {context['start_year']}-{context['end_year']}")
+          PYEOF
+
+      - name: Create data directories
+        run: mkdir -p fantasy_football_data/{matchup_data,player_data,draft_data,transaction_data,schedule_data}
+
+      - name: Run import for batch
+        id: import
+        env:
+          AUTO_CONFIRM: "1"
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          echo "Importing batch ${{ matrix.batch_id }}: ${{ matrix.start_year }}-${{ matrix.end_year }}"
+          python initial_import_v2.py --context ../league_context.json 2>&1 | tee ../import_batch_${{ matrix.batch_id }}.log
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+
+      - name: Upload batch artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: batch-${{ matrix.batch_id }}-data
+          path: |
+            fantasy_football_data/*.parquet
+            fantasy_football_data/**/*.parquet
+          retention-days: 1
+
+  # Merge all batches and upload
+  merge-and-upload:
+    needs: [setup, import-batch]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Download all batch artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: batch_data
+          pattern: batch-*-data
+
+      - name: Merge batch data
+        run: |
+          mkdir -p fantasy_football_data
+
+          python - <<'PYEOF'
+          import pandas as pd
+          from pathlib import Path
+          import os
+
+          batch_dir = Path('batch_data')
+          output_dir = Path('fantasy_football_data')
+
+          # Find all parquet files across batches
+          all_files = {}
+          for batch_path in batch_dir.glob('batch-*-data'):
+              for pf in batch_path.rglob('*.parquet'):
+                  # Get relative path within batch
+                  rel_path = pf.relative_to(batch_path)
+                  if rel_path not in all_files:
+                      all_files[rel_path] = []
+                  all_files[rel_path].append(pf)
+
+          print(f"Found {len(all_files)} unique file types across batches")
+
+          # Merge each file type
+          for rel_path, files in all_files.items():
+              output_path = output_dir / rel_path
+              output_path.parent.mkdir(parents=True, exist_ok=True)
+
+              if len(files) == 1:
+                  # Single file, just copy
+                  import shutil
+                  shutil.copy(files[0], output_path)
+                  print(f"  Copied: {rel_path}")
+              else:
+                  # Multiple files, merge
+                  dfs = [pd.read_parquet(f) for f in files]
+                  merged = pd.concat(dfs, ignore_index=True)
+
+                  # Deduplicate based on file type
+                  stem = rel_path.stem.lower()
+                  if 'matchup' in stem:
+                      merged = merged.drop_duplicates(subset=['year', 'week', 'team'], keep='last')
+                  elif 'player' in stem:
+                      if 'player_key' in merged.columns:
+                          merged = merged.drop_duplicates(subset=['year', 'week', 'player_key'], keep='last')
+                  elif 'draft' in stem:
+                      merged = merged.drop_duplicates(subset=['year', 'round', 'pick'], keep='last')
+                  else:
+                      merged = merged.drop_duplicates(keep='last')
+
+                  merged.to_parquet(output_path, index=False)
+                  print(f"  Merged {len(files)} files -> {rel_path}: {len(merged)} rows")
+
+          print("Merge complete!")
+          PYEOF
+
+      - name: Upload to MotherDuck
+        uses: ./.github/actions/upload-to-motherduck
+        with:
+          database_name: ${{ needs.setup.outputs.database_name }}
+          data_directory: fantasy_football_data
+          motherduck_token: ${{ secrets.MOTHERDUCK_TOKEN }}
+
+      # ==================== RUN SQL ENRICHMENTS ====================
+      # The merge upload overwrites enriched data from individual batches
+      # so we need to re-run enrichments on the merged data
+      - name: Run SQL enrichments
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_NAME: ${{ needs.setup.outputs.database_name }}
+        run: |
+          pip install duckdb
+          echo "Running SQL enrichments after merge..."
+          python -c "
+          import sys
+          sys.path.insert(0, 'fantasy_football_data_scripts')
+          import os
+          from multi_league.transformations.sql_enrichments import SQLEnrichments
+
+          db_name = os.environ['DATABASE_NAME']
+          print(f'Running SQL enrichments on {db_name}...')
+
+          with SQLEnrichments(db_name, dry_run=False) as enricher:
+              roster_by_year, scoring_params = enricher.load_settings_from_motherduck()
+              print(f'Settings: {len(roster_by_year)} years, PPR={scoring_params.get(\"ppr\")}')
+              enricher.roster_by_year = roster_by_year
+              enricher._update_scoring_params(scoring_params)
+
+              results = enricher.run_all()
+              for name, count in results.items():
+                  if count >= 0:
+                      print(f'  {name}: {count:,} rows')
+                  elif count == -1:
+                      print(f'  {name}: completed')
+
+          print('SQL enrichments complete!')
+          "
+
+      - name: Trigger playoff odds
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run playoff_odds_worker.yml \
+            -f database_name="${{ needs.setup.outputs.database_name }}" \
+            -f n_sims="10000" \
+            -f user_id="${{ github.event.inputs.user_id }}"

@@ -1,0 +1,228 @@
+name: 'Trigger Downstream Workflows'
+description: 'Trigger playoff odds calculation and/or full historical import after successful upload'
+
+inputs:
+  database_name:
+    description: 'MotherDuck database name'
+    required: true
+  user_id:
+    description: 'User ID for this import job'
+    required: true
+  import_mode:
+    description: 'Import mode: quick or full'
+    required: true
+  season:
+    description: 'Current season year'
+    required: true
+  actual_start_year:
+    description: 'Original start year for full import'
+    required: true
+  league_data_file:
+    description: 'Path to league_data_input.json file'
+    required: false
+    default: 'league_data_input.json'
+  github_token:
+    description: 'GitHub token for workflow dispatch'
+    required: true
+  n_sims:
+    description: 'Number of Monte Carlo simulations for playoff odds'
+    required: false
+    default: '10000'
+  platform:
+    description: 'Platform: yahoo, sleeper, or espn (determines which full import workflow to trigger)'
+    required: false
+    default: 'yahoo'
+
+outputs:
+  playoff_odds_triggered:
+    description: 'Whether playoff odds workflow was triggered'
+    value: ${{ steps.trigger.outputs.playoff_odds_triggered }}
+  historical_import_triggered:
+    description: 'Whether historical import was triggered'
+    value: ${{ steps.trigger.outputs.historical_import_triggered }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Trigger downstream workflows
+      id: trigger
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+        DATABASE_NAME: ${{ inputs.database_name }}
+        USER_ID: ${{ inputs.user_id }}
+        IMPORT_MODE: ${{ inputs.import_mode }}
+        SEASON: ${{ inputs.season }}
+        ACTUAL_START_YEAR: ${{ inputs.actual_start_year }}
+        LEAGUE_DATA_FILE: ${{ inputs.league_data_file }}
+        N_SIMS: ${{ inputs.n_sims }}
+        PLATFORM: ${{ inputs.platform }}
+      run: |
+        PLAYOFF_TRIGGERED=false
+        HISTORY_TRIGGERED=false
+
+        # Trigger playoff odds for FULL imports only
+        if [ "${IMPORT_MODE}" != "quick" ]; then
+          echo "========================================"
+          echo "Triggering Playoff Odds Calculator"
+          echo "========================================"
+
+          gh workflow run playoff_odds_worker.yml \
+            -f database_name="${DATABASE_NAME}" \
+            -f n_sims="${N_SIMS}" \
+            -f user_id="${USER_ID}"
+
+          if [ $? -eq 0 ]; then
+            echo "Playoff odds workflow triggered successfully"
+            PLAYOFF_TRIGGERED=true
+          else
+            echo "WARNING: Could not trigger playoff odds workflow"
+          fi
+        else
+          echo "Skipping playoff odds for quick import"
+        fi
+
+        # Trigger full import after quick import
+        # ALWAYS trigger, even for single-year leagues, because:
+        # 1. Full import runs expand_to_all_nfl.py which adds unrostered NFL players
+        # 2. Unrostered players are needed for accurate LAMAR calculations
+        # 3. expand_to_all_nfl.py fetches ALL years from super_table including quick import year
+        if [ "${IMPORT_MODE}" == "quick" ]; then
+          echo "========================================"
+          echo "Triggering Full Import (NFL Expansion + History)"
+          echo "========================================"
+          echo "Quick import completed for: ${SEASON}"
+          echo "Full import range: ${ACTUAL_START_YEAR}-${SEASON} (or NFL expansion only if single year)"
+
+          # Read the league data file to get complete configuration
+          if [ ! -f "${LEAGUE_DATA_FILE}" ]; then
+            echo "ERROR: League data file not found: ${LEAGUE_DATA_FILE}"
+            echo "Cannot trigger historical import without league data"
+            HISTORY_TRIGGERED=false
+          else
+            # Re-encode league data for full historical import
+            python - <<'PYEOF'
+        import json
+        import base64
+        import os
+        import sys
+
+        league_data_file = os.environ.get('LEAGUE_DATA_FILE', 'league_data_input.json')
+
+        try:
+            with open(league_data_file) as f:
+                league_data = json.load(f)
+        except FileNotFoundError:
+            print(f"ERROR: League data file not found: {league_data_file}")
+            sys.exit(1)
+        except Exception as e:
+            print(f"ERROR: Failed to read league data: {e}")
+            sys.exit(1)
+
+        # Get the actual start year (including staging data years if present)
+        actual_start = league_data.get('actual_start_year')
+        if actual_start is None:
+            actual_start = league_data.get('start_year')
+            print(f"WARNING: actual_start_year not in league data, using start_year: {actual_start}")
+
+        current_season = int(league_data.get('season', os.environ.get('SEASON', 2024)))
+
+        if actual_start is None:
+            print("ERROR: Cannot determine start year for historical import")
+            sys.exit(1)
+
+        actual_start = int(actual_start)
+
+        # Determine if this is NFL expansion only (single-year league, no historical data)
+        nfl_expansion_only = actual_start >= current_season
+
+        if nfl_expansion_only:
+            # No historical data to fetch, but we still need to run full import
+            # for expand_to_all_nfl.py to add unrostered NFL players
+            print(f"INFO: Single-year league (start={actual_start}, current={current_season})")
+            print(f"INFO: Full import will run for NFL expansion only (adding unrostered players)")
+            # Set year range to current season only - expand_to_all_nfl fetches ALL years from super_table
+            league_data['start_year'] = current_season
+            league_data['season'] = current_season
+            league_data['end_year'] = current_season
+            league_data['actual_start_year'] = actual_start
+            league_data['nfl_expansion_only'] = True
+            print(f"Preparing NFL expansion import for year: {current_season}")
+        else:
+            # Update league data for full historical import
+            # IMPORTANT: Include current_season in end_year so transformations run on ALL data
+            # Quick import fetched raw data for current year, but transformations (z-scores,
+            # DEF normalization, optimal lineup, LAMAR) need the complete dataset to work correctly.
+            league_data['start_year'] = actual_start
+            league_data['season'] = current_season
+            league_data['end_year'] = current_season
+            # Keep actual_start_year so context knows the full range
+            league_data['actual_start_year'] = actual_start
+            # Ensure has_external_data flag is preserved
+            # This is critical so the historical import knows to merge staging data
+            print(f"Preparing full import: {actual_start}-{current_season}")
+            print(f"(Transformations will run on ALL years including current)")
+        if league_data.get('has_external_data'):
+            print(f"Will merge external staging data during import")
+
+        # CRITICAL: Add database_name to league_data so full import uses the same database
+        # Without this, full import might derive a different database name and create a collision
+        db_name_from_env = os.environ.get('DATABASE_NAME', '').strip()
+        if db_name_from_env:
+            league_data['database_name'] = db_name_from_env
+            print(f"Using database_name from quick import: {db_name_from_env}")
+
+        league_data_json = json.dumps(league_data)
+        league_data_b64 = base64.b64encode(league_data_json.encode()).decode()
+
+        with open("full_import_data.b64", 'w') as f:
+            f.write(league_data_b64)
+
+        print(f"✓ Prepared full import data ({len(league_data_b64)} bytes)")
+        PYEOF
+
+            if [ $? -ne 0 ]; then
+              echo "ERROR: Failed to prepare full import data"
+              HISTORY_TRIGGERED=false
+            else
+              FULL_IMPORT_DATA=$(cat full_import_data.b64)
+
+              echo "Triggering full import workflow..."
+              # Use gh workflow run (workflow_dispatch) - works with GITHUB_TOKEN
+              # Note: repository_dispatch requires a PAT with repo scope
+
+              # Choose workflow based on platform
+              if [ "${PLATFORM}" == "sleeper" ]; then
+                FULL_WORKFLOW="sleeper_full_import_worker.yml"
+              elif [ "${PLATFORM}" == "espn" ]; then
+                FULL_WORKFLOW="espn_full_import_worker.yml"
+              else
+                FULL_WORKFLOW="full_import_worker.yml"
+              fi
+              echo "Using workflow: ${FULL_WORKFLOW}"
+
+              gh workflow run "${FULL_WORKFLOW}" \
+                -f league_data_b64="${FULL_IMPORT_DATA}" \
+                -f user_id="${USER_ID}_full"
+
+              if [ $? -eq 0 ]; then
+                echo "✓ Full import workflow triggered successfully"
+                echo "  User ID: ${USER_ID}_full"
+                if [ "${ACTUAL_START_YEAR}" == "${SEASON}" ]; then
+                  echo "  Mode: NFL expansion only (adding unrostered players for ${SEASON})"
+                else
+                  echo "  Mode: Full import + NFL expansion"
+                  echo "  Years: ${ACTUAL_START_YEAR}-${SEASON} (all years including current)"
+                fi
+                HISTORY_TRIGGERED=true
+              else
+                echo "ERROR: Failed to trigger full import workflow"
+                HISTORY_TRIGGERED=false
+              fi
+            fi
+          fi
+        fi
+
+        # Output results
+        echo "playoff_odds_triggered=${PLAYOFF_TRIGGERED}" >> $GITHUB_OUTPUT
+        echo "historical_import_triggered=${HISTORY_TRIGGERED}" >> $GITHUB_OUTPUT

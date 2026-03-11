@@ -1,0 +1,760 @@
+name: Full Import Worker (All Historical Years)
+
+# This workflow imports ALL historical years and merges with existing data.
+# Triggered by quick_import_worker.yml after current year is imported.
+# Does NOT drop tables - preserves quick import data and merges historical data.
+
+on:
+  workflow_dispatch:
+    inputs:
+      league_data_b64:
+        description: 'Base64-encoded JSON with league configuration'
+        required: false
+        type: string
+      user_id:
+        description: 'Unique identifier for this user/import job'
+        required: true
+        type: string
+
+  repository_dispatch:
+    types: [full_import]
+
+# Prevent multiple imports for the same user running simultaneously
+# If a new import is triggered while one is running, cancel the old one
+concurrency:
+  group: league-import-${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
+  cancel-in-progress: false  # Don't cancel - let the first one finish
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  import-league-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      PYTHONUNBUFFERED: 1
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Cache Python virtualenv
+        uses: actions/cache@v5
+        id: cache-venv
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py3.11-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            venv-${{ runner.os }}-py3.11-
+
+      - name: Cache NFLverse data
+        uses: actions/cache@v5
+        with:
+          path: ~/.nflverse
+          key: nflverse-${{ runner.os }}-${{ hashFiles('fantasy_football_data_scripts/multi_league/data_fetchers/nfl_data.py') }}
+          restore-keys: |
+            nflverse-${{ runner.os }}-
+
+      - name: Install dependencies
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Activate virtualenv
+        run: echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
+
+      # ==================== PARSE LEAGUE DATA ====================
+      - name: Parse league data
+        id: parse
+        uses: ./.github/actions/parse-league-data
+        with:
+          league_data_b64: ${{ github.event.inputs.league_data_b64 || github.event.client_payload.league_data_b64 || '' }}
+          import_mode: 'full'  # ALWAYS full - this is the full import worker
+          yahoo_client_id: ${{ secrets.YAHOO_CLIENT_ID }}
+          yahoo_client_secret: ${{ secrets.YAHOO_CLIENT_SECRET }}
+          motherduck_token: ${{ secrets.MOTHERDUCK_TOKEN }}
+
+      # ==================== UPDATE JOB STATUS - STARTING ====================
+
+      # ==================== REFRESH OAUTH TOKEN ====================
+      - name: Refresh OAuth token
+        env:
+          YAHOO_CLIENT_ID: ${{ secrets.YAHOO_CLIENT_ID }}
+          YAHOO_CLIENT_SECRET: ${{ secrets.YAHOO_CLIENT_SECRET }}
+        run: |
+          echo "Refreshing OAuth token..."
+          python - <<'PYEOF'
+          import json
+          import os
+          import time
+          import requests
+
+          with open("oauth/Oauth.json", 'r') as f:
+              oauth_data = json.load(f)
+
+          refresh_token = oauth_data.get('refresh_token')
+          if not refresh_token:
+              print("No refresh_token found - will try with existing access_token")
+              exit(0)
+
+          consumer_key = os.environ.get('YAHOO_CLIENT_ID')
+          consumer_secret = os.environ.get('YAHOO_CLIENT_SECRET')
+
+          if not consumer_key or not consumer_secret:
+              print("Missing Yahoo credentials - cannot refresh token")
+              exit(0)
+
+          try:
+              response = requests.post(
+                  "https://api.login.yahoo.com/oauth2/get_token",
+                  data={
+                      'grant_type': 'refresh_token',
+                      'refresh_token': refresh_token,
+                      'client_id': consumer_key,
+                      'client_secret': consumer_secret,
+                  },
+                  headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                  timeout=30
+              )
+
+              if response.status_code == 200:
+                  new_tokens = response.json()
+                  oauth_data['access_token'] = new_tokens.get('access_token')
+                  oauth_data['refresh_token'] = new_tokens.get('refresh_token', refresh_token)
+                  oauth_data['token_time'] = time.time()
+                  oauth_data['expires_in'] = new_tokens.get('expires_in', 3600)
+
+                  with open("oauth/Oauth.json", 'w') as f:
+                      json.dump(oauth_data, f, indent=2)
+
+                  print(f"Token refreshed successfully!")
+              else:
+                  print(f"Token refresh failed: {response.status_code}")
+          except Exception as e:
+              print(f"Token refresh error: {e}")
+          PYEOF
+
+      # ==================== CREATE DATA DIRECTORIES ====================
+      - name: Create data directory
+        run: |
+          mkdir -p fantasy_football_data/{matchup_data,player_data,draft_data,transaction_data,schedule_data}
+
+      # ==================== CREATE LEAGUE CONTEXT ====================
+      - name: Create league context
+        env:
+          IMPORT_MODE: ${{ steps.parse.outputs.import_mode }}
+        run: |
+          python - <<'PYEOF'
+          import json
+          import os
+          from pathlib import Path
+
+          with open("league_data_input.json") as f:
+              league_data = json.load(f)
+
+          oauth_file = Path("oauth/Oauth.json").resolve()
+          import_mode = os.environ.get('IMPORT_MODE', 'full').strip().lower()
+
+          # Get year range from league data
+          # Don't use hardcoded defaults - require start_year to be provided
+          if not league_data.get('start_year'):
+              print("[ERROR] start_year is required in league_data")
+              exit(1)
+          
+          start_year = int(league_data.get('start_year'))
+          end_year = int(league_data.get('season', league_data.get('end_year')))
+          
+          # Store the ACTUAL start year (including any staging data years)
+          actual_start_year = league_data.get('actual_start_year', start_year)
+
+          print(f"[FULL IMPORT] Importing years: {start_year}-{end_year}")
+          if actual_start_year != start_year:
+              print(f"[FULL IMPORT] Including staging data from: {actual_start_year}")
+
+          context = {
+              "league_id": league_data.get('league_id'),
+              "league_name": league_data.get('league_name'),
+              "oauth_file_path": str(oauth_file),
+              "game_code": league_data.get('game_code', 'nfl'),
+              "start_year": start_year,
+              "end_year": end_year,
+              "num_teams": int(league_data.get('num_teams', 10)),
+              "playoff_teams": int(league_data.get('playoff_teams', 6)),
+              "regular_season_weeks": int(league_data.get('regular_season_weeks', 14)),
+              "data_directory": str(Path("fantasy_football_data").resolve()),
+              "max_workers": 5,
+              "enable_caching": True,
+              "rate_limit_per_sec": 4.0,
+              "manager_name_overrides": league_data.get('manager_name_overrides', {}),
+              "keeper_rules": league_data.get('keeper_rules'),
+              "has_external_data": league_data.get('has_external_data', False),
+              "import_mode": import_mode,
+          }
+
+          with open("league_context.json", 'w') as f:
+              json.dump(context, f, indent=2)
+
+          print(f"League context created: {start_year}-{end_year} (mode: {import_mode})")
+          
+          # Debug: Show what was actually written to the context file
+          print("\n[DEBUG] Context file contents:")
+          print(json.dumps(context, indent=2))
+          PYEOF
+
+      # ==================== DIAGNOSE CONFIGURATION ====================
+      # Run diagnostic checks to catch issues early before wasting time on failed imports
+      - name: Diagnose configuration
+        run: |
+          echo "========================================"
+          echo "Running import configuration diagnostics"
+          echo "========================================"
+          python diagnose_import_failure.py || {
+            echo ""
+            echo "⚠️ Diagnostic checks found issues but continuing anyway"
+            echo "Check the output above for details"
+          }
+
+      # NOTE: Full imports do NOT drop tables - they merge with existing data
+      # The quick import already populated current year data, we preserve that
+
+      # ==================== RUN INITIAL IMPORT ====================
+      - name: Run initial import
+        id: import
+        env:
+          AUTO_CONFIRM: "1"
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          echo "========================================"
+          echo "Starting import for ${{ steps.parse.outputs.league_name }}"
+          echo "Season: ${{ steps.parse.outputs.season }}"
+          echo "Import Mode: ${{ steps.parse.outputs.import_mode }}"
+          echo "Years: ${{ steps.parse.outputs.start_year }}-${{ steps.parse.outputs.season }}"
+          echo "========================================"
+
+          # Run import with detailed error capture
+          set +e  # Don't exit on error - we want to capture the exit code
+          python initial_import_v2.py --context ../league_context.json 2>&1 | tee ../import.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+
+          echo "exit_code=${EXIT_CODE}" >> $GITHUB_OUTPUT
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo "========================================"
+            echo "❌ IMPORT FAILED (exit code ${EXIT_CODE})"
+            echo "========================================"
+            echo ""
+            
+            echo "=== CONTEXT FILE ==="
+            cat ../league_context.json || echo "Could not read context file"
+            echo ""
+            
+            echo "=== DIRECTORY STRUCTURE ==="
+            echo "Data directory contents:"
+            ls -lR ../fantasy_football_data/ 2>/dev/null || echo "Data directory not found or empty"
+            echo ""
+            
+            echo "=== LAST 300 LINES OF IMPORT LOG ==="
+            tail -300 ../import.log
+            echo ""
+            
+            echo "=== SEARCHING FOR PHASE 1 (FETCHERS) IN LOG ==="
+            grep -A 50 "PHASE 1: Data Fetchers" ../import.log || echo "Phase 1 never started!"
+            echo ""
+            
+            echo "=== SEARCHING FOR ERRORS IN LOG ==="
+            grep -i "error\|exception\|traceback\|failed" ../import.log | head -50 || echo "No obvious errors found"
+            
+            exit $EXIT_CODE
+          fi
+          
+          echo ""
+          echo "✓ Import completed successfully"
+
+      # ==================== CONSOLIDATE CANONICAL FILES ====================
+      # DISABLED: The import script (initial_import_v2.py) already handles consolidation
+      # in Phase 2.1, followed by staging merge (Phase 2.2) and transformations (Phase 3).
+      # Running consolidation AFTER import overwrites the transformed files with raw data,
+      # losing all the cumulative stats, LAMAR metrics, and other enrichments.
+      - name: Consolidate canonical files (DISABLED)
+        if: false  # Disabled - import script already handles this
+        run: |
+          echo "========================================"
+          echo "Consolidating canonical parquet files"
+          echo "========================================"
+          
+          python - <<'PYEOF'
+          import sys
+          from pathlib import Path
+          
+          # Add script directory to path
+          sys.path.insert(0, 'fantasy_football_data_scripts')
+          
+          from multi_league.data_fetchers.shared.aggregators import (
+              merge_matchups_to_parquet,
+              normalize_draft_parquet,
+              normalize_transactions_parquet,
+              normalize_schedule_parquet,
+          )
+          
+          context_path = "league_context.json"
+          
+          print("[CONSOLIDATE] Starting canonical file consolidation...")
+          
+          failed = []
+          
+          # Consolidate matchups
+          try:
+              print("[CONSOLIDATE] Creating matchup.parquet...")
+              matchup_path = merge_matchups_to_parquet(context_path, years=None)
+              print(f"  ✓ Created {matchup_path}")
+          except Exception as e:
+              print(f"  ✗ Failed to create matchup.parquet: {e}")
+              import traceback
+              traceback.print_exc()
+              failed.append(("matchup", str(e)))
+          
+          # Consolidate draft
+          try:
+              print("[CONSOLIDATE] Creating draft.parquet...")
+              draft_path = normalize_draft_parquet(context_path)
+              print(f"  ✓ Created {draft_path}")
+          except Exception as e:
+              print(f"  ✗ Failed to create draft.parquet: {e}")
+              import traceback
+              traceback.print_exc()
+              failed.append(("draft", str(e)))
+          
+          # Consolidate transactions
+          try:
+              print("[CONSOLIDATE] Creating transactions.parquet...")
+              trans_path = normalize_transactions_parquet(context_path)
+              print(f"  ✓ Created {trans_path}")
+          except Exception as e:
+              print(f"  ✗ Failed to create transactions.parquet: {e}")
+              import traceback
+              traceback.print_exc()
+              failed.append(("transactions", str(e)))
+          
+          # Consolidate schedule
+          try:
+              print("[CONSOLIDATE] Creating schedule.parquet...")
+              schedule_path = normalize_schedule_parquet(context_path)
+              print(f"  ✓ Created {schedule_path}")
+          except Exception as e:
+              print(f"  ✗ Failed to create schedule.parquet: {e}")
+              import traceback
+              traceback.print_exc()
+              failed.append(("schedule", str(e)))
+          
+          print("\n[CONSOLIDATE] Consolidation complete!")
+          
+          # Verify canonical files were created
+          data_dir = Path("fantasy_football_data")
+          canonical_files = ["matchup.parquet", "draft.parquet", "transactions.parquet", "schedule.parquet"]
+          found = []
+          missing = []
+          
+          for fname in canonical_files:
+              fpath = data_dir / fname
+              if fpath.exists():
+                  found.append(fname)
+              else:
+                  missing.append(fname)
+          
+          print(f"\n[VERIFY] Found {len(found)} canonical files: {', '.join(found)}")
+          if missing:
+              print(f"[VERIFY] Missing {len(missing)} canonical files: {', '.join(missing)}")
+          
+          # Exit with error if consolidation failed
+          if failed:
+              print(f"\n[ERROR] Consolidation failed for {len(failed)} table(s):")
+              for table, error in failed:
+                  print(f"  - {table}: {error}")
+              sys.exit(1)
+          
+          if missing:
+              print(f"\n[ERROR] {len(missing)} canonical files were not created!")
+              sys.exit(1)
+          
+          print("\n[SUCCESS] All canonical files created successfully!")
+          PYEOF
+
+      # ==================== VERIFY PARQUET FILES ====================
+      - name: Verify parquet files
+        if: steps.import.outputs.exit_code == '0'
+        id: verify
+        run: |
+          PARQUET_COUNT=$(find fantasy_football_data -name "*.parquet" -type f | wc -l)
+          echo "Found ${PARQUET_COUNT} parquet files"
+
+          if [ "$PARQUET_COUNT" -eq 0 ]; then
+            echo "ERROR: No parquet files created!"
+            exit 1
+          fi
+
+          # List canonical files at root level (if they exist)
+          echo "=== Canonical Files (Root Level) ==="
+          ls -lh fantasy_football_data/{player,matchup,draft,transactions,schedule}.parquet 2>/dev/null || echo "  (No canonical files at root yet - normal during staging)"
+          
+          # List all parquet files found (first 20 for brevity)
+          echo ""
+          echo "=== All Parquet Files (First 20) ==="
+          find fantasy_football_data -name "*.parquet" -type f -exec ls -lh {} \; | head -20
+          
+          # Count files by subdirectory
+          echo ""
+          echo "=== Files by Directory ==="
+          for dir in fantasy_football_data/*/; do
+            if [ -d "$dir" ]; then
+              count=$(find "$dir" -name "*.parquet" -type f | wc -l)
+              if [ "$count" -gt 0 ]; then
+                echo "  $(basename "$dir"): ${count} files"
+              fi
+            fi
+          done
+
+          echo "file_count=${PARQUET_COUNT}" >> $GITHUB_OUTPUT
+
+      # ==================== CONSOLIDATE LEAGUE SETTINGS ====================
+      - name: Consolidate league settings
+        if: steps.import.outputs.exit_code == '0'
+        run: |
+          python - <<'PYEOF'
+          import json
+          from pathlib import Path
+          import pandas as pd
+
+          settings_dir = Path("fantasy_football_data/league_settings")
+          if not settings_dir.exists():
+              print("No league_settings directory")
+              exit(0)
+
+          settings_files = list(settings_dir.glob("league_settings_*.json"))
+          if not settings_files:
+              print("No settings files found")
+              exit(0)
+
+          rows = []
+          for sf in sorted(settings_files):
+              try:
+                  with open(sf, 'r', encoding='utf-8') as f:
+                      data = json.load(f)
+                  metadata = data.get('metadata', {})
+                  rows.append({
+                      'year': data.get('year'),
+                      'league_key': data.get('league_key'),
+                      'num_teams': metadata.get('num_teams'),
+                      'num_playoff_teams': metadata.get('num_playoff_teams') or metadata.get('playoff_teams'),
+                      'playoff_start_week': metadata.get('playoff_start_week'),
+                      'bye_teams': metadata.get('bye_teams'),  # Critical for playoff bracket simulation
+                      'has_multiweek_championship': metadata.get('has_multiweek_championship'),
+                      'uses_playoff_reseeding': metadata.get('uses_playoff_reseeding'),
+                      'current_week': metadata.get('current_week'),  # Current week of the season
+                      'end_week': metadata.get('end_week'),  # Final week of the season
+                      'is_finished': metadata.get('is_finished', False),  # Whether season is complete
+                      'settings_json': json.dumps(data)
+                  })
+              except Exception as e:
+                  print(f"Error reading {sf.name}: {e}")
+
+          if rows:
+              pd.DataFrame(rows).to_parquet("fantasy_football_data/league_settings.parquet", index=False)
+              print(f"Created league_settings.parquet with {len(rows)} years")
+          PYEOF
+
+      # ==================== SAVE LEAGUE CONTEXT TO PARQUET ====================
+      - name: Save league context to parquet
+        if: steps.import.outputs.exit_code == '0'
+        run: |
+          python - <<'PYEOF'
+          import json
+          import pandas as pd
+          from pathlib import Path
+          from datetime import datetime
+
+          with open("league_context.json") as f:
+              context = json.load(f)
+
+          now = datetime.now().isoformat()
+          row = {
+              'league_id': context.get('league_id'),
+              'league_name': context.get('league_name'),
+              'game_code': context.get('game_code', 'nfl'),
+              'start_year': context.get('start_year'),
+              'end_year': context.get('end_year'),
+              'num_teams': context.get('num_teams'),
+              'playoff_teams': context.get('playoff_teams'),
+              'regular_season_weeks': context.get('regular_season_weeks'),
+              'league_ids_json': json.dumps(context.get('league_ids', {})),
+              'keeper_rules_json': json.dumps(context.get('keeper_rules')) if context.get('keeper_rules') else None,
+              'manager_name_overrides_json': json.dumps(context.get('manager_name_overrides', {})),
+              'created_at': context.get('created_at') or now,  # Use existing or set new
+              'updated_at': now,  # Always update on import
+          }
+
+          pd.DataFrame([row]).to_parquet("fantasy_football_data/league_context.parquet", index=False)
+          print("Saved league_context.parquet")
+          PYEOF
+
+      # ==================== VALIDATE CRITICAL TABLES ====================
+      # Note: Upload, SQL enrichments, and aggregation are already handled by the import pipeline
+      # (PHASE 4: Upload, PHASE 4.5: SQL Enrichments, PHASE 5: Aggregation)
+      - name: Validate critical tables in MotherDuck
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
+        run: |
+          echo "========================================"
+          echo "Validating critical tables in MotherDuck"
+          echo "========================================"
+
+          python - <<'PYEOF'
+          import duckdb
+          import os
+          import sys
+          import re
+
+          db_name = os.environ['DATABASE_NAME']
+          token = os.environ['MOTHERDUCK_TOKEN']
+
+          # Sanitize database name (same as _slug function in database.py)
+          db = re.sub(r'[^a-zA-Z0-9]+', '_', db_name.strip().lower()).strip('_')
+          if not db:
+              db = 'db'
+          if db[0].isdigit():
+              db = 'l_' + db
+          db = db[:63]
+
+          # NOTE: 'player' replaced by 'player_fantasy' in two-track architecture
+          # NFL stats come from super table (___ops.nfl_historical.nfl_player_stats_all) via JOIN
+          CRITICAL_TABLES = ['matchup', 'player_fantasy', 'schedule', 'draft', 'transactions']
+
+          print(f"Connecting to database: {db}")
+          conn = duckdb.connect(f'md:{db}?motherduck_token={token}')
+
+          failed = []
+          for table in CRITICAL_TABLES:
+              count = 0
+              found = False
+
+              # Try public schema first (new pattern)
+              try:
+                  result = conn.execute(f"SELECT COUNT(*) FROM public.{table}").fetchone()
+                  count = result[0] if result else 0
+                  found = True
+              except Exception:
+                  pass
+
+              # Try without schema (legacy pattern)
+              if not found:
+                  try:
+                      result = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+                      count = result[0] if result else 0
+                      found = True
+                  except Exception:
+                      pass
+
+              if not found:
+                  print(f"  ✗ {table}: MISSING")
+                  failed.append(f"{table} (missing)")
+              elif count == 0:
+                  print(f"  ✗ {table}: EXISTS but EMPTY (0 rows)")
+                  failed.append(f"{table} (empty)")
+              else:
+                  print(f"  ✓ {table}: {count:,} rows")
+
+          conn.close()
+
+          if failed:
+              print(f"\n❌ VALIDATION FAILED: Critical tables missing or empty: {', '.join(failed)}")
+              sys.exit(1)
+          else:
+              print(f"\n✓ All {len(CRITICAL_TABLES)} critical tables validated successfully")
+          PYEOF
+
+      # ==================== CLEANUP DEPRECATED COLUMNS ====================
+      - name: Cleanup deprecated columns
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
+        run: |
+          source .venv/bin/activate
+          echo "Cleaning up deprecated columns..."
+          python -c "import os; import sys; sys.path.insert(0, '.'); from streamlit_helpers.database import drop_deprecated_columns; db=os.environ.get('DATABASE_NAME',''); tok=os.environ.get('MOTHERDUCK_TOKEN',''); dropped=drop_deprecated_columns(db,tok,dry_run=False) if db and tok else []; print(f'Dropped {len(dropped)} deprecated columns') if dropped else print('No deprecated columns to drop')"
+
+      # ==================== CLEANUP STAGING DATA ====================
+      # Always cleanup staging after full import completes successfully
+      - name: Cleanup staging data
+        if: steps.import.outputs.exit_code == '0'
+        uses: ./.github/actions/cleanup-staging
+        with:
+          database_name: ${{ steps.parse.outputs.database_name }}
+          motherduck_token: ${{ secrets.MOTHERDUCK_TOKEN }}
+          has_external_data: 'true'
+
+      # ==================== STORE CREDENTIALS ====================
+      # Always store credentials, even if import fails — they're needed for
+      # future re-imports and weekly updates. store_league_credentials uses
+      # INSERT OR REPLACE so re-runs are idempotent.
+      - name: Store credentials for weekly updates
+        if: always()
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
+          LEAGUE_ID: ${{ steps.parse.outputs.league_id }}
+          LEAGUE_NAME: ${{ steps.parse.outputs.league_name }}
+        run: |
+          if [ -z "$CREDENTIAL_ENCRYPTION_KEY" ]; then
+            echo "CREDENTIAL_ENCRYPTION_KEY not set - weekly updates will require manual auth"
+            exit 0
+          fi
+
+          python - <<'PYEOF'
+          import json
+          import sys
+          sys.path.insert(0, 'fantasy_football_data_scripts')
+
+          from multi_league.utils.credential_store import store_league_credentials
+          import os
+
+          with open("oauth/Oauth.json", 'r') as f:
+              oauth_data = json.load(f)
+
+          refresh_token = oauth_data.get('refresh_token')
+          if not refresh_token:
+              print("No refresh_token - weekly updates may not work")
+              exit(0)
+
+          success = store_league_credentials(
+              database_name=os.environ['DATABASE_NAME'],
+              refresh_token=refresh_token,
+              league_id=os.environ['LEAGUE_ID'],
+              league_name=os.environ['LEAGUE_NAME']
+          )
+
+          if success:
+              print(f"Credentials stored - weekly updates enabled")
+          PYEOF
+
+      # ==================== CREATE DEPLOYMENT MANIFEST ====================
+      - name: Create deployment manifest
+        if: steps.import.outputs.exit_code == '0'
+        run: |
+          python - <<'PYEOF'
+          import json
+          import os
+
+          manifest = {
+              "user_id": "${{ steps.parse.outputs.user_id }}",
+              "league_name": "${{ steps.parse.outputs.league_name }}",
+              "league_id": "${{ steps.parse.outputs.league_id }}",
+              "season": "${{ steps.parse.outputs.season }}",
+              "motherduck_database": "${{ steps.parse.outputs.database_name }}",
+              "parquet_file_count": ${{ steps.verify.outputs.file_count }},
+              "import_mode": "${{ steps.parse.outputs.import_mode }}",
+              "created_at": os.popen('date -Iseconds').read().strip(),
+              "workflow_run_id": "${{ github.run_id }}",
+              "status": "ready"
+          }
+
+          with open("deployment_manifest.json", 'w') as f:
+              json.dump(manifest, f, indent=2)
+
+          print(json.dumps(manifest, indent=2))
+          PYEOF
+
+      # ==================== CLEANUP ON FAILURE ====================
+      # NOTE: We intentionally do not cleanup staging data on failure
+      # The user may want to retry the import and needs their uploaded data preserved
+      # Staging cleanup only happens after successful FULL imports
+
+      # ==================== UPDATE JOB STATUS - FINAL ====================
+
+      # ==================== UPLOAD ARTIFACTS ====================
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: league-import-${{ steps.parse.outputs.user_id }}
+          path: |
+            import.log
+            motherduck.log
+          retention-days: 30
+
+      # ==================== WORKFLOW SUMMARY ====================
+      - name: Create workflow summary
+        if: always()
+        run: |
+          echo "# League Import Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## League Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **League**: ${{ steps.parse.outputs.league_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Season**: ${{ steps.parse.outputs.season }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Import Mode**: ${{ steps.parse.outputs.import_mode }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Years**: ${{ steps.parse.outputs.start_year }}-${{ steps.parse.outputs.season }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Database**: \`${{ steps.parse.outputs.database_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.import.outputs.exit_code }}" == "0" ]; then
+            echo "## Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
+            echo "- Parquet files: ${{ steps.verify.outputs.file_count }}" >> $GITHUB_STEP_SUMMARY
+            echo "- Import completed successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## Status: FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "Check the logs for details" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # ==================== COMPUTE HOMEPAGE SUMMARY ====================
+      # Precompute all homepage data for 10-15x faster page loads
+      - name: Compute homepage summary
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          source .venv/bin/activate
+          echo "Computing precomputed homepage summary tables..."
+          # DuckDB can segfault (exit 139) during process shutdown on low-memory runners
+          # even after all data is uploaded successfully. Treat exit 139 as success.
+          python fantasy_football_data_scripts/multi_league/transformations/aggregation/homepage_summary.py \
+            --context league_context.json --upload || {
+            exit_code=$?
+            if [ "$exit_code" -eq 139 ]; then
+              echo "⚠️ DuckDB segfault on shutdown (exit 139) — data already uploaded, ignoring"
+            else
+              exit $exit_code
+            fi
+          }
+          echo "Homepage summary complete!"
+
+      # ==================== TRIGGER DOWNSTREAM WORKFLOWS ====================
+      - name: Trigger downstream workflows
+        if: steps.import.outputs.exit_code == '0'
+        uses: ./.github/actions/trigger-downstream
+        with:
+          database_name: ${{ steps.parse.outputs.database_name }}
+          user_id: ${{ steps.parse.outputs.user_id }}
+          import_mode: ${{ steps.parse.outputs.import_mode }}
+          season: ${{ steps.parse.outputs.season }}
+          actual_start_year: ${{ steps.parse.outputs.actual_start_year }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          n_sims: '10000'
