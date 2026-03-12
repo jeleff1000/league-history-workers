@@ -49,6 +49,7 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github_token }}
+        GH_REPO: ${{ github.repository }}
         DATABASE_NAME: ${{ inputs.database_name }}
         USER_ID: ${{ inputs.user_id }}
         IMPORT_MODE: ${{ inputs.import_mode }}
@@ -58,6 +59,7 @@ runs:
         N_SIMS: ${{ inputs.n_sims }}
         PLATFORM: ${{ inputs.platform }}
       run: |
+        echo "Target repo: ${GH_REPO}"
         PLAYOFF_TRIGGERED=false
         HISTORY_TRIGGERED=false
 
@@ -68,7 +70,7 @@ runs:
           echo "========================================"
 
           gh workflow run playoff_odds_worker.yml \
-            --repo "${{ github.repository }}" \
+            --repo "${GH_REPO}" \
             -f database_name="${DATABASE_NAME}" \
             -f n_sims="${N_SIMS}" \
             -f user_id="${USER_ID}"
@@ -203,7 +205,7 @@ runs:
               echo "Using workflow: ${FULL_WORKFLOW}"
 
               gh workflow run "${FULL_WORKFLOW}" \
-                --repo "${{ github.repository }}" \
+                --repo "${GH_REPO}" \
                 -f league_data_b64="${FULL_IMPORT_DATA}" \
                 -f user_id="${USER_ID}_full"
 
