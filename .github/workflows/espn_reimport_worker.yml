@@ -78,6 +78,7 @@ jobs:
           token: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Setup Python
+        id: setup-python
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
@@ -87,7 +88,7 @@ jobs:
         id: cache-venv
         with:
           path: .venv
-          key: venv-${{ runner.os }}-py3.11-${{ hashFiles('requirements.txt') }}
+          key: venv-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('requirements.txt') }}
 
       - name: Cache NFLverse data
         uses: actions/cache@v5
