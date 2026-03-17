@@ -38,9 +38,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Setup Python
         id: setup-python
@@ -177,12 +174,13 @@ jobs:
               "keeper_rules": league_data.get('keeper_rules'),
               "has_external_data": league_data.get('has_external_data', False),
               "import_mode": "quick",
+              "motherduck_db_name": "${{ steps.parse.outputs.database_name }}",
           }
 
           with open("league_context.json", 'w') as f:
               json.dump(context, f, indent=2)
 
-          print(f"[QUICK IMPORT] League context created for year {season}")
+          print(f"[QUICK IMPORT] League context created for year {season} (db: {context.get('motherduck_db_name', 'N/A')})")
           PYEOF
 
       # ==================== DROP ALL TABLES (CLEAN SLATE) ====================
@@ -379,6 +377,7 @@ jobs:
       # Basic homepage summary after quick import (LAMAR only, no clutch yet)
       - name: Compute homepage summary
         if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         run: |

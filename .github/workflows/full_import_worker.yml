@@ -40,9 +40,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Setup Python
         id: setup-python
@@ -204,12 +201,13 @@ jobs:
               "keeper_rules": league_data.get('keeper_rules'),
               "has_external_data": league_data.get('has_external_data', False),
               "import_mode": import_mode,
+              "motherduck_db_name": "${{ steps.parse.outputs.database_name }}",
           }
 
           with open("league_context.json", 'w') as f:
               json.dump(context, f, indent=2)
 
-          print(f"League context created: {start_year}-{end_year} (mode: {import_mode})")
+          print(f"League context created: {start_year}-{end_year} (mode: {import_mode}, db: {context.get('motherduck_db_name', 'N/A')})")
           
           # Debug: Show what was actually written to the context file
           print("\n[DEBUG] Context file contents:")
@@ -727,22 +725,22 @@ jobs:
 
       # ==================== COMPUTE HOMEPAGE SUMMARY ====================
       # Precompute all homepage data for 10-15x faster page loads
+      # Non-fatal: homepage errors must not block downstream workflows (playoff sims, etc.)
       - name: Compute homepage summary
         if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         run: |
           source .venv/bin/activate
           echo "Computing precomputed homepage summary tables..."
-          # DuckDB can segfault (exit 139) during process shutdown on low-memory runners
-          # even after all data is uploaded successfully. Treat exit 139 as success.
           python fantasy_football_data_scripts/multi_league/transformations/aggregation/homepage_summary.py \
             --context league_context.json --upload || {
             exit_code=$?
             if [ "$exit_code" -eq 139 ]; then
               echo "⚠️ DuckDB segfault on shutdown (exit 139) — data already uploaded, ignoring"
             else
-              exit $exit_code
+              echo "⚠️ Homepage summary failed (exit $exit_code) — continuing to downstream workflows"
             fi
           }
           echo "Homepage summary complete!"

@@ -37,9 +37,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Setup Python for discovery
         uses: actions/setup-python@v6
@@ -302,9 +299,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Setup Python
         id: setup-python
@@ -422,6 +416,7 @@ jobs:
                       "max_workers": 5,
                       "enable_caching": True,
                       "rate_limit_per_sec": 4.0,
+                      "motherduck_db_name": db_name,
                   }
 
                   # Parse JSON columns
@@ -902,6 +897,7 @@ jobs:
 
       - name: Compute homepage summary
         if: steps.update.outputs.exit_code == '0' && github.event.inputs.dry_run != 'true'
+        continue-on-error: true
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         run: |
