@@ -32,9 +32,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -681,7 +678,55 @@ jobs:
             tail -30 ../matchup_aggregation.log
           fi
 
+      # ==================== V2 AGGREGATIONS (feature-flagged) ====================
+      # These only run when IMPORT_PIPELINE_V2=true. They consolidate work that
+      # previously ran in quick+full import workflows into this finalization stage.
+      - name: Aggregate draft context (V2)
+        if: env.IMPORT_PIPELINE_V2 == 'true'
+        continue-on-error: true
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_NAME: ${{ github.event.inputs.database_name }}
+        run: |
+          echo "========================================"
+          echo "Aggregating draft season/career tables (V2)"
+          echo "========================================"
+          cd fantasy_football_data_scripts
+          python multi_league/transformations/aggregation/aggregate_draft_context.py \
+            --context ../aggregation_context.json \
+            2>&1 | tee ../draft_aggregation.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "✓ Draft aggregation complete"
+          else
+            echo "✗ Draft aggregation failed (non-critical)"
+            tail -30 ../draft_aggregation.log
+          fi
+
+      - name: Aggregate transaction context (V2)
+        if: env.IMPORT_PIPELINE_V2 == 'true'
+        continue-on-error: true
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_NAME: ${{ github.event.inputs.database_name }}
+        run: |
+          echo "========================================"
+          echo "Aggregating transaction season/career tables (V2)"
+          echo "========================================"
+          cd fantasy_football_data_scripts
+          python multi_league/transformations/aggregation/aggregate_transaction_context.py \
+            --context ../aggregation_context.json \
+            2>&1 | tee ../transaction_aggregation.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "✓ Transaction aggregation complete"
+          else
+            echo "✗ Transaction aggregation failed (non-critical)"
+            tail -30 ../transaction_aggregation.log
+          fi
+
       - name: Compute homepage summary
+        continue-on-error: true
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           DATABASE_NAME: ${{ github.event.inputs.database_name }}

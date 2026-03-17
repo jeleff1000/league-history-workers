@@ -40,9 +40,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Setup Python
         id: setup-python
@@ -735,7 +732,7 @@ jobs:
       # Precompute all homepage data for 10-15x faster page loads
       # Non-fatal: homepage errors must not block downstream workflows (playoff sims, etc.)
       - name: Compute homepage summary
-        if: steps.import.outputs.exit_code == '0'
+        if: steps.import.outputs.exit_code == '0' && env.IMPORT_PIPELINE_V2 != 'true'
         continue-on-error: true
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
