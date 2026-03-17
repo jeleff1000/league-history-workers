@@ -204,6 +204,11 @@ jobs:
               "motherduck_db_name": "${{ steps.parse.outputs.database_name }}",
           }
 
+          # Pass through league_ids mapping (year → league_key) for combined leagues
+          if league_data.get('league_ids'):
+              context['league_ids'] = league_data['league_ids']
+              print(f"[FULL IMPORT] league_ids mapping: {len(context['league_ids'])} years")
+
           with open("league_context.json", 'w') as f:
               json.dump(context, f, indent=2)
 
