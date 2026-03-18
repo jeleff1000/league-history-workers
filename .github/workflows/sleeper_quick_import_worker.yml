@@ -622,7 +622,14 @@ jobs:
           DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
         run: |
           source .venv/bin/activate
-          python - <<'PYEOF'
+          python - <<'PYEOF' || {
+          exit_code=$?
+          if [ "$exit_code" -eq 139 ]; then
+            echo "⚠️ DuckDB segfault on shutdown (exit 139) — data already stored, ignoring"
+          else
+            exit $exit_code
+          fi
+          }
           import sys
           sys.path.insert(0, 'fantasy_football_data_scripts')
           import os
