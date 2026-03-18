@@ -28,6 +28,7 @@ jobs:
 
     env:
       PYTHONUNBUFFERED: 1
+      IMPORT_PIPELINE_V2: ${{ vars.IMPORT_PIPELINE_V2 }}
 
     steps:
       - name: Checkout code
