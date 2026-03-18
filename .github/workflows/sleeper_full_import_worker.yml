@@ -500,14 +500,8 @@ jobs:
           DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
         run: |
           source .venv/bin/activate
-          python - <<'PYEOF' || {
-          exit_code=$?
-          if [ "$exit_code" -eq 139 ]; then
-            echo "⚠️ DuckDB segfault on shutdown (exit 139) — data already stored, ignoring"
-          else
-            exit $exit_code
-          fi
-          }
+          set +e
+          python - <<'PYEOF'
           import sys
           sys.path.insert(0, 'fantasy_football_data_scripts')
           import os
@@ -521,6 +515,13 @@ jobs:
           )
           print("Sleeper league info stored")
           PYEOF
+          exit_code=$?
+          set -e
+          if [ "$exit_code" -eq 139 ]; then
+            echo "⚠️ DuckDB segfault on shutdown (exit 139) — data already stored, ignoring"
+          elif [ "$exit_code" -ne 0 ]; then
+            exit $exit_code
+          fi
 
       # ==================== SUMMARY ====================
       - name: Print summary
