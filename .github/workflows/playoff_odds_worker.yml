@@ -295,16 +295,28 @@ jobs:
             exit 0
           fi
 
+          # If matchup.parquet doesn't exist, the download step failed — nothing we can do
+          if [ ! -f "fantasy_football_data/matchup.parquet" ]; then
+            echo "✗ matchup.parquet not found — cannot create league context (main import likely incomplete)"
+            exit 1
+          fi
+
           echo "Creating league context from matchup data (fallback)..."
-          
+
           python - <<'PYEOF'
           import json
           import pandas as pd
           from pathlib import Path
           import os
+          import sys
 
           # Read matchup data to infer context
           matchup_df = pd.read_parquet("fantasy_football_data/matchup.parquet")
+
+          if matchup_df.empty:
+              print("✗ matchup.parquet is empty — cannot create league context")
+              print("Make sure the main import has completed and uploaded data to MotherDuck.")
+              sys.exit(1)
 
           years = sorted(matchup_df['year'].unique())
           managers = matchup_df['manager'].unique()
