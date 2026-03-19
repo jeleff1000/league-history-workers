@@ -250,6 +250,8 @@ jobs:
       - name: Run Expected Record Calculator
         env:
           N_SIMS: ${{ github.event.inputs.n_sims }}
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_NAME: ${{ github.event.inputs.database_name }}
         working-directory: fantasy_football_data_scripts
         run: |
           echo "========================================"
@@ -258,9 +260,9 @@ jobs:
           echo "========================================"
 
           # Expected record uses Monte Carlo simulations for schedule-independent analysis
-          # This runs BEFORE playoff odds since both update matchup.parquet
+          # --db mode: reads matchup from MotherDuck, writes results back directly
           python multi_league/transformations/matchup/expected_record_v2.py \
-            --context ../league_context.json \
+            --db ${DATABASE_NAME} \
             --n-sims ${N_SIMS} \
             2>&1 | tee ../expected_record.log
 
@@ -277,6 +279,8 @@ jobs:
       - name: Run Playoff Odds Calculator
         env:
           N_SIMS: ${{ github.event.inputs.n_sims }}
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_NAME: ${{ github.event.inputs.database_name }}
         working-directory: fantasy_football_data_scripts
         run: |
           echo "========================================"
@@ -285,7 +289,7 @@ jobs:
           echo "========================================"
 
           python multi_league/transformations/matchup/playoff_odds_import.py \
-            --context ../league_context.json \
+            --db ${DATABASE_NAME} \
             --n-sims ${N_SIMS} \
             2>&1 | tee ../playoff_odds.log
 
@@ -299,208 +303,30 @@ jobs:
             exit $EXIT_CODE
           fi
 
-      - name: Verify results
-        run: |
-          python - <<'PYEOF'
-          import pandas as pd
-
-          df = pd.read_parquet("fantasy_football_data/matchup.parquet")
-
-          # Check for expected record columns
-          expected_record_cols = ['shuffle_avg_wins', 'shuffle_avg_seed', 'wins_vs_shuffle_wins', 'seed_vs_shuffle_seed']
-          print("Expected record columns check:")
-          for col in expected_record_cols:
-              if col in df.columns:
-                  non_null = df[col].notna().sum()
-                  print(f"  ✓ {col}: {non_null:,} non-null values")
-              else:
-                  print(f"  ✗ {col}: MISSING")
-
-          # Check for playoff odds columns
-          playoff_cols = ['p_playoffs', 'p_bye', 'p_champ', 'avg_seed', 'p_semis', 'p_final']
-          print("\nPlayoff odds columns check:")
-          for col in playoff_cols:
-              if col in df.columns:
-                  non_null = df[col].notna().sum()
-                  print(f"  ✓ {col}: {non_null:,} non-null values")
-              else:
-                  print(f"  ✗ {col}: MISSING")
-
-          print(f"\nTotal rows: {len(df):,}")
-          PYEOF
-
-      - name: Upload updated data to MotherDuck
+      - name: Verify results in MotherDuck
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           DATABASE_NAME: ${{ github.event.inputs.database_name }}
         run: |
-          echo "========================================"
-          echo "Uploading updated data to MotherDuck"
-          echo "========================================"
-
-          # Upload matchup.parquet (with playoff odds) and player_fantasy.parquet (with clutch equity)
           python - <<'PYEOF'
-          import duckdb
-          import os
-          import sys
-          from pathlib import Path
+          import duckdb, os
 
           db_name = os.environ['DATABASE_NAME']
           token = os.environ['MOTHERDUCK_TOKEN']
-          data_dir = Path("fantasy_football_data")
+          conn = duckdb.connect(f'md:{db_name}?motherduck_token={token}')
 
-          print(f"Connecting to MotherDuck database: {db_name}")
-          try:
-              conn = duckdb.connect(f'md:{db_name}?motherduck_token={token}')
-          except Exception as e:
-              print(f"ERROR: Failed to connect to MotherDuck: {e}")
-              sys.exit(1)
+          # Check expected record columns
+          cols = [c[0] for c in conn.execute("SELECT * FROM public.matchup LIMIT 0").description]
+          expected_cols = ['shuffle_avg_wins', 'shuffle_avg_seed', 'p_playoffs', 'p_bye', 'p_champ']
+          print("Column check:")
+          for col in expected_cols:
+              status = "✓" if col in cols else "✗ MISSING"
+              print(f"  {status} {col}")
 
-          # Upload matchup.parquet - MERGE with existing data to preserve columns from main import
-          # The main import adds cumulative stats (wins_to_date, etc.) and this worker adds
-          # playoff odds (p_playoffs, etc.) - we need to preserve BOTH sets of columns
-          matchup_file = data_dir / "matchup.parquet"
-          if not matchup_file.exists():
-              print(f"ERROR: {matchup_file} not found!")
-              sys.exit(1)
-
-          print(f"Uploading matchup.parquet (MERGE mode to preserve existing columns)...")
-          try:
-              # Get columns from new parquet file (these are guaranteed unique)
-              new_cols_result = conn.execute(f"SELECT * FROM read_parquet('{matchup_file}') LIMIT 0").description
-              new_cols = [c[0] for c in new_cols_result]
-              row_count = conn.execute(f"SELECT COUNT(*) FROM read_parquet('{matchup_file}')").fetchone()[0]
-              print(f"  New file has {len(new_cols)} columns, {row_count:,} rows")
-
-              # Check if table exists and get ACTUAL column names from the table itself
-              # Using SELECT * LIMIT 0 instead of information_schema avoids stale metadata issues
-              existing_cols = []
-              try:
-                  result = conn.execute("SELECT * FROM public.matchup LIMIT 0").description
-                  # Deduplicate column names (some tables may have duplicate columns from bugs)
-                  seen = set()
-                  existing_cols = []
-                  for c in result:
-                      if c[0] not in seen:
-                          existing_cols.append(c[0])
-                          seen.add(c[0])
-                  print(f"  Existing table has {len(existing_cols)} unique columns")
-              except:
-                  print(f"  No existing table found - will create new")
-
-              # If existing table has columns we don't have, we need to preserve them
-              missing_cols = set(existing_cols) - set(new_cols)
-              # Overlapping columns exist in BOTH new parquet and existing table.
-              # Use COALESCE(new, existing) to avoid overwriting SQL-enriched values
-              # (like optimal_points) with NULL from the local parquet.
-              overlap_cols = set(new_cols) & set(existing_cols) - {'year', 'week', 'manager'}
-              if missing_cols or overlap_cols:
-                  print(f"  Preserving {len(missing_cols)} columns from existing table: {list(missing_cols)[:5]}...")
-                  if overlap_cols:
-                      print(f"  COALESCE on {len(overlap_cols)} overlapping columns to preserve enriched values")
-
-                  # Build explicit column list - use only columns that actually exist in the table
-                  all_existing_cols = ", ".join([f'"{c}"' for c in existing_cols])
-                  preserved_cols = ", ".join([f'e."{c}"' for c in missing_cols]) if missing_cols else ""
-
-                  # For overlapping columns, use COALESCE(new, existing) so NULL in new
-                  # doesn't overwrite enriched values in existing
-                  new_cols_parts = []
-                  # Build type map from new parquet for safe COALESCE casting
-                  new_type_map = {c[0]: c[1] for c in new_cols_result}
-                  for c in new_cols:
-                      if c in overlap_cols:
-                          # TRY_CAST handles type mismatches (e.g., DOUBLE vs BOOLEAN)
-                          ctype = new_type_map.get(c, 'VARCHAR')
-                          new_cols_parts.append(f'COALESCE(n."{c}", TRY_CAST(e."{c}" AS {ctype})) AS "{c}"')
-                      else:
-                          new_cols_parts.append(f'n."{c}"')
-                  new_cols_select = ", ".join(new_cols_parts)
-
-                  select_clause = new_cols_select
-                  if preserved_cols:
-                      select_clause += ", " + preserved_cols
-
-                  conn.execute(f"""
-                      CREATE OR REPLACE TABLE public.matchup AS
-                      WITH existing_clean AS (
-                          -- Dedupe existing table to handle any duplicate columns
-                          SELECT DISTINCT {all_existing_cols}
-                          FROM public.matchup
-                      )
-                      SELECT {select_clause}
-                      FROM read_parquet('{matchup_file}') n
-                      LEFT JOIN existing_clean e
-                        ON n.year = e.year AND n.week = e.week AND n.manager = e.manager
-                  """)
-              else:
-                  # No columns to preserve, just replace with clean data
-                  conn.execute(f"CREATE OR REPLACE TABLE public.matchup AS SELECT * FROM read_parquet('{matchup_file}')")
-
-              final_count = conn.execute("SELECT COUNT(*) FROM public.matchup").fetchone()[0]
-              final_cols = conn.execute("DESCRIBE public.matchup").fetchdf()
-              print(f"  ✓ matchup: {final_count:,} rows, {len(final_cols)} columns")
-          except Exception as e:
-              print(f"  ✗ matchup upload failed: {e}")
-              import traceback
-              traceback.print_exc()
-              sys.exit(1)
-
-          # Update player_fantasy clutch_equity column (UPDATE, not replace!)
-          # This preserves the full NFL dataset and only updates clutch_equity for rostered players
-          player_file = data_dir / "player_fantasy.parquet"
-          if player_file.exists():
-              print(f"Updating player_fantasy clutch_equity column...")
-              try:
-                  # Check if clutch_equity column exists in the parquet file
-                  parquet_cols = conn.execute(f"SELECT * FROM read_parquet('{player_file}') LIMIT 0").description
-                  parquet_col_names = [c[0] for c in parquet_cols]
-
-                  if 'clutch_equity' not in parquet_col_names:
-                      print(f"  ⚠ clutch_equity column not in parquet file (clutch calc may not have run)")
-                      print(f"    Available columns: {parquet_col_names[:10]}...")
-                  else:
-                      # First ensure clutch_equity column exists in MotherDuck table
-                      conn.execute("""
-                          ALTER TABLE public.player_fantasy
-                          ADD COLUMN IF NOT EXISTS clutch_equity DOUBLE
-                      """)
-
-                      # Create temp table from parquet with just the columns we need for update
-                      conn.execute(f"""
-                          CREATE OR REPLACE TEMP TABLE clutch_updates AS
-                          SELECT player_week, clutch_equity
-                          FROM read_parquet('{player_file}')
-                          WHERE clutch_equity IS NOT NULL
-                      """)
-
-                      # Update existing rows with clutch_equity values
-                      result = conn.execute("""
-                          UPDATE public.player_fantasy pf
-                          SET clutch_equity = cu.clutch_equity
-                          FROM clutch_updates cu
-                          WHERE pf.player_week = cu.player_week
-                      """)
-
-                      updated_count = conn.execute("SELECT COUNT(*) FROM clutch_updates").fetchone()[0]
-                      print(f"  ✓ player_fantasy: updated clutch_equity for {updated_count:,} rows")
-
-                      conn.execute("DROP TABLE IF EXISTS clutch_updates")
-              except Exception as e:
-                  print(f"  ⚠ player_fantasy clutch_equity update failed (non-critical): {e}")
-          else:
-              print(f"  ⚠ player_fantasy.parquet not found (skipping clutch update)")
-
+          total = conn.execute("SELECT COUNT(*) FROM public.matchup").fetchone()[0]
+          print(f"\nTotal matchup rows: {total:,}")
           conn.close()
-          print("\n✓ MotherDuck upload complete")
           PYEOF
-
-          if [ $? -eq 0 ]; then
-            echo "✓ MotherDuck upload complete"
-          else
-            echo "✗ MotherDuck upload failed"
-            exit 1
-          fi
 
       - name: Re-aggregate season/career tables
         env:
