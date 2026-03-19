@@ -164,205 +164,87 @@ jobs:
           print("\n✓ Download complete")
           PYEOF
 
-      - name: Download league context from MotherDuck
+      - name: Build league context from league_settings
         env:
           DATABASE_NAME: ${{ github.event.inputs.database_name }}
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         run: |
           echo "========================================"
-          echo "Downloading league context"
+          echo "Building league context"
           echo "========================================"
 
           python - <<'PYEOF'
-          import duckdb
-          import os
-          import sys
-          import json
+          import duckdb, json, os, sys, re
           from pathlib import Path
-          import pandas as pd
 
           db_name = os.environ['DATABASE_NAME']
           token = os.environ['MOTHERDUCK_TOKEN']
+          data_dir = Path("fantasy_football_data").resolve()
 
-          # Connect to MotherDuck
-          print(f"Connecting to MotherDuck database: {db_name}")
-          try:
-              conn = duckdb.connect(f'md:{db_name}?motherduck_token={token}')
-          except Exception as e:
-              print(f"ERROR: Failed to connect to MotherDuck: {e}")
-              sys.exit(1)
-
-          # Try to download league_context.parquet from public schema
-          context_downloaded = False
-          try:
-              # Check if league_context table exists
-              result = conn.execute("SELECT table_name FROM information_schema.tables WHERE table_catalog = ? AND table_schema = 'public'", [db_name]).fetchall()
-              table_names = [r[0] for r in result]
-              
-              if 'league_context' in table_names:
-                  print("Downloading league_context.parquet...")
-                  df = conn.execute("SELECT * FROM public.league_context").fetchdf()
-                  
-                  if not df.empty:
-                      # The parquet file should have a single row with all context fields
-                      context_row = df.iloc[0]
-                      
-                      # Convert to dictionary and write as JSON
-                      context_data = context_row.to_dict()
-                      
-                      # Clean up the context data (convert numpy types to native Python types)
-                      import numpy as np
-                      for key, value in context_data.items():
-                          if isinstance(value, (np.integer, np.int64)):
-                              context_data[key] = int(value)
-                          elif isinstance(value, (np.floating, np.float64)):
-                              context_data[key] = float(value)
-                          elif isinstance(value, np.bool_):
-                              context_data[key] = bool(value)
-                          elif pd.isna(value):
-                              context_data[key] = None
-                      
-                      # Parse JSON fields - handle both direct names and _json suffix versions
-                      # The league_import_worker saves as *_json columns in MotherDuck
-                      json_field_mappings = {
-                          'league_ids_json': 'league_ids',
-                          'manager_name_overrides_json': 'manager_name_overrides',
-                          'keeper_rules_json': 'keeper_rules',
-                          'league_rules_json': 'league_rules',
-                          'standings_weights_json': 'standings_weights',
-                      }
-
-                      for json_col, target_field in json_field_mappings.items():
-                          if json_col in context_data and context_data[json_col]:
-                              try:
-                                  if isinstance(context_data[json_col], str):
-                                      context_data[target_field] = json.loads(context_data[json_col])
-                                  else:
-                                      context_data[target_field] = context_data[json_col]
-                                  # Remove the _json version to avoid passing unknown keys
-                                  del context_data[json_col]
-                              except (json.JSONDecodeError, TypeError):
-                                  pass
-
-                      # Also handle direct field names (for backward compatibility)
-                      for json_field in ['league_ids', 'manager_name_overrides', 'keeper_rules', 'league_rules', 'standings_weights']:
-                          if json_field in context_data and isinstance(context_data[json_field], str):
-                              try:
-                                  context_data[json_field] = json.loads(context_data[json_field])
-                              except (json.JSONDecodeError, TypeError):
-                                  pass
-
-                      # CRITICAL: Override data_directory to use current working directory
-                      # The original data_directory from import runner is no longer valid
-                      # on this new runner - data was downloaded to ./fantasy_football_data/
-                      context_data['data_directory'] = str(Path("fantasy_football_data").resolve())
-                      print(f"  Data directory: {context_data['data_directory']}")
-
-                      # Write to league_context.json
-                      with open("league_context.json", 'w', encoding='utf-8') as f:
-                          json.dump(context_data, f, indent=2)
-                      
-                      print("✓ Downloaded league_context.parquet from MotherDuck")
-                      print(f"  League: {context_data.get('league_name', 'Unknown')}")
-                      print(f"  Years: {context_data.get('start_year', '?')}-{context_data.get('end_year', '?')}")
-                      context_downloaded = True
-                  else:
-                      print("⚠ league_context table is empty")
-              else:
-                  print("⚠ No league_context table found in public schema")
-          except Exception as e:
-              print(f"⚠ Could not download league_context from MotherDuck: {e}")
-              import traceback
-              traceback.print_exc()
-
-          conn.close()
-
-          # If context wasn't downloaded, we'll create it from matchup data in next step
-          if not context_downloaded:
-              print("\n⚠ Will create league_context from matchup data (fallback)")
-              sys.exit(0)  # Don't fail - let the next step handle it
-          PYEOF
-
-      - name: Create league context (fallback)
-        if: always()
-        env:
-          DATABASE_NAME: ${{ github.event.inputs.database_name }}
-        run: |
-          # Only create context if it doesn't exist from previous step
-          if [ -f "league_context.json" ]; then
-            echo "✓ Using league_context.json from MotherDuck"
-            cat league_context.json
-            exit 0
-          fi
-
-          # If matchup.parquet doesn't exist, the download step failed — nothing we can do
-          if [ ! -f "fantasy_football_data/matchup.parquet" ]; then
-            echo "✗ matchup.parquet not found — cannot create league context (main import likely incomplete)"
-            exit 1
-          fi
-
-          echo "Creating league context from matchup data (fallback)..."
-
-          python - <<'PYEOF'
-          import json
-          import pandas as pd
-          from pathlib import Path
-          import os
-          import sys
-
-          # Read matchup data to infer context
-          matchup_df = pd.read_parquet("fantasy_football_data/matchup.parquet")
-
-          if matchup_df.empty:
-              print("✗ matchup.parquet is empty — cannot create league context")
-              print("Make sure the main import has completed and uploaded data to MotherDuck.")
-              sys.exit(1)
-
-          years = sorted(matchup_df['year'].unique())
-          managers = matchup_df['manager'].unique()
-
-          # Get league_id from data (use most recent year's league_id as primary)
-          league_id = 'unknown'
-          if 'league_id' in matchup_df.columns:
-              max_year = max(years)
-              max_year_data = matchup_df[matchup_df['year'] == max_year]
-              if not max_year_data.empty:
-                  league_id = max_year_data['league_id'].iloc[0]
-
-          # Build league_ids mapping (year -> league_id) for proper isolation
-          league_ids = {}
-          if 'league_id' in matchup_df.columns:
-              for year in years:
-                  year_data = matchup_df[matchup_df['year'] == year]
-                  if not year_data.empty:
-                      lid = year_data['league_id'].iloc[0]
-                      if pd.notna(lid):
-                          league_ids[str(int(year))] = str(lid)
-
-          # Format league name for display (strip l_ prefix if present for digit-starting names)
-          db_name = os.environ['DATABASE_NAME']
+          # Derive league name from database name
           display_name = db_name
           if db_name.startswith('l_') and len(db_name) > 2 and db_name[2].isdigit():
-              display_name = db_name[2:]  # Strip the l_ prefix
+              display_name = db_name[2:]
           league_name = display_name.replace('_', ' ').title()
 
+          # Get year range and league metadata from league_settings (already downloaded)
+          settings_dir = data_dir / "league_settings"
+          years = []
+          num_teams = None
+          playoff_teams = None
+          league_ids = {}
+
+          if settings_dir.exists():
+              for f in sorted(settings_dir.glob("league_settings_*.json")):
+                  try:
+                      with open(f, 'r') as fh:
+                          s = json.load(fh)
+                      year = s.get('year') or s.get('season')
+                      if year:
+                          years.append(int(year))
+                          num_teams = num_teams or s.get('num_teams')
+                          playoff_teams = playoff_teams or s.get('num_playoff_teams')
+                          lid = s.get('league_id') or s.get('league_key')
+                          if lid:
+                              league_ids[str(year)] = str(lid)
+                  except Exception:
+                      continue
+
+          if not years:
+              # Fallback: query matchup table for year range
+              try:
+                  conn = duckdb.connect(f'md:{db_name}?motherduck_token={token}')
+                  result = conn.execute("SELECT DISTINCT year FROM public.matchup ORDER BY year").fetchall()
+                  years = [r[0] for r in result if r[0]]
+                  conn.close()
+              except Exception as e:
+                  print(f"✗ Cannot determine year range: {e}")
+                  sys.exit(1)
+
+          if not years:
+              print("✗ No years found in league_settings or matchup table.")
+              print("  The main import must complete before running playoff odds.")
+              sys.exit(1)
+
           context = {
-              "league_id": str(league_id),
               "league_name": league_name,
-              "game_code": "nfl",
-              "start_year": int(min(years)),
-              "end_year": int(max(years)),
-              "num_teams": len(managers),
-              "data_directory": str(Path("fantasy_football_data").resolve()),
+              "league_id": league_ids.get(str(max(years)), "unknown"),
+              "start_year": min(years),
+              "end_year": max(years),
+              "num_teams": num_teams,
+              "playoff_teams": playoff_teams,
+              "data_directory": str(data_dir),
               "league_ids": league_ids,
-              "require_oauth": False,  # Read-only operations don't need OAuth
+              "require_oauth": False,
           }
 
           with open("league_context.json", 'w') as f:
               json.dump(context, f, indent=2)
 
-          print("✓ League context created (fallback)")
-          print(json.dumps(context, indent=2))
+          print(f"✓ League context built from league_settings")
+          print(f"  League: {league_name}")
+          print(f"  Years: {min(years)}-{max(years)}")
+          print(f"  Teams: {num_teams}, Playoff teams: {playoff_teams}")
           PYEOF
 
       - name: Run Expected Record Calculator
