@@ -51,201 +51,8 @@ jobs:
       - name: Install dependencies
         run: uv pip install --system -r requirements.txt
 
-      - name: Download existing data from MotherDuck
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
-          DATABASE_NAME: ${{ github.event.inputs.database_name }}
-        run: |
-          echo "========================================"
-          echo "Downloading data from MotherDuck"
-          echo "Database: ${DATABASE_NAME}"
-          echo "========================================"
-
-          mkdir -p fantasy_football_data/league_settings
-
-          python - <<'PYEOF'
-          import duckdb
-          import os
-          import sys
-
-          db_name = os.environ['DATABASE_NAME']
-          token = os.environ['MOTHERDUCK_TOKEN']
-
-          # Connect to MotherDuck
-          print(f"Connecting to MotherDuck database: {db_name}")
-          try:
-              conn = duckdb.connect(f'md:{db_name}?motherduck_token={token}')
-          except Exception as e:
-              print(f"ERROR: Failed to connect to MotherDuck: {e}")
-              sys.exit(1)
-
-          # Download required tables (from public schema)
-          # NOTE: player_fantasy needed for clutch equity calculation - only rostered players needed
-          tables = ['matchup', 'schedule']
-          failed_tables = []
-
-          for table in tables:
-              print(f"Downloading {table}...")
-              try:
-                  df = conn.execute(f"SELECT * FROM public.{table}").fetchdf()
-                  df.to_parquet(f"fantasy_football_data/{table}.parquet", index=False)
-                  print(f"  ✓ {table}: {len(df):,} rows")
-              except Exception as e:
-                  print(f"  ✗ {table}: {e}")
-                  failed_tables.append(table)
-
-          # Download player_fantasy with filter - only rostered players needed for clutch equity
-          # This reduces download from 1.4M+ rows to ~50-100k rows (massive performance improvement)
-          print(f"Downloading player_fantasy (rostered only)...")
-          try:
-              df = conn.execute("""
-                  SELECT * FROM public.player_fantasy
-                  WHERE manager IS NOT NULL
-                    AND manager <> ''
-                    AND LOWER(TRIM(manager)) <> 'unrostered'
-              """).fetchdf()
-              df.to_parquet(f"fantasy_football_data/player_fantasy.parquet", index=False)
-              print(f"  ✓ player_fantasy: {len(df):,} rows (rostered only)")
-          except Exception as e:
-              print(f"  ✗ player_fantasy: {e}")
-              failed_tables.append('player_fantasy')
-
-          # Exit if required tables failed
-          if 'matchup' in failed_tables:
-              print("\nERROR: Required table 'matchup' could not be downloaded!")
-              print("Make sure the main import has completed and uploaded data to MotherDuck.")
-              sys.exit(1)
-
-          # player_fantasy is optional (needed for clutch calc but not critical)
-          if 'player_fantasy' in failed_tables:
-              print("\n⚠ Warning: player_fantasy not downloaded - clutch equity will be skipped")
-
-          # Download league settings and extract to JSON files
-          try:
-              # Check if league_settings table exists in public schema
-              result = conn.execute("SELECT table_name FROM information_schema.tables WHERE table_catalog = ? AND table_schema = 'public'", [db_name]).fetchall()
-              table_names = [r[0] for r in result]
-
-              if 'league_settings' in table_names:
-                  print("Downloading league_settings...")
-                  settings_df = conn.execute("SELECT * FROM public.league_settings").fetchdf()
-                  print(f"  ✓ league_settings: {len(settings_df):,} rows")
-
-                  # Extract each year's settings from the settings_json column
-                  import json
-                  from pathlib import Path
-
-                  settings_dir = Path("fantasy_football_data/league_settings")
-                  settings_dir.mkdir(parents=True, exist_ok=True)
-
-                  for _, row in settings_df.iterrows():
-                      year = row.get('year', 'unknown')
-                      league_key = row.get('league_key', 'unknown')
-                      settings_json = row.get('settings_json')
-
-                      if settings_json:
-                          try:
-                              settings_data = json.loads(settings_json)
-                              safe_key = str(league_key).replace(".", "_")
-                              output_file = settings_dir / f"league_settings_{year}_{safe_key}.json"
-                              with open(output_file, 'w', encoding='utf-8') as f:
-                                  json.dump(settings_data, f, indent=2)
-                              print(f"    ✓ Extracted settings for {year}")
-                          except json.JSONDecodeError as je:
-                              print(f"    ✗ Invalid JSON for {year}: {je}")
-                      else:
-                          print(f"    ⚠ No settings_json for {year}")
-              else:
-                  print("  ⚠ league_settings table not found - using defaults")
-          except Exception as e:
-              print(f"  Note: Could not download league_settings: {e}")
-
-          conn.close()
-          print("\n✓ Download complete")
-          PYEOF
-
-      - name: Build league context from league_settings
-        env:
-          DATABASE_NAME: ${{ github.event.inputs.database_name }}
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
-        run: |
-          echo "========================================"
-          echo "Building league context"
-          echo "========================================"
-
-          python - <<'PYEOF'
-          import duckdb, json, os, sys, re
-          from pathlib import Path
-
-          db_name = os.environ['DATABASE_NAME']
-          token = os.environ['MOTHERDUCK_TOKEN']
-          data_dir = Path("fantasy_football_data").resolve()
-
-          # Derive league name from database name
-          display_name = db_name
-          if db_name.startswith('l_') and len(db_name) > 2 and db_name[2].isdigit():
-              display_name = db_name[2:]
-          league_name = display_name.replace('_', ' ').title()
-
-          # Get year range and league metadata from league_settings (already downloaded)
-          settings_dir = data_dir / "league_settings"
-          years = []
-          num_teams = None
-          playoff_teams = None
-          league_ids = {}
-
-          if settings_dir.exists():
-              for f in sorted(settings_dir.glob("league_settings_*.json")):
-                  try:
-                      with open(f, 'r') as fh:
-                          s = json.load(fh)
-                      year = s.get('year') or s.get('season')
-                      if year:
-                          years.append(int(year))
-                          num_teams = num_teams or s.get('num_teams')
-                          playoff_teams = playoff_teams or s.get('num_playoff_teams')
-                          lid = s.get('league_id') or s.get('league_key')
-                          if lid:
-                              league_ids[str(year)] = str(lid)
-                  except Exception:
-                      continue
-
-          if not years:
-              # Fallback: query matchup table for year range
-              try:
-                  conn = duckdb.connect(f'md:{db_name}?motherduck_token={token}')
-                  result = conn.execute("SELECT DISTINCT year FROM public.matchup ORDER BY year").fetchall()
-                  years = [r[0] for r in result if r[0]]
-                  conn.close()
-              except Exception as e:
-                  print(f"✗ Cannot determine year range: {e}")
-                  sys.exit(1)
-
-          if not years:
-              print("✗ No years found in league_settings or matchup table.")
-              print("  The main import must complete before running playoff odds.")
-              sys.exit(1)
-
-          context = {
-              "league_name": league_name,
-              "league_id": league_ids.get(str(max(years)), "unknown"),
-              "start_year": min(years),
-              "end_year": max(years),
-              "num_teams": num_teams,
-              "playoff_teams": playoff_teams,
-              "data_directory": str(data_dir),
-              "league_ids": league_ids,
-              "require_oauth": False,
-          }
-
-          with open("league_context.json", 'w') as f:
-              json.dump(context, f, indent=2)
-
-          print(f"✓ League context built from league_settings")
-          print(f"  League: {league_name}")
-          print(f"  Years: {min(years)}-{max(years)}")
-          print(f"  Teams: {num_teams}, Playoff teams: {playoff_teams}")
-          PYEOF
+      # All scripts use --db to read/write directly from MotherDuck.
+      # No data download or context file needed.
 
       - name: Run Expected Record Calculator
         env:
@@ -332,100 +139,30 @@ jobs:
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           DATABASE_NAME: ${{ github.event.inputs.database_name }}
+        working-directory: fantasy_football_data_scripts
         run: |
-          echo "========================================"
-          echo "Re-aggregating season/career tables"
-          echo "(Updating with clutch_equity values)"
-          echo "========================================"
-
-          # Create minimal context for aggregation script
-          python - <<'PYEOF'
-          import json
-          import os
-
-          db_name = os.environ['DATABASE_NAME']
-
-          # Format league name for display
-          display_name = db_name
-          if db_name.startswith('l_') and len(db_name) > 2 and db_name[2].isdigit():
-              display_name = db_name[2:]
-          league_name = display_name.replace('_', ' ').title()
-
-          context = {
-              "league_name": league_name,
-              "motherduck_db_name": db_name,
-          }
-
-          with open("aggregation_context.json", 'w') as f:
-              json.dump(context, f, indent=2)
-
-          print(f"Created aggregation context for {db_name}")
-          PYEOF
-
-          # Run the aggregation script
-          cd fantasy_football_data_scripts
-          python multi_league/transformations/aggregation/aggregate_fantasy_context.py \
-            --context ../aggregation_context.json \
-            2>&1 | tee ../aggregation.log
-
-          EXIT_CODE=${PIPESTATUS[0]}
-
-          if [ $EXIT_CODE -eq 0 ]; then
-            echo "✓ Season/career aggregation complete"
-          else
-            echo "✗ Season/career aggregation failed"
-            tail -30 ../aggregation.log
-            exit $EXIT_CODE
-          fi
+          echo "Re-aggregating season/career tables..."
+          python -m multi_league.transformations.aggregation.aggregate_fantasy_context --db ${DATABASE_NAME}
 
       - name: Re-aggregate matchup tables
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           DATABASE_NAME: ${{ github.event.inputs.database_name }}
+        working-directory: fantasy_football_data_scripts
         run: |
-          echo "========================================"
-          echo "Re-aggregating matchup season/career/H2H tables"
-          echo "(Includes playoff odds + expected record)"
-          echo "========================================"
+          echo "Re-aggregating matchup season/career/H2H tables..."
+          python -m multi_league.transformations.aggregation.aggregate_matchup_context --db ${DATABASE_NAME}
 
-          cd fantasy_football_data_scripts
-          python multi_league/transformations/aggregation/aggregate_matchup_context.py \
-            --context ../league_context.json \
-            2>&1 | tee ../matchup_aggregation.log
-
-          EXIT_CODE=${PIPESTATUS[0]}
-
-          if [ $EXIT_CODE -eq 0 ]; then
-            echo "✓ Matchup aggregation complete"
-          else
-            echo "✗ Matchup aggregation failed (non-critical)"
-            tail -30 ../matchup_aggregation.log
-          fi
-
-      # ==================== V2 AGGREGATIONS (feature-flagged) ====================
-      # These only run when IMPORT_PIPELINE_V2=true. They consolidate work that
-      # previously ran in quick+full import workflows into this finalization stage.
       - name: Aggregate draft context (V2)
         if: env.IMPORT_PIPELINE_V2 == 'true'
         continue-on-error: true
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           DATABASE_NAME: ${{ github.event.inputs.database_name }}
+        working-directory: fantasy_football_data_scripts
         run: |
-          echo "========================================"
-          echo "Aggregating draft season/career tables (V2)"
-          echo "========================================"
-          cd fantasy_football_data_scripts
-          python multi_league/transformations/aggregation/aggregate_draft_context.py \
-            --context ../aggregation_context.json \
-            2>&1 | tee ../draft_aggregation.log
-          EXIT_CODE=${PIPESTATUS[0]}
-          if [ $EXIT_CODE -eq 0 ]; then
-            echo "✓ Draft aggregation complete"
-          else
-            echo "✗ Draft aggregation failed (non-critical)"
-            tail -30 ../draft_aggregation.log
-          fi
+          echo "Aggregating draft season/career tables..."
+          python -m multi_league.transformations.aggregation.aggregate_draft_context --db ${DATABASE_NAME}
 
       - name: Aggregate transaction context (V2)
         if: env.IMPORT_PIPELINE_V2 == 'true'
@@ -433,48 +170,24 @@ jobs:
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           DATABASE_NAME: ${{ github.event.inputs.database_name }}
+        working-directory: fantasy_football_data_scripts
         run: |
-          echo "========================================"
-          echo "Aggregating transaction season/career tables (V2)"
-          echo "========================================"
-          cd fantasy_football_data_scripts
-          python multi_league/transformations/aggregation/aggregate_transaction_context.py \
-            --context ../aggregation_context.json \
-            2>&1 | tee ../transaction_aggregation.log
-          EXIT_CODE=${PIPESTATUS[0]}
-          if [ $EXIT_CODE -eq 0 ]; then
-            echo "✓ Transaction aggregation complete"
-          else
-            echo "✗ Transaction aggregation failed (non-critical)"
-            tail -30 ../transaction_aggregation.log
-          fi
+          echo "Aggregating transaction season/career tables..."
+          python -m multi_league.transformations.aggregation.aggregate_transaction_context --db ${DATABASE_NAME}
 
       - name: Compute homepage summary
         continue-on-error: true
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           DATABASE_NAME: ${{ github.event.inputs.database_name }}
+        working-directory: fantasy_football_data_scripts
         run: |
-          echo "========================================"
-          echo "Computing precomputed homepage summary"
-          echo "(Includes clutch_equity data)"
-          echo "========================================"
-
-          # Run the homepage summary script (uses aggregation_context.json)
-          cd fantasy_football_data_scripts
-          python multi_league/transformations/aggregation/homepage_summary.py \
-            --context ../aggregation_context.json --upload \
-            2>&1 | tee ../homepage_summary.log
-
+          echo "Computing homepage summary..."
+          python -m multi_league.transformations.aggregation.homepage_summary --db ${DATABASE_NAME} --upload 2>&1 | tee ../homepage_summary.log
           EXIT_CODE=${PIPESTATUS[0]}
-
-          if [ $EXIT_CODE -eq 0 ]; then
-            echo "✓ Homepage summary complete"
-          elif [ $EXIT_CODE -eq 139 ]; then
-            echo "⚠️ DuckDB segfault on shutdown (exit 139) — data already uploaded, ignoring"
-          else
-            echo "✗ Homepage summary failed"
-            tail -30 ../homepage_summary.log
+          if [ $EXIT_CODE -eq 139 ]; then
+            echo "DuckDB segfault on shutdown (exit 139) -- data already uploaded, ignoring"
+          elif [ $EXIT_CODE -ne 0 ]; then
             exit $EXIT_CODE
           fi
 
@@ -486,12 +199,7 @@ jobs:
           path: |
             expected_record.log
             playoff_odds.log
-            motherduck_upload.log
-            aggregation.log
-            matchup_aggregation.log
             homepage_summary.log
-            fantasy_football_data/matchup.parquet
-            fantasy_football_data/player_fantasy.parquet
           retention-days: 7
 
       - name: Create workflow summary
