@@ -93,8 +93,6 @@ jobs:
           # Get input from either workflow_dispatch or repository_dispatch
           league_data_b64 = os.environ.get('LEAGUE_DATA_B64', '')
           user_id = os.environ.get('USER_ID', '')
-          import_mode = 'quick'  # ALWAYS quick - this is the quick import worker
-
           # Decode base64 if provided
           if league_data_b64:
               try:
@@ -104,6 +102,9 @@ jobs:
           else:
               print("ERROR: No league data provided")
               exit(1)
+
+          # import_mode from payload: "quick" (free) or "quick_to_full" (paid)
+          import_mode = league_data.get('import_mode', 'quick')
 
           # Extract ESPN-specific fields
           espn_league_id = league_data.get('espn_league_id') or league_data.get('league_id')
@@ -199,7 +200,7 @@ jobs:
           with open("league_data_input.json") as f:
               league_data = json.load(f)
 
-          import_mode = 'quick'  # ALWAYS quick - this is the quick import worker
+          import_mode = league_data.get('import_mode', 'quick')  # "quick" (free) or "quick_to_full" (paid)
           # Quick import: only current year (same as Yahoo quick import)
           season = int("${{ steps.parse.outputs.end_year }}")
           data_dir = Path("fantasy_football_data/espn_${{ steps.parse.outputs.database_name }}").resolve()
@@ -252,7 +253,7 @@ jobs:
               "created_at": datetime.now().isoformat(),
               "updated_at": datetime.now().isoformat(),
               "platform": "espn",
-              "import_mode": import_mode,
+              "import_mode": "quick" if import_mode == "quick_to_full" else import_mode,
               "require_oauth": False,
               "keeper_rules": league_data.get('keeper_rules'),
               "league_rules": league_data.get('league_rules'),
@@ -288,10 +289,17 @@ jobs:
           echo "Import Mode: ${{ steps.parse.outputs.import_mode }}"
           echo "========================================"
 
+          # Always run in "quick" mode — the import script only knows quick vs full
+          # "quick_to_full" is handled by trigger-downstream (chains to full import after)
+          SCRIPT_MODE="${{ steps.parse.outputs.import_mode }}"
+          if [ "$SCRIPT_MODE" == "quick_to_full" ]; then
+            SCRIPT_MODE="quick"
+          fi
+
           set +e
           python espn_initial_import.py \
             --context ../espn_context.json \
-            --import-mode ${{ steps.parse.outputs.import_mode }} \
+            --import-mode ${SCRIPT_MODE} \
             2>&1 | tee ../import.log
           EXIT_CODE=${PIPESTATUS[0]}
           set -e

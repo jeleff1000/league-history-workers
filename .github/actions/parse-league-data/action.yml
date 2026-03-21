@@ -129,7 +129,7 @@ runs:
         import_mode = os.environ.get('IMPORT_MODE', 'full').strip().lower()
 
         # Validate import mode
-        if import_mode not in ('quick', 'full'):
+        if import_mode not in ('quick', 'full', 'quick_to_full'):
             validation_warnings.append(f"Invalid import_mode '{import_mode}', defaulting to 'full'")
             import_mode = 'full'
 
@@ -193,7 +193,7 @@ runs:
         # DETERMINE YEAR RANGE
         # ============================================================
 
-        if import_mode == 'quick':
+        if import_mode in ('quick', 'quick_to_full'):
             start_year = season  # Only import current season
             print(f"QUICK MODE: Importing only {season} (full history will run separately)")
         else:

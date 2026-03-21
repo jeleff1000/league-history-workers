@@ -75,7 +75,7 @@ jobs:
         uses: ./.github/actions/parse-league-data
         with:
           league_data_b64: ${{ github.event.inputs.league_data_b64 || github.event.client_payload.league_data_b64 || '' }}
-          import_mode: 'quick'  # ALWAYS quick - this is the quick import worker
+          import_mode: ${{ github.event.client_payload.import_mode || github.event.inputs.import_mode || 'quick' }}
           yahoo_client_id: ${{ secrets.YAHOO_CLIENT_ID }}
           yahoo_client_secret: ${{ secrets.YAHOO_CLIENT_SECRET }}
           motherduck_token: ${{ secrets.MOTHERDUCK_TOKEN }}
@@ -160,6 +160,8 @@ jobs:
           # Quick import: only current year
           season = int(league_data.get('season', league_data.get('end_year')))
 
+          import_mode = league_data.get('import_mode', 'quick')  # "quick" (free) or "quick_to_full" (paid)
+
           context = {
               "league_id": league_data.get('league_id'),
               "league_name": league_data.get('league_name'),
@@ -177,7 +179,7 @@ jobs:
               "manager_name_overrides": league_data.get('manager_name_overrides', {}),
               "keeper_rules": league_data.get('keeper_rules'),
               "has_external_data": league_data.get('has_external_data', False),
-              "import_mode": "quick",
+              "import_mode": "quick" if import_mode == "quick_to_full" else import_mode,
               "motherduck_db_name": "${{ steps.parse.outputs.database_name }}",
           }
 
@@ -272,8 +274,15 @@ jobs:
           echo "Year: ${{ steps.parse.outputs.season }}"
           echo "========================================"
 
+          # Always run in "quick" mode — the import script only knows quick vs full
+          # "quick_to_full" is handled by trigger-downstream (chains to full import after)
+          SCRIPT_MODE="${{ steps.parse.outputs.import_mode }}"
+          if [ "$SCRIPT_MODE" == "quick_to_full" ]; then
+            SCRIPT_MODE="quick"
+          fi
+
           set +e
-          python initial_import_v2.py --context ../league_context.json 2>&1 | tee ../import.log
+          python initial_import_v2.py --context ../league_context.json --import-mode ${SCRIPT_MODE} 2>&1 | tee ../import.log
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
 
@@ -463,7 +472,7 @@ jobs:
         with:
           database_name: ${{ steps.parse.outputs.database_name }}
           user_id: ${{ steps.parse.outputs.user_id }}
-          import_mode: 'quick'  # This tells trigger-downstream to trigger full import
+          import_mode: ${{ steps.parse.outputs.import_mode }}
           season: ${{ steps.parse.outputs.season }}
           actual_start_year: ${{ steps.parse.outputs.actual_start_year }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
