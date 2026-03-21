@@ -41,9 +41,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Setup Python
         id: setup-python
@@ -150,6 +147,47 @@ jobs:
               print(f"Token refresh error: {e}")
           PYEOF
 
+      # ==================== STORE CREDENTIALS (EARLY) ====================
+      # Store credentials immediately after token refresh so they're available
+      # for debugging even if the import fails downstream.
+      - name: Store credentials (early)
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
+          LEAGUE_ID: ${{ steps.parse.outputs.league_id }}
+          LEAGUE_NAME: ${{ steps.parse.outputs.league_name }}
+        run: |
+          if [ -z "$CREDENTIAL_ENCRYPTION_KEY" ]; then
+            echo "CREDENTIAL_ENCRYPTION_KEY not set - skipping"
+            exit 0
+          fi
+
+          python - <<'PYEOF'
+          import json
+          import sys
+          sys.path.insert(0, 'fantasy_football_data_scripts')
+
+          from multi_league.utils.credential_store import store_league_credentials
+          import os
+
+          with open("oauth/Oauth.json", 'r') as f:
+              oauth_data = json.load(f)
+
+          refresh_token = oauth_data.get('refresh_token')
+          if not refresh_token:
+              print("No refresh_token found - skipping early credential store")
+              exit(0)
+
+          store_league_credentials(
+              database_name=os.environ['DATABASE_NAME'],
+              refresh_token=refresh_token,
+              league_id=os.environ['LEAGUE_ID'],
+              league_name=os.environ['LEAGUE_NAME']
+          )
+          print("Credentials stored (early)")
+          PYEOF
+
       # ==================== CREATE DATA DIRECTORIES ====================
       - name: Create data directory
         run: |
@@ -176,10 +214,10 @@ jobs:
           if not league_data.get('start_year'):
               print("[ERROR] start_year is required in league_data")
               exit(1)
-          
+
           start_year = int(league_data.get('start_year'))
           end_year = int(league_data.get('season', league_data.get('end_year')))
-          
+
           # Store the ACTUAL start year (including any staging data years)
           actual_start_year = league_data.get('actual_start_year', start_year)
 
@@ -217,7 +255,7 @@ jobs:
               json.dump(context, f, indent=2)
 
           print(f"League context created: {start_year}-{end_year} (mode: {import_mode}, db: {context.get('motherduck_db_name', 'N/A')})")
-          
+
           # Debug: Show what was actually written to the context file
           print("\n[DEBUG] Context file contents:")
           print(json.dumps(context, indent=2))
@@ -255,8 +293,10 @@ jobs:
           echo "========================================"
 
           # Run import with detailed error capture
+          echo "🔀 Branch: ${{ github.ref_name }} | Script: initial_import_v3.py (v3 in-process pipeline)"
+          ls -la initial_import_v3.py || { echo "❌ initial_import_v3.py NOT FOUND — wrong branch?"; exit 1; }
           set +e  # Don't exit on error - we want to capture the exit code
-          python initial_import_v2.py --context ../league_context.json 2>&1 | tee ../import.log
+          python initial_import_v3.py --context ../league_context.json 2>&1 | tee ../import.log
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
 
@@ -268,35 +308,35 @@ jobs:
             echo "❌ IMPORT FAILED (exit code ${EXIT_CODE})"
             echo "========================================"
             echo ""
-            
+
             echo "=== CONTEXT FILE ==="
             cat ../league_context.json || echo "Could not read context file"
             echo ""
-            
+
             echo "=== DIRECTORY STRUCTURE ==="
             echo "Data directory contents:"
             ls -lR ../fantasy_football_data/ 2>/dev/null || echo "Data directory not found or empty"
             echo ""
-            
+
             echo "=== LAST 300 LINES OF IMPORT LOG ==="
             tail -300 ../import.log
             echo ""
-            
+
             echo "=== SEARCHING FOR PHASE 1 (FETCHERS) IN LOG ==="
             grep -A 50 "PHASE 1: Data Fetchers" ../import.log || echo "Phase 1 never started!"
             echo ""
-            
+
             echo "=== SEARCHING FOR ERRORS IN LOG ==="
             grep -i "error\|exception\|traceback\|failed" ../import.log | head -50 || echo "No obvious errors found"
-            
+
             exit $EXIT_CODE
           fi
-          
+
           echo ""
           echo "✓ Import completed successfully"
 
       # ==================== CONSOLIDATE CANONICAL FILES ====================
-      # DISABLED: The import script (initial_import_v2.py) already handles consolidation
+      # DISABLED: The import script (initial_import_v3.py) already handles consolidation
       # in Phase 2.1, followed by staging merge (Phase 2.2) and transformations (Phase 3).
       # Running consolidation AFTER import overwrites the transformed files with raw data,
       # losing all the cumulative stats, LAMAR metrics, and other enrichments.
@@ -306,27 +346,27 @@ jobs:
           echo "========================================"
           echo "Consolidating canonical parquet files"
           echo "========================================"
-          
+
           python - <<'PYEOF'
           import sys
           from pathlib import Path
-          
+
           # Add script directory to path
           sys.path.insert(0, 'fantasy_football_data_scripts')
-          
+
           from multi_league.data_fetchers.shared.aggregators import (
               merge_matchups_to_parquet,
               normalize_draft_parquet,
               normalize_transactions_parquet,
               normalize_schedule_parquet,
           )
-          
+
           context_path = "league_context.json"
-          
+
           print("[CONSOLIDATE] Starting canonical file consolidation...")
-          
+
           failed = []
-          
+
           # Consolidate matchups
           try:
               print("[CONSOLIDATE] Creating matchup.parquet...")
@@ -337,7 +377,7 @@ jobs:
               import traceback
               traceback.print_exc()
               failed.append(("matchup", str(e)))
-          
+
           # Consolidate draft
           try:
               print("[CONSOLIDATE] Creating draft.parquet...")
@@ -348,7 +388,7 @@ jobs:
               import traceback
               traceback.print_exc()
               failed.append(("draft", str(e)))
-          
+
           # Consolidate transactions
           try:
               print("[CONSOLIDATE] Creating transactions.parquet...")
@@ -359,7 +399,7 @@ jobs:
               import traceback
               traceback.print_exc()
               failed.append(("transactions", str(e)))
-          
+
           # Consolidate schedule
           try:
               print("[CONSOLIDATE] Creating schedule.parquet...")
@@ -370,37 +410,37 @@ jobs:
               import traceback
               traceback.print_exc()
               failed.append(("schedule", str(e)))
-          
+
           print("\n[CONSOLIDATE] Consolidation complete!")
-          
+
           # Verify canonical files were created
           data_dir = Path("fantasy_football_data")
           canonical_files = ["matchup.parquet", "draft.parquet", "transactions.parquet", "schedule.parquet"]
           found = []
           missing = []
-          
+
           for fname in canonical_files:
               fpath = data_dir / fname
               if fpath.exists():
                   found.append(fname)
               else:
                   missing.append(fname)
-          
+
           print(f"\n[VERIFY] Found {len(found)} canonical files: {', '.join(found)}")
           if missing:
               print(f"[VERIFY] Missing {len(missing)} canonical files: {', '.join(missing)}")
-          
+
           # Exit with error if consolidation failed
           if failed:
               print(f"\n[ERROR] Consolidation failed for {len(failed)} table(s):")
               for table, error in failed:
                   print(f"  - {table}: {error}")
               sys.exit(1)
-          
+
           if missing:
               print(f"\n[ERROR] {len(missing)} canonical files were not created!")
               sys.exit(1)
-          
+
           print("\n[SUCCESS] All canonical files created successfully!")
           PYEOF
 
@@ -420,12 +460,12 @@ jobs:
           # List canonical files at root level (if they exist)
           echo "=== Canonical Files (Root Level) ==="
           ls -lh fantasy_football_data/{player,matchup,draft,transactions,schedule}.parquet 2>/dev/null || echo "  (No canonical files at root yet - normal during staging)"
-          
+
           # List all parquet files found (first 20 for brevity)
           echo ""
           echo "=== All Parquet Files (First 20) ==="
           find fantasy_football_data -name "*.parquet" -type f -exec ls -lh {} \; | head -20
-          
+
           # Count files by subdirectory
           echo ""
           echo "=== Files by Directory ==="

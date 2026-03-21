@@ -40,9 +40,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Setup Python
         id: setup-python
@@ -163,6 +160,30 @@ jobs:
           LEAGUE_DATA_B64: ${{ github.event.inputs.league_data_b64 || github.event.client_payload.league_data_b64 }}
           USER_ID: ${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+
+      # ==================== REGISTER LEAGUE (EARLY) ====================
+      # Register league in MotherDuck immediately so it's tracked even if import fails.
+      - name: Register league (early)
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          SLEEPER_LEAGUE_ID: ${{ steps.parse.outputs.sleeper_league_id }}
+          LEAGUE_NAME: ${{ steps.parse.outputs.league_name }}
+          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
+        run: |
+          python - <<'PYEOF'
+          import sys
+          sys.path.insert(0, 'fantasy_football_data_scripts')
+          import os
+
+          from multi_league.utils.credential_store import store_sleeper_league
+
+          store_sleeper_league(
+              sleeper_league_id=os.environ['SLEEPER_LEAGUE_ID'],
+              league_name=os.environ['LEAGUE_NAME'],
+              database_name=os.environ['DATABASE_NAME']
+          )
+          print("League registered (early)")
+          PYEOF
 
       # ==================== CREATE DATA DIRECTORY ====================
       - name: Create data directory
@@ -500,7 +521,6 @@ jobs:
           DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
         run: |
           source .venv/bin/activate
-          set +e
           python - <<'PYEOF'
           import sys
           sys.path.insert(0, 'fantasy_football_data_scripts')
@@ -515,13 +535,6 @@ jobs:
           )
           print("Sleeper league info stored")
           PYEOF
-          exit_code=$?
-          set -e
-          if [ "$exit_code" -eq 139 ]; then
-            echo "⚠️ DuckDB segfault on shutdown (exit 139) — data already stored, ignoring"
-          elif [ "$exit_code" -ne 0 ]; then
-            exit $exit_code
-          fi
 
       # ==================== SUMMARY ====================
       - name: Print summary

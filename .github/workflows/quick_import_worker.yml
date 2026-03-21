@@ -39,9 +39,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Setup Python
         id: setup-python
@@ -138,6 +135,47 @@ jobs:
                   print(f"Token refresh failed: {response.status_code}")
           except Exception as e:
               print(f"Token refresh error: {e}")
+          PYEOF
+
+      # ==================== STORE CREDENTIALS (EARLY) ====================
+      # Store credentials immediately after token refresh so they're available
+      # for debugging even if the import fails downstream.
+      - name: Store credentials (early)
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
+          LEAGUE_ID: ${{ steps.parse.outputs.league_id }}
+          LEAGUE_NAME: ${{ steps.parse.outputs.league_name }}
+        run: |
+          if [ -z "$CREDENTIAL_ENCRYPTION_KEY" ]; then
+            echo "CREDENTIAL_ENCRYPTION_KEY not set - skipping"
+            exit 0
+          fi
+
+          python - <<'PYEOF'
+          import json
+          import sys
+          sys.path.insert(0, 'fantasy_football_data_scripts')
+
+          from multi_league.utils.credential_store import store_league_credentials
+          import os
+
+          with open("oauth/Oauth.json", 'r') as f:
+              oauth_data = json.load(f)
+
+          refresh_token = oauth_data.get('refresh_token')
+          if not refresh_token:
+              print("No refresh_token found - skipping early credential store")
+              exit(0)
+
+          store_league_credentials(
+              database_name=os.environ['DATABASE_NAME'],
+              refresh_token=refresh_token,
+              league_id=os.environ['LEAGUE_ID'],
+              league_name=os.environ['LEAGUE_NAME']
+          )
+          print("Credentials stored (early)")
           PYEOF
 
       # ==================== CREATE DATA DIRECTORIES ====================
@@ -282,7 +320,7 @@ jobs:
           fi
 
           set +e
-          python initial_import_v2.py --context ../league_context.json --import-mode ${SCRIPT_MODE} 2>&1 | tee ../import.log
+          python initial_import_v3.py --context ../league_context.json --import-mode ${SCRIPT_MODE} 2>&1 | tee ../import.log
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
 

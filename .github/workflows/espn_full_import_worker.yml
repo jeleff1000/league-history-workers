@@ -40,9 +40,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Setup Python
         id: setup-python
@@ -171,6 +168,44 @@ jobs:
           LEAGUE_DATA_B64: ${{ github.event.inputs.league_data_b64 || github.event.client_payload.league_data_b64 }}
           USER_ID: ${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+
+      # ==================== REGISTER LEAGUE (EARLY) ====================
+      # Register league in MotherDuck immediately so it's tracked even if import fails.
+      - name: Register league (early)
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+          ESPN_LEAGUE_ID: ${{ steps.parse.outputs.espn_league_id }}
+          LEAGUE_NAME: ${{ steps.parse.outputs.league_name }}
+          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
+        run: |
+          python - <<'PYEOF'
+          import sys
+          sys.path.insert(0, 'fantasy_football_data_scripts')
+          import os
+
+          from multi_league.utils.credential_store import store_espn_league
+
+          # Read ESPN cookies from files
+          espn_s2 = ''
+          swid = ''
+          try:
+              with open('.espn_s2', 'r') as f:
+                  espn_s2 = f.read().strip()
+              with open('.espn_swid', 'r') as f:
+                  swid = f.read().strip()
+          except FileNotFoundError:
+              print("NOTE: ESPN cookie files not found (public league)")
+
+          store_espn_league(
+              espn_league_id=int(os.environ['ESPN_LEAGUE_ID']),
+              league_name=os.environ['LEAGUE_NAME'],
+              database_name=os.environ['DATABASE_NAME'],
+              espn_s2=espn_s2,
+              swid=swid
+          )
+          print("League registered (early)")
+          PYEOF
 
       # ==================== CREATE DATA DIRECTORY ====================
       - name: Create data directory
