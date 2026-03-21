@@ -108,10 +108,10 @@ jobs:
               league_data = json.loads(league_data_raw)
           else:
               print("ERROR: No league data provided")
+              exit(1)
 
           # import_mode from payload: "quick" (free) or "quick_to_full" (paid)
           import_mode = league_data.get('import_mode', 'quick')
-              exit(1)
 
           # Extract Sleeper-specific fields
           sleeper_league_id = league_data.get('sleeper_league_id') or league_data.get('league_id')
