@@ -576,6 +576,7 @@ jobs:
       # ==================== COMPUTE HOMEPAGE SUMMARY ====================
       - name: Compute homepage summary
         if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         run: |
@@ -669,7 +670,7 @@ jobs:
       # ==================== ARTIFACTS ====================
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: espn-reimport-${{ steps.inputs.outputs.database_name }}
           path: |

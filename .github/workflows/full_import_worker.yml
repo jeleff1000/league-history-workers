@@ -744,7 +744,7 @@ jobs:
       # ==================== UPLOAD ARTIFACTS ====================
       - name: Upload artifacts
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: league-import-${{ steps.parse.outputs.user_id }}
           path: |
