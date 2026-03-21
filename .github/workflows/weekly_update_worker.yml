@@ -77,26 +77,19 @@ jobs:
           try:
               conn = duckdb.connect(f"md:?motherduck_token={token}")
 
-              # Get all databases
-              dbs = conn.execute("SELECT DISTINCT catalog_name FROM information_schema.schemata WHERE schema_name = 'public'").fetchall()
-              all_dbs = [row[0] for row in dbs]
-
-              # Filter to fantasy football databases (have matchup table)
-              fantasy_dbs = []
-              for db in all_dbs:
-                  if db in ('information_schema', 'my_db', 'sample_data'):
-                      continue
-                  try:
-                      # Check if this database has a matchup table (indicates fantasy football)
-                      # Try public schema first, then without schema (legacy pattern)
-                      try:
-                          conn.execute(f"SELECT 1 FROM {db}.public.matchup LIMIT 1")
-                      except:
-                          conn.execute(f"SELECT 1 FROM {db}.matchup LIMIT 1")
-                      fantasy_dbs.append(db)
-                      print(f"  ✓ {db} - fantasy football database")
-                  except:
-                      print(f"  ✗ {db} - skipping (no matchup table)")
+              # Get all league databases from registry (fast — avoids scanning 500+ attached DBs)
+              registry_rows = conn.execute("""
+                  SELECT DISTINCT database_name FROM (
+                      SELECT database_name FROM ___ops.main.league_credentials
+                      UNION ALL
+                      SELECT database_name FROM ___ops.main.sleeper_leagues
+                      UNION ALL
+                      SELECT database_name FROM ___ops.main.espn_leagues
+                  )
+                  ORDER BY database_name
+              """).fetchall()
+              fantasy_dbs = [row[0] for row in registry_rows if row[0]]
+              print(f"  Found {len(fantasy_dbs)} league databases from registry")
 
               conn.close()
 
@@ -172,33 +165,27 @@ jobs:
                   if not token:
                       return None
 
-                  # Find first league with credentials
+                  # Find first league with credentials (query registry directly)
                   conn = duckdb.connect(f"md:?motherduck_token={token}")
-                  dbs = conn.execute("SELECT DISTINCT catalog_name FROM information_schema.schemata WHERE schema_name = 'public'").fetchall()
-                  conn.close()
-
                   refresh_token = None
                   league_key = None
 
-                  for (db_name,) in dbs:
-                      if db_name in ('information_schema', 'my_db', 'sample_data'):
-                          continue
+                  cred_rows = conn.execute("""
+                      SELECT database_name, league_id, encrypted_refresh_token
+                      FROM ___ops.main.league_credentials
+                      WHERE encrypted_refresh_token IS NOT NULL
+                      LIMIT 1
+                  """).fetchall()
+                  conn.close()
+
+                  for db_name, lid, enc_token in cred_rows:
                       try:
                           creds = retrieve_league_credentials(db_name)
                           if creds and creds.get('refresh_token'):
                               refresh_token = creds['refresh_token']
-                              # Try to get league_key from league_settings
-                              conn = duckdb.connect(f"md:{db_name}?motherduck_token={token}")
-                              try:
-                                  result = conn.execute("SELECT league_key FROM league_settings ORDER BY year DESC LIMIT 1").fetchone()
-                                  if result:
-                                      league_key = result[0]
-                              except:
-                                  pass
-                              conn.close()
-                              if league_key:
-                                  print(f"Using credentials from {db_name}, league_key: {league_key}")
-                                  break
+                              league_key = lid
+                              print(f"Using credentials from {db_name}, league_key: {league_key}")
+                              break
                       except:
                           continue
 

@@ -30,9 +30,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -143,25 +140,20 @@ jobs:
               print("   Token is valid but won't be stored in MotherDuck")
               sys.exit(0)
 
-          # Find all league databases
+          # Find all league databases from registry (fast — avoids scanning 500+ attached DBs)
           conn = duckdb.connect(f"md:?motherduck_token={md_token}")
 
-          dbs = conn.execute("""
-              SELECT DISTINCT catalog_name
-              FROM information_schema.schemata
-              WHERE schema_name = 'public'
+          registry_rows = conn.execute("""
+              SELECT DISTINCT database_name FROM (
+                  SELECT database_name FROM ___ops.main.league_credentials
+                  UNION ALL
+                  SELECT database_name FROM ___ops.main.sleeper_leagues
+                  UNION ALL
+                  SELECT database_name FROM ___ops.main.espn_leagues
+              )
+              ORDER BY database_name
           """).fetchall()
-
-          # Filter to fantasy football databases
-          league_dbs = []
-          for (db_name,) in dbs:
-              if db_name in ('information_schema', 'my_db', 'sample_data', 'system', 'temp', 'memory'):
-                  continue
-              try:
-                  conn.execute(f"SELECT 1 FROM {db_name}.public.matchup LIMIT 1")
-                  league_dbs.append(db_name)
-              except:
-                  pass
+          league_dbs = [row[0] for row in registry_rows if row[0]]
 
           conn.close()
 
