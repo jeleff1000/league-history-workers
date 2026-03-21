@@ -316,6 +316,7 @@ jobs:
           echo "========================================"
 
           # v3 uses --quick flag instead of --import-mode
+          # "quick_to_full" is handled by trigger-downstream (chains to full import after)
           SCRIPT_MODE="${{ steps.parse.outputs.import_mode }}"
           QUICK_FLAG=""
           if [ "$SCRIPT_MODE" == "quick" ] || [ "$SCRIPT_MODE" == "quick_to_full" ]; then
