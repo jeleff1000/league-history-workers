@@ -315,15 +315,15 @@ jobs:
           echo "Year: ${{ steps.parse.outputs.season }}"
           echo "========================================"
 
-          # Always run in "quick" mode — the import script only knows quick vs full
-          # "quick_to_full" is handled by trigger-downstream (chains to full import after)
+          # v3 uses --quick flag instead of --import-mode
           SCRIPT_MODE="${{ steps.parse.outputs.import_mode }}"
-          if [ "$SCRIPT_MODE" == "quick_to_full" ]; then
-            SCRIPT_MODE="quick"
+          QUICK_FLAG=""
+          if [ "$SCRIPT_MODE" == "quick" ] || [ "$SCRIPT_MODE" == "quick_to_full" ]; then
+            QUICK_FLAG="--quick"
           fi
 
           set +e
-          python initial_import_v3.py --context ../league_context.json --import-mode ${SCRIPT_MODE} 2>&1 | tee ../import.log
+          python initial_import_v3.py --context ../league_context.json ${QUICK_FLAG} 2>&1 | tee ../import.log
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
 
