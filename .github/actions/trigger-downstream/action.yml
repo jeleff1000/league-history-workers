@@ -63,8 +63,9 @@ runs:
         PLAYOFF_TRIGGERED=false
         HISTORY_TRIGGERED=false
 
-        # Trigger playoff odds for FULL imports only
-        if [ "${IMPORT_MODE}" != "quick" ]; then
+        # Trigger playoff odds for quick (free) and full imports — NOT quick_to_full
+        # (quick_to_full chains to full import, which triggers playoff odds itself)
+        if [ "${IMPORT_MODE}" == "quick" ] || [ "${IMPORT_MODE}" == "full" ]; then
           echo "========================================"
           echo "Triggering Playoff Odds Calculator"
           echo "========================================"
@@ -82,15 +83,13 @@ runs:
             echo "WARNING: Could not trigger playoff odds workflow"
           fi
         else
-          echo "Skipping playoff odds for quick import"
+          echo "Skipping playoff odds (will run after full import completes)"
         fi
 
-        # Trigger full import after quick import
-        # ALWAYS trigger, even for single-year leagues, because:
-        # 1. Full import runs expand_to_all_nfl.py which adds unrostered NFL players
-        # 2. Unrostered players are needed for accurate LAMAR calculations
-        # 3. expand_to_all_nfl.py fetches ALL years from super_table including quick import year
-        if [ "${IMPORT_MODE}" == "quick" ]; then
+        # Trigger full import only for quick_to_full (paid flow)
+        # quick_to_full = quick import was step 1, now chain to full historical import
+        # plain "quick" = free reimport, just refresh current season + playoff odds
+        if [ "${IMPORT_MODE}" == "quick_to_full" ]; then
           echo "========================================"
           echo "Triggering Full Import (NFL Expansion + History)"
           echo "========================================"

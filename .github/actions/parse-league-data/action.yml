@@ -151,6 +151,12 @@ runs:
             print(f"VALIDATION ERRORS: {validation_errors}")
             sys.exit(1)
 
+        # Override import_mode from league data if present (e.g. quick_to_full from paid flow)
+        league_data_mode = league_data.get('import_mode', '').strip().lower()
+        if league_data_mode in ('quick', 'full', 'quick_to_full'):
+            import_mode = league_data_mode
+            print(f"[PARSE] Import mode overridden from league data: {import_mode}")
+
         # ============================================================
         # VALIDATE FIELDS
         # ============================================================
