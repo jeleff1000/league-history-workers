@@ -41,9 +41,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Setup Python
         id: setup-python
@@ -632,7 +629,33 @@ jobs:
               else:
                   print(f"  ✓ {table}: {count:,} rows")
 
+          # Check for Unknown managers in transactions (Phase 1.9 validation)
+          unknown_warnings = []
+          try:
+              rows = conn.execute("""
+                  SELECT year, COUNT(*) as unknown_count
+                  FROM public.transactions
+                  WHERE manager = 'Unknown' OR manager IS NULL
+                  GROUP BY year
+                  ORDER BY year
+              """).fetchall()
+              if rows:
+                  for year, count in rows:
+                      unknown_warnings.append(f"year={year}: {count} rows")
+                      print(f"  ⚠ WARNING: transactions has {count} Unknown/NULL manager rows in {year}")
+              else:
+                  print("  ✓ No Unknown managers in transactions")
+          except Exception as e:
+              print(f"  ⚠ Could not check Unknown managers: {e}")
+
           conn.close()
+
+          # Write Phase 1.9 result for workflow summary
+          with open("phase19_result.txt", "w") as f:
+              if unknown_warnings:
+                  f.write("WARNING: " + "; ".join(unknown_warnings))
+              else:
+                  f.write("OK")
 
           if failed:
               print(f"\n❌ VALIDATION FAILED: Critical tables missing or empty: {', '.join(failed)}")
@@ -773,6 +796,19 @@ jobs:
           else
             echo "## Status: FAILED" >> $GITHUB_STEP_SUMMARY
             echo "Check the logs for details" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Post-Fetch Validation (Phase 1.9)" >> $GITHUB_STEP_SUMMARY
+          if [ -f "phase19_result.txt" ]; then
+            PHASE19=$(cat phase19_result.txt)
+            if [[ "$PHASE19" == "OK" ]]; then
+              echo "- Transaction manager resolution: OK" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- Transaction manager resolution: $PHASE19" >> $GITHUB_STEP_SUMMARY
+            fi
+          else
+            echo "- Phase 1.9 check did not run" >> $GITHUB_STEP_SUMMARY
           fi
 
       # ==================== COMPUTE HOMEPAGE SUMMARY ====================
