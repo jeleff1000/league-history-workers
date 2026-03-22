@@ -151,9 +151,14 @@ runs:
             print(f"VALIDATION ERRORS: {validation_errors}")
             sys.exit(1)
 
-        # Override import_mode from league data if present (e.g. quick_to_full from paid flow)
+        # Override import_mode from league data ONLY if the workflow didn't explicitly set it.
+        # The env var IMPORT_MODE comes from the workflow's action input; if the workflow
+        # hardcodes it (e.g. full_import_worker sets 'full'), we trust the workflow.
+        # We only override when the workflow passes 'quick' (the default) and the league
+        # data has a more specific mode like 'quick_to_full'.
+        env_import_mode = os.environ.get('IMPORT_MODE', 'full').strip().lower()
         league_data_mode = league_data.get('import_mode', '').strip().lower()
-        if league_data_mode in ('quick', 'full', 'quick_to_full'):
+        if env_import_mode == 'quick' and league_data_mode in ('quick_to_full',):
             import_mode = league_data_mode
             print(f"[PARSE] Import mode overridden from league data: {import_mode}")
 
