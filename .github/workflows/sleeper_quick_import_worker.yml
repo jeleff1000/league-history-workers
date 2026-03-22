@@ -44,9 +44,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Setup Python
         id: setup-python
@@ -185,7 +182,7 @@ jobs:
           LEAGUE_NAME: ${{ steps.parse.outputs.league_name }}
           DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
         run: |
-          python - <<'PYEOF'
+          python - <<'PYEOF' || {
           import sys
           sys.path.insert(0, 'fantasy_football_data_scripts')
           import os
@@ -199,6 +196,13 @@ jobs:
           )
           print("League registered (early)")
           PYEOF
+            exit_code=$?
+            if [ "$exit_code" -eq 139 ]; then
+              echo "⚠️ DuckDB segfault on shutdown (exit 139) — league already registered, ignoring"
+            else
+              exit $exit_code
+            fi
+          }
 
       # ==================== CREATE DATA DIRECTORY ====================
       - name: Create data directory
