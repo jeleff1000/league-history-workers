@@ -1,0 +1,156 @@
+name: Fleet Validation
+
+# Validates all league databases using pure SQL checks.
+# Runs from GH Actions (us-east-1, close to MotherDuck) for low latency.
+# Switches duckling to Standard mode for the run, then back to Pulse.
+
+on:
+  workflow_dispatch:
+    inputs:
+      workers:
+        description: 'Parallel connections (default 10)'
+        required: false
+        type: number
+        default: 10
+      limit:
+        description: 'Max leagues to validate (empty = all)'
+        required: false
+        type: number
+      db:
+        description: 'Specific database(s) to validate (comma-separated, empty = all)'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate-fleet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install duckdb requests
+
+      - name: Scale duckling to Standard
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          python - <<'PYEOF'
+          import sys
+          sys.path.insert(0, 'fantasy_football_data_scripts')
+          from multi_league.core.duckling_manager import scale_up_for_enrichments
+          result = scale_up_for_enrichments()
+          if result:
+              print(f"Scaled up from {result} to standard")
+          else:
+              print("Already standard or scaling not needed")
+          PYEOF
+
+      - name: Run fleet validation
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          PYTHONUNBUFFERED: '1'
+        run: |
+          cd fantasy_football_data_scripts
+
+          CMD="python -m multi_league.validation.validate_fleet"
+          CMD="$CMD --workers ${{ inputs.workers || 10 }}"
+
+          if [ -n "${{ inputs.limit }}" ] && [ "${{ inputs.limit }}" != "0" ]; then
+            CMD="$CMD --limit ${{ inputs.limit }}"
+          fi
+
+          if [ -n "${{ inputs.db }}" ]; then
+            IFS=',' read -ra DBS <<< "${{ inputs.db }}"
+            for db in "${DBS[@]}"; do
+              CMD="$CMD --db $(echo $db | xargs)"
+            done
+          fi
+
+          echo "Running: $CMD"
+          $CMD
+
+      - name: Scale duckling back to Pulse
+        if: always()
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          python - <<'PYEOF'
+          import sys
+          sys.path.insert(0, 'fantasy_football_data_scripts')
+          from multi_league.core.duckling_manager import scale_down_after_enrichments
+          scale_down_after_enrichments(previous_size="pulse")
+          PYEOF
+
+      - name: Query results summary
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          python - <<'PYEOF'
+          import duckdb, os
+          token = os.environ['MOTHERDUCK_TOKEN']
+          conn = duckdb.connect(f"md:___ops?motherduck_token={token}")
+
+          print("\n=== FLEET HEALTH SUMMARY ===\n")
+
+          # Latest run
+          run = conn.execute("""
+              SELECT run_id, run_timestamp, COUNT(DISTINCT db_name) as leagues,
+                     SUM(CASE WHEN NOT passed THEN 1 ELSE 0 END) as total_failures
+              FROM fleet_health.validation_results
+              GROUP BY run_id, run_timestamp
+              ORDER BY run_timestamp DESC LIMIT 1
+          """).fetchone()
+
+          if run:
+              print(f"Run: {run[0]} at {run[1]}")
+              print(f"Leagues: {run[2]}, Total failures: {run[3]}")
+
+          # Fix action breakdown
+          print("\n--- Fix Actions ---")
+          rows = conn.execute("""
+              SELECT fix_action,
+                     COUNT(DISTINCT db_name) as leagues,
+                     COUNT(*) as violations
+              FROM fleet_health.validation_results
+              WHERE NOT passed AND run_id = (
+                  SELECT run_id FROM fleet_health.validation_results
+                  ORDER BY run_timestamp DESC LIMIT 1
+              )
+              GROUP BY fix_action
+              ORDER BY leagues DESC
+          """).fetchall()
+          for action, leagues, violations in rows:
+              print(f"  {action or 'investigate'}: {leagues} leagues, {violations} violations")
+
+          # Top failing checks
+          print("\n--- Top 15 Failing Checks ---")
+          rows = conn.execute("""
+              SELECT check_name, COUNT(DISTINCT db_name) as leagues, SUM(count) as total
+              FROM fleet_health.validation_results
+              WHERE NOT passed AND run_id = (
+                  SELECT run_id FROM fleet_health.validation_results
+                  ORDER BY run_timestamp DESC LIMIT 1
+              )
+              GROUP BY check_name
+              ORDER BY leagues DESC
+              LIMIT 15
+          """).fetchall()
+          for check, leagues, total in rows:
+              print(f"  {leagues:>4} leagues  {check}")
+
+          conn.close()
+          PYEOF
