@@ -57,13 +57,6 @@ jobs:
           path: .venv
           key: venv-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('requirements.txt') }}
 
-      - name: Cache NFLverse data
-        uses: actions/cache@v5
-        with:
-          path: ~/.nflverse
-          key: nflverse-${{ runner.os }}-${{ hashFiles('fantasy_football_data_scripts/multi_league/data_fetchers/nfl_data.py') }}
-          restore-keys: |
-            nflverse-${{ runner.os }}-
 
       - name: Create virtualenv
         if: steps.cache-venv.outputs.cache-hit != 'true'
