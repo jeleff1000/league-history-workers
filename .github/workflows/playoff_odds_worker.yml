@@ -139,6 +139,23 @@ jobs:
           conn.close()
           PYEOF
 
+      - name: Aggregate player fantasy context
+        continue-on-error: true
+        working-directory: fantasy_football_data_scripts
+        run: |
+          echo "========================================"
+          echo "Aggregating player_fantasy_season + player_fantasy_career"
+          echo "========================================"
+
+          python -m multi_league.transformations.aggregation.aggregate_fantasy_context \
+            --db ${DATABASE_NAME} \
+            2>&1 | tee ../player_aggregation.log
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "✓ Player aggregation complete"
+          else
+            echo "✗ Player aggregation failed (non-critical)"
+          fi
+
       - name: Re-aggregate matchup tables
         continue-on-error: true
         working-directory: fantasy_football_data_scripts
