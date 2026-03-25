@@ -215,6 +215,162 @@ jobs:
             echo "✗ Homepage summary failed (non-critical)"
           fi
 
+      - name: Validate post-aggregation outputs
+        run: |
+          python - <<'PYEOF' 2>&1 | tee post_aggregation_validation.log
+          import duckdb
+          import os
+          import sys
+
+          db_name = os.environ['DATABASE_NAME']
+          token = os.environ['MOTHERDUCK_TOKEN']
+          conn = duckdb.connect(f'md:{db_name}?motherduck_token={token}')
+
+          failures = []
+
+          def table_count(table_name: str) -> int:
+              try:
+                  return conn.execute(f"SELECT COUNT(*) FROM public.{table_name}").fetchone()[0]
+              except Exception as exc:
+                  failures.append(f"{table_name} missing or unreadable: {exc}")
+                  return 0
+
+          def require_rows(table_name: str, *, when: bool = True):
+              if not when:
+                  return
+              count = table_count(table_name)
+              print(f"{table_name}: {count:,} rows")
+              if count == 0:
+                  failures.append(f"{table_name} is empty")
+
+          def non_null_count(table_name: str, column_name: str) -> int:
+              return conn.execute(
+                  f'SELECT COUNT(*) FROM public.{table_name} WHERE "{column_name}" IS NOT NULL'
+              ).fetchone()[0]
+
+          base_years = conn.execute("SELECT COUNT(DISTINCT year) FROM public.matchup").fetchone()[0]
+          single_year = base_years <= 1
+          print(f"Years in matchup: {base_years}")
+
+          print("\nLeague settings contract:")
+          for column_name in ['num_teams', 'playoff_teams', 'playoff_start_week']:
+              try:
+                  count = non_null_count('league_settings', column_name)
+                  print(f"  {column_name}: {count:,} populated rows")
+                  if count == 0:
+                      failures.append(f"league_settings.{column_name} is missing for all rows")
+              except Exception as exc:
+                  failures.append(f"league_settings.{column_name} check failed: {exc}")
+
+          try:
+              bye_count = non_null_count('league_settings', 'bye_teams')
+              print(f"  bye_teams: {bye_count:,} populated rows")
+              if bye_count == 0:
+                  print("  bye_teams: derived downstream from playoff_teams when omitted")
+          except Exception as exc:
+              failures.append(f"league_settings.bye_teams check failed: {exc}")
+
+          print("\nBase tables:")
+          player_rows = table_count('player_fantasy')
+          draft_rows = table_count('draft')
+          txn_rows = table_count('transactions')
+          matchup_rows = table_count('matchup')
+          print(f"player_fantasy: {player_rows:,}")
+          print(f"draft: {draft_rows:,}")
+          print(f"transactions: {txn_rows:,}")
+          print(f"matchup: {matchup_rows:,}")
+
+          print("\nAggregated tables:")
+          require_rows('player_fantasy_season', when=player_rows > 0)
+          require_rows('player_fantasy_career', when=player_rows > 0 and not single_year)
+          require_rows('matchup_season', when=matchup_rows > 0)
+          require_rows('matchup_career', when=matchup_rows > 0 and not single_year)
+          require_rows('matchup_h2h_season', when=matchup_rows > 0)
+          require_rows('matchup_h2h_career', when=matchup_rows > 0 and not single_year)
+          require_rows('draft_manager_season', when=draft_rows > 0)
+          require_rows('draft_manager_career', when=draft_rows > 0 and not single_year)
+          require_rows('transaction_manager_season', when=txn_rows > 0)
+          require_rows('transaction_manager_career', when=txn_rows > 0 and not single_year)
+          require_rows('transaction_report_card', when=txn_rows > 0)
+
+          print("\nHomepage tables:")
+          require_rows('homepage_league_summary')
+          require_rows('homepage_manager_rankings')
+          require_rows('homepage_current_standings')
+          require_rows('homepage_manager_profiles')
+
+          print("\nID flow:")
+          try:
+              platform = conn.execute(
+                  "SELECT platform FROM public.league_settings WHERE platform IS NOT NULL ORDER BY year DESC LIMIT 1"
+              ).fetchone()
+              platform_name = platform[0].lower() if platform and platform[0] else ''
+          except Exception:
+              platform_name = ''
+          id_column = {
+              'yahoo': 'yahoo_player_id',
+              'sleeper': 'sleeper_player_id',
+              'espn': 'espn_player_id',
+          }.get(platform_name)
+          if id_column:
+              print(f"Platform: {platform_name} ({id_column})")
+              for table_name in ['matchup', 'player_fantasy', 'draft', 'transactions']:
+                  try:
+                      mismatches = conn.execute(
+                          f"SELECT COUNT(*) FROM public.{table_name} "
+                          f"WHERE platform IS NOT NULL AND LOWER(TRIM(platform)) != ?",
+                          [platform_name],
+                      ).fetchone()[0]
+                      print(f"  {table_name} platform mismatches: {mismatches:,}")
+                      if mismatches > 0:
+                          failures.append(f"{table_name} has {mismatches} rows with platform != {platform_name}")
+                  except Exception as exc:
+                      failures.append(f"{table_name} platform consistency check failed: {exc}")
+              try:
+                  if player_rows > 0:
+                      player_with_ids = conn.execute(
+                          f"SELECT COUNT(*) FROM public.player_fantasy WHERE COALESCE(TRIM({id_column}), '') != ''"
+                      ).fetchone()[0]
+                      print(f"  player_fantasy {id_column}: {player_with_ids:,}/{player_rows:,}")
+                      if player_with_ids == 0:
+                          failures.append(f"player_fantasy rows lost {id_column} before upload")
+              except Exception as exc:
+                  failures.append(f"player_fantasy {id_column} check failed: {exc}")
+              try:
+                  if draft_rows > 0:
+                      draft_with_ids = conn.execute(
+                          f"SELECT COUNT(*) FROM public.draft WHERE COALESCE(TRIM({id_column}), '') != ''"
+                      ).fetchone()[0]
+                      print(f"  draft {id_column}: {draft_with_ids:,}/{draft_rows:,}")
+                      if draft_with_ids == 0:
+                          failures.append(f"draft rows lost {id_column} before upload")
+              except Exception as exc:
+                  failures.append(f"draft {id_column} check failed: {exc}")
+              try:
+                  txn_player_rows = conn.execute(
+                      "SELECT COUNT(*) FROM public.transactions WHERE transaction_type != 'draft_pick_trade' AND player IS NOT NULL"
+                  ).fetchone()[0]
+                  if txn_player_rows > 0:
+                      txn_with_ids = conn.execute(
+                          f"SELECT COUNT(*) FROM public.transactions WHERE transaction_type != 'draft_pick_trade' AND player IS NOT NULL AND COALESCE(TRIM({id_column}), '') != ''"
+                      ).fetchone()[0]
+                      print(f"  transactions {id_column}: {txn_with_ids:,}/{txn_player_rows:,}")
+                      if txn_with_ids == 0:
+                          failures.append(f"transaction rows lost {id_column} before upload")
+              except Exception as exc:
+                  failures.append(f"transactions {id_column} check failed: {exc}")
+
+          conn.close()
+
+          if failures:
+              print("\nFAILURES:")
+              for failure in failures:
+                  print(f"  - {failure}")
+              sys.exit(1)
+
+          print("\nPost-aggregation validation passed.")
+          PYEOF
+
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v6
@@ -223,10 +379,12 @@ jobs:
           path: |
             expected_record.log
             playoff_odds.log
+            player_aggregation.log
             matchup_aggregation.log
             draft_aggregation.log
             transaction_aggregation.log
             homepage_summary.log
+            post_aggregation_validation.log
           retention-days: 7
 
       - name: Create workflow summary
@@ -245,4 +403,5 @@ jobs:
           echo "### Steps:" >> $GITHUB_STEP_SUMMARY
           echo "1. Expected record (shuffle sims) → UPDATE matchup" >> $GITHUB_STEP_SUMMARY
           echo "2. Playoff odds + clutch equity → UPDATE matchup + player_fantasy" >> $GITHUB_STEP_SUMMARY
-          echo "3. Aggregation (matchup, draft, transaction, homepage)" >> $GITHUB_STEP_SUMMARY
+          echo "3. Aggregation (player, matchup, draft, transaction, homepage)" >> $GITHUB_STEP_SUMMARY
+          echo "4. Post-aggregation validation (schema + aggregate outputs)" >> $GITHUB_STEP_SUMMARY

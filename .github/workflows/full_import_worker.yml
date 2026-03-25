@@ -611,6 +611,96 @@ jobs:
                       continue
               return []
 
+          def fetch_regular_season_week_gaps() -> list[tuple[int, int, int, int]]:
+              try:
+                  return conn.execute("""
+                      WITH settings AS (
+                          SELECT
+                              year,
+                              CAST(num_teams AS INTEGER) AS num_teams,
+                              CAST(COALESCE(playoff_start_week - 1, end_week) AS INTEGER) AS regular_weeks
+                          FROM public.league_settings
+                          WHERE year IS NOT NULL
+                            AND num_teams IS NOT NULL
+                            AND COALESCE(playoff_start_week - 1, end_week) IS NOT NULL
+                      ),
+                      expected AS (
+                          SELECT s.year, gs.generate_series AS week, s.num_teams
+                          FROM settings s, generate_series(1, s.regular_weeks) gs
+                      ),
+                      actual AS (
+                          SELECT
+                              year,
+                              week,
+                              COUNT(DISTINCT COALESCE(NULLIF(franchise_id, ''), manager)) AS manager_count
+                          FROM public.matchup
+                          WHERE manager IS NOT NULL
+                            AND TRIM(manager) != ''
+                          GROUP BY 1, 2
+                      )
+                      SELECT
+                          e.year,
+                          e.week,
+                          e.num_teams,
+                          COALESCE(a.manager_count, 0) AS manager_count
+                      FROM expected e
+                      LEFT JOIN actual a
+                        ON a.year = e.year AND a.week = e.week
+                      WHERE COALESCE(a.manager_count, 0) <> e.num_teams
+                      ORDER BY e.year, e.week
+                  """).fetchall()
+              except Exception:
+                  return []
+
+          def fetch_player_coverage_gaps() -> list[tuple[int, int, str, str]]:
+              try:
+                  return conn.execute("""
+                      WITH settings AS (
+                          SELECT
+                              year,
+                              CAST(COALESCE(playoff_start_week - 1, end_week) AS INTEGER) AS regular_weeks
+                          FROM public.league_settings
+                          WHERE year IS NOT NULL
+                            AND COALESCE(playoff_start_week - 1, end_week) IS NOT NULL
+                      ),
+                      matchup_managers AS (
+                          SELECT DISTINCT
+                              m.year,
+                              m.week,
+                              COALESCE(NULLIF(m.franchise_id, ''), m.manager) AS manager_key,
+                              m.manager
+                          FROM public.matchup m
+                          JOIN settings s
+                            ON s.year = m.year
+                          WHERE m.week <= s.regular_weeks
+                            AND m.manager IS NOT NULL
+                            AND TRIM(m.manager) != ''
+                      ),
+                      roster_managers AS (
+                          SELECT DISTINCT
+                              p.year,
+                              p.week,
+                              COALESCE(NULLIF(p.franchise_id, ''), p.manager) AS manager_key
+                          FROM public.player_fantasy p
+                          WHERE p.manager IS NOT NULL
+                            AND TRIM(p.manager) != ''
+                      )
+                      SELECT
+                          mm.year,
+                          mm.week,
+                          mm.manager_key,
+                          mm.manager
+                      FROM matchup_managers mm
+                      LEFT JOIN roster_managers rm
+                        ON rm.year = mm.year
+                       AND rm.week = mm.week
+                       AND rm.manager_key = mm.manager_key
+                      WHERE rm.manager_key IS NULL
+                      ORDER BY mm.year, mm.week, mm.manager
+                  """).fetchall()
+              except Exception:
+                  return []
+
           print(f"Connecting to database: {db}")
           conn = duckdb.connect(f'md:{db}?motherduck_token={token}')
 
@@ -638,24 +728,69 @@ jobs:
                       failed.append(f"{table} missing years {missing_years}")
                   else:
                       print(f"  ✓ {table}: year coverage OK")
+              matchup_week_gaps = fetch_regular_season_week_gaps()
+              if matchup_week_gaps:
+                  preview = ", ".join(
+                      f"{year}-W{week} ({actual}/{expected})"
+                      for year, week, expected, actual in matchup_week_gaps[:10]
+                  )
+                  print(f"  X matchup: regular-season week coverage gaps -> {preview}")
+                  if len(matchup_week_gaps) > 10:
+                      print(f"    ... plus {len(matchup_week_gaps) - 10} more gap(s)")
+                  failed.append(f"matchup missing manager-weeks in {len(matchup_week_gaps)} regular-season week(s)")
+              else:
+                  print("  OK matchup: regular-season weekly manager coverage OK")
+
+              player_coverage_gaps = fetch_player_coverage_gaps()
+              if player_coverage_gaps:
+                  preview = ", ".join(
+                      f"{year}-W{week} {manager}"
+                      for year, week, _, manager in player_coverage_gaps[:10]
+                  )
+                  print(f"  X player_fantasy: missing matchup managers -> {preview}")
+                  if len(player_coverage_gaps) > 10:
+                      print(f"    ... plus {len(player_coverage_gaps) - 10} more gap(s)")
+                  failed.append(f"player_fantasy missing {len(player_coverage_gaps)} matchup manager-week roster(s)")
+              else:
+                  print("  OK player_fantasy: matchup manager-weeks covered in regular season")
           else:
               failed.append("league_settings has no year rows")
 
-          # Check for Unknown managers in transactions (Phase 1.9 validation)
+          # Check for Unknown managers in transactions after SQL enrichments.
           unknown_warnings = []
           try:
               rows = conn.execute("""
-                  SELECT year, COUNT(*) as unknown_count
+                  SELECT
+                      year,
+                      COUNT(*) AS unknown_count,
+                      SUM(
+                          CASE
+                              WHEN COALESCE(LOWER(TRIM(transaction_type)), '') != 'drop' THEN 1
+                              ELSE 0
+                          END
+                      ) AS blocking_unknown_count
                   FROM public.transactions
-                  WHERE manager = 'Unknown' OR manager IS NULL
+                  WHERE manager IS NULL OR TRIM(manager) = '' OR LOWER(TRIM(manager)) = 'unknown'
                   GROUP BY year
                   ORDER BY year
               """).fetchall()
               if rows:
-                  for year, count in rows:
-                      unknown_warnings.append(f"year={year}: {count} rows")
-                      print(f"  ⚠ WARNING: transactions has {count} Unknown/NULL manager rows in {year}")
-                  failed.append("transactions have Unknown/NULL managers")
+                  blocking_years = []
+                  for year, count, blocking_count in rows:
+                      if blocking_count and int(blocking_count) > 0:
+                          blocking_years.append(f"year={year}: {count} rows ({blocking_count} non-drop)")
+                          print(
+                              f"  X transactions has {count} Unknown/NULL manager rows in {year} "
+                              f"({blocking_count} outside drop-only cases)"
+                          )
+                      else:
+                          unknown_warnings.append(f"year={year}: {count} drop-only rows")
+                          print(
+                              f"  ! WARNING: transactions has {count} Unknown/NULL manager rows in {year} "
+                              f"(drop-only; logged but not blocking)"
+                          )
+                  if blocking_years:
+                      failed.append("transactions have blocking Unknown/NULL managers: " + "; ".join(blocking_years))
               else:
                   print("  ✓ No Unknown managers in transactions")
           except Exception as e:

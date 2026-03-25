@@ -328,9 +328,12 @@ jobs:
           source .venv/bin/activate
           python - <<'PYEOF'
           import json
-          import math
+          import sys
           from pathlib import Path
           import pandas as pd
+
+          sys.path.insert(0, "fantasy_football_data_scripts")
+          from multi_league.core.canonical_settings import flatten_settings, get_schema_keys
 
           data_dir = Path("fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}")
           settings_dir = data_dir / "league_settings"
@@ -350,42 +353,16 @@ jobs:
                   with open(sf, 'r', encoding='utf-8') as f:
                       data = json.load(f)
 
-                  metadata = data.get('metadata', data)
-                  settings_nested = data.get('settings', {})
-                  league_avg_match = data.get('league_average_match')
-                  if league_avg_match is None or league_avg_match == 0:
-                      league_avg_match = settings_nested.get('league_average_match', 0)
-
-                  # Get playoff settings
-                  playoff_start = metadata.get('playoff_start_week') or data.get('playoff_start_week', 15)
-                  num_playoff = metadata.get('num_playoff_teams') or data.get('num_playoff_teams') or data.get('playoff_teams', 6)
-
-                  # Calculate end_week dynamically if missing (instead of hardcoding 17)
-                  stored_end_week = metadata.get('end_week') or data.get('end_week')
-                  if stored_end_week:
-                      end_week = stored_end_week
-                  else:
-                      # Calculate from bracket structure: playoff_start + rounds - 1
-                      playoff_rounds = math.ceil(math.log2(num_playoff)) if num_playoff > 1 else 1
-                      end_week = playoff_start + playoff_rounds - 1
-
-                  rows.append({
-                      'year': data.get('season'),
-                      'league_id': data.get('league_id'),
-                      'num_teams': data.get('num_teams') or data.get('total_rosters'),
-                      'num_playoff_teams': num_playoff,
-                      'bye_teams': metadata.get('bye_teams') or data.get('bye_teams', 0),
-                      'playoff_start_week': playoff_start,
-                      'end_week': end_week,
-                      'league_average_match': league_avg_match,
-                      'settings_json': json.dumps(data)
-                  })
+                  year = int(data.get('season') or data.get('year'))
+                  league_key = str(data.get('league_id') or '')
+                  flat = flatten_settings(data, platform='sleeper', year=year, league_key=league_key)
+                  rows.append({key: flat.get(key) for key in get_schema_keys()})
               except Exception as e:
                   print(f"Error reading {sf.name}: {e}")
 
           if rows:
               pd.DataFrame(rows).to_parquet(data_dir / "league_settings.parquet", index=False)
-              print(f"Created league_settings.parquet with {len(rows)} years")
+              print(f"Created flat league_settings.parquet with {len(rows)} years")
           PYEOF
 
       # ==================== SAVE LEAGUE CONTEXT TO PARQUET ====================
@@ -445,6 +422,7 @@ jobs:
           import duckdb
           import os
           import re
+          import sys
 
           db_name = os.environ['DATABASE_NAME']
           token = os.environ['MOTHERDUCK_TOKEN']
@@ -455,17 +433,70 @@ jobs:
               db = 'l_' + db
           db = db[:63]
 
-          CRITICAL_TABLES = ['matchup', 'player_fantasy', 'draft', 'transactions', 'schedule']
+          required_tables = ['league_settings', 'matchup', 'player_fantasy']
+          optional_tables = ['draft', 'transactions', 'schedule']
+          failures = []
           conn = duckdb.connect(f'md:?motherduck_token={token}')
           print(f"Validating database: {db}")
-          for table in CRITICAL_TABLES:
+          for table in required_tables + optional_tables:
               try:
                   result = conn.execute(f'SELECT COUNT(*) FROM {db}.public.{table}').fetchone()
                   count = result[0] if result else 0
-                  print(f"  {table}: {count:,} rows")
+                  status = "OK" if count > 0 else "EMPTY"
+                  print(f"  {table}: {count:,} rows [{status}]")
+                  if table in required_tables and count == 0:
+                      failures.append(f"{table} is empty")
               except Exception as e:
                   print(f"  {table}: ERROR - {e}")
+                  if table in required_tables:
+                      failures.append(f"{table} query failed: {e}")
+
+          print("\nFlat league_settings contract:")
+          for col in ['num_teams', 'playoff_teams', 'bye_teams', 'playoff_start_week']:
+              try:
+                  count = conn.execute(
+                      f'SELECT COUNT(*) FROM {db}.public.league_settings WHERE \"{col}\" IS NOT NULL'
+                  ).fetchone()[0]
+                  print(f"  {col}: {count:,} populated rows")
+                  if count == 0:
+                      failures.append(f"league_settings.{col} is missing for all rows")
+              except Exception as e:
+                  print(f"  {col}: ERROR - {e}")
+                  failures.append(f"league_settings.{col} check failed: {e}")
+
+          print("\nPlatform ID flow:")
+          try:
+              draft_total = conn.execute(f'SELECT COUNT(*) FROM {db}.public.draft').fetchone()[0]
+              if draft_total > 0:
+                  draft_with_ids = conn.execute(
+                      f"SELECT COUNT(*) FROM {db}.public.draft WHERE COALESCE(TRIM(sleeper_player_id), '') != ''"
+                  ).fetchone()[0]
+                  print(f"  draft sleeper_player_id: {draft_with_ids:,}/{draft_total:,}")
+                  if draft_with_ids == 0:
+                      failures.append('draft rows lost sleeper_player_id before upload')
+          except Exception as e:
+              print(f"  draft sleeper_player_id: ERROR - {e}")
+
+          try:
+              txn_total = conn.execute(
+                  f"SELECT COUNT(*) FROM {db}.public.transactions WHERE transaction_type != 'draft_pick_trade' AND player IS NOT NULL"
+              ).fetchone()[0]
+              if txn_total > 0:
+                  txn_with_ids = conn.execute(
+                      f"SELECT COUNT(*) FROM {db}.public.transactions WHERE transaction_type != 'draft_pick_trade' AND player IS NOT NULL AND COALESCE(TRIM(sleeper_player_id), '') != ''"
+                  ).fetchone()[0]
+                  print(f"  transactions sleeper_player_id: {txn_with_ids:,}/{txn_total:,}")
+                  if txn_with_ids == 0:
+                      failures.append('transaction rows lost sleeper_player_id before upload')
+          except Exception as e:
+              print(f"  transactions sleeper_player_id: ERROR - {e}")
           conn.close()
+          print("\nValidation complete!")
+          if failures:
+              print("\nFAILURES:")
+              for failure in failures:
+                  print(f"  - {failure}")
+              sys.exit(1)
           PYEOF
 
       # ==================== CLEANUP DEPRECATED COLUMNS ====================
