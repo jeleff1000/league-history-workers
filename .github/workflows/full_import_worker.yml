@@ -589,32 +589,34 @@ jobs:
 
           # NOTE: 'player' replaced by 'player_fantasy' in two-track architecture
           # NFL stats come from super table (___ops.nfl_historical.nfl_player_stats_all) via JOIN
-          CRITICAL_TABLES = ['matchup', 'player_fantasy', 'schedule', 'draft', 'transactions']
+          CRITICAL_TABLES = ['league_settings', 'matchup', 'player_fantasy', 'schedule', 'draft', 'transactions']
+
+          def fetch_count(table: str) -> tuple[bool, int]:
+              for table_ref in (f"public.{table}", table):
+                  try:
+                      result = conn.execute(f"SELECT COUNT(*) FROM {table_ref}").fetchone()
+                      return True, result[0] if result else 0
+                  except Exception:
+                      continue
+              return False, 0
+
+          def fetch_years(table: str) -> list[int]:
+              for table_ref in (f"public.{table}", table):
+                  try:
+                      rows = conn.execute(
+                          f"SELECT DISTINCT year FROM {table_ref} WHERE year IS NOT NULL ORDER BY year"
+                      ).fetchall()
+                      return [int(row[0]) for row in rows if row and row[0] is not None]
+                  except Exception:
+                      continue
+              return []
 
           print(f"Connecting to database: {db}")
           conn = duckdb.connect(f'md:{db}?motherduck_token={token}')
 
           failed = []
           for table in CRITICAL_TABLES:
-              count = 0
-              found = False
-
-              # Try public schema first (new pattern)
-              try:
-                  result = conn.execute(f"SELECT COUNT(*) FROM public.{table}").fetchone()
-                  count = result[0] if result else 0
-                  found = True
-              except Exception:
-                  pass
-
-              # Try without schema (legacy pattern)
-              if not found:
-                  try:
-                      result = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
-                      count = result[0] if result else 0
-                      found = True
-                  except Exception:
-                      pass
+              found, count = fetch_count(table)
 
               if not found:
                   print(f"  ✗ {table}: MISSING")
@@ -624,6 +626,20 @@ jobs:
                   failed.append(f"{table} (empty)")
               else:
                   print(f"  ✓ {table}: {count:,} rows")
+
+          expected_years = fetch_years("league_settings")
+          if expected_years:
+              print(f"Expected years from league_settings: {expected_years}")
+              for table in ["matchup", "player_fantasy", "schedule", "draft", "transactions"]:
+                  actual_years = fetch_years(table)
+                  missing_years = sorted(set(expected_years) - set(actual_years))
+                  if missing_years:
+                      print(f"  ✗ {table}: missing year coverage for {missing_years}")
+                      failed.append(f"{table} missing years {missing_years}")
+                  else:
+                      print(f"  ✓ {table}: year coverage OK")
+          else:
+              failed.append("league_settings has no year rows")
 
           # Check for Unknown managers in transactions (Phase 1.9 validation)
           unknown_warnings = []
@@ -639,16 +655,20 @@ jobs:
                   for year, count in rows:
                       unknown_warnings.append(f"year={year}: {count} rows")
                       print(f"  ⚠ WARNING: transactions has {count} Unknown/NULL manager rows in {year}")
+                  failed.append("transactions have Unknown/NULL managers")
               else:
                   print("  ✓ No Unknown managers in transactions")
           except Exception as e:
               print(f"  ⚠ Could not check Unknown managers: {e}")
+              failed.append(f"transactions Unknown-manager check failed: {e}")
 
           conn.close()
 
           # Write Phase 1.9 result for workflow summary
           with open("phase19_result.txt", "w") as f:
-              if unknown_warnings:
+              if failed:
+                  f.write("ERROR: " + "; ".join(failed))
+              elif unknown_warnings:
                   f.write("WARNING: " + "; ".join(unknown_warnings))
               else:
                   f.write("OK")
