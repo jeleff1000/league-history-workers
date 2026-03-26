@@ -94,7 +94,6 @@ jobs:
       - name: Create virtualenv
         if: steps.cache-venv.outputs.cache-hit != 'true'
         run: python -m venv .venv
-
       - name: Install dependencies
         run: |
           source .venv/bin/activate
@@ -512,19 +511,59 @@ jobs:
 
           echo "ESPN re-import completed successfully"
 
-      # ==================== VERIFY PARQUET FILES ====================
-      - name: Verify parquet files
+      # ==================== VERIFY LOCAL DUCKDB ARTIFACTS ====================
+      - name: Verify local DuckDB artifacts
         if: steps.import.outputs.exit_code == '0'
         id: verify
+        env:
+          DATA_DIR: fantasy_football_data/espn_${{ steps.inputs.outputs.database_name }}
+          DATABASE_NAME: ${{ steps.inputs.outputs.database_name }}
         run: |
-          DATA_DIR="fantasy_football_data/espn_${{ steps.inputs.outputs.database_name }}"
+          source .venv/bin/activate
           PARQUET_COUNT=$(find "$DATA_DIR" -name "*.parquet" -type f | wc -l)
-          echo "Found ${PARQUET_COUNT} parquet files"
-          if [ "$PARQUET_COUNT" -eq 0 ]; then
-            echo "ERROR: No parquet files created!"
-            exit 1
-          fi
-          echo "file_count=${PARQUET_COUNT}" >> $GITHUB_OUTPUT
+          LOCAL_DB="$DATA_DIR/${DATABASE_NAME}.duckdb"
+          export PARQUET_COUNT LOCAL_DB
+
+          echo "Observed ${PARQUET_COUNT} parquet files (informational only)"
+
+          python - <<'PYEOF'
+          import os
+          import sys
+          from pathlib import Path
+
+          import duckdb
+
+          db_path = Path(os.environ["LOCAL_DB"])
+          required = ["league_settings", "matchup", "player_fantasy", "draft", "transactions", "schedule"]
+
+          if not db_path.exists():
+              print(f"ERROR: Local DuckDB not found: {db_path}")
+              sys.exit(1)
+
+          conn = duckdb.connect(str(db_path), read_only=True)
+          existing = {
+              row[0]
+              for row in conn.execute(
+                  "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+              ).fetchall()
+          }
+          missing = [table for table in required if table not in existing]
+
+          print(f"Local DuckDB: {db_path}")
+          if missing:
+              print("ERROR: Missing canonical tables: " + ", ".join(missing))
+              sys.exit(1)
+
+          print("Canonical table row counts:")
+          for table in required:
+              count = conn.execute(f"SELECT COUNT(*) FROM public.{table}").fetchone()[0]
+              print(f"  {table}: {count}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"local_db_path={db_path.as_posix()}\n")
+              fh.write(f"table_count={len(required)}\n")
+              fh.write(f"parquet_count={os.environ['PARQUET_COUNT']}\n")
+          PYEOF
 
       # ==================== VALIDATE CRITICAL TABLES ====================
       - name: Validate critical tables
@@ -687,7 +726,8 @@ jobs:
 
           if [ "${{ steps.import.outputs.exit_code }}" == "0" ]; then
             echo "## Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
-            echo "- Parquet files: ${{ steps.verify.outputs.file_count }}" >> $GITHUB_STEP_SUMMARY
+            echo "- Local DuckDB: \`${{ steps.verify.outputs.local_db_path }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- Canonical tables verified: ${{ steps.verify.outputs.table_count }}" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Site URL**: https://leaguehistory.streamlit.app/?league=${{ steps.inputs.outputs.database_name }}" >> $GITHUB_STEP_SUMMARY
           else

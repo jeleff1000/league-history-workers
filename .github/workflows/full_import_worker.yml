@@ -58,11 +58,9 @@ jobs:
           path: .venv
           key: venv-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('requirements.txt') }}
 
-
       - name: Create virtualenv
         if: steps.cache-venv.outputs.cache-hit != 'true'
         run: python -m venv .venv
-
       - name: Install dependencies
         run: |
           source .venv/bin/activate
@@ -440,41 +438,58 @@ jobs:
           print("\n[SUCCESS] All canonical files created successfully!")
           PYEOF
 
-      # ==================== VERIFY PARQUET FILES ====================
-      - name: Verify parquet files
+      # ==================== VERIFY LOCAL DUCKDB ARTIFACTS ====================
+      - name: Verify local DuckDB artifacts
         if: steps.import.outputs.exit_code == '0'
         id: verify
+        env:
+          DATA_DIR: fantasy_football_data
+          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
         run: |
-          PARQUET_COUNT=$(find fantasy_football_data -name "*.parquet" -type f | wc -l)
-          echo "Found ${PARQUET_COUNT} parquet files"
+          source .venv/bin/activate
+          PARQUET_COUNT=$(find "$DATA_DIR" -name "*.parquet" -type f | wc -l)
+          LOCAL_DB="$DATA_DIR/${DATABASE_NAME}.duckdb"
+          export PARQUET_COUNT LOCAL_DB
 
-          if [ "$PARQUET_COUNT" -eq 0 ]; then
-            echo "ERROR: No parquet files created!"
-            exit 1
-          fi
+          echo "Observed ${PARQUET_COUNT} parquet files (informational only)"
+          python - <<'PYEOF'
+          import os
+          import sys
+          from pathlib import Path
 
-          # List canonical files at root level (if they exist)
-          echo "=== Canonical Files (Root Level) ==="
-          ls -lh fantasy_football_data/{player,matchup,draft,transactions,schedule}.parquet 2>/dev/null || echo "  (No canonical files at root yet - normal during staging)"
+          import duckdb
 
-          # List all parquet files found (first 20 for brevity)
-          echo ""
-          echo "=== All Parquet Files (First 20) ==="
-          find fantasy_football_data -name "*.parquet" -type f -exec ls -lh {} \; | head -20
+          db_path = Path(os.environ["LOCAL_DB"])
+          required = ["league_settings", "matchup", "player_fantasy", "draft", "transactions", "schedule"]
 
-          # Count files by subdirectory
-          echo ""
-          echo "=== Files by Directory ==="
-          for dir in fantasy_football_data/*/; do
-            if [ -d "$dir" ]; then
-              count=$(find "$dir" -name "*.parquet" -type f | wc -l)
-              if [ "$count" -gt 0 ]; then
-                echo "  $(basename "$dir"): ${count} files"
-              fi
-            fi
-          done
+          if not db_path.exists():
+              print(f"ERROR: Local DuckDB not found: {db_path}")
+              sys.exit(1)
 
-          echo "file_count=${PARQUET_COUNT}" >> $GITHUB_OUTPUT
+          conn = duckdb.connect(str(db_path), read_only=True)
+          existing = {
+              row[0]
+              for row in conn.execute(
+                  "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
+              ).fetchall()
+          }
+          missing = [table for table in required if table not in existing]
+
+          print(f"Local DuckDB: {db_path}")
+          if missing:
+              print("ERROR: Missing canonical tables: " + ", ".join(missing))
+              sys.exit(1)
+
+          print("Canonical table row counts:")
+          for table in required:
+              count = conn.execute(f"SELECT COUNT(*) FROM public.{table}").fetchone()[0]
+              print(f"  {table}: {count}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"local_db_path={db_path.as_posix()}\n")
+              fh.write(f"table_count={len(required)}\n")
+              fh.write(f"parquet_count={os.environ['PARQUET_COUNT']}\n")
+          PYEOF
 
       # ==================== CONSOLIDATE LEAGUE SETTINGS ====================
       - name: Consolidate league settings
@@ -895,7 +910,8 @@ jobs:
               "league_id": "${{ steps.parse.outputs.league_id }}",
               "season": "${{ steps.parse.outputs.season }}",
               "motherduck_database": "${{ steps.parse.outputs.database_name }}",
-              "parquet_file_count": ${{ steps.verify.outputs.file_count }},
+              "local_duckdb_path": "${{ steps.verify.outputs.local_db_path }}",
+              "verified_table_count": ${{ steps.verify.outputs.table_count }},
               "import_mode": "${{ steps.parse.outputs.import_mode }}",
               "created_at": os.popen('date -Iseconds').read().strip(),
               "workflow_run_id": "${{ github.run_id }}",
@@ -942,7 +958,8 @@ jobs:
 
           if [ "${{ steps.import.outputs.exit_code }}" == "0" ]; then
             echo "## Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
-            echo "- Parquet files: ${{ steps.verify.outputs.file_count }}" >> $GITHUB_STEP_SUMMARY
+            echo "- Local DuckDB: \`${{ steps.verify.outputs.local_db_path }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- Canonical tables verified: ${{ steps.verify.outputs.table_count }}" >> $GITHUB_STEP_SUMMARY
             echo "- Import completed successfully" >> $GITHUB_STEP_SUMMARY
           else
             echo "## Status: FAILED" >> $GITHUB_STEP_SUMMARY
