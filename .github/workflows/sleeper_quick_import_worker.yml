@@ -1,7 +1,7 @@
 name: Sleeper Quick Import Worker (Current Year Only)
 
 # This workflow imports ONLY the current year for fast startup (~5 min).
-# After completion, it triggers sleeper_full_import_worker.yml to import historical years.
+# Self-contained: fetch → transforms → enrichments → sims → aggregations → upload.
 # Called from: Streamlit UI via trigger_import_workflow.py
 
 on:
@@ -65,6 +65,7 @@ jobs:
       - name: Create virtualenv
         if: steps.cache-venv.outputs.cache-hit != 'true'
         run: python -m venv .venv
+
       - name: Install dependencies
         run: |
           source .venv/bin/activate
@@ -330,7 +331,7 @@ jobs:
 
           # Run Sleeper import with detailed error capture
           # Always run in "quick" mode — the import script only knows quick vs full
-          # "quick_to_full" is handled by trigger-downstream (chains to full import after)
+          # "quick_to_full" is a routing concept handled at the workflow level
           SCRIPT_MODE="${{ steps.parse.outputs.import_mode }}"
           if [ "$SCRIPT_MODE" == "quick_to_full" ]; then
             SCRIPT_MODE="quick"
@@ -339,6 +340,7 @@ jobs:
           python sleeper_initial_import.py \
             --context ../sleeper_context.json \
             --import-mode ${SCRIPT_MODE} \
+            --skip-track-2-upload \
             2>&1 | tee ../import.log
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
@@ -370,15 +372,12 @@ jobs:
         if: steps.import.outputs.exit_code == '0'
         id: verify
         env:
-          DATA_DIR: fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}
           DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
         run: |
           source .venv/bin/activate
-          PARQUET_COUNT=$(find "$DATA_DIR" -name "*.parquet" -type f | wc -l)
-          LOCAL_DB="$DATA_DIR/${DATABASE_NAME}.duckdb"
-          export PARQUET_COUNT LOCAL_DB
-
-          echo "Observed ${PARQUET_COUNT} parquet files (informational only)"
+          LOCAL_DATA_DIR="fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}"
+          LOCAL_DB="$LOCAL_DATA_DIR/${{ steps.parse.outputs.database_name }}.duckdb"
+          export LOCAL_DB
 
           python - <<'PYEOF'
           import os
@@ -416,278 +415,74 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
               fh.write(f"local_db_path={db_path.as_posix()}\n")
               fh.write(f"table_count={len(required)}\n")
-              fh.write(f"parquet_count={os.environ['PARQUET_COUNT']}\n")
           PYEOF
 
-      # ==================== CONSOLIDATE LEAGUE SETTINGS ====================
-      - name: Consolidate league settings
+      # ==================== CALCULATE EXPECTED RECORDS ====================
+      - name: Calculate expected records
         if: steps.import.outputs.exit_code == '0'
-        run: |
-          source .venv/bin/activate
-          python - <<'PYEOF'
-          import json
-          import sys
-          from pathlib import Path
-          import pandas as pd
-
-          sys.path.insert(0, "fantasy_football_data_scripts")
-          from multi_league.core.canonical_settings import flatten_settings, get_schema_keys
-
-          data_dir = Path("fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}")
-          settings_dir = data_dir / "league_settings"
-
-          if not settings_dir.exists():
-              print("No league_settings directory")
-              exit(0)
-
-          settings_files = list(settings_dir.glob("league_settings_*.json"))
-          if not settings_files:
-              print("No settings files found")
-              exit(0)
-
-          rows = []
-          for sf in sorted(settings_files):
-              try:
-                  with open(sf, 'r', encoding='utf-8') as f:
-                      data = json.load(f)
-
-                  year = int(data.get('season') or data.get('year'))
-                  league_key = str(data.get('league_id') or '')
-                  flat = flatten_settings(data, platform='sleeper', year=year, league_key=league_key)
-                  rows.append({key: flat.get(key) for key in get_schema_keys()})
-              except Exception as e:
-                  print(f"Error reading {sf.name}: {e}")
-
-          if rows:
-              pd.DataFrame(rows).to_parquet(data_dir / "league_settings.parquet", index=False)
-              print(f"Created flat league_settings.parquet with {len(rows)} years")
-          PYEOF
-
-      # ==================== SAVE LEAGUE CONTEXT TO PARQUET ====================
-      - name: Save league context to parquet
-        if: steps.import.outputs.exit_code == '0'
-        run: |
-          source .venv/bin/activate
-          python - <<'PYEOF'
-          import json
-          import pandas as pd
-          from pathlib import Path
-          from datetime import datetime
-
-          data_dir = Path("fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}")
-
-          with open("sleeper_context.json") as f:
-              context = json.load(f)
-
-          now = datetime.now().isoformat()
-          # Get standings_weights for storing
-          standings_weights = context.get('standings_weights')
-          standings_weights_json = json.dumps(standings_weights) if standings_weights else None
-
-          row = {
-              'league_id': context.get('league_id'),
-              'league_name': context.get('league_name'),
-              'platform': 'sleeper',
-              'username': context.get('username'),
-              'start_year': context.get('start_year'),
-              'end_year': context.get('end_year'),
-              'num_teams': context.get('num_teams'),
-              'playoff_teams': context.get('playoff_teams'),
-              'bye_teams': context.get('bye_teams'),
-              'playoff_start_week': context.get('playoff_start_week'),
-              'uses_median_scoring': context.get('uses_median_scoring', False),
-              'standings_weights_json': standings_weights_json,
-              'league_ids_json': json.dumps(context.get('league_ids', {})),
-              'keeper_rules_json': json.dumps(context.get('keeper_rules')) if context.get('keeper_rules') else None,
-              'created_at': context.get('created_at') or now,
-              'updated_at': now,
-          }
-
-          pd.DataFrame([row]).to_parquet(data_dir / "league_context.parquet", index=False)
-          print("Saved league_context.parquet")
-          PYEOF
-
-      # ==================== VALIDATE CRITICAL TABLES ====================
-      # Note: Upload, SQL enrichments, and aggregation are already handled by the import pipeline
-      # (PHASE 4: Upload, PHASE 4.5: SQL Enrichments, PHASE 5: Aggregation)
-      - name: Validate critical tables
-        if: steps.import.outputs.exit_code == '0'
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
-          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
-        run: |
-          source .venv/bin/activate
-          echo "========================================"
-          echo "Validating critical tables in MotherDuck"
-          echo "========================================"
-
-          python - <<'PYEOF'
-          import duckdb
-          import os
-          import re
-          import sys
-
-          db_name = os.environ['DATABASE_NAME']
-          token = os.environ['MOTHERDUCK_TOKEN']
-
-          # Sanitize database name
-          db = re.sub(r'[^a-zA-Z0-9]+', '_', db_name.strip().lower()).strip('_')
-          if not db:
-              db = 'sleeper_league'
-          if db[0].isdigit():
-              db = 'l_' + db
-          db = db[:63]
-
-          required_tables = ['league_settings', 'matchup', 'player_fantasy']
-          optional_tables = ['draft', 'transactions', 'schedule']
-          failures = []
-
-          conn = duckdb.connect(f'md:?motherduck_token={token}')
-
-          print(f"Validating database: {db}")
-
-          for table in required_tables + optional_tables:
-              try:
-                  result = conn.execute(f'SELECT COUNT(*) FROM {db}.public.{table}').fetchone()
-                  count = result[0] if result else 0
-                  status = "OK" if count > 0 else "EMPTY"
-                  print(f"  {table}: {count:,} rows [{status}]")
-                  if table in required_tables and count == 0:
-                      failures.append(f"{table} is empty")
-              except Exception as e:
-                  print(f"  {table}: ERROR - {e}")
-                  if table in required_tables:
-                      failures.append(f"{table} query failed: {e}")
-
-          print("\nFlat league_settings contract:")
-          for col in ['num_teams', 'playoff_teams', 'playoff_start_week']:
-              try:
-                  count = conn.execute(
-                      f'SELECT COUNT(*) FROM {db}.public.league_settings WHERE "{col}" IS NOT NULL'
-                  ).fetchone()[0]
-                  print(f"  {col}: {count:,} populated rows")
-                  if count == 0:
-                      failures.append(f"league_settings.{col} is missing for all rows")
-              except Exception as e:
-                  print(f"  {col}: ERROR - {e}")
-                  failures.append(f"league_settings.{col} check failed: {e}")
-
-          try:
-              bye_count = conn.execute(
-                  f'SELECT COUNT(*) FROM {db}.public.league_settings WHERE "bye_teams" IS NOT NULL'
-              ).fetchone()[0]
-              print(f"  bye_teams: {bye_count:,} populated rows")
-              if bye_count == 0:
-                  print("  bye_teams: derived downstream from playoff_teams when omitted")
-          except Exception as e:
-              print(f"  bye_teams: ERROR - {e}")
-              failures.append(f"league_settings.bye_teams check failed: {e}")
-
-          print("\nPlatform consistency:")
-          platform_name = None
-          try:
-              platform_row = conn.execute(
-                  f"SELECT LOWER(TRIM(platform)) FROM {db}.public.league_settings "
-                  f"WHERE platform IS NOT NULL ORDER BY year DESC LIMIT 1"
-              ).fetchone()
-              if platform_row and platform_row[0]:
-                  platform_name = platform_row[0]
-                  print(f"  league_settings.platform: {platform_name}")
-          except Exception as e:
-              print(f"  league_settings.platform: ERROR - {e}")
-
-          if platform_name:
-              for table in ['matchup', 'player_fantasy', 'draft', 'transactions']:
-                  try:
-                      mismatches = conn.execute(
-                          f"SELECT COUNT(*) FROM {db}.public.{table} "
-                          f"WHERE platform IS NOT NULL AND LOWER(TRIM(platform)) != '{platform_name}'"
-                      ).fetchone()[0]
-                      print(f"  {table} platform mismatches: {mismatches:,}")
-                      if mismatches > 0:
-                          failures.append(f"{table} has {mismatches} rows with platform != {platform_name}")
-                  except Exception as e:
-                      print(f"  {table} platform mismatches: ERROR - {e}")
-
-          print("\nPlatform ID flow:")
-          try:
-              roster_total = conn.execute(f'SELECT COUNT(*) FROM {db}.public.player_fantasy').fetchone()[0]
-              if roster_total > 0:
-                  roster_with_ids = conn.execute(
-                      f"SELECT COUNT(*) FROM {db}.public.player_fantasy WHERE COALESCE(TRIM(sleeper_player_id), '') != ''"
-                  ).fetchone()[0]
-                  print(f"  player_fantasy sleeper_player_id: {roster_with_ids:,}/{roster_total:,}")
-                  if roster_with_ids == 0:
-                      failures.append('player_fantasy rows lost sleeper_player_id before upload')
-          except Exception as e:
-              print(f"  player_fantasy sleeper_player_id: ERROR - {e}")
-
-          try:
-              draft_total = conn.execute(f'SELECT COUNT(*) FROM {db}.public.draft').fetchone()[0]
-              if draft_total > 0:
-                  draft_with_ids = conn.execute(
-                      f"SELECT COUNT(*) FROM {db}.public.draft WHERE COALESCE(TRIM(sleeper_player_id), '') != ''"
-                  ).fetchone()[0]
-                  print(f"  draft sleeper_player_id: {draft_with_ids:,}/{draft_total:,}")
-                  if draft_with_ids == 0:
-                      failures.append('draft rows lost sleeper_player_id before upload')
-          except Exception as e:
-              print(f"  draft sleeper_player_id: ERROR - {e}")
-
-          try:
-              txn_total = conn.execute(
-                  f"SELECT COUNT(*) FROM {db}.public.transactions WHERE transaction_type != 'draft_pick_trade' AND player IS NOT NULL"
-              ).fetchone()[0]
-              if txn_total > 0:
-                  txn_with_ids = conn.execute(
-                      f"SELECT COUNT(*) FROM {db}.public.transactions WHERE transaction_type != 'draft_pick_trade' AND player IS NOT NULL AND COALESCE(TRIM(sleeper_player_id), '') != ''"
-                  ).fetchone()[0]
-                  print(f"  transactions sleeper_player_id: {txn_with_ids:,}/{txn_total:,}")
-                  if txn_with_ids == 0:
-                      failures.append('transaction rows lost sleeper_player_id before upload')
-          except Exception as e:
-              print(f"  transactions sleeper_player_id: ERROR - {e}")
-
-          conn.close()
-          print("\nValidation complete!")
-          if failures:
-              print("\nFAILURES:")
-              for failure in failures:
-                  print(f"  - {failure}")
-              sys.exit(1)
-          PYEOF
-
-      # ==================== CLEANUP DEPRECATED COLUMNS ====================
-      - name: Cleanup deprecated columns
-        if: steps.import.outputs.exit_code == '0'
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
-          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
-        run: |
-          source .venv/bin/activate
-          echo "Cleaning up deprecated columns..."
-          python -c "import os; import sys; sys.path.insert(0, '.'); from streamlit_helpers.database import drop_deprecated_columns; db=os.environ.get('DATABASE_NAME',''); tok=os.environ.get('MOTHERDUCK_TOKEN',''); dropped=drop_deprecated_columns(db,tok,dry_run=False) if db and tok else []; print(f'Dropped {len(dropped)} deprecated columns') if dropped else print('No deprecated columns to drop')"
-
-      # ==================== COMPUTE HOMEPAGE SUMMARY ====================
-      # Basic homepage summary after quick import (LAMAR only, no clutch yet)
-      - name: Compute homepage summary
-        if: steps.import.outputs.exit_code == '0' && env.IMPORT_PIPELINE_V2 != 'true'
         continue-on-error: true
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         run: |
-          source .venv/bin/activate
-          echo "Computing precomputed homepage summary tables..."
-          python fantasy_football_data_scripts/multi_league/transformations/aggregation/homepage_summary.py \
-            --context sleeper_context.json --upload || {
-            exit_code=$?
-            if [ "$exit_code" -eq 139 ]; then
-              echo "⚠️ DuckDB segfault on shutdown (exit 139) — data already uploaded, ignoring"
-            else
-              exit $exit_code
-            fi
-          }
-          echo "Homepage summary complete!"
+          cd fantasy_football_data_scripts
+          python -m multi_league.transformations.matchup.expected_record_v2 \
+            --db ${{ steps.parse.outputs.database_name }} \
+            --data-dir ${{ github.workspace }}/fantasy_football_data \
+            --n-sims 10000
+
+      # ==================== CALCULATE PLAYOFF ODDS ====================
+      - name: Calculate playoff odds
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          cd fantasy_football_data_scripts
+          python -m multi_league.transformations.matchup.playoff_odds_import \
+            --db ${{ steps.parse.outputs.database_name }} \
+            --data-dir ${{ github.workspace }}/fantasy_football_data \
+            --n-sims 10000
+
+      # ==================== RUN AGGREGATIONS ====================
+      - name: Run aggregations
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          cd fantasy_football_data_scripts
+          python -m multi_league.transformations.aggregation.aggregate_matchup_context \
+            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data
+          python -m multi_league.transformations.aggregation.aggregate_fantasy_context \
+            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data
+          python -m multi_league.transformations.aggregation.aggregate_draft_context \
+            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data
+          python -m multi_league.transformations.aggregation.aggregate_transaction_context \
+            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data
+          python -m multi_league.transformations.aggregation.aggregate_standings \
+            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data
+          python -m multi_league.transformations.aggregation.aggregate_simulations \
+            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data
+          python -m multi_league.transformations.aggregation.homepage_summary \
+            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data
+
+      # ==================== UPLOAD TO MOTHERDUCK ====================
+      - name: Upload to MotherDuck
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          cd fantasy_football_data_scripts
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from multi_league.core.local_db import LocalLeagueDB
+          db = LocalLeagueDB('${{ github.workspace }}/fantasy_football_data', '${{ steps.parse.outputs.database_name }}')
+          db.connect()
+          db.upload_to_motherduck('${{ steps.parse.outputs.database_name }}')
+          db.close()
+          print('Upload to MotherDuck complete')
+          "
 
       # ==================== UPDATE LEAGUE DATA WITH DISCOVERED IDS ====================
       # The import discovers year-specific league_ids which are critical for
@@ -732,20 +527,6 @@ jobs:
 
           print("Updated league_data_input.json with discovered league_ids")
           PYEOF
-
-      # ==================== TRIGGER DOWNSTREAM WORKFLOWS ====================
-      - name: Trigger downstream workflows
-        if: steps.import.outputs.exit_code == '0'
-        uses: ./.github/actions/trigger-downstream
-        with:
-          database_name: ${{ steps.parse.outputs.database_name }}
-          user_id: ${{ steps.parse.outputs.user_id }}
-          import_mode: ${{ steps.parse.outputs.import_mode }}
-          season: ${{ steps.parse.outputs.end_year }}
-          actual_start_year: ${{ steps.parse.outputs.start_year }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          n_sims: '10000'
-          platform: 'sleeper'
 
       # ==================== STORE SLEEPER LEAGUE INFO ====================
       - name: Store Sleeper league info
