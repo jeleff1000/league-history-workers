@@ -393,8 +393,6 @@ jobs:
             --db ${{ env.DB_NAME }} --data-dir ${{ env.DATA_DIR }}
           python -m multi_league.transformations.aggregation.aggregate_standings \
             --db ${{ env.DB_NAME }} --data-dir ${{ env.DATA_DIR }}
-          python -m multi_league.transformations.aggregation.aggregate_simulations \
-            --db ${{ env.DB_NAME }} --data-dir ${{ env.DATA_DIR }}
           python -m multi_league.transformations.aggregation.homepage_summary \
             --db ${{ env.DB_NAME }} --data-dir ${{ env.DATA_DIR }}
 

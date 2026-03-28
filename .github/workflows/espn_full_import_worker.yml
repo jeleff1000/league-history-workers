@@ -442,8 +442,6 @@ jobs:
             --db ${DB_NAME} --data-dir ${DATA_DIR}
           python -m multi_league.transformations.aggregation.aggregate_standings \
             --db ${DB_NAME} --data-dir ${DATA_DIR}
-          python -m multi_league.transformations.aggregation.aggregate_simulations \
-            --db ${DB_NAME} --data-dir ${DATA_DIR}
           python -m multi_league.transformations.aggregation.homepage_summary \
             --db ${DB_NAME} --data-dir ${DATA_DIR}
 

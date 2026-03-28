@@ -461,8 +461,6 @@ jobs:
             --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}
           python -m multi_league.transformations.aggregation.aggregate_standings \
             --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}
-          python -m multi_league.transformations.aggregation.aggregate_simulations \
-            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}
           python -m multi_league.transformations.aggregation.homepage_summary \
             --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}
 

@@ -649,24 +649,6 @@ jobs:
             echo "Standings aggregation failed (non-critical)"
           fi
 
-      # ==================== AGGREGATION: SIMULATIONS ====================
-      - name: Aggregate simulations
-        if: steps.import.outputs.exit_code == '0'
-        continue-on-error: true
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
-        working-directory: fantasy_football_data_scripts
-        run: |
-          python -m multi_league.transformations.aggregation.aggregate_simulations \
-            --db ${DB_NAME} \
-            --data-dir ${DATA_DIR} \
-            2>&1 | tee ../agg_simulations.log
-          if [ ${PIPESTATUS[0]} -eq 0 ]; then
-            echo "Simulations aggregation complete"
-          else
-            echo "Simulations aggregation failed (non-critical)"
-          fi
-
       # ==================== AGGREGATION: HOMEPAGE SUMMARY ====================
       - name: Aggregate homepage summary
         if: steps.import.outputs.exit_code == '0'
@@ -782,7 +764,6 @@ jobs:
             agg_transaction.log
             agg_fantasy.log
             agg_standings.log
-            agg_simulations.log
             agg_homepage.log
           retention-days: 30
 
@@ -802,7 +783,7 @@ jobs:
           echo "1. Quick import (current year) -> upload to MD (site usable)" >> $GITHUB_STEP_SUMMARY
           echo "2. Full import (all years) -> local only" >> $GITHUB_STEP_SUMMARY
           echo "3. Sims (expected record + playoff odds) -> local" >> $GITHUB_STEP_SUMMARY
-          echo "4. Aggregations (7 scripts) -> local" >> $GITHUB_STEP_SUMMARY
+          echo "4. Aggregations (6 scripts) -> local" >> $GITHUB_STEP_SUMMARY
           echo "5. Final upload -> replaces everything in MotherDuck" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
