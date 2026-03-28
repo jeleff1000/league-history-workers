@@ -1,0 +1,817 @@
+name: Yahoo Full Import Worker (Paid Tier)
+
+# Paid Yahoo import: runs quick import (uploads for fast site), then full historical
+# import + sims + aggregations locally, uploads final result to MotherDuck.
+# All on one runner — no trigger-downstream to playoff_odds_worker.
+
+on:
+  workflow_dispatch:
+    inputs:
+      league_data_b64:
+        description: 'Base64-encoded JSON with league configuration'
+        required: false
+        type: string
+      user_id:
+        description: 'Unique identifier for this user/import job'
+        required: true
+        type: string
+
+  repository_dispatch:
+    types: [yahoo_full_import]
+
+# Prevent multiple imports for the same user running simultaneously
+# If a new import is triggered while one is running, let the first one finish
+concurrency:
+  group: league-import-${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  import-league-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      PYTHONUNBUFFERED: 1
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        id: setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Cache Python virtualenv
+        uses: actions/cache@v5
+        id: cache-venv
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Create virtualenv
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: python -m venv .venv
+
+      - name: Install dependencies
+        run: |
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Activate virtualenv
+        run: echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
+
+      # ==================== PARSE LEAGUE DATA ====================
+      - name: Parse league data
+        id: parse
+        uses: ./.github/actions/parse-league-data
+        with:
+          league_data_b64: ${{ github.event.inputs.league_data_b64 || github.event.client_payload.league_data_b64 || '' }}
+          import_mode: 'full'
+          yahoo_client_id: ${{ secrets.YAHOO_CLIENT_ID }}
+          yahoo_client_secret: ${{ secrets.YAHOO_CLIENT_SECRET }}
+          motherduck_token: ${{ secrets.MOTHERDUCK_TOKEN }}
+
+      # ==================== COMPUTE DB_NAME AND DATA_DIR ====================
+      - name: Set DATA_DIR
+        id: dirs
+        run: |
+          DB_NAME="${{ steps.parse.outputs.database_name }}"
+          DATA_DIR="${{ github.workspace }}/fantasy_football_data"
+          echo "DB_NAME=${DB_NAME}" >> $GITHUB_ENV
+          echo "DATA_DIR=${DATA_DIR}" >> $GITHUB_ENV
+          echo "db_name=${DB_NAME}" >> $GITHUB_OUTPUT
+          echo "data_dir=${DATA_DIR}" >> $GITHUB_OUTPUT
+          echo "DB_NAME=${DB_NAME}  DATA_DIR=${DATA_DIR}"
+
+      # ==================== REFRESH OAUTH TOKEN ====================
+      - name: Refresh OAuth token
+        env:
+          YAHOO_CLIENT_ID: ${{ secrets.YAHOO_CLIENT_ID }}
+          YAHOO_CLIENT_SECRET: ${{ secrets.YAHOO_CLIENT_SECRET }}
+        run: |
+          echo "Refreshing OAuth token..."
+          python - <<'PYEOF'
+          import json
+          import os
+          import time
+          import requests
+
+          with open("oauth/Oauth.json", 'r') as f:
+              oauth_data = json.load(f)
+
+          refresh_token = oauth_data.get('refresh_token')
+          if not refresh_token:
+              print("No refresh_token found - will try with existing access_token")
+              exit(0)
+
+          consumer_key = os.environ.get('YAHOO_CLIENT_ID')
+          consumer_secret = os.environ.get('YAHOO_CLIENT_SECRET')
+
+          if not consumer_key or not consumer_secret:
+              print("Missing Yahoo credentials - cannot refresh token")
+              exit(0)
+
+          try:
+              response = requests.post(
+                  "https://api.login.yahoo.com/oauth2/get_token",
+                  data={
+                      'grant_type': 'refresh_token',
+                      'refresh_token': refresh_token,
+                      'client_id': consumer_key,
+                      'client_secret': consumer_secret,
+                  },
+                  headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                  timeout=30
+              )
+
+              if response.status_code == 200:
+                  new_tokens = response.json()
+                  oauth_data['access_token'] = new_tokens.get('access_token')
+                  oauth_data['refresh_token'] = new_tokens.get('refresh_token', refresh_token)
+                  oauth_data['token_time'] = time.time()
+                  oauth_data['expires_in'] = new_tokens.get('expires_in', 3600)
+
+                  with open("oauth/Oauth.json", 'w') as f:
+                      json.dump(oauth_data, f, indent=2)
+
+                  print(f"Token refreshed successfully!")
+              else:
+                  print(f"Token refresh failed: {response.status_code}")
+          except Exception as e:
+              print(f"Token refresh error: {e}")
+          PYEOF
+
+      # ==================== STORE CREDENTIALS (EARLY) ====================
+      # Store credentials immediately after token refresh so they're available
+      # for debugging even if the import fails downstream.
+      - name: Store credentials (early)
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
+          LEAGUE_ID: ${{ steps.parse.outputs.league_id }}
+          LEAGUE_NAME: ${{ steps.parse.outputs.league_name }}
+        run: |
+          if [ -z "$CREDENTIAL_ENCRYPTION_KEY" ]; then
+            echo "CREDENTIAL_ENCRYPTION_KEY not set - skipping"
+            exit 0
+          fi
+
+          python - <<'PYEOF'
+          import json
+          import sys
+          sys.path.insert(0, 'fantasy_football_data_scripts')
+
+          from multi_league.utils.credential_store import store_league_credentials
+          import os
+
+          with open("oauth/Oauth.json", 'r') as f:
+              oauth_data = json.load(f)
+
+          refresh_token = oauth_data.get('refresh_token')
+          if not refresh_token:
+              print("No refresh_token found - skipping early credential store")
+              exit(0)
+
+          store_league_credentials(
+              database_name=os.environ['DATABASE_NAME'],
+              refresh_token=refresh_token,
+              league_id=os.environ['LEAGUE_ID'],
+              league_name=os.environ['LEAGUE_NAME']
+          )
+          print("Credentials stored (early)")
+          PYEOF
+
+      # ==================== CREATE DATA DIRECTORIES ====================
+      - name: Create data directory
+        run: |
+          mkdir -p fantasy_football_data/{matchup_data,player_data,draft_data,transaction_data,schedule_data}
+
+      # ==================== CREATE LEAGUE CONTEXT (QUICK) ====================
+      # Quick import context: current year only, uploads to MD for fast site
+      - name: Create league context (quick)
+        run: |
+          python - <<'PYEOF'
+          import json
+          from pathlib import Path
+
+          with open("league_data_input.json") as f:
+              league_data = json.load(f)
+
+          oauth_file = Path("oauth/Oauth.json").resolve()
+
+          # Quick import: only current year
+          season = int(league_data.get('season', league_data.get('end_year')))
+
+          context = {
+              "league_id": league_data.get('league_id'),
+              "league_name": league_data.get('league_name'),
+              "oauth_file_path": str(oauth_file),
+              "game_code": league_data.get('game_code', 'nfl'),
+              "start_year": season,
+              "end_year": season,
+              "num_teams": int(league_data.get('num_teams', 10)),
+              "playoff_teams": int(league_data.get('playoff_teams', 6)),
+              "regular_season_weeks": int(league_data.get('regular_season_weeks', 14)),
+              "data_directory": str(Path("fantasy_football_data").resolve()),
+              "max_workers": 5,
+              "enable_caching": True,
+              "rate_limit_per_sec": 4.0,
+              "manager_name_overrides": league_data.get('manager_name_overrides', {}),
+              "keeper_rules": league_data.get('keeper_rules'),
+              "has_external_data": league_data.get('has_external_data', False),
+              "import_mode": "quick",
+              "motherduck_db_name": "${{ steps.parse.outputs.database_name }}",
+          }
+
+          # Pass through league_ids mapping (year -> league_key) for combined leagues
+          if league_data.get('league_ids'):
+              context['league_ids'] = league_data['league_ids']
+
+          with open("league_context_quick.json", 'w') as f:
+              json.dump(context, f, indent=2)
+
+          print(f"[QUICK CONTEXT] Created for year {season} (db: {context.get('motherduck_db_name', 'N/A')})")
+          PYEOF
+
+      # ==================== DROP ALL TABLES (CLEAN SLATE) ====================
+      # Quick import ALWAYS drops all tables first for a clean slate
+      - name: Drop all tables (clean slate)
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
+        run: |
+          echo "========================================"
+          echo "QUICK IMPORT: Dropping all tables (clean slate)"
+          echo "========================================"
+
+          python - <<'PYEOF'
+          import os
+          import re
+          import duckdb
+
+          token = os.environ.get('MOTHERDUCK_TOKEN')
+          if not token:
+              print("No MotherDuck token, skipping table drop")
+              exit(0)
+
+          db_name = os.environ.get('DATABASE_NAME', '')
+          if not db_name:
+              print("No database name, skipping table drop")
+              exit(0)
+
+          # Sanitize database name
+          db = re.sub(r'[^a-zA-Z0-9]+', '_', db_name.strip().lower()).strip('_')
+          if not db:
+              db = 'db'
+          if db[0].isdigit():
+              db = 'l_' + db
+          db = db[:63]
+
+          print(f"Connecting to database: {db}")
+
+          # Ensure database exists
+          try:
+              setup_con = duckdb.connect(f"md:?motherduck_token={token}")
+              setup_con.execute(f"CREATE DATABASE IF NOT EXISTS {db}")
+              setup_con.close()
+          except Exception as e:
+              print(f"Database setup: {e}")
+
+          try:
+              con = duckdb.connect(f"md:{db}?motherduck_token={token}")
+              con.execute("CREATE SCHEMA IF NOT EXISTS public")
+
+              # Drop views first (they depend on tables) - filter by THIS database only
+              existing_views = con.execute("""
+                  SELECT table_name FROM information_schema.tables
+                  WHERE table_catalog = ? AND table_schema = 'public' AND table_type = 'VIEW'
+              """, [db]).fetchall()
+              for (view_name,) in existing_views:
+                  con.execute(f"DROP VIEW IF EXISTS public.{view_name}")
+              if existing_views:
+                  print(f"  Dropped {len(existing_views)} views")
+
+              # Drop all tables in public schema only - filter by THIS database only
+              existing_tables = con.execute("""
+                  SELECT table_name FROM information_schema.tables
+                  WHERE table_catalog = ? AND table_schema = 'public' AND table_type = 'BASE TABLE'
+              """, [db]).fetchall()
+              for (table_name,) in existing_tables:
+                  con.execute(f"DROP TABLE IF EXISTS public.{table_name}")
+
+              print(f"  Dropped {len(existing_tables)} tables from public schema")
+              con.close()
+          except Exception as e:
+              print(f"Could not drop tables: {e}")
+          PYEOF
+
+      # ==================== RUN QUICK IMPORT ====================
+      # Quick import uploads to MotherDuck so the site becomes usable immediately
+      - name: Run quick import (current year, uploads to MD)
+        id: quick_import
+        env:
+          AUTO_CONFIRM: "1"
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          echo "========================================"
+          echo "QUICK IMPORT: ${{ steps.parse.outputs.league_name }}"
+          echo "Year: ${{ steps.parse.outputs.season }}"
+          echo "========================================"
+
+          set +e
+          python initial_import_v3.py --context ../league_context_quick.json --quick 2>&1 | tee ../quick_import.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+
+          echo "exit_code=${EXIT_CODE}" >> $GITHUB_OUTPUT
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "Quick import failed with exit code ${EXIT_CODE}"
+            tail -100 ../quick_import.log
+            exit $EXIT_CODE
+          fi
+
+          echo "Quick import completed — site is now usable"
+
+      # ==================== REFRESH OAUTH TOKEN (BEFORE FULL IMPORT) ====================
+      # Yahoo OAuth tokens expire in ~60 min. Quick import may have used 5-15 min.
+      # Refresh again before the full import to ensure a fresh token for the long run.
+      - name: Refresh OAuth token (pre-full import)
+        if: steps.quick_import.outputs.exit_code == '0'
+        env:
+          YAHOO_CLIENT_ID: ${{ secrets.YAHOO_CLIENT_ID }}
+          YAHOO_CLIENT_SECRET: ${{ secrets.YAHOO_CLIENT_SECRET }}
+        run: |
+          echo "Refreshing OAuth token before full import..."
+          python - <<'PYEOF'
+          import json
+          import os
+          import time
+          import requests
+
+          with open("oauth/Oauth.json", 'r') as f:
+              oauth_data = json.load(f)
+
+          refresh_token = oauth_data.get('refresh_token')
+          if not refresh_token:
+              print("No refresh_token found - continuing with existing token")
+              exit(0)
+
+          consumer_key = os.environ.get('YAHOO_CLIENT_ID')
+          consumer_secret = os.environ.get('YAHOO_CLIENT_SECRET')
+
+          if not consumer_key or not consumer_secret:
+              print("Missing Yahoo credentials - continuing with existing token")
+              exit(0)
+
+          try:
+              response = requests.post(
+                  "https://api.login.yahoo.com/oauth2/get_token",
+                  data={
+                      'grant_type': 'refresh_token',
+                      'refresh_token': refresh_token,
+                      'client_id': consumer_key,
+                      'client_secret': consumer_secret,
+                  },
+                  headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                  timeout=30
+              )
+
+              if response.status_code == 200:
+                  new_tokens = response.json()
+                  oauth_data['access_token'] = new_tokens.get('access_token')
+                  oauth_data['refresh_token'] = new_tokens.get('refresh_token', refresh_token)
+                  oauth_data['token_time'] = time.time()
+                  oauth_data['expires_in'] = new_tokens.get('expires_in', 3600)
+
+                  with open("oauth/Oauth.json", 'w') as f:
+                      json.dump(oauth_data, f, indent=2)
+
+                  print("Token refreshed successfully (pre-full import)")
+              else:
+                  print(f"Token refresh failed: {response.status_code} - continuing with existing token")
+          except Exception as e:
+              print(f"Token refresh error: {e} - continuing with existing token")
+          PYEOF
+
+      # ==================== CREATE LEAGUE CONTEXT (FULL) ====================
+      - name: Create league context (full)
+        if: steps.quick_import.outputs.exit_code == '0'
+        run: |
+          python - <<'PYEOF'
+          import json
+          import os
+          from pathlib import Path
+
+          with open("league_data_input.json") as f:
+              league_data = json.load(f)
+
+          oauth_file = Path("oauth/Oauth.json").resolve()
+
+          # Full import: all historical years
+          if not league_data.get('start_year'):
+              print("[ERROR] start_year is required in league_data")
+              exit(1)
+
+          start_year = int(league_data.get('start_year'))
+          end_year = int(league_data.get('season', league_data.get('end_year')))
+
+          actual_start_year = league_data.get('actual_start_year', start_year)
+
+          print(f"[FULL IMPORT] Importing years: {start_year}-{end_year}")
+          if actual_start_year != start_year:
+              print(f"[FULL IMPORT] Including staging data from: {actual_start_year}")
+
+          context = {
+              "league_id": league_data.get('league_id'),
+              "league_name": league_data.get('league_name'),
+              "oauth_file_path": str(oauth_file),
+              "game_code": league_data.get('game_code', 'nfl'),
+              "start_year": start_year,
+              "end_year": end_year,
+              "num_teams": int(league_data.get('num_teams', 10)),
+              "playoff_teams": int(league_data.get('playoff_teams', 6)),
+              "regular_season_weeks": int(league_data.get('regular_season_weeks', 14)),
+              "data_directory": str(Path("fantasy_football_data").resolve()),
+              "max_workers": 5,
+              "enable_caching": True,
+              "rate_limit_per_sec": 4.0,
+              "manager_name_overrides": league_data.get('manager_name_overrides', {}),
+              "keeper_rules": league_data.get('keeper_rules'),
+              "has_external_data": league_data.get('has_external_data', False),
+              "import_mode": "full",
+              "motherduck_db_name": "${{ steps.parse.outputs.database_name }}",
+          }
+
+          # Pass through league_ids mapping (year -> league_key) for combined leagues
+          if league_data.get('league_ids'):
+              context['league_ids'] = league_data['league_ids']
+              print(f"[FULL IMPORT] league_ids mapping: {len(context['league_ids'])} years")
+
+          with open("league_context.json", 'w') as f:
+              json.dump(context, f, indent=2)
+
+          print(f"League context created: {start_year}-{end_year} (mode: full, db: {context.get('motherduck_db_name', 'N/A')})")
+          PYEOF
+
+      # ==================== RUN FULL IMPORT (LOCAL ONLY) ====================
+      - name: Run full import (historical, local only)
+        if: steps.quick_import.outputs.exit_code == '0'
+        id: import
+        env:
+          AUTO_CONFIRM: "1"
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          echo "========================================"
+          echo "FULL IMPORT: ${{ steps.parse.outputs.league_name }}"
+          echo "Years: ${{ steps.parse.outputs.start_year }}-${{ steps.parse.outputs.season }}"
+          echo "Mode: local only (--skip-track-2-upload)"
+          echo "========================================"
+
+          set +e
+          python initial_import_v3.py \
+            --context ../league_context.json \
+            --skip-track-2-upload \
+            2>&1 | tee ../import.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+
+          echo "exit_code=${EXIT_CODE}" >> $GITHUB_OUTPUT
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo "========================================"
+            echo "FULL IMPORT FAILED (exit code ${EXIT_CODE})"
+            echo "========================================"
+            echo ""
+
+            echo "=== LAST 300 LINES OF IMPORT LOG ==="
+            tail -300 ../import.log
+
+            echo "=== SEARCHING FOR ERRORS IN LOG ==="
+            grep -i "error\|exception\|traceback\|failed" ../import.log | head -50 || echo "No obvious errors found"
+
+            exit $EXIT_CODE
+          fi
+
+          echo "Full import completed successfully (local only)"
+
+      # ==================== EXPECTED RECORD CALCULATOR ====================
+      - name: Run expected record calculator
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          echo "========================================"
+          echo "Running Expected Record Calculator"
+          echo "========================================"
+
+          python -m multi_league.transformations.matchup.expected_record_v2 \
+            --db ${DB_NAME} \
+            --data-dir ${DATA_DIR} \
+            --n-sims 10000 \
+            2>&1 | tee ../expected_record.log
+
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "Expected record calculation complete"
+          else
+            echo "Expected record calculation failed (non-critical, continuing)"
+          fi
+
+      # ==================== PLAYOFF ODDS CALCULATOR ====================
+      - name: Run playoff odds calculator
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          echo "========================================"
+          echo "Running Playoff Odds Calculator"
+          echo "========================================"
+
+          python -m multi_league.transformations.matchup.playoff_odds_import \
+            --db ${DB_NAME} \
+            --data-dir ${DATA_DIR} \
+            --n-sims 10000 \
+            2>&1 | tee ../playoff_odds.log
+
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "Playoff odds calculation complete"
+          else
+            echo "Playoff odds calculation failed (non-critical, continuing)"
+          fi
+
+      # ==================== AGGREGATION: MATCHUP CONTEXT ====================
+      - name: Aggregate matchup context
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          python -m multi_league.transformations.aggregation.aggregate_matchup_context \
+            --db ${DB_NAME} \
+            --data-dir ${DATA_DIR} \
+            2>&1 | tee ../agg_matchup.log
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "Matchup aggregation complete"
+          else
+            echo "Matchup aggregation failed (non-critical)"
+          fi
+
+      # ==================== AGGREGATION: DRAFT CONTEXT ====================
+      - name: Aggregate draft context
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          python -m multi_league.transformations.aggregation.aggregate_draft_context \
+            --db ${DB_NAME} \
+            --data-dir ${DATA_DIR} \
+            2>&1 | tee ../agg_draft.log
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "Draft aggregation complete"
+          else
+            echo "Draft aggregation failed (non-critical)"
+          fi
+
+      # ==================== AGGREGATION: TRANSACTION CONTEXT ====================
+      - name: Aggregate transaction context
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          python -m multi_league.transformations.aggregation.aggregate_transaction_context \
+            --db ${DB_NAME} \
+            --data-dir ${DATA_DIR} \
+            2>&1 | tee ../agg_transaction.log
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "Transaction aggregation complete"
+          else
+            echo "Transaction aggregation failed (non-critical)"
+          fi
+
+      # ==================== AGGREGATION: FANTASY CONTEXT ====================
+      - name: Aggregate fantasy context
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          python -m multi_league.transformations.aggregation.aggregate_fantasy_context \
+            --db ${DB_NAME} \
+            --data-dir ${DATA_DIR} \
+            2>&1 | tee ../agg_fantasy.log
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "Fantasy context aggregation complete"
+          else
+            echo "Fantasy context aggregation failed (non-critical)"
+          fi
+
+      # ==================== AGGREGATION: STANDINGS ====================
+      - name: Aggregate standings
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          python -m multi_league.transformations.aggregation.aggregate_standings \
+            --db ${DB_NAME} \
+            --data-dir ${DATA_DIR} \
+            2>&1 | tee ../agg_standings.log
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "Standings aggregation complete"
+          else
+            echo "Standings aggregation failed (non-critical)"
+          fi
+
+      # ==================== AGGREGATION: SIMULATIONS ====================
+      - name: Aggregate simulations
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          python -m multi_league.transformations.aggregation.aggregate_simulations \
+            --db ${DB_NAME} \
+            --data-dir ${DATA_DIR} \
+            2>&1 | tee ../agg_simulations.log
+          if [ ${PIPESTATUS[0]} -eq 0 ]; then
+            echo "Simulations aggregation complete"
+          else
+            echo "Simulations aggregation failed (non-critical)"
+          fi
+
+      # ==================== AGGREGATION: HOMEPAGE SUMMARY ====================
+      - name: Aggregate homepage summary
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          python -m multi_league.transformations.aggregation.homepage_summary \
+            --db ${DB_NAME} \
+            --data-dir ${DATA_DIR} \
+            2>&1 | tee ../agg_homepage.log
+
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 139 ]; then
+            echo "Homepage summary complete"
+          else
+            echo "Homepage summary failed (non-critical)"
+          fi
+
+      # ==================== FINAL UPLOAD TO MOTHERDUCK ====================
+      # Upload all local tables (core + aggregation + sims) to MotherDuck.
+      # This replaces the quick import data with the full historical dataset.
+      - name: Upload to MotherDuck (final)
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          echo "========================================"
+          echo "Uploading all tables to MotherDuck"
+          echo "Database: ${DB_NAME}"
+          echo "Data dir: ${DATA_DIR}"
+          echo "========================================"
+
+          python - <<'PYEOF'
+          import sys
+          import os
+          sys.path.insert(0, 'fantasy_football_data_scripts')
+
+          from multi_league.core.local_db import LocalLeagueDB
+
+          data_dir = os.environ['DATA_DIR']
+          db_name = os.environ['DB_NAME']
+
+          print(f"[UPLOAD] Opening local DB: {data_dir}/{db_name}.duckdb")
+          db = LocalLeagueDB(data_dir, db_name)
+          db.connect()
+
+          print(f"[UPLOAD] Uploading to MotherDuck database: {db_name}")
+          db.upload_to_motherduck(db_name)
+
+          db.close()
+          print("[UPLOAD] Final upload complete")
+          PYEOF
+
+      # ==================== STORE CREDENTIALS ====================
+      # Always store credentials, even if import fails — they're needed for
+      # future re-imports and weekly updates.
+      - name: Store credentials for weekly updates
+        if: always()
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
+          LEAGUE_ID: ${{ steps.parse.outputs.league_id }}
+          LEAGUE_NAME: ${{ steps.parse.outputs.league_name }}
+        run: |
+          if [ -z "$CREDENTIAL_ENCRYPTION_KEY" ]; then
+            echo "CREDENTIAL_ENCRYPTION_KEY not set - weekly updates will require manual auth"
+            exit 0
+          fi
+
+          python - <<'PYEOF'
+          import json
+          import sys
+          sys.path.insert(0, 'fantasy_football_data_scripts')
+
+          from multi_league.utils.credential_store import store_league_credentials
+          import os
+
+          with open("oauth/Oauth.json", 'r') as f:
+              oauth_data = json.load(f)
+
+          refresh_token = oauth_data.get('refresh_token')
+          if not refresh_token:
+              print("No refresh_token - weekly updates may not work")
+              exit(0)
+
+          success = store_league_credentials(
+              database_name=os.environ['DATABASE_NAME'],
+              refresh_token=refresh_token,
+              league_id=os.environ['LEAGUE_ID'],
+              league_name=os.environ['LEAGUE_NAME']
+          )
+
+          if success:
+              print(f"Credentials stored - weekly updates enabled")
+          PYEOF
+
+      # ==================== UPLOAD ARTIFACTS ====================
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: league-import-${{ steps.parse.outputs.user_id }}
+          path: |
+            quick_import.log
+            import.log
+            expected_record.log
+            playoff_odds.log
+            agg_matchup.log
+            agg_draft.log
+            agg_transaction.log
+            agg_fantasy.log
+            agg_standings.log
+            agg_simulations.log
+            agg_homepage.log
+          retention-days: 30
+
+      # ==================== WORKFLOW SUMMARY ====================
+      - name: Create workflow summary
+        if: always()
+        run: |
+          echo "# Yahoo Full Import Summary (Paid Tier)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## League Information" >> $GITHUB_STEP_SUMMARY
+          echo "- **League**: ${{ steps.parse.outputs.league_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Season**: ${{ steps.parse.outputs.season }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Years**: ${{ steps.parse.outputs.start_year }}-${{ steps.parse.outputs.season }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Database**: \`${{ steps.parse.outputs.database_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Pipeline" >> $GITHUB_STEP_SUMMARY
+          echo "1. Quick import (current year) -> upload to MD (site usable)" >> $GITHUB_STEP_SUMMARY
+          echo "2. Full import (all years) -> local only" >> $GITHUB_STEP_SUMMARY
+          echo "3. Sims (expected record + playoff odds) -> local" >> $GITHUB_STEP_SUMMARY
+          echo "4. Aggregations (7 scripts) -> local" >> $GITHUB_STEP_SUMMARY
+          echo "5. Final upload -> replaces everything in MotherDuck" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.quick_import.outputs.exit_code }}" != "0" ]; then
+            echo "## Status: FAILED (quick import)" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.import.outputs.exit_code }}" != "0" ]; then
+            echo "## Status: FAILED (full import)" >> $GITHUB_STEP_SUMMARY
+            echo "Quick import succeeded - site has current year data" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
+            echo "All steps completed. Full historical data uploaded to MotherDuck." >> $GITHUB_STEP_SUMMARY
+          fi

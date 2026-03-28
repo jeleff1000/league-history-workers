@@ -199,7 +199,7 @@ runs:
               elif [ "${PLATFORM}" == "espn" ]; then
                 FULL_WORKFLOW="espn_full_import_worker.yml"
               else
-                FULL_WORKFLOW="full_import_worker.yml"
+                FULL_WORKFLOW="yahoo_full_import_worker.yml"
               fi
               echo "Using workflow: ${FULL_WORKFLOW}"
 
