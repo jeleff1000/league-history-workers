@@ -167,6 +167,53 @@ jobs:
           USER_ID: ${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
 
+      # ==================== RETRIEVE STORED COOKIES (if not in payload) ====================
+      - name: Retrieve ESPN cookies from MotherDuck (fallback)
+        if: steps.parse.outputs.database_name != ''
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+        run: |
+          # Check if cookies were provided in the payload
+          if [ -s .espn_s2 ] && [ "$(cat .espn_s2 | tr -d '[:space:]')" != "" ]; then
+            echo "ESPN cookies provided in payload — skipping MotherDuck lookup"
+            exit 0
+          fi
+
+          echo "No ESPN cookies in payload — retrieving from MotherDuck..."
+          python - <<'PYEOF'
+          import duckdb, os, sys
+          from cryptography.fernet import Fernet
+
+          db_name = "${{ steps.parse.outputs.database_name }}"
+          token = os.environ['MOTHERDUCK_TOKEN']
+          enc_key = os.environ.get('CREDENTIAL_ENCRYPTION_KEY', '')
+          if not enc_key:
+              print("WARNING: CREDENTIAL_ENCRYPTION_KEY not set — cannot decrypt stored cookies")
+              sys.exit(0)
+
+          conn = duckdb.connect(f"md:?motherduck_token={token}")
+          result = conn.execute("""
+              SELECT encrypted_espn_s2, encrypted_swid
+              FROM ___ops.espn_leagues
+              WHERE database_name = ?
+          """, [db_name]).fetchone()
+
+          if not result or not result[0]:
+              print(f"No stored cookies for {db_name} — league may be public")
+              sys.exit(0)
+
+          f = Fernet(enc_key.encode())
+          espn_s2 = f.decrypt(result[0].encode()).decode()
+          swid = f.decrypt(result[1].encode()).decode()
+
+          with open(".espn_s2", "w") as fh:
+              fh.write(espn_s2)
+          with open(".espn_swid", "w") as fh:
+              fh.write(swid)
+          print(f"Retrieved and decrypted ESPN cookies for {db_name}")
+          PYEOF
+
       # ==================== SET DATA_DIR AND DB_NAME ====================
       - name: Set DATA_DIR and DB_NAME
         id: dirs
