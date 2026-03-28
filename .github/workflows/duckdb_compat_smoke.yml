@@ -1,0 +1,169 @@
+name: DuckDB Compatibility Smoke
+
+# Manual repro workflow for MotherDuck + DuckDB client version issues.
+# Purpose: compare a known-good DuckDB pin against a candidate version in the
+# same GitHub Actions environment where the segfault has been observed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      database_name:
+        description: "MotherDuck database name to target (e.g. kmffl)"
+        required: true
+        type: string
+      target:
+        description: "Script to run repeatedly"
+        required: true
+        default: "homepage_summary"
+        type: choice
+        options:
+          - homepage_summary
+          - aggregate_fantasy_context
+          - playoff_odds_import
+      iterations:
+        description: "How many times to run the target script in one job"
+        required: false
+        default: "5"
+        type: string
+      n_sims:
+        description: "Monte Carlo sims for playoff_odds_import only"
+        required: false
+        default: "1000"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: py${{ matrix.python-version }} / duckdb ${{ matrix.duckdb-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+        duckdb-version: ["1.4.4", "1.5.1"]
+
+    env:
+      PYTHONUNBUFFERED: 1
+      PYTHONFAULTHANDLER: 1
+      MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+      DATABASE_NAME: ${{ github.event.inputs.database_name }}
+      TARGET: ${{ github.event.inputs.target }}
+      ITERATIONS: ${{ github.event.inputs.iterations }}
+      N_SIMS: ${{ github.event.inputs.n_sims }}
+      DUCKDB_VERSION: ${{ matrix.duckdb-version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "requirements.txt"
+
+      - name: Install dependencies
+        run: |
+          uv pip install --system -r requirements.txt
+          uv pip install --system --reinstall "duckdb==${DUCKDB_VERSION}"
+
+      - name: Verify DuckDB version
+        run: |
+          python - <<'PYEOF'
+          import duckdb
+          print(f"DuckDB version: {duckdb.__version__}")
+          PYEOF
+
+      - name: Run compatibility smoke loop
+        id: smoke
+        working-directory: fantasy_football_data_scripts
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+
+          case "$TARGET" in
+            homepage_summary)
+              CMD="python -m multi_league.transformations.aggregation.homepage_summary --db ${DATABASE_NAME} --upload"
+              ;;
+            aggregate_fantasy_context)
+              CMD="python -m multi_league.transformations.aggregation.aggregate_fantasy_context --db ${DATABASE_NAME}"
+              ;;
+            playoff_odds_import)
+              CMD="python -m multi_league.transformations.matchup.playoff_odds_import --db ${DATABASE_NAME} --n-sims ${N_SIMS}"
+              ;;
+            *)
+              echo "Unknown target: $TARGET"
+              echo "exit_code=64" >> "$GITHUB_OUTPUT"
+              exit 64
+              ;;
+          esac
+
+          mkdir -p ../duckdb-smoke-logs
+
+          echo "Python: ${{ matrix.python-version }}" | tee ../duckdb-smoke-logs/meta.txt
+          echo "DuckDB: ${DUCKDB_VERSION}" | tee -a ../duckdb-smoke-logs/meta.txt
+          echo "Target: ${TARGET}" | tee -a ../duckdb-smoke-logs/meta.txt
+          echo "Database: ${DATABASE_NAME}" | tee -a ../duckdb-smoke-logs/meta.txt
+          echo "Iterations: ${ITERATIONS}" | tee -a ../duckdb-smoke-logs/meta.txt
+          echo "Command: ${CMD}" | tee -a ../duckdb-smoke-logs/meta.txt
+
+          EXIT_CODE=0
+          for i in $(seq 1 "${ITERATIONS}"); do
+            LOG="../duckdb-smoke-logs/run_${i}.log"
+            echo "==================================================" | tee -a "$LOG"
+            echo "Iteration ${i}/${ITERATIONS}" | tee -a "$LOG"
+            echo "==================================================" | tee -a "$LOG"
+
+            bash -lc "${CMD}" 2>&1 | tee -a "$LOG"
+            CMD_EXIT=${PIPESTATUS[0]}
+            echo "Exit code: ${CMD_EXIT}" | tee -a "$LOG"
+
+            if [ "${CMD_EXIT}" -ne 0 ]; then
+              EXIT_CODE=${CMD_EXIT}
+              echo "Failure detected on iteration ${i}" | tee -a ../duckdb-smoke-logs/meta.txt
+              break
+            fi
+          done
+
+          echo "exit_code=${EXIT_CODE}" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload smoke logs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: duckdb-smoke-py${{ matrix.python-version }}-duckdb-${{ matrix.duckdb-version }}
+          path: duckdb-smoke-logs/
+          retention-days: 14
+
+      - name: Write workflow summary
+        if: always()
+        run: |
+          echo "## DuckDB Smoke: py${{ matrix.python-version }} / duckdb ${{ matrix.duckdb-version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Target: \`${{ github.event.inputs.target }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Database: \`${{ github.event.inputs.database_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Iterations: \`${{ github.event.inputs.iterations }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Exit code: \`${{ steps.smoke.outputs.exit_code || 'unknown' }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ steps.smoke.outputs.exit_code }}" = "0" ]; then
+            echo "Result: success" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ steps.smoke.outputs.exit_code }}" = "139" ]; then
+            echo "Result: segfault-like failure (exit 139)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Result: non-zero failure" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Fail job on smoke failure
+        if: steps.smoke.outputs.exit_code != '0'
+        run: |
+          echo "Smoke test failed with exit code ${{ steps.smoke.outputs.exit_code }}"
+          exit 1
