@@ -163,7 +163,7 @@ jobs:
       - name: Set DB_NAME and DATA_DIR
         run: |
           echo "DB_NAME=${{ steps.parse.outputs.database_name }}" >> $GITHUB_ENV
-          echo "DATA_DIR=fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}" >> $GITHUB_ENV
+          echo "DATA_DIR=${{ github.workspace }}/fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}" >> $GITHUB_ENV
 
       # ==================== REGISTER LEAGUE (EARLY) ====================
       # Register league in MotherDuck immediately so it's tracked even if import fails.
