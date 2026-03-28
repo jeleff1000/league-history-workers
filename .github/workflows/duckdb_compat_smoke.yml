@@ -12,13 +12,14 @@ on:
         required: true
         type: string
       target:
-        description: "Script to run repeatedly"
+        description: "Script or probe to run repeatedly"
         required: true
         default: "homepage_summary"
         type: choice
         options:
           - homepage_summary
           - aggregate_fantasy_context
+          - aggregate_upload_probe
           - playoff_odds_import
       iterations:
         description: "How many times to run the target script in one job"
@@ -98,6 +99,9 @@ jobs:
               ;;
             aggregate_fantasy_context)
               CMD="python -m multi_league.transformations.aggregation.aggregate_fantasy_context --db ${DATABASE_NAME}"
+              ;;
+            aggregate_upload_probe)
+              CMD="python -m multi_league.validation.duckdb_compat_probe --db ${DATABASE_NAME}"
               ;;
             playoff_odds_import)
               CMD="python -m multi_league.transformations.matchup.playoff_odds_import --db ${DATABASE_NAME} --n-sims ${N_SIMS}"
