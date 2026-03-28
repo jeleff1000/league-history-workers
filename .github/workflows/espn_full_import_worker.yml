@@ -1,8 +1,8 @@
-name: ESPN Full Import Worker (All Years)
+name: ESPN Full Import Worker (Paid ESPN)
 
-# This workflow imports ALL years including current year to run complete transformations.
-# Quick import fetches raw data; full import runs transformations on the complete dataset.
-# Called from: trigger-downstream action after espn_quick_import_worker.yml completes.
+# Paid ESPN import: runs full historical import + sims + aggregations locally,
+# uploads final result to MotherDuck.
+# All on one runner — no trigger-downstream to playoff_odds_worker.
 
 on:
   workflow_dispatch:
@@ -40,9 +40,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Setup Python
         id: setup-python
@@ -61,6 +58,7 @@ jobs:
       - name: Create virtualenv
         if: steps.cache-venv.outputs.cache-hit != 'true'
         run: python -m venv .venv
+
       - name: Install dependencies
         run: |
           source .venv/bin/activate
@@ -164,6 +162,18 @@ jobs:
           USER_ID: ${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
 
+      # ==================== SET DB_NAME AND DATA_DIR ====================
+      - name: Set DB_NAME and DATA_DIR
+        id: dirs
+        run: |
+          DB_NAME="${{ steps.parse.outputs.database_name }}"
+          DATA_DIR="${{ github.workspace }}/fantasy_football_data/espn_${{ steps.parse.outputs.database_name }}"
+          echo "DB_NAME=${DB_NAME}" >> $GITHUB_ENV
+          echo "DATA_DIR=${DATA_DIR}" >> $GITHUB_ENV
+          echo "db_name=${DB_NAME}" >> $GITHUB_OUTPUT
+          echo "data_dir=${DATA_DIR}" >> $GITHUB_OUTPUT
+          echo "DB_NAME=${DB_NAME}  DATA_DIR=${DATA_DIR}"
+
       # ==================== REGISTER LEAGUE (EARLY) ====================
       # Register league in MotherDuck immediately so it's tracked even if import fails.
       - name: Register league (early)
@@ -205,10 +215,8 @@ jobs:
       # ==================== CREATE DATA DIRECTORY ====================
       - name: Create data directory
         run: |
-          DATA_DIR="fantasy_football_data/espn_${{ steps.parse.outputs.database_name }}"
-          mkdir -p "$DATA_DIR"/{league_settings,rosters,matchups,drafts,transactions,schedules,box_scores}
-          echo "data_directory=$DATA_DIR" >> $GITHUB_OUTPUT
-          echo "Created data directory: $DATA_DIR"
+          mkdir -p "${DATA_DIR}"/{league_settings,rosters,matchups,drafts,transactions,schedules,box_scores}
+          echo "Created data directory: ${DATA_DIR}"
         id: datadir
 
       # ==================== CREATE ESPN CONTEXT ====================
@@ -226,7 +234,7 @@ jobs:
               league_data = json.load(f)
 
           import_mode = 'full'  # ALWAYS full - this is the full import worker
-          data_dir = Path("fantasy_football_data/espn_${{ steps.parse.outputs.database_name }}").resolve()
+          data_dir = Path(os.environ['DATA_DIR']).resolve()
 
           # Read ESPN cookies from files
           espn_s2 = ''
@@ -309,12 +317,14 @@ jobs:
           echo "Starting ESPN FULL import for ${{ steps.parse.outputs.league_name }}"
           echo "League ID: ${{ steps.parse.outputs.espn_league_id }}"
           echo "Historical Years: ${{ steps.parse.outputs.start_year }}-${{ steps.parse.outputs.end_year }}"
+          echo "Mode: local only (--skip-track-2-upload)"
           echo "========================================"
 
           set +e
           python espn_initial_import.py \
             --context ../espn_context.json \
             --import-mode full \
+            --skip-track-2-upload \
             2>&1 | tee ../import.log
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
@@ -327,141 +337,76 @@ jobs:
             exit $EXIT_CODE
           fi
 
-          echo "ESPN full import completed successfully"
+          echo "ESPN full import completed successfully (local only)"
 
-      # ==================== VERIFY LOCAL DUCKDB ARTIFACTS ====================
-      - name: Verify local DuckDB artifacts
+      # ==================== CALCULATE EXPECTED RECORDS ====================
+      - name: Calculate expected records
         if: steps.import.outputs.exit_code == '0'
-        id: verify
-        env:
-          DATA_DIR: fantasy_football_data/espn_${{ steps.parse.outputs.database_name }}
-          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
-        run: |
-          source .venv/bin/activate
-          PARQUET_COUNT=$(find "$DATA_DIR" -name "*.parquet" -type f | wc -l)
-          LOCAL_DB="$DATA_DIR/${DATABASE_NAME}.duckdb"
-          export PARQUET_COUNT LOCAL_DB
-
-          echo "Observed ${PARQUET_COUNT} parquet files (informational only)"
-
-          python - <<'PYEOF'
-          import os
-          import sys
-          from pathlib import Path
-
-          import duckdb
-
-          db_path = Path(os.environ["LOCAL_DB"])
-          required = ["league_settings", "matchup", "player_fantasy", "draft", "transactions", "schedule"]
-
-          if not db_path.exists():
-              print(f"ERROR: Local DuckDB not found: {db_path}")
-              sys.exit(1)
-
-          conn = duckdb.connect(str(db_path), read_only=True)
-          existing = {
-              row[0]
-              for row in conn.execute(
-                  "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
-              ).fetchall()
-          }
-          missing = [table for table in required if table not in existing]
-
-          print(f"Local DuckDB: {db_path}")
-          if missing:
-              print("ERROR: Missing canonical tables: " + ", ".join(missing))
-              sys.exit(1)
-
-          print("Canonical table row counts:")
-          for table in required:
-              count = conn.execute(f"SELECT COUNT(*) FROM public.{table}").fetchone()[0]
-              print(f"  {table}: {count}")
-
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-              fh.write(f"local_db_path={db_path.as_posix()}\n")
-              fh.write(f"table_count={len(required)}\n")
-              fh.write(f"parquet_count={os.environ['PARQUET_COUNT']}\n")
-          PYEOF
-
-      # ==================== VALIDATE CRITICAL TABLES ====================
-      - name: Validate critical tables
-        if: steps.import.outputs.exit_code == '0'
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
-          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
-        run: |
-          source .venv/bin/activate
-          python - <<'PYEOF'
-          import duckdb
-          import os
-          import re
-
-          db_name = os.environ['DATABASE_NAME']
-          token = os.environ['MOTHERDUCK_TOKEN']
-          db = re.sub(r'[^a-zA-Z0-9]+', '_', db_name.strip().lower()).strip('_')
-          if not db:
-              db = 'espn_league'
-          if db[0].isdigit():
-              db = 'l_' + db
-          db = db[:63]
-
-          CRITICAL_TABLES = ['matchup', 'player_fantasy', 'draft', 'transactions', 'schedule']
-          conn = duckdb.connect(f'md:?motherduck_token={token}')
-          print(f"Validating database: {db}")
-          for table in CRITICAL_TABLES:
-              try:
-                  result = conn.execute(f'SELECT COUNT(*) FROM {db}.public.{table}').fetchone()
-                  count = result[0] if result else 0
-                  print(f"  {table}: {count:,} rows")
-              except Exception as e:
-                  print(f"  {table}: ERROR - {e}")
-          conn.close()
-          PYEOF
-
-      # ==================== CLEANUP DEPRECATED COLUMNS ====================
-      - name: Cleanup deprecated columns
-        if: steps.import.outputs.exit_code == '0'
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
-          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
-        run: |
-          source .venv/bin/activate
-          echo "Cleaning up deprecated columns..."
-          python -c "import os; import sys; sys.path.insert(0, '.'); from streamlit_helpers.database import drop_deprecated_columns; db=os.environ.get('DATABASE_NAME',''); tok=os.environ.get('MOTHERDUCK_TOKEN',''); dropped=drop_deprecated_columns(db,tok,dry_run=False) if db and tok else []; print(f'Dropped {len(dropped)} deprecated columns') if dropped else print('No deprecated columns to drop')"
-
-      # ==================== COMPUTE HOMEPAGE SUMMARY ====================
-      - name: Compute homepage summary
-        if: steps.import.outputs.exit_code == '0' && env.IMPORT_PIPELINE_V2 != 'true'
         continue-on-error: true
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         run: |
-          source .venv/bin/activate
-          echo "Computing precomputed homepage summary tables..."
-          python fantasy_football_data_scripts/multi_league/transformations/aggregation/homepage_summary.py \
-            --context espn_context.json --upload || {
-            exit_code=$?
-            if [ "$exit_code" -eq 139 ]; then
-              echo "⚠️ DuckDB segfault on shutdown (exit 139) — data already uploaded, ignoring"
-            else
-              exit $exit_code
-            fi
-          }
-          echo "Homepage summary complete!"
+          cd fantasy_football_data_scripts
+          python -m multi_league.transformations.matchup.expected_record_v2 \
+            --db ${DB_NAME} \
+            --data-dir ${DATA_DIR} \
+            --n-sims 10000
 
-      # ==================== TRIGGER PLAYOFF ODDS ====================
-      - name: Trigger playoff odds
+      # ==================== CALCULATE PLAYOFF ODDS ====================
+      - name: Calculate playoff odds
         if: steps.import.outputs.exit_code == '0'
-        uses: ./.github/actions/trigger-downstream
-        with:
-          database_name: ${{ steps.parse.outputs.database_name }}
-          user_id: ${{ steps.parse.outputs.user_id }}
-          import_mode: 'full'
-          season: ${{ steps.parse.outputs.end_year }}
-          actual_start_year: ${{ steps.parse.outputs.start_year }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          n_sims: '10000'
-          platform: 'espn'
+        continue-on-error: true
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          cd fantasy_football_data_scripts
+          python -m multi_league.transformations.matchup.playoff_odds_import \
+            --db ${DB_NAME} \
+            --data-dir ${DATA_DIR} \
+            --n-sims 10000
+
+      # ==================== RUN AGGREGATIONS ====================
+      - name: Run aggregations
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          cd fantasy_football_data_scripts
+          python -m multi_league.transformations.aggregation.aggregate_matchup_context \
+            --db ${DB_NAME} --data-dir ${DATA_DIR}
+          python -m multi_league.transformations.aggregation.aggregate_fantasy_context \
+            --db ${DB_NAME} --data-dir ${DATA_DIR}
+          python -m multi_league.transformations.aggregation.aggregate_draft_context \
+            --db ${DB_NAME} --data-dir ${DATA_DIR}
+          python -m multi_league.transformations.aggregation.aggregate_transaction_context \
+            --db ${DB_NAME} --data-dir ${DATA_DIR}
+          python -m multi_league.transformations.aggregation.aggregate_standings \
+            --db ${DB_NAME} --data-dir ${DATA_DIR}
+          python -m multi_league.transformations.aggregation.aggregate_simulations \
+            --db ${DB_NAME} --data-dir ${DATA_DIR}
+          python -m multi_league.transformations.aggregation.homepage_summary \
+            --db ${DB_NAME} --data-dir ${DATA_DIR}
+
+      # ==================== UPLOAD TO MOTHERDUCK ====================
+      - name: Upload to MotherDuck
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          cd fantasy_football_data_scripts
+          python - <<'PYEOF'
+          import os, sys
+          sys.path.insert(0, '.')
+          from multi_league.core.local_db import LocalLeagueDB
+          data_dir = os.environ['DATA_DIR']
+          db_name = os.environ['DB_NAME']
+          db = LocalLeagueDB(data_dir, db_name)
+          db.connect()
+          db.upload_to_motherduck(db_name)
+          db.close()
+          print('Upload to MotherDuck complete')
+          PYEOF
 
       # ==================== STORE ESPN LEAGUE INFO ====================
       - name: Store ESPN league info
