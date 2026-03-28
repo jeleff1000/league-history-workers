@@ -252,14 +252,23 @@ jobs:
           except FileNotFoundError:
               print("NOTE: ESPN cookie files not found (public league)")
 
-          store_espn_league(
-              espn_league_id=int(os.environ['ESPN_LEAGUE_ID']),
-              league_name=os.environ['LEAGUE_NAME'],
-              database_name=os.environ['DATABASE_NAME'],
-              espn_s2=espn_s2,
-              swid=swid
-          )
-          print("League registered (early)")
+          # Only store cookies if non-empty — don't overwrite existing encrypted cookies with blanks
+          if espn_s2 and swid:
+              store_espn_league(
+                  espn_league_id=int(os.environ['ESPN_LEAGUE_ID']),
+                  league_name=os.environ['LEAGUE_NAME'],
+                  database_name=os.environ['DATABASE_NAME'],
+                  espn_s2=espn_s2,
+                  swid=swid
+              )
+              print("League registered with cookies (early)")
+          else:
+              store_espn_league(
+                  espn_league_id=int(os.environ['ESPN_LEAGUE_ID']),
+                  league_name=os.environ['LEAGUE_NAME'],
+                  database_name=os.environ['DATABASE_NAME'],
+              )
+              print("League registered without cookies (early) — existing cookies preserved")
           PYEOF
 
       # ==================== CREATE DATA DIRECTORY ====================
