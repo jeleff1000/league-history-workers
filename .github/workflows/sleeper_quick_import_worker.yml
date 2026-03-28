@@ -427,7 +427,7 @@ jobs:
           cd fantasy_football_data_scripts
           python -m multi_league.transformations.matchup.expected_record_v2 \
             --db ${{ steps.parse.outputs.database_name }} \
-            --data-dir ${{ github.workspace }}/fantasy_football_data \
+            --data-dir ${{ github.workspace }}/fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }} \
             --n-sims 10000
 
       # ==================== CALCULATE PLAYOFF ODDS ====================
@@ -440,7 +440,7 @@ jobs:
           cd fantasy_football_data_scripts
           python -m multi_league.transformations.matchup.playoff_odds_import \
             --db ${{ steps.parse.outputs.database_name }} \
-            --data-dir ${{ github.workspace }}/fantasy_football_data \
+            --data-dir ${{ github.workspace }}/fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }} \
             --n-sims 10000
 
       # ==================== RUN AGGREGATIONS ====================
@@ -452,19 +452,19 @@ jobs:
         run: |
           cd fantasy_football_data_scripts
           python -m multi_league.transformations.aggregation.aggregate_matchup_context \
-            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data
+            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}
           python -m multi_league.transformations.aggregation.aggregate_fantasy_context \
-            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data
+            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}
           python -m multi_league.transformations.aggregation.aggregate_draft_context \
-            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data
+            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}
           python -m multi_league.transformations.aggregation.aggregate_transaction_context \
-            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data
+            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}
           python -m multi_league.transformations.aggregation.aggregate_standings \
-            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data
+            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}
           python -m multi_league.transformations.aggregation.aggregate_simulations \
-            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data
+            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}
           python -m multi_league.transformations.aggregation.homepage_summary \
-            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data
+            --db ${{ steps.parse.outputs.database_name }} --data-dir ${{ github.workspace }}/fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}
 
       # ==================== UPLOAD TO MOTHERDUCK ====================
       - name: Upload to MotherDuck
@@ -477,7 +477,7 @@ jobs:
           import sys
           sys.path.insert(0, '.')
           from multi_league.core.local_db import LocalLeagueDB
-          db = LocalLeagueDB('${{ github.workspace }}/fantasy_football_data', '${{ steps.parse.outputs.database_name }}')
+          db = LocalLeagueDB('${{ github.workspace }}/fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}', '${{ steps.parse.outputs.database_name }}')
           db.connect()
           db.upload_to_motherduck('${{ steps.parse.outputs.database_name }}')
           db.close()
