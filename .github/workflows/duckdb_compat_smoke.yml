@@ -42,6 +42,7 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         python-version: ["3.11", "3.12"]
         duckdb-version: ["1.4.4", "1.5.1"]
@@ -86,6 +87,31 @@ jobs:
           print(f"DuckDB version: {duckdb.__version__}")
           PYEOF
 
+      - name: Reset target output tables
+        if: github.event.inputs.target == 'homepage_summary'
+        run: |
+          python - <<'PYEOF'
+          import os
+          import duckdb
+
+          db = os.environ["DATABASE_NAME"]
+          token = os.environ["MOTHERDUCK_TOKEN"]
+          tables = [
+              "homepage_league_summary",
+              "homepage_manager_rankings",
+              "homepage_current_standings",
+              "homepage_top_rivalries",
+              "homepage_manager_profiles",
+          ]
+
+          conn = duckdb.connect(f"md:{db}?motherduck_token={token}")
+          try:
+              for table in tables:
+                  conn.execute(f"DROP TABLE IF EXISTS public.{table}")
+          finally:
+              conn.close()
+          PYEOF
+
       - name: Run compatibility smoke loop
         id: smoke
         working-directory: fantasy_football_data_scripts
@@ -101,7 +127,11 @@ jobs:
               CMD="python -m multi_league.transformations.aggregation.aggregate_fantasy_context --db ${DATABASE_NAME}"
               ;;
             aggregate_upload_probe)
-              CMD="python -m multi_league.validation.duckdb_compat_probe --db ${DATABASE_NAME}"
+              PY_TAG=$(printf '%s' "${{ matrix.python-version }}" | tr -cd '0-9')
+              DD_TAG=$(printf '%s' "${DUCKDB_VERSION}" | tr -cd '0-9')
+              RUN_DB="${DATABASE_NAME}_compat_p${PY_TAG}_d${DD_TAG}"
+              RUN_DB="${RUN_DB:0:63}"
+              CMD="python -m multi_league.validation.duckdb_compat_probe --db ${RUN_DB}"
               ;;
             playoff_odds_import)
               CMD="python -m multi_league.transformations.matchup.playoff_odds_import --db ${DATABASE_NAME} --n-sims ${N_SIMS}"
