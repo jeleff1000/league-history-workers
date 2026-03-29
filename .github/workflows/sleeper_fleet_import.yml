@@ -84,13 +84,13 @@ jobs:
           elif source == "test":
               # 7 Sleeper test leagues with correct IDs and actual start years
               leagues = [
-                  {"sleeper_league_id": "1253478574636138496", "database_name": "champions_branch_out", "start_year": 2021},
-                  {"sleeper_league_id": "1314686478772600832", "database_name": "degenerate_gamblers_football_league", "start_year": 2019},
-                  {"sleeper_league_id": "1209663934118768640", "database_name": "l_14_big_booms", "start_year": 2019},
-                  {"sleeper_league_id": "1194644814116040704", "database_name": "nyu_ffl", "start_year": 2018},
-                  {"sleeper_league_id": "1312076046484373504", "database_name": "playing_for_keeps_league", "start_year": 2021},
-                  {"sleeper_league_id": "1257088277819691008", "database_name": "the_real_ff_league", "start_year": 2024},
-                  {"sleeper_league_id": "1180216138503110656", "database_name": "zootown_dynasty", "start_year": 2023},
+                  {"sleeper_league_id": "1253478574636138496", "database_name": "champions_branch_out", "import_mode": "full"},
+                  {"sleeper_league_id": "1314686478772600832", "database_name": "degenerate_gamblers_football_league", "import_mode": "full"},
+                  {"sleeper_league_id": "1209663934118768640", "database_name": "l_14_big_booms", "import_mode": "full"},
+                  {"sleeper_league_id": "1194644814116040704", "database_name": "nyu_ffl", "import_mode": "full"},
+                  {"sleeper_league_id": "1312076046484373504", "database_name": "playing_for_keeps_league", "import_mode": "full"},
+                  {"sleeper_league_id": "1257088277819691008", "database_name": "the_real_ff_league", "import_mode": "full"},
+                  {"sleeper_league_id": "1180216138503110656", "database_name": "zootown_dynasty", "import_mode": "full"},
               ]
 
           elif source == "motherduck":
@@ -98,7 +98,7 @@ jobs:
               token = os.environ["MOTHERDUCK_TOKEN"]
               conn = duckdb.connect(f"md:?motherduck_token={token}")
               rows = conn.execute("""
-                  SELECT sleeper_league_id, database_name
+                  SELECT sleeper_league_id, database_name, import_mode
                   FROM ___ops.main.sleeper_leagues
                   ORDER BY database_name
               """).fetchall()
@@ -106,14 +106,13 @@ jobs:
 
               # Deduplicate by database_name, take the latest (highest numeric) league_id
               db_map = {}
-              for lid, db in rows:
+              for lid, db, mode in rows:
                   lid_int = int(lid)
                   if db not in db_map or lid_int > db_map[db]["lid_int"]:
-                      db_map[db] = {"lid_int": lid_int, "sleeper_league_id": lid, "database_name": db}
+                      db_map[db] = {"lid_int": lid_int, "sleeper_league_id": lid, "database_name": db, "import_mode": mode or "quick"}
 
-              # Use start_year=2017 for full discovery (the import traces previous_league_id)
               leagues = [
-                  {"sleeper_league_id": v["sleeper_league_id"], "database_name": v["database_name"], "start_year": 2017}
+                  {"sleeper_league_id": v["sleeper_league_id"], "database_name": v["database_name"], "import_mode": v["import_mode"]}
                   for v in sorted(db_map.values(), key=lambda x: x["database_name"])
               ]
           else:
@@ -124,8 +123,8 @@ jobs:
           for lg in leagues:
               assert lg.get("sleeper_league_id"), f"Missing sleeper_league_id: {lg}"
               assert lg.get("database_name"), f"Missing database_name: {lg}"
-              if "start_year" not in lg:
-                  lg["start_year"] = 2017  # default: let import discover
+              if "import_mode" not in lg:
+                  lg["import_mode"] = "quick"
 
           matrix = {"include": leagues}
 
@@ -156,7 +155,7 @@ jobs:
       PYTHONUNBUFFERED: 1
       DB_NAME: ${{ matrix.database_name }}
       SLEEPER_LEAGUE_ID: ${{ matrix.sleeper_league_id }}
-      START_YEAR: ${{ matrix.start_year }}
+      IMPORT_MODE: ${{ matrix.import_mode }}
       MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
 
     steps:
@@ -201,7 +200,7 @@ jobs:
           echo "========================================"
           echo "Importing: ${{ env.DB_NAME }}"
           echo "League ID: ${{ env.SLEEPER_LEAGUE_ID }}"
-          echo "Start year: ${{ env.START_YEAR }}"
+          echo "Import mode: ${{ env.IMPORT_MODE }}"
           echo "========================================"
 
           DATA_DIR="${{ github.workspace }}/fantasy_football_data/sleeper_${{ env.DB_NAME }}"
@@ -211,7 +210,7 @@ jobs:
           python sleeper_initial_import.py \
             --league-id ${{ env.SLEEPER_LEAGUE_ID }} \
             --data-dir "$DATA_DIR" \
-            --import-mode full \
+            --import-mode ${{ env.IMPORT_MODE }} \
             --skip-track-2-upload \
             2>&1 | tee ../import_${{ env.DB_NAME }}.log
           EXIT_CODE=${PIPESTATUS[0]}
