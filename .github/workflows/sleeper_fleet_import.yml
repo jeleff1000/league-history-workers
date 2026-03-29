@@ -134,7 +134,7 @@ jobs:
 
           print(f"Discovered {len(leagues)} leagues:")
           for lg in leagues:
-              print(f"  {lg['database_name']} (ID={lg['sleeper_league_id']}, start={lg['start_year']})")
+              print(f"  {lg['database_name']} (ID={lg['sleeper_league_id']}, mode={lg['import_mode']})")
           PYEOF
 
   # ================================================================
