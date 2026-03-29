@@ -29,6 +29,15 @@ on:
         required: false
         type: number
         default: 5
+      batch:
+        description: 'Batch number for motherduck source (1=first 250, 2=remaining). Ignored for test/custom.'
+        required: false
+        type: number
+        default: 1
+      exclude_dbs:
+        description: 'Comma-separated database names to skip (e.g. already reimported)'
+        required: false
+        type: string
       dry_run:
         description: 'Dry run - discover leagues but skip import'
         required: false
@@ -71,6 +80,8 @@ jobs:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           SOURCE: ${{ github.event.inputs.source }}
           LEAGUES_JSON: ${{ github.event.inputs.leagues_json }}
+          BATCH: ${{ github.event.inputs.batch || '1' }}
+          EXCLUDE_DBS: ${{ github.event.inputs.exclude_dbs || '' }}
         run: |
           python - <<'PYEOF'
           import json, os, sys
@@ -111,9 +122,25 @@ jobs:
                   if db not in db_map or lid_int > db_map[db]["lid_int"]:
                       db_map[db] = {"lid_int": lid_int, "sleeper_league_id": lid, "database_name": db, "import_mode": mode or "quick"}
 
+              all_leagues = sorted(db_map.values(), key=lambda x: x["database_name"])
+
+              # Exclude specific databases (e.g. already reimported)
+              exclude = set(x.strip() for x in os.environ.get("EXCLUDE_DBS", "").split(",") if x.strip())
+              if exclude:
+                  all_leagues = [v for v in all_leagues if v["database_name"] not in exclude]
+                  print(f"Excluding {len(exclude)} databases: {exclude}")
+
+              # Batch: split into chunks of 250 (GH Actions matrix limit = 256)
+              batch = int(os.environ.get("BATCH", "1"))
+              batch_size = 250
+              start = (batch - 1) * batch_size
+              end = start + batch_size
+              batched = all_leagues[start:end]
+              print(f"Batch {batch}: leagues {start+1}-{min(end, len(all_leagues))} of {len(all_leagues)}")
+
               leagues = [
                   {"sleeper_league_id": v["sleeper_league_id"], "database_name": v["database_name"], "import_mode": v["import_mode"]}
-                  for v in sorted(db_map.values(), key=lambda x: x["database_name"])
+                  for v in batched
               ]
           else:
               print(f"ERROR: Unknown source '{source}'")
