@@ -138,10 +138,45 @@ jobs:
           PYEOF
 
   # ================================================================
+  # Job 1.5: Build or restore ___ops cache
+  # ================================================================
+  build-cache:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Restore ops cache
+        id: cache
+        uses: actions/cache@v5
+        with:
+          path: ops_cache
+          key: ops-cache-v1-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
+          restore-keys: ops-cache-v1-
+
+      - name: Build ops cache (on miss)
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          pip install duckdb==1.5.1
+          python fantasy_football_data_scripts/build_ops_cache.py \
+            --output ops_cache/ops_cache.duckdb
+
+  # ================================================================
   # Job 2: Import each league in parallel (matrix)
   # ================================================================
   import-league:
-    needs: discover
+    needs: [discover, build-cache]
     if: ${{ !inputs.dry_run && fromJson(needs.discover.outputs.league_count) > 0 }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -157,6 +192,7 @@ jobs:
       SLEEPER_LEAGUE_ID: ${{ matrix.sleeper_league_id }}
       IMPORT_MODE: ${{ matrix.import_mode }}
       MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+      OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
 
     steps:
       - name: Checkout code
@@ -164,6 +200,13 @@ jobs:
         with:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Restore ops cache
+        uses: actions/cache@v5
+        with:
+          path: ops_cache
+          key: ops-cache-v1-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
+          restore-keys: ops-cache-v1-
 
       - name: Setup Python
         id: setup-python
