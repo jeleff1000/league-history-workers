@@ -1,0 +1,309 @@
+name: Sleeper Fleet Import
+
+# Imports multiple Sleeper leagues in parallel using matrix strategy.
+# Each league runs as its own independent job so failures are isolated.
+#
+# Usage:
+#   Manual: provide leagues_json with array of {sleeper_league_id, database_name, start_year}
+#   Or: set source=motherduck to auto-discover from ___ops.main.sleeper_leagues
+#   Or: set source=test to run the 7 test leagues
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'League source: "test" (7 test leagues), "motherduck" (all sleeper leagues), or "custom" (provide leagues_json)'
+        required: true
+        type: choice
+        options:
+          - test
+          - motherduck
+          - custom
+        default: test
+      leagues_json:
+        description: 'JSON array of leagues (only used when source=custom). Format: [{"sleeper_league_id":"...", "database_name":"...", "start_year":2021}]'
+        required: false
+        type: string
+      max_parallel:
+        description: 'Max parallel imports (GitHub free = 20 concurrent jobs)'
+        required: false
+        type: number
+        default: 5
+      dry_run:
+        description: 'Dry run - discover leagues but skip import'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  # ================================================================
+  # Job 1: Discover leagues and build the matrix
+  # ================================================================
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+      league_count: ${{ steps.build.outputs.league_count }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install duckdb
+        run: pip install duckdb==1.1.4
+
+      - name: Build league matrix
+        id: build
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          SOURCE: ${{ github.event.inputs.source }}
+          LEAGUES_JSON: ${{ github.event.inputs.leagues_json }}
+        run: |
+          python - <<'PYEOF'
+          import json, os, sys
+
+          source = os.environ.get("SOURCE", "test")
+          leagues_json_raw = os.environ.get("LEAGUES_JSON", "")
+
+          if source == "custom" and leagues_json_raw:
+              leagues = json.loads(leagues_json_raw)
+
+          elif source == "test":
+              # 7 Sleeper test leagues with correct IDs and actual start years
+              leagues = [
+                  {"sleeper_league_id": "1253478574636138496", "database_name": "champions_branch_out", "start_year": 2021},
+                  {"sleeper_league_id": "1314686478772600832", "database_name": "degenerate_gamblers_football_league", "start_year": 2019},
+                  {"sleeper_league_id": "1209663934118768640", "database_name": "l_14_big_booms", "start_year": 2019},
+                  {"sleeper_league_id": "1194644814116040704", "database_name": "nyu_ffl", "start_year": 2018},
+                  {"sleeper_league_id": "1312076046484373504", "database_name": "playing_for_keeps_league", "start_year": 2021},
+                  {"sleeper_league_id": "1257088277819691008", "database_name": "the_real_ff_league", "start_year": 2024},
+                  {"sleeper_league_id": "1180216138503110656", "database_name": "zootown_dynasty", "start_year": 2023},
+              ]
+
+          elif source == "motherduck":
+              import duckdb
+              token = os.environ["MOTHERDUCK_TOKEN"]
+              conn = duckdb.connect(f"md:?motherduck_token={token}")
+              rows = conn.execute("""
+                  SELECT sleeper_league_id, database_name
+                  FROM ___ops.main.sleeper_leagues
+                  ORDER BY database_name
+              """).fetchall()
+              conn.close()
+
+              # Deduplicate by database_name, take the latest (highest numeric) league_id
+              db_map = {}
+              for lid, db in rows:
+                  lid_int = int(lid)
+                  if db not in db_map or lid_int > db_map[db]["lid_int"]:
+                      db_map[db] = {"lid_int": lid_int, "sleeper_league_id": lid, "database_name": db}
+
+              # Use start_year=2017 for full discovery (the import traces previous_league_id)
+              leagues = [
+                  {"sleeper_league_id": v["sleeper_league_id"], "database_name": v["database_name"], "start_year": 2017}
+                  for v in sorted(db_map.values(), key=lambda x: x["database_name"])
+              ]
+          else:
+              print(f"ERROR: Unknown source '{source}'")
+              sys.exit(1)
+
+          # Validate
+          for lg in leagues:
+              assert lg.get("sleeper_league_id"), f"Missing sleeper_league_id: {lg}"
+              assert lg.get("database_name"), f"Missing database_name: {lg}"
+              if "start_year" not in lg:
+                  lg["start_year"] = 2017  # default: let import discover
+
+          matrix = {"include": leagues}
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"matrix={json.dumps(matrix)}\n")
+              f.write(f"league_count={len(leagues)}\n")
+
+          print(f"Discovered {len(leagues)} leagues:")
+          for lg in leagues:
+              print(f"  {lg['database_name']} (ID={lg['sleeper_league_id']}, start={lg['start_year']})")
+          PYEOF
+
+  # ================================================================
+  # Job 2: Import each league in parallel (matrix)
+  # ================================================================
+  import-league:
+    needs: discover
+    if: ${{ !inputs.dry_run && fromJson(needs.discover.outputs.league_count) > 0 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    strategy:
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+      max-parallel: ${{ fromJson(github.event.inputs.max_parallel || '5') }}
+      fail-fast: false  # Don't cancel other leagues if one fails
+
+    env:
+      PYTHONUNBUFFERED: 1
+      DB_NAME: ${{ matrix.database_name }}
+      SLEEPER_LEAGUE_ID: ${{ matrix.sleeper_league_id }}
+      START_YEAR: ${{ matrix.start_year }}
+      MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        id: setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Cache Python virtualenv
+        uses: actions/cache@v5
+        id: cache-venv
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Create virtualenv
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: python -m venv .venv
+
+      - name: Install dependencies
+        run: |
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Activate venv
+        run: echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
+
+      # ==================== IMPORT ====================
+      - name: Run import
+        id: import
+        working-directory: fantasy_football_data_scripts
+        run: |
+          source ../.venv/bin/activate
+          echo "========================================"
+          echo "Importing: ${{ env.DB_NAME }}"
+          echo "League ID: ${{ env.SLEEPER_LEAGUE_ID }}"
+          echo "Start year: ${{ env.START_YEAR }}"
+          echo "========================================"
+
+          DATA_DIR="${{ github.workspace }}/fantasy_football_data/sleeper_${{ env.DB_NAME }}"
+          mkdir -p "$DATA_DIR"
+
+          set +e
+          python sleeper_initial_import.py \
+            --league-id ${{ env.SLEEPER_LEAGUE_ID }} \
+            --data-dir "$DATA_DIR" \
+            --import-mode full \
+            --skip-track-2-upload \
+            2>&1 | tee ../import_${{ env.DB_NAME }}.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+
+          echo "exit_code=${EXIT_CODE}" >> $GITHUB_OUTPUT
+          echo "data_dir=${DATA_DIR}" >> $GITHUB_OUTPUT
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "IMPORT FAILED for ${{ env.DB_NAME }} (exit code ${EXIT_CODE})"
+            tail -100 ../import_${{ env.DB_NAME }}.log
+            exit $EXIT_CODE
+          fi
+
+      # ==================== SIMS ====================
+      - name: Calculate expected records
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        run: |
+          cd fantasy_football_data_scripts
+          python -m multi_league.transformations.matchup.expected_record_v2 \
+            --db ${{ env.DB_NAME }} \
+            --data-dir ${{ steps.import.outputs.data_dir }} \
+            --n-sims 10000
+
+      - name: Calculate playoff odds
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        run: |
+          cd fantasy_football_data_scripts
+          python -m multi_league.transformations.matchup.playoff_odds_import \
+            --db ${{ env.DB_NAME }} \
+            --data-dir ${{ steps.import.outputs.data_dir }} \
+            --n-sims 10000
+
+      # ==================== AGGREGATIONS ====================
+      - name: Run aggregations
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        run: |
+          cd fantasy_football_data_scripts
+          python -m multi_league.transformations.aggregation.aggregate_matchup_context \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+          python -m multi_league.transformations.aggregation.aggregate_fantasy_context \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+          python -m multi_league.transformations.aggregation.aggregate_draft_context \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+          python -m multi_league.transformations.aggregation.aggregate_transaction_context \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+          python -m multi_league.transformations.aggregation.aggregate_standings \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+          python -m multi_league.transformations.aggregation.homepage_summary \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+
+      # ==================== UPLOAD ====================
+      - name: Upload to MotherDuck
+        if: steps.import.outputs.exit_code == '0'
+        run: |
+          cd fantasy_football_data_scripts
+          python -c "
+          from multi_league.core.local_db import LocalLeagueDB
+          db = LocalLeagueDB('${{ steps.import.outputs.data_dir }}', '${{ env.DB_NAME }}')
+          db.connect()
+          db.upload_to_motherduck('${{ env.DB_NAME }}')
+          db.close()
+          print('Upload to MotherDuck complete: ${{ env.DB_NAME }}')
+          "
+
+      # ==================== STATUS ====================
+      - name: Print status
+        if: always()
+        run: |
+          echo "========================================"
+          echo "RESULT: ${{ env.DB_NAME }}"
+          echo "Import: ${{ steps.import.outputs.exit_code == '0' && 'SUCCESS' || 'FAILED' }}"
+          echo "========================================"
+
+  # ================================================================
+  # Job 3: Summary
+  # ================================================================
+  summary:
+    needs: [discover, import-league]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fleet summary
+        run: |
+          echo "========================================"
+          echo "SLEEPER FLEET IMPORT COMPLETE"
+          echo "========================================"
+          echo "Leagues attempted: ${{ needs.discover.outputs.league_count }}"
+          echo "Source: ${{ github.event.inputs.source }}"
+          echo "Max parallel: ${{ github.event.inputs.max_parallel || 5 }}"
+          echo "Dry run: ${{ github.event.inputs.dry_run }}"
+          echo "========================================"
