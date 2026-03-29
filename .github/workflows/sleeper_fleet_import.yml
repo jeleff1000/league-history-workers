@@ -63,7 +63,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install duckdb
-        run: pip install duckdb==1.1.4
+        run: pip install duckdb==1.4.4
 
       - name: Build league matrix
         id: build
