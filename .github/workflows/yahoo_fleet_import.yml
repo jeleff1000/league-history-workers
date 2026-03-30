@@ -239,6 +239,8 @@ jobs:
       IMPORT_MODE: ${{ matrix.import_mode }}
       MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
       CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+      YAHOO_CLIENT_ID: ${{ secrets.YAHOO_CLIENT_ID }}
+      YAHOO_CLIENT_SECRET: ${{ secrets.YAHOO_CLIENT_SECRET }}
       OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
 
     steps:
