@@ -1,0 +1,373 @@
+name: Yahoo Fleet Import
+
+# Imports multiple Yahoo leagues in parallel using matrix strategy.
+# Each league runs as its own independent job so failures are isolated.
+#
+# Usage:
+#   Manual: set source=test for QA leagues, or source=custom with leagues_json
+#   Or: set source=motherduck to auto-discover from ___ops.main.league_credentials
+#
+# Yahoo-specific: each league needs OAuth credentials (encrypted refresh token
+# stored in ___ops.main.league_credentials). The importer uses --league flag
+# which pulls credentials from MotherDuck automatically.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'League source: "test" (6 QA leagues), "motherduck" (all yahoo leagues), or "custom" (provide leagues_json)'
+        required: true
+        type: choice
+        options:
+          - test
+          - motherduck
+          - custom
+        default: test
+      leagues_json:
+        description: 'JSON array of leagues (only used when source=custom). Format: [{"database_name":"the_league", "import_mode":"full"}]'
+        required: false
+        type: string
+      max_parallel:
+        description: 'Max parallel imports (GitHub free = 20 concurrent jobs)'
+        required: false
+        type: number
+        default: 3
+      batch:
+        description: 'Batch number for motherduck source (1=first 250, 2=remaining). Ignored for test/custom.'
+        required: false
+        type: number
+        default: 1
+      exclude_dbs:
+        description: 'Comma-separated database names to skip (e.g. already reimported)'
+        required: false
+        type: string
+      dry_run:
+        description: 'Dry run - discover leagues but skip import'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  # ================================================================
+  # Job 1: Discover leagues and build the matrix
+  # ================================================================
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+      league_count: ${{ steps.build.outputs.league_count }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install duckdb
+        run: pip install duckdb==1.5.1
+
+      - name: Build league matrix
+        id: build
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          SOURCE: ${{ github.event.inputs.source }}
+          LEAGUES_JSON: ${{ github.event.inputs.leagues_json }}
+          BATCH: ${{ github.event.inputs.batch || '1' }}
+          EXCLUDE_DBS: ${{ github.event.inputs.exclude_dbs || '' }}
+        run: |
+          python - <<'PYEOF'
+          import json, os, sys
+
+          source = os.environ.get("SOURCE", "test")
+          leagues_json_raw = os.environ.get("LEAGUES_JSON", "")
+
+          if source == "custom" and leagues_json_raw:
+              leagues = json.loads(leagues_json_raw)
+
+          elif source == "test":
+              # 6 Yahoo test leagues — mix of depths and features
+              leagues = [
+                  {"database_name": "the_league", "import_mode": "full"},
+                  {"database_name": "l_5_towns_football", "import_mode": "full"},
+                  {"database_name": "kmffl", "import_mode": "full"},
+                  {"database_name": "you_are_a_pirate", "import_mode": "full"},
+                  {"database_name": "keeper_league", "import_mode": "full"},
+                  {"database_name": "the_league_year_xiii", "import_mode": "full"},
+              ]
+
+          elif source == "motherduck":
+              import duckdb
+              token = os.environ["MOTHERDUCK_TOKEN"]
+              conn = duckdb.connect(f"md:?motherduck_token={token}")
+              rows = conn.execute("""
+                  SELECT league_id, league_name, database_name
+                  FROM ___ops.main.league_credentials
+                  ORDER BY database_name
+              """).fetchall()
+              conn.close()
+
+              # Deduplicate by database_name
+              db_map = {}
+              for lid, name, db in rows:
+                  if db not in db_map:
+                      db_map[db] = {"database_name": db, "import_mode": "full"}
+
+              all_leagues = sorted(db_map.values(), key=lambda x: x["database_name"])
+
+              # Exclude specific databases
+              exclude = set(x.strip() for x in os.environ.get("EXCLUDE_DBS", "").split(",") if x.strip())
+              if exclude:
+                  all_leagues = [v for v in all_leagues if v["database_name"] not in exclude]
+                  print(f"Excluding {len(exclude)} databases: {exclude}")
+
+              # Batch: split into chunks of 250 (GH Actions matrix limit = 256)
+              batch = int(os.environ.get("BATCH", "1"))
+              batch_size = 250
+              start = (batch - 1) * batch_size
+              end = start + batch_size
+              batched = all_leagues[start:end]
+              print(f"Batch {batch}: leagues {start+1}-{min(end, len(all_leagues))} of {len(all_leagues)}")
+
+              leagues = batched
+          else:
+              print(f"ERROR: Unknown source '{source}'")
+              sys.exit(1)
+
+          # Validate
+          for lg in leagues:
+              assert lg.get("database_name"), f"Missing database_name: {lg}"
+              if "import_mode" not in lg:
+                  lg["import_mode"] = "full"
+
+          matrix = {"include": leagues}
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"matrix={json.dumps(matrix)}\n")
+              f.write(f"league_count={len(leagues)}\n")
+
+          print(f"Discovered {len(leagues)} leagues:")
+          for lg in leagues:
+              print(f"  {lg['database_name']} (mode={lg['import_mode']})")
+          PYEOF
+
+  # ================================================================
+  # Job 1.5: Build or restore ___ops cache
+  # ================================================================
+  build-cache:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Restore ops cache
+        id: cache
+        uses: actions/cache@v5
+        with:
+          path: ops_cache
+          key: ops-cache-v1-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
+          restore-keys: ops-cache-v1-
+
+      - name: Build ops cache (on miss)
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          pip install duckdb==1.5.1
+          python fantasy_football_data_scripts/build_ops_cache.py \
+            --output ops_cache/ops_cache.duckdb
+
+  # ================================================================
+  # Job 2: Import each league in parallel (matrix)
+  # ================================================================
+  import-league:
+    needs: [discover, build-cache]
+    if: ${{ !inputs.dry_run && fromJson(needs.discover.outputs.league_count) > 0 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    strategy:
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+      max-parallel: ${{ fromJson(github.event.inputs.max_parallel || '3') }}
+      fail-fast: false  # Don't cancel other leagues if one fails
+
+    env:
+      PYTHONUNBUFFERED: 1
+      DB_NAME: ${{ matrix.database_name }}
+      IMPORT_MODE: ${{ matrix.import_mode }}
+      MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+      CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+      OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Restore ops cache
+        uses: actions/cache@v5
+        with:
+          path: ops_cache
+          key: ops-cache-v1-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
+          restore-keys: ops-cache-v1-
+
+      - name: Setup Python
+        id: setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Cache Python virtualenv
+        uses: actions/cache@v5
+        id: cache-venv
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Create virtualenv
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: python -m venv .venv
+
+      - name: Install dependencies
+        run: |
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Activate venv
+        run: echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
+
+      # ==================== IMPORT ====================
+      - name: Run import
+        id: import
+        working-directory: fantasy_football_data_scripts
+        run: |
+          source ../.venv/bin/activate
+          echo "========================================"
+          echo "Importing: ${{ env.DB_NAME }}"
+          echo "Import mode: ${{ env.IMPORT_MODE }}"
+          echo "========================================"
+
+          DATA_DIR="${{ github.workspace }}/fantasy_football_data/yahoo_${{ env.DB_NAME }}"
+          mkdir -p "$DATA_DIR"
+
+          # Build import flags
+          IMPORT_FLAGS="--league ${{ env.DB_NAME }}"
+          if [ "${{ env.IMPORT_MODE }}" = "quick" ]; then
+            IMPORT_FLAGS="$IMPORT_FLAGS --quick"
+          fi
+          IMPORT_FLAGS="$IMPORT_FLAGS --skip-track-2-upload"
+
+          set +e
+          python initial_import_v3.py $IMPORT_FLAGS \
+            2>&1 | tee ../import_${{ env.DB_NAME }}.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+
+          echo "exit_code=${EXIT_CODE}" >> $GITHUB_OUTPUT
+          echo "data_dir=${DATA_DIR}" >> $GITHUB_OUTPUT
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "IMPORT FAILED for ${{ env.DB_NAME }} (exit code ${EXIT_CODE})"
+            tail -100 ../import_${{ env.DB_NAME }}.log
+            exit $EXIT_CODE
+          fi
+
+      # ==================== SIMS ====================
+      - name: Calculate expected records
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        run: |
+          cd fantasy_football_data_scripts
+          python -m multi_league.transformations.matchup.expected_record_v2 \
+            --db ${{ env.DB_NAME }} \
+            --data-dir ${{ steps.import.outputs.data_dir }} \
+            --n-sims 10000
+
+      - name: Calculate playoff odds
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        run: |
+          cd fantasy_football_data_scripts
+          python -m multi_league.transformations.matchup.playoff_odds_import \
+            --db ${{ env.DB_NAME }} \
+            --data-dir ${{ steps.import.outputs.data_dir }} \
+            --n-sims 10000
+
+      # ==================== AGGREGATIONS ====================
+      - name: Run aggregations
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        run: |
+          cd fantasy_football_data_scripts
+          python -m multi_league.transformations.aggregation.aggregate_matchup_context \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+          python -m multi_league.transformations.aggregation.aggregate_fantasy_context \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+          python -m multi_league.transformations.aggregation.aggregate_draft_context \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+          python -m multi_league.transformations.aggregation.aggregate_transaction_context \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+          python -m multi_league.transformations.aggregation.aggregate_standings \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+          python -m multi_league.transformations.aggregation.homepage_summary \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+
+      # ==================== UPLOAD ====================
+      - name: Upload to MotherDuck
+        if: steps.import.outputs.exit_code == '0'
+        run: |
+          cd fantasy_football_data_scripts
+          python -c "
+          from multi_league.core.local_db import LocalLeagueDB
+          db = LocalLeagueDB('${{ steps.import.outputs.data_dir }}', '${{ env.DB_NAME }}')
+          db.connect()
+          db.upload_to_motherduck('${{ env.DB_NAME }}')
+          db.close()
+          print('Upload to MotherDuck complete: ${{ env.DB_NAME }}')
+          "
+
+      # ==================== STATUS ====================
+      - name: Print status
+        if: always()
+        run: |
+          echo "========================================"
+          echo "RESULT: ${{ env.DB_NAME }}"
+          echo "Import: ${{ steps.import.outputs.exit_code == '0' && 'SUCCESS' || 'FAILED' }}"
+          echo "========================================"
+
+  # ================================================================
+  # Job 3: Summary
+  # ================================================================
+  summary:
+    needs: [discover, import-league]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fleet summary
+        run: |
+          echo "========================================"
+          echo "YAHOO FLEET IMPORT COMPLETE"
+          echo "========================================"
+          echo "Leagues attempted: ${{ needs.discover.outputs.league_count }}"
