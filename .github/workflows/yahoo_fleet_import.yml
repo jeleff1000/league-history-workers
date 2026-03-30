@@ -92,44 +92,64 @@ jobs:
           source = os.environ.get("SOURCE", "test")
           leagues_json_raw = os.environ.get("LEAGUES_JSON", "")
 
+          # Never touch these databases in fleet imports
+          ALWAYS_EXCLUDE = {"kmffl", "demo_league"}
+
+          # Leagues registered after this date get quick import (already have data)
+          # Leagues before get full (need reimport with pipeline fixes)
+          CUTOFF = "2026-03-22"
+          # Exception: always full import for these
+          ALWAYS_FULL = {"yk_jff_vilde_hatzooleh_league"}
+
           if source == "custom" and leagues_json_raw:
               leagues = json.loads(leagues_json_raw)
 
           elif source == "test":
-              # 6 Yahoo test leagues — mix of depths and features
+              # Yahoo test leagues — mix of depths and features
               leagues = [
                   {"database_name": "the_league", "import_mode": "full"},
                   {"database_name": "l_5_towns_football", "import_mode": "full"},
-                  {"database_name": "kmffl", "import_mode": "full"},
                   {"database_name": "you_are_a_pirate", "import_mode": "full"},
                   {"database_name": "keeper_league", "import_mode": "full"},
                   {"database_name": "the_league_year_xiii", "import_mode": "full"},
+                  {"database_name": "yk_jff_vilde_hatzooleh_league", "import_mode": "full"},
               ]
 
           elif source == "motherduck":
               import duckdb
+              from datetime import datetime
               token = os.environ["MOTHERDUCK_TOKEN"]
               conn = duckdb.connect(f"md:?motherduck_token={token}")
               rows = conn.execute("""
-                  SELECT league_id, league_name, database_name
+                  SELECT league_id, league_name, database_name, updated_at
                   FROM ___ops.main.league_credentials
                   ORDER BY database_name
               """).fetchall()
               conn.close()
 
-              # Deduplicate by database_name
+              cutoff_dt = datetime.fromisoformat(CUTOFF)
+
+              # Deduplicate by database_name, assign import mode by registration date
               db_map = {}
-              for lid, name, db in rows:
+              for lid, name, db, updated_at in rows:
+                  if db in ALWAYS_EXCLUDE:
+                      continue
                   if db not in db_map:
-                      db_map[db] = {"database_name": db, "import_mode": "full"}
+                      if db in ALWAYS_FULL:
+                          mode = "full"
+                      elif updated_at and updated_at > cutoff_dt:
+                          mode = "quick"
+                      else:
+                          mode = "full"
+                      db_map[db] = {"database_name": db, "import_mode": mode}
 
               all_leagues = sorted(db_map.values(), key=lambda x: x["database_name"])
 
-              # Exclude specific databases
-              exclude = set(x.strip() for x in os.environ.get("EXCLUDE_DBS", "").split(",") if x.strip())
-              if exclude:
-                  all_leagues = [v for v in all_leagues if v["database_name"] not in exclude]
-                  print(f"Excluding {len(exclude)} databases: {exclude}")
+              # Exclude specific databases (user-provided + always-exclude)
+              exclude = ALWAYS_EXCLUDE | set(x.strip() for x in os.environ.get("EXCLUDE_DBS", "").split(",") if x.strip())
+              all_leagues = [v for v in all_leagues if v["database_name"] not in exclude]
+              if exclude - ALWAYS_EXCLUDE:
+                  print(f"Excluding {len(exclude - ALWAYS_EXCLUDE)} user databases: {exclude - ALWAYS_EXCLUDE}")
 
               # Batch: split into chunks of 250 (GH Actions matrix limit = 256)
               batch = int(os.environ.get("BATCH", "1"))
@@ -143,6 +163,9 @@ jobs:
           else:
               print(f"ERROR: Unknown source '{source}'")
               sys.exit(1)
+
+          # Remove always-excluded from any source
+          leagues = [lg for lg in leagues if lg["database_name"] not in ALWAYS_EXCLUDE]
 
           # Validate
           for lg in leagues:
