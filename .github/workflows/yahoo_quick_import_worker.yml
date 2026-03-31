@@ -240,77 +240,8 @@ jobs:
           print(f"[QUICK IMPORT] League context created for year {season} (db: {context.get('motherduck_db_name', 'N/A')})")
           PYEOF
 
-      # ==================== DROP ALL TABLES (CLEAN SLATE) ====================
-      # Quick import ALWAYS drops all tables first for a clean slate
-      - name: Drop all tables (clean slate)
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
-          DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
-        run: |
-          echo "========================================"
-          echo "QUICK IMPORT: Dropping all tables (clean slate)"
-          echo "========================================"
-
-          python - <<'PYEOF'
-          import os
-          import re
-          import duckdb
-
-          token = os.environ.get('MOTHERDUCK_TOKEN')
-          if not token:
-              print("No MotherDuck token, skipping table drop")
-              exit(0)
-
-          db_name = os.environ.get('DATABASE_NAME', '')
-          if not db_name:
-              print("No database name, skipping table drop")
-              exit(0)
-
-          # Sanitize database name
-          db = re.sub(r'[^a-zA-Z0-9]+', '_', db_name.strip().lower()).strip('_')
-          if not db:
-              db = 'db'
-          if db[0].isdigit():
-              db = 'l_' + db
-          db = db[:63]
-
-          print(f"Connecting to database: {db}")
-
-          # Ensure database exists
-          try:
-              setup_con = duckdb.connect(f"md:?motherduck_token={token}")
-              setup_con.execute(f"CREATE DATABASE IF NOT EXISTS {db}")
-              setup_con.close()
-          except Exception as e:
-              print(f"Database setup: {e}")
-
-          try:
-              con = duckdb.connect(f"md:{db}?motherduck_token={token}")
-              con.execute("CREATE SCHEMA IF NOT EXISTS public")
-
-              # Drop views first (they depend on tables) - filter by THIS database only
-              existing_views = con.execute("""
-                  SELECT table_name FROM information_schema.tables
-                  WHERE table_catalog = ? AND table_schema = 'public' AND table_type = 'VIEW'
-              """, [db]).fetchall()
-              for (view_name,) in existing_views:
-                  con.execute(f"DROP VIEW IF EXISTS public.{view_name}")
-              if existing_views:
-                  print(f"  Dropped {len(existing_views)} views")
-
-              # Drop all tables in public schema only - filter by THIS database only
-              existing_tables = con.execute("""
-                  SELECT table_name FROM information_schema.tables
-                  WHERE table_catalog = ? AND table_schema = 'public' AND table_type = 'BASE TABLE'
-              """, [db]).fetchall()
-              for (table_name,) in existing_tables:
-                  con.execute(f"DROP TABLE IF EXISTS public.{table_name}")
-
-              print(f"  Dropped {len(existing_tables)} tables from public schema")
-              con.close()
-          except Exception as e:
-              print(f"Could not drop tables: {e}")
-          PYEOF
+      # NOTE: Clean-slate table drop is handled by initial_import_v3.py Phase 0
+      # (drop_league_tables) — no need for a separate workflow step.
 
       # ==================== RUN INITIAL IMPORT ====================
       - name: Run initial import
@@ -325,16 +256,17 @@ jobs:
           echo "Year: ${{ steps.parse.outputs.season }}"
           echo "========================================"
 
-          # Always run in "quick" mode — the import script only knows quick vs full
-          SCRIPT_MODE="${{ steps.parse.outputs.import_mode }}"
-          if [ "$SCRIPT_MODE" == "quick_to_full" ]; then
-            SCRIPT_MODE="quick"
+          # v3 uses --quick flag instead of --import-mode
+          IMPORT_MODE="${{ steps.parse.outputs.import_mode }}"
+          QUICK_FLAG=""
+          if [ "$IMPORT_MODE" == "quick" ] || [ "$IMPORT_MODE" == "quick_to_full" ]; then
+            QUICK_FLAG="--quick"
           fi
 
           set +e
           python initial_import_v3.py \
             --context ../league_context.json \
-            --import-mode ${SCRIPT_MODE} \
+            ${QUICK_FLAG} \
             --skip-track-2-upload 2>&1 | tee ../import.log
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
