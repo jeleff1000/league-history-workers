@@ -286,6 +286,7 @@ jobs:
       - name: Create ESPN context
         env:
           IMPORT_MODE: ${{ steps.parse.outputs.import_mode }}
+          LEAGUE_NAME: ${{ steps.parse.outputs.league_name }}
         run: |
           source .venv/bin/activate
           python - <<'PYEOF'
@@ -328,7 +329,7 @@ jobs:
           # Create ESPN context
           context = {
               "league_id": int("${{ steps.parse.outputs.espn_league_id }}"),
-              "league_name": "${{ steps.parse.outputs.league_name }}",
+              "league_name": os.environ["LEAGUE_NAME"],
               "motherduck_db_name": "${{ steps.parse.outputs.database_name }}",
               "espn_s2": espn_s2,
               "swid": swid,

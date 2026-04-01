@@ -207,6 +207,8 @@ jobs:
 
       # ==================== CREATE SLEEPER CONTEXT ====================
       - name: Create Sleeper context
+        env:
+          LEAGUE_NAME: ${{ steps.parse.outputs.league_name }}
         run: |
           source .venv/bin/activate
           python - <<'PYEOF'
@@ -242,7 +244,7 @@ jobs:
           # Create Sleeper context
           context = {
               "league_id": "${{ steps.parse.outputs.sleeper_league_id }}",
-              "league_name": "${{ steps.parse.outputs.league_name }}",
+              "league_name": os.environ["LEAGUE_NAME"],
               "motherduck_db_name": "${{ steps.parse.outputs.database_name }}",
               "username": "${{ steps.parse.outputs.username }}",
               "sport": "nfl",
