@@ -198,9 +198,11 @@ jobs:
 
       # ==================== CREATE LEAGUE CONTEXT ====================
       - name: Create league context
+        id: create_quick_context
         run: |
           python - <<'PYEOF'
           import json
+          import os
           from pathlib import Path
 
           with open("league_data_input.json") as f:
@@ -208,8 +210,8 @@ jobs:
 
           oauth_file = Path("oauth/Oauth.json").resolve()
 
-          # Quick import: only current year
-          season = int(league_data.get('season', league_data.get('end_year')))
+          # Quick import: use the league's most recent mapped year when available.
+          season = int(league_data.get('quick_import_year', league_data.get('season', league_data.get('end_year'))))
 
           import_mode = league_data.get('import_mode', 'quick')  # "quick" (free) or "quick_to_full" (paid)
 
@@ -234,8 +236,14 @@ jobs:
               "motherduck_db_name": "${{ steps.parse.outputs.database_name }}",
           }
 
+          if league_data.get('league_ids'):
+              context['league_ids'] = league_data['league_ids']
+
           with open("league_context.json", 'w') as f:
               json.dump(context, f, indent=2)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"season={season}\n")
 
           print(f"[QUICK IMPORT] League context created for year {season} (db: {context.get('motherduck_db_name', 'N/A')})")
           PYEOF
@@ -253,7 +261,7 @@ jobs:
         run: |
           echo "========================================"
           echo "QUICK IMPORT: ${{ steps.parse.outputs.league_name }}"
-          echo "Year: ${{ steps.parse.outputs.season }}"
+          echo "Year: ${{ steps.create_quick_context.outputs.season }}"
           echo "========================================"
 
           # v3 uses --quick flag instead of --import-mode
