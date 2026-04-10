@@ -1,0 +1,441 @@
+name: ESPN Fleet Import
+
+# Imports multiple ESPN leagues in parallel using matrix strategy.
+# Each league runs as its own independent job so failures are isolated.
+#
+# Usage:
+#   source=motherduck: auto-discover from ___ops.main.espn_leagues
+#   source=custom: provide leagues_json
+#   source=test: run tfl_of_extraordinary_gentleman only
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: 'League source: "test" (1 test league), "motherduck" (all ESPN leagues), or "custom" (provide leagues_json)'
+        required: true
+        type: choice
+        options:
+          - test
+          - motherduck
+          - custom
+        default: test
+      leagues_json:
+        description: 'JSON array of leagues (only used when source=custom). Format: [{"espn_league_id":"...", "database_name":"...", "start_year":2012, "end_year":2025}]'
+        required: false
+        type: string
+      max_parallel:
+        description: 'Max parallel imports'
+        required: false
+        type: number
+        default: 5
+      dry_run:
+        description: 'Dry run - discover leagues but skip import'
+        required: false
+        type: boolean
+        default: false
+      yahoo_oauth_ref:
+        description: 'yahoo_oauth branch/ref to check out (default main)'
+        required: false
+        type: string
+        default: 'main'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  # ================================================================
+  # Job 1: Discover leagues and build the matrix
+  # ================================================================
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+      league_count: ${{ steps.build.outputs.league_count }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install duckdb
+        run: pip install duckdb==1.5.1
+
+      - name: Build league matrix
+        id: build
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          SOURCE: ${{ github.event.inputs.source }}
+          LEAGUES_JSON: ${{ github.event.inputs.leagues_json }}
+        run: |
+          python - <<'PYEOF'
+          import json, os, sys
+
+          source = os.environ.get("SOURCE", "test")
+          leagues_json_raw = os.environ.get("LEAGUES_JSON", "")
+
+          if source == "custom" and leagues_json_raw:
+              leagues = json.loads(leagues_json_raw)
+
+          elif source == "test":
+              leagues = [
+                  {"espn_league_id": "71580", "database_name": "tfl_of_extraordinary_gentleman", "import_mode": "full"},
+              ]
+
+          elif source == "motherduck":
+              import duckdb
+              token = os.environ["MOTHERDUCK_TOKEN"]
+              conn = duckdb.connect(f"md:?motherduck_token={token}")
+              rows = conn.execute("""
+                  SELECT espn_league_id, database_name, league_name
+                  FROM ___ops.main.espn_leagues
+                  ORDER BY database_name
+              """).fetchall()
+              conn.close()
+
+              leagues = [
+                  {"espn_league_id": str(lid), "database_name": db, "league_name": name, "import_mode": "full"}
+                  for lid, db, name in rows
+              ]
+          else:
+              print(f"ERROR: Unknown source '{source}'")
+              sys.exit(1)
+
+          # Validate
+          for lg in leagues:
+              assert lg.get("espn_league_id"), f"Missing espn_league_id: {lg}"
+              assert lg.get("database_name"), f"Missing database_name: {lg}"
+              if "import_mode" not in lg:
+                  lg["import_mode"] = "full"
+
+          matrix = {"include": leagues}
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"matrix={json.dumps(matrix)}\n")
+              f.write(f"league_count={len(leagues)}\n")
+
+          print(f"Discovered {len(leagues)} ESPN leagues:")
+          for lg in leagues:
+              print(f"  {lg['database_name']} (ID={lg['espn_league_id']}, mode={lg['import_mode']})")
+          PYEOF
+
+  # ================================================================
+  # Job 1.5: Build or restore ___ops cache
+  # ================================================================
+  build-cache:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Restore ops cache
+        id: cache
+        uses: actions/cache@v5
+        with:
+          path: ops_cache
+          key: ops-cache-v1-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
+          restore-keys: ops-cache-v1-
+
+      - name: Build ops cache (on miss)
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        run: |
+          pip install duckdb==1.5.1
+          python fantasy_football_data_scripts/build_ops_cache.py \
+            --output ops_cache/ops_cache.duckdb
+
+  # ================================================================
+  # Job 2: Import each league in parallel (matrix)
+  # ================================================================
+  import-league:
+    needs: [discover, build-cache]
+    if: ${{ !inputs.dry_run && fromJson(needs.discover.outputs.league_count) > 0 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    strategy:
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+      max-parallel: ${{ fromJson(github.event.inputs.max_parallel || '5') }}
+      fail-fast: false
+
+    env:
+      PYTHONUNBUFFERED: 1
+      DB_NAME: ${{ matrix.database_name }}
+      ESPN_LEAGUE_ID: ${{ matrix.espn_league_id }}
+      IMPORT_MODE: ${{ matrix.import_mode }}
+      MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+      CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+      OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || 'main' }}
+
+      - name: Restore ops cache
+        uses: actions/cache@v5
+        with:
+          path: ops_cache
+          key: ops-cache-v1-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
+          restore-keys: ops-cache-v1-
+
+      - name: Setup Python
+        id: setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Cache Python virtualenv
+        uses: actions/cache@v5
+        id: cache-venv
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Create virtualenv
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: python -m venv .venv
+
+      - name: Install dependencies
+        run: |
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Activate venv
+        run: echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
+
+      # ==================== RETRIEVE COOKIES ====================
+      - name: Retrieve ESPN cookies from MotherDuck
+        id: cookies
+        run: |
+          python - <<'PYEOF'
+          import duckdb, os, sys
+
+          db_name = os.environ['DB_NAME']
+          token = os.environ['MOTHERDUCK_TOKEN']
+          enc_key = os.environ.get('CREDENTIAL_ENCRYPTION_KEY', '')
+
+          if not enc_key:
+              print("No CREDENTIAL_ENCRYPTION_KEY — league may be public")
+              with open(".espn_s2", "w") as f: f.write("")
+              with open(".espn_swid", "w") as f: f.write("")
+              sys.exit(0)
+
+          conn = duckdb.connect(f"md:?motherduck_token={token}")
+          result = conn.execute("""
+              SELECT encrypted_espn_s2, encrypted_swid
+              FROM ___ops.main.espn_leagues
+              WHERE database_name = ?
+          """, [db_name]).fetchone()
+          conn.close()
+
+          if not result or not result[0]:
+              print(f"No stored cookies for {db_name} — public league")
+              with open(".espn_s2", "w") as f: f.write("")
+              with open(".espn_swid", "w") as f: f.write("")
+              sys.exit(0)
+
+          from cryptography.fernet import Fernet
+          f = Fernet(enc_key.encode())
+          espn_s2 = f.decrypt(result[0].encode()).decode()
+          swid = f.decrypt(result[1].encode()).decode()
+
+          with open(".espn_s2", "w") as fh: fh.write(espn_s2)
+          with open(".espn_swid", "w") as fh: fh.write(swid)
+          print(f"Decrypted ESPN cookies for {db_name}")
+          PYEOF
+
+      # ==================== CREATE CONTEXT ====================
+      - name: Create ESPN context
+        run: |
+          python - <<'PYEOF'
+          import json, os
+          from pathlib import Path
+          from datetime import datetime
+
+          db_name = os.environ['DB_NAME']
+          espn_league_id = int(os.environ['ESPN_LEAGUE_ID'])
+          league_name = "${{ matrix.league_name || matrix.database_name }}"
+          data_dir = Path(os.environ.get('GITHUB_WORKSPACE', '.')) / "fantasy_football_data" / f"espn_{db_name}"
+          data_dir.mkdir(parents=True, exist_ok=True)
+
+          espn_s2 = ""
+          swid = ""
+          try:
+              with open(".espn_s2") as f: espn_s2 = f.read().strip()
+              with open(".espn_swid") as f: swid = f.read().strip()
+          except FileNotFoundError:
+              pass
+
+          context = {
+              "league_id": espn_league_id,
+              "league_name": league_name,
+              "motherduck_db_name": db_name,
+              "espn_s2": espn_s2,
+              "swid": swid,
+              "sport": "nfl",
+              "start_year": 2000,
+              "end_year": 2025,
+              "data_directory": str(data_dir),
+              "max_workers": 3,
+              "enable_caching": True,
+              "team_to_manager": {},
+              "team_to_guid": {},
+              "team_to_team_name": {},
+              "manager_name_overrides": {},
+              "created_at": datetime.now().isoformat(),
+              "platform": "espn",
+              "import_mode": "full",
+              "require_oauth": False,
+              "league_ids": {},
+          }
+
+          with open("espn_context.json", "w") as f:
+              json.dump(context, f, indent=2)
+
+          # Also write data_dir for later steps
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"data_dir={data_dir}\n")
+
+          print(f"ESPN context: {league_name} (ID={espn_league_id}, db={db_name})")
+          PYEOF
+        id: context
+
+      # ==================== IMPORT ====================
+      - name: Run import
+        id: import
+        working-directory: fantasy_football_data_scripts
+        run: |
+          source ../.venv/bin/activate
+          echo "========================================"
+          echo "Importing: ${{ env.DB_NAME }}"
+          echo "League ID: ${{ env.ESPN_LEAGUE_ID }}"
+          echo "Import mode: ${{ env.IMPORT_MODE }}"
+          echo "========================================"
+
+          set +e
+          python espn_initial_import.py \
+            --context ../espn_context.json \
+            --import-mode full \
+            --skip-track-2-upload \
+            2>&1 | tee ../import_${{ env.DB_NAME }}.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+
+          echo "exit_code=${EXIT_CODE}" >> $GITHUB_OUTPUT
+          echo "data_dir=${{ steps.context.outputs.data_dir }}" >> $GITHUB_OUTPUT
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "IMPORT FAILED for ${{ env.DB_NAME }} (exit code ${EXIT_CODE})"
+            tail -100 ../import_${{ env.DB_NAME }}.log
+            exit $EXIT_CODE
+          fi
+
+      # ==================== SIMS ====================
+      - name: Calculate expected records
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        run: |
+          cd fantasy_football_data_scripts
+          python -m multi_league.transformations.matchup.expected_record_v2 \
+            --db ${{ env.DB_NAME }} \
+            --data-dir ${{ steps.import.outputs.data_dir }} \
+            --n-sims 10000
+
+      - name: Calculate playoff odds
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        run: |
+          cd fantasy_football_data_scripts
+          python -m multi_league.transformations.matchup.playoff_odds_import \
+            --db ${{ env.DB_NAME }} \
+            --data-dir ${{ steps.import.outputs.data_dir }} \
+            --n-sims 10000
+
+      # ==================== AGGREGATIONS ====================
+      - name: Run aggregations
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        run: |
+          cd fantasy_football_data_scripts
+          python -m multi_league.transformations.aggregation.aggregate_matchup_context \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+          python -m multi_league.transformations.aggregation.aggregate_fantasy_context \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+          python -m multi_league.transformations.aggregation.aggregate_draft_context \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+          python -m multi_league.transformations.aggregation.aggregate_transaction_context \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+          python -m multi_league.transformations.aggregation.aggregate_standings \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+          python -m multi_league.transformations.aggregation.homepage_summary \
+            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+
+      # ==================== UPLOAD ====================
+      - name: Upload to MotherDuck
+        if: steps.import.outputs.exit_code == '0'
+        run: |
+          cd fantasy_football_data_scripts
+          python -c "
+          from multi_league.core.local_db import LocalLeagueDB
+          db = LocalLeagueDB('${{ steps.import.outputs.data_dir }}', '${{ env.DB_NAME }}')
+          db.connect()
+          db.upload_to_motherduck('${{ env.DB_NAME }}')
+          db.close()
+          print('Upload to MotherDuck complete: ${{ env.DB_NAME }}')
+          "
+
+      # ==================== CLEANUP ====================
+      - name: Cleanup sensitive files
+        if: always()
+        run: rm -f .espn_s2 .espn_swid
+
+      # ==================== STATUS ====================
+      - name: Print status
+        if: always()
+        run: |
+          echo "========================================"
+          echo "RESULT: ${{ env.DB_NAME }}"
+          echo "Import: ${{ steps.import.outputs.exit_code == '0' && 'SUCCESS' || 'FAILED' }}"
+          echo "========================================"
+
+  # ================================================================
+  # Job 3: Summary
+  # ================================================================
+  summary:
+    needs: [discover, import-league]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fleet summary
+        run: |
+          echo "========================================"
+          echo "ESPN FLEET IMPORT COMPLETE"
+          echo "========================================"
+          echo "Leagues attempted: ${{ needs.discover.outputs.league_count }}"
+          echo "Source: ${{ github.event.inputs.source }}"
+          echo "Max parallel: ${{ github.event.inputs.max_parallel || 5 }}"
+          echo "========================================"
