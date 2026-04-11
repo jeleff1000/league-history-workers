@@ -1,13 +1,13 @@
 name: Playoff Odds & Expected Record Calculator
 
-# Runs expected record sims, playoff odds, clutch equity, and aggregation
-# directly against MotherDuck — no parquet downloads, no context files
+# Downloads league data from ___leagues to local DuckDB, runs all sims and
+# aggregations locally, then uploads results back to ___leagues.
 
 on:
   workflow_dispatch:
     inputs:
       database_name:
-        description: 'MotherDuck database name (e.g., kmffl)'
+        description: 'Database name in ___leagues (e.g., demo_league)'
         required: true
         type: string
       n_sims:
@@ -19,6 +19,11 @@ on:
         description: 'User ID (for artifact naming)'
         required: false
         type: string
+      yahoo_oauth_ref:
+        description: 'yahoo_oauth branch/ref to check out (workers-repo override; default main)'
+        required: false
+        type: string
+        default: 'main'
 
 jobs:
   calculate-playoff-odds:
@@ -30,6 +35,7 @@ jobs:
       MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
       DATABASE_NAME: ${{ github.event.inputs.database_name }}
       N_SIMS: ${{ github.event.inputs.n_sims }}
+      DATA_DIR: ${{ github.workspace }}/playoff_odds_data
 
     steps:
       - name: Checkout code
@@ -37,6 +43,7 @@ jobs:
         with:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || github.event.client_payload.yahoo_oauth_ref || 'main' }}
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -52,126 +59,145 @@ jobs:
       - name: Install dependencies
         run: uv pip install --system -r requirements.txt
 
+      # ==================== DOWNLOAD FROM ___leagues TO LOCAL DUCKDB ====================
+      - name: Download league data to local DuckDB
+        working-directory: fantasy_football_data_scripts
+        run: |
+          echo "========================================"
+          echo "Downloading ${DATABASE_NAME} from ___leagues to local DuckDB"
+          echo "Data dir: ${DATA_DIR}"
+          echo "========================================"
+
+          mkdir -p "${DATA_DIR}"
+
+          python - <<'PYEOF'
+          import duckdb
+          import os
+          import sys
+
+          db_name = os.environ['DATABASE_NAME']
+          data_dir = os.environ['DATA_DIR']
+          token = os.environ['MOTHERDUCK_TOKEN']
+          local_path = f"{data_dir}/{db_name}.duckdb"
+
+          # Connect to local DuckDB
+          local = duckdb.connect(local_path)
+          local.execute("CREATE SCHEMA IF NOT EXISTS public")
+
+          # Connect to MotherDuck ___leagues
+          local.execute("INSTALL motherduck")
+          local.execute("LOAD motherduck")
+          local.execute(f"SET motherduck_token='{token}'")
+          local.execute("ATTACH 'md:___leagues' AS _md_source (READ_ONLY)")
+
+          # Discover all tables for this league
+          tables = local.execute(
+              "SELECT DISTINCT table_name FROM information_schema.tables "
+              "WHERE table_catalog = '_md_source' AND table_schema = 'public'"
+          ).fetchall()
+          table_names = [r[0] for r in tables]
+          print(f"Found {len(table_names)} tables in ___leagues")
+
+          total_rows = 0
+          for table_name in table_names:
+              # Check if this table has db_name column (league-scoped)
+              cols = [r[0] for r in local.execute(
+                  f"DESCRIBE _md_source.public.{table_name}"
+              ).fetchall()]
+
+              if 'db_name' not in cols:
+                  print(f"  SKIP {table_name} (no db_name column)")
+                  continue
+
+              # Check if any rows exist for this league
+              cnt = local.execute(
+                  f"SELECT COUNT(*) FROM _md_source.public.{table_name} WHERE db_name = ?",
+                  [db_name]
+              ).fetchone()[0]
+
+              if cnt == 0:
+                  print(f"  SKIP {table_name} (0 rows for {db_name})")
+                  continue
+
+              # Download: strip db_name column (local files don't use it)
+              non_db_cols = [c for c in cols if c != 'db_name']
+              col_list = ', '.join(f'"{c}"' for c in non_db_cols)
+
+              # Create table locally with same schema (minus db_name)
+              local.execute(f"DROP TABLE IF EXISTS public.{table_name}")
+              local.execute(
+                  f"CREATE TABLE public.{table_name} AS "
+                  f"SELECT {col_list} FROM _md_source.public.{table_name} "
+                  f"WHERE db_name = ?",
+                  [db_name]
+              )
+              print(f"  {table_name}: {cnt:,} rows")
+              total_rows += cnt
+
+          local.execute("DETACH _md_source")
+          local.close()
+
+          print(f"\nDownloaded {total_rows:,} total rows to {local_path}")
+          PYEOF
+
+      # ==================== EXPECTED RECORD CALCULATOR ====================
       - name: Run Expected Record Calculator
         working-directory: fantasy_football_data_scripts
         run: |
           echo "========================================"
           echo "Running Expected Record Calculator"
-          echo "Database: ${DATABASE_NAME}"
-          echo "Simulations: ${N_SIMS}"
           echo "========================================"
 
           python -m multi_league.transformations.matchup.expected_record_v2 \
             --db ${DATABASE_NAME} \
+            --data-dir ${DATA_DIR} \
             --n-sims ${N_SIMS} \
             2>&1 | tee ../expected_record.log
 
           EXIT_CODE=${PIPESTATUS[0]}
           if [ $EXIT_CODE -eq 0 ]; then
-            echo "✓ Expected record calculation complete"
+            echo "Expected record calculation complete"
           else
-            echo "✗ Expected record calculation failed"
+            echo "Expected record calculation failed"
             tail -50 ../expected_record.log
             exit $EXIT_CODE
           fi
 
-      - name: Run Playoff Odds Calculator (+ clutch equity + fantasy aggregation)
+      # ==================== PLAYOFF ODDS CALCULATOR ====================
+      - name: Run Playoff Odds Calculator (+ clutch equity)
         working-directory: fantasy_football_data_scripts
         run: |
           echo "========================================"
           echo "Running Playoff Odds Calculator"
-          echo "(Also runs clutch equity + fantasy context aggregation)"
-          echo "Simulations: ${N_SIMS}"
           echo "========================================"
 
           python -m multi_league.transformations.matchup.playoff_odds_import \
             --db ${DATABASE_NAME} \
+            --data-dir ${DATA_DIR} \
             --n-sims ${N_SIMS} \
             2>&1 | tee ../playoff_odds.log
 
           EXIT_CODE=${PIPESTATUS[0]}
           if [ $EXIT_CODE -eq 0 ]; then
-            echo "✓ Playoff odds + clutch equity complete"
+            echo "Playoff odds + clutch equity complete"
           else
-            echo "✗ Playoff odds calculation failed"
+            echo "Playoff odds calculation failed"
             tail -50 ../playoff_odds.log
             exit $EXIT_CODE
           fi
 
-      - name: Verify results
-        run: |
-          python - <<'PYEOF'
-          import duckdb, os
-
-          db_name = os.environ['DATABASE_NAME']
-          token = os.environ['MOTHERDUCK_TOKEN']
-          conn = duckdb.connect(f'md:{db_name}?motherduck_token={token}')
-
-          # Check expected record columns
-          print("Expected record columns check:")
-          for col in ['shuffle_avg_wins', 'shuffle_avg_seed', 'wins_vs_shuffle_wins']:
-              try:
-                  cnt = conn.execute(f'SELECT COUNT("{col}") FROM public.matchup WHERE "{col}" IS NOT NULL').fetchone()[0]
-                  print(f"  ✓ {col}: {cnt:,} non-null values")
-              except Exception as e:
-                  print(f"  ✗ {col}: {e}")
-
-          # Check playoff odds columns
-          print("\nPlayoff odds columns check:")
-          for col in ['p_playoffs', 'p_bye', 'p_champ', 'avg_seed', 'power_rating']:
-              try:
-                  cnt = conn.execute(f'SELECT COUNT("{col}") FROM public.matchup WHERE "{col}" IS NOT NULL').fetchone()[0]
-                  print(f"  ✓ {col}: {cnt:,} non-null values")
-              except Exception as e:
-                  print(f"  ✗ {col}: {e}")
-
-          # Check clutch equity
-          print("\nClutch equity check:")
-          try:
-              cnt = conn.execute("SELECT COUNT(clutch_equity) FROM public.player_fantasy WHERE clutch_equity IS NOT NULL AND clutch_equity != 0").fetchone()[0]
-              print(f"  ✓ clutch_equity: {cnt:,} non-zero values")
-          except Exception as e:
-              print(f"  ✗ clutch_equity: {e}")
-
-          total = conn.execute("SELECT COUNT(*) FROM public.matchup").fetchone()[0]
-          cols = len(conn.execute("DESCRIBE public.matchup").fetchall())
-          print(f"\nTotal matchup rows: {total:,}, columns: {cols}")
-          conn.close()
-          PYEOF
-
-      - name: Aggregate player fantasy context
-        continue-on-error: true
-        working-directory: fantasy_football_data_scripts
-        run: |
-          echo "========================================"
-          echo "Aggregating player_fantasy_season + player_fantasy_career"
-          echo "========================================"
-
-          python -m multi_league.transformations.aggregation.aggregate_fantasy_context \
-            --db ${DATABASE_NAME} \
-            2>&1 | tee ../player_aggregation.log
-          if [ ${PIPESTATUS[0]} -eq 0 ]; then
-            echo "✓ Player aggregation complete"
-          else
-            echo "✗ Player aggregation failed (non-critical)"
-          fi
-
+      # ==================== AGGREGATIONS (LOCAL) ====================
       - name: Re-aggregate matchup tables
         continue-on-error: true
         working-directory: fantasy_football_data_scripts
         run: |
-          echo "========================================"
-          echo "Re-aggregating matchup season/career/H2H tables"
-          echo "========================================"
-
           python -m multi_league.transformations.aggregation.aggregate_matchup_context \
-            --db ${DATABASE_NAME} \
+            --db ${DATABASE_NAME} --data-dir ${DATA_DIR} \
             2>&1 | tee ../matchup_aggregation.log
-
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
-            echo "✓ Matchup aggregation complete"
+            echo "Matchup aggregation complete"
           else
-            echo "✗ Matchup aggregation failed (non-critical)"
+            echo "Matchup aggregation failed (non-critical)"
           fi
 
       - name: Aggregate draft context
@@ -179,12 +205,12 @@ jobs:
         working-directory: fantasy_football_data_scripts
         run: |
           python -m multi_league.transformations.aggregation.aggregate_draft_context \
-            --db ${DATABASE_NAME} \
+            --db ${DATABASE_NAME} --data-dir ${DATA_DIR} \
             2>&1 | tee ../draft_aggregation.log
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
-            echo "✓ Draft aggregation complete"
+            echo "Draft aggregation complete"
           else
-            echo "✗ Draft aggregation failed (non-critical)"
+            echo "Draft aggregation failed (non-critical)"
           fi
 
       - name: Aggregate transaction context
@@ -192,12 +218,12 @@ jobs:
         working-directory: fantasy_football_data_scripts
         run: |
           python -m multi_league.transformations.aggregation.aggregate_transaction_context \
-            --db ${DATABASE_NAME} \
+            --db ${DATABASE_NAME} --data-dir ${DATA_DIR} \
             2>&1 | tee ../transaction_aggregation.log
           if [ ${PIPESTATUS[0]} -eq 0 ]; then
-            echo "✓ Transaction aggregation complete"
+            echo "Transaction aggregation complete"
           else
-            echo "✗ Transaction aggregation failed (non-critical)"
+            echo "Transaction aggregation failed (non-critical)"
           fi
 
       - name: Compute homepage summary
@@ -205,171 +231,90 @@ jobs:
         working-directory: fantasy_football_data_scripts
         run: |
           python -m multi_league.transformations.aggregation.homepage_summary \
-            --db ${DATABASE_NAME} --upload \
+            --db ${DATABASE_NAME} --data-dir ${DATA_DIR} \
             2>&1 | tee ../homepage_summary.log
 
           EXIT_CODE=${PIPESTATUS[0]}
           if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 139 ]; then
-            echo "✓ Homepage summary complete"
+            echo "Homepage summary complete"
           else
-            echo "✗ Homepage summary failed (non-critical)"
+            echo "Homepage summary failed (non-critical)"
           fi
 
-      - name: Validate post-aggregation outputs
+      # ==================== UPLOAD RESULTS TO ___leagues ====================
+      - name: Upload results to MotherDuck
+        working-directory: fantasy_football_data_scripts
         run: |
-          python - <<'PYEOF' 2>&1 | tee post_aggregation_validation.log
-          import duckdb
-          import os
+          echo "========================================"
+          echo "Uploading results to ___leagues"
+          echo "========================================"
+
+          python -c "
           import sys
+          sys.path.insert(0, '.')
+          from multi_league.core.local_db import LocalLeagueDB
+
+          db = LocalLeagueDB('${DATA_DIR}', '${DATABASE_NAME}')
+          db.connect()
+          db.upload_to_motherduck('${DATABASE_NAME}')
+          db.close()
+          print('Upload to MotherDuck complete')
+          "
+
+      # ==================== VERIFY ====================
+      - name: Verify results
+        run: |
+          python - <<'PYEOF'
+          import duckdb, os
 
           db_name = os.environ['DATABASE_NAME']
           token = os.environ['MOTHERDUCK_TOKEN']
-          conn = duckdb.connect(f'md:{db_name}?motherduck_token={token}')
+          conn = duckdb.connect(f'md:___leagues?motherduck_token={token}')
 
-          failures = []
-
-          def table_count(table_name: str) -> int:
+          print("Expected record columns check:")
+          for col in ['shuffle_avg_wins', 'shuffle_avg_seed', 'wins_vs_shuffle_wins']:
               try:
-                  return conn.execute(f"SELECT COUNT(*) FROM public.{table_name}").fetchone()[0]
-              except Exception as exc:
-                  failures.append(f"{table_name} missing or unreadable: {exc}")
-                  return 0
+                  cnt = conn.execute(f"SELECT COUNT(\"{col}\") FROM public.matchup WHERE \"{col}\" IS NOT NULL AND db_name = '{db_name}'").fetchone()[0]
+                  print(f"  {col}: {cnt:,} non-null values")
+              except Exception as e:
+                  print(f"  {col}: {e}")
 
-          def require_rows(table_name: str, *, when: bool = True):
-              if not when:
-                  return
-              count = table_count(table_name)
-              print(f"{table_name}: {count:,} rows")
-              if count == 0:
-                  failures.append(f"{table_name} is empty")
-
-          def non_null_count(table_name: str, column_name: str) -> int:
-              return conn.execute(
-                  f'SELECT COUNT(*) FROM public.{table_name} WHERE "{column_name}" IS NOT NULL'
-              ).fetchone()[0]
-
-          base_years = conn.execute("SELECT COUNT(DISTINCT year) FROM public.matchup").fetchone()[0]
-          single_year = base_years <= 1
-          print(f"Years in matchup: {base_years}")
-
-          print("\nLeague settings contract:")
-          for column_name in ['num_teams', 'playoff_teams', 'playoff_start_week']:
+          print("\nPlayoff odds columns check:")
+          for col in ['p_playoffs', 'p_bye', 'p_champ', 'avg_seed', 'power_rating']:
               try:
-                  count = non_null_count('league_settings', column_name)
-                  print(f"  {column_name}: {count:,} populated rows")
-                  if count == 0:
-                      failures.append(f"league_settings.{column_name} is missing for all rows")
-              except Exception as exc:
-                  failures.append(f"league_settings.{column_name} check failed: {exc}")
+                  cnt = conn.execute(f"SELECT COUNT(\"{col}\") FROM public.matchup WHERE \"{col}\" IS NOT NULL AND db_name = '{db_name}'").fetchone()[0]
+                  print(f"  {col}: {cnt:,} non-null values")
+              except Exception as e:
+                  print(f"  {col}: {e}")
 
+          print("\nClutch equity check:")
           try:
-              bye_count = non_null_count('league_settings', 'bye_teams')
-              print(f"  bye_teams: {bye_count:,} populated rows")
-              if bye_count == 0:
-                  print("  bye_teams: derived downstream from playoff_teams when omitted")
-          except Exception as exc:
-              failures.append(f"league_settings.bye_teams check failed: {exc}")
+              cnt = conn.execute(f"SELECT COUNT(clutch_equity) FROM public.player_fantasy WHERE clutch_equity IS NOT NULL AND clutch_equity != 0 AND db_name = '{db_name}'").fetchone()[0]
+              print(f"  clutch_equity: {cnt:,} non-zero values")
+          except Exception as e:
+              print(f"  clutch_equity: {e}")
 
-          print("\nBase tables:")
-          player_rows = table_count('player_fantasy')
-          draft_rows = table_count('draft')
-          txn_rows = table_count('transactions')
-          matchup_rows = table_count('matchup')
-          print(f"player_fantasy: {player_rows:,}")
-          print(f"draft: {draft_rows:,}")
-          print(f"transactions: {txn_rows:,}")
-          print(f"matchup: {matchup_rows:,}")
-
-          print("\nAggregated tables:")
-          require_rows('player_fantasy_season', when=player_rows > 0)
-          require_rows('player_fantasy_career', when=player_rows > 0 and not single_year)
-          require_rows('matchup_season', when=matchup_rows > 0)
-          require_rows('matchup_career', when=matchup_rows > 0 and not single_year)
-          require_rows('matchup_h2h_season', when=matchup_rows > 0)
-          require_rows('matchup_h2h_career', when=matchup_rows > 0 and not single_year)
-          require_rows('draft_manager_season', when=draft_rows > 0)
-          require_rows('draft_manager_career', when=draft_rows > 0 and not single_year)
-          require_rows('transaction_manager_season', when=txn_rows > 0)
-          require_rows('transaction_manager_career', when=txn_rows > 0 and not single_year)
-          require_rows('transaction_report_card', when=txn_rows > 0)
-
-          print("\nHomepage tables:")
-          require_rows('homepage_league_summary')
-          require_rows('homepage_manager_rankings')
-          require_rows('homepage_current_standings')
-          require_rows('homepage_manager_profiles')
-
-          print("\nID flow:")
-          try:
-              platform = conn.execute(
-                  "SELECT platform FROM public.league_settings WHERE platform IS NOT NULL ORDER BY year DESC LIMIT 1"
-              ).fetchone()
-              platform_name = platform[0].lower() if platform and platform[0] else ''
-          except Exception:
-              platform_name = ''
-          id_column = {
-              'yahoo': 'yahoo_player_id',
-              'sleeper': 'sleeper_player_id',
-              'espn': 'espn_player_id',
-          }.get(platform_name)
-          if id_column:
-              print(f"Platform: {platform_name} ({id_column})")
-              for table_name in ['matchup', 'player_fantasy', 'draft', 'transactions']:
-                  try:
-                      mismatches = conn.execute(
-                          f"SELECT COUNT(*) FROM public.{table_name} "
-                          f"WHERE platform IS NOT NULL AND LOWER(TRIM(platform)) != ?",
-                          [platform_name],
-                      ).fetchone()[0]
-                      print(f"  {table_name} platform mismatches: {mismatches:,}")
-                      if mismatches > 0:
-                          failures.append(f"{table_name} has {mismatches} rows with platform != {platform_name}")
-                  except Exception as exc:
-                      failures.append(f"{table_name} platform consistency check failed: {exc}")
-              try:
-                  if player_rows > 0:
-                      player_with_ids = conn.execute(
-                          f"SELECT COUNT(*) FROM public.player_fantasy WHERE COALESCE(TRIM({id_column}), '') != ''"
-                      ).fetchone()[0]
-                      print(f"  player_fantasy {id_column}: {player_with_ids:,}/{player_rows:,}")
-                      if player_with_ids == 0:
-                          failures.append(f"player_fantasy rows lost {id_column} before upload")
-              except Exception as exc:
-                  failures.append(f"player_fantasy {id_column} check failed: {exc}")
-              try:
-                  if draft_rows > 0:
-                      draft_with_ids = conn.execute(
-                          f"SELECT COUNT(*) FROM public.draft WHERE COALESCE(TRIM({id_column}), '') != ''"
-                      ).fetchone()[0]
-                      print(f"  draft {id_column}: {draft_with_ids:,}/{draft_rows:,}")
-                      if draft_with_ids == 0:
-                          failures.append(f"draft rows lost {id_column} before upload")
-              except Exception as exc:
-                  failures.append(f"draft {id_column} check failed: {exc}")
-              try:
-                  txn_player_rows = conn.execute(
-                      "SELECT COUNT(*) FROM public.transactions WHERE transaction_type != 'draft_pick_trade' AND player IS NOT NULL"
-                  ).fetchone()[0]
-                  if txn_player_rows > 0:
-                      txn_with_ids = conn.execute(
-                          f"SELECT COUNT(*) FROM public.transactions WHERE transaction_type != 'draft_pick_trade' AND player IS NOT NULL AND COALESCE(TRIM({id_column}), '') != ''"
-                      ).fetchone()[0]
-                      print(f"  transactions {id_column}: {txn_with_ids:,}/{txn_player_rows:,}")
-                      if txn_with_ids == 0:
-                          failures.append(f"transaction rows lost {id_column} before upload")
-              except Exception as exc:
-                  failures.append(f"transactions {id_column} check failed: {exc}")
-
+          total = conn.execute(f"SELECT COUNT(*) FROM public.matchup WHERE db_name = '{db_name}'").fetchone()[0]
+          print(f"\nTotal matchup rows for {db_name}: {total:,}")
           conn.close()
-
-          if failures:
-              print("\nFAILURES:")
-              for failure in failures:
-                  print(f"  - {failure}")
-              sys.exit(1)
-
-          print("\nPost-aggregation validation passed.")
           PYEOF
+
+      # ==================== CLEANUP ====================
+      - name: Gracefully shut down Duckling
+        if: always()
+        env:
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+        working-directory: fantasy_football_data_scripts
+        run: |
+          if [ -z "$MOTHERDUCK_TOKEN" ]; then
+            echo "MOTHERDUCK_TOKEN not set - skipping shutdown"
+            exit 0
+          fi
+
+          python -m multi_league.core.duckling_manager || {
+            echo "Duckling shutdown failed (non-critical)"
+            exit 0
+          }
 
       - name: Upload logs
         if: always()
@@ -379,12 +324,10 @@ jobs:
           path: |
             expected_record.log
             playoff_odds.log
-            player_aggregation.log
             matchup_aggregation.log
             draft_aggregation.log
             transaction_aggregation.log
             homepage_summary.log
-            post_aggregation_validation.log
           retention-days: 7
 
       - name: Create workflow summary
@@ -397,11 +340,13 @@ jobs:
           echo "- **Simulations**: ${N_SIMS}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Architecture" >> $GITHUB_STEP_SUMMARY
-          echo "All scripts run with \`--db\` flag — surgical SELECT/UPDATE directly on MotherDuck." >> $GITHUB_STEP_SUMMARY
-          echo "No parquet downloads. No context files. No table drops." >> $GITHUB_STEP_SUMMARY
+          echo "1. Download league data from \`___leagues\` to local DuckDB" >> $GITHUB_STEP_SUMMARY
+          echo "2. Run all sims + aggregations locally (free GH Actions compute)" >> $GITHUB_STEP_SUMMARY
+          echo "3. Upload results back to \`___leagues\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Steps:" >> $GITHUB_STEP_SUMMARY
-          echo "1. Expected record (shuffle sims) → UPDATE matchup" >> $GITHUB_STEP_SUMMARY
-          echo "2. Playoff odds + clutch equity → UPDATE matchup + player_fantasy" >> $GITHUB_STEP_SUMMARY
-          echo "3. Aggregation (player, matchup, draft, transaction, homepage)" >> $GITHUB_STEP_SUMMARY
-          echo "4. Post-aggregation validation (schema + aggregate outputs)" >> $GITHUB_STEP_SUMMARY
+          echo "1. Download \`${DATABASE_NAME}\` → local DuckDB" >> $GITHUB_STEP_SUMMARY
+          echo "2. Expected record (shuffle sims)" >> $GITHUB_STEP_SUMMARY
+          echo "3. Playoff odds + clutch equity" >> $GITHUB_STEP_SUMMARY
+          echo "4. Aggregation (matchup, draft, transaction, homepage)" >> $GITHUB_STEP_SUMMARY
+          echo "5. Upload all results → \`___leagues\`" >> $GITHUB_STEP_SUMMARY
