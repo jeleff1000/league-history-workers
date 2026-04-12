@@ -99,6 +99,7 @@ jobs:
         env:
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         run: |
+          pip install duckdb==1.5.1 -q 2>/dev/null || true
           python - <<'PYEOF'
           import duckdb, os
 
