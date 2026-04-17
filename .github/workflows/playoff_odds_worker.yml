@@ -40,6 +40,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || github.event.client_payload.yahoo_oauth_ref || 'main' }}
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -181,14 +185,6 @@ jobs:
             tail -50 ../playoff_odds.log
             exit $EXIT_CODE
           fi
-
-      # ==================== CLUTCH EQUITY (LOCAL) ====================
-      - name: Calculate clutch equity
-        continue-on-error: true
-        working-directory: fantasy_football_data_scripts
-        run: |
-          python -m multi_league.transformations.player.clutch_to_player \
-            --db ${DATABASE_NAME} --data-dir ${DATA_DIR}
 
       # ==================== AGGREGATIONS (LOCAL) ====================
       - name: Re-aggregate matchup tables
