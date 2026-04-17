@@ -186,6 +186,14 @@ jobs:
             exit $EXIT_CODE
           fi
 
+      # ==================== CLUTCH EQUITY (LOCAL) ====================
+      - name: Calculate clutch equity
+        continue-on-error: true
+        working-directory: fantasy_football_data_scripts
+        run: |
+          python -m multi_league.transformations.player.clutch_to_player \
+            --db ${DATABASE_NAME} --data-dir ${DATA_DIR}
+
       # ==================== AGGREGATIONS (LOCAL) ====================
       - name: Re-aggregate matchup tables
         continue-on-error: true

@@ -344,6 +344,15 @@ jobs:
             --data-dir ${{ env.DATA_DIR }} \
             --n-sims 10000
 
+      # ==================== CALCULATE CLUTCH EQUITY ====================
+      - name: Calculate clutch equity
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        run: |
+          cd fantasy_football_data_scripts
+          python -m multi_league.transformations.player.clutch_to_player \
+            --db ${{ env.DB_NAME }} --data-dir ${{ env.DATA_DIR }}
+
       # ==================== RUN AGGREGATIONS ====================
       - name: Run aggregations
         if: steps.import.outputs.exit_code == '0'

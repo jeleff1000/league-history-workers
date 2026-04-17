@@ -495,6 +495,15 @@ jobs:
             echo "Playoff odds calculation failed (non-critical, continuing)"
           fi
 
+      # ==================== CALCULATE CLUTCH EQUITY ====================
+      - name: Calculate clutch equity
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        working-directory: fantasy_football_data_scripts
+        run: |
+          python -m multi_league.transformations.player.clutch_to_player \
+            --db ${DB_NAME} --data-dir ${DATA_DIR}
+
       # ==================== AGGREGATION: MATCHUP CONTEXT ====================
       - name: Aggregate matchup context
         if: steps.import.outputs.exit_code == '0'
