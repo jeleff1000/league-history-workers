@@ -91,21 +91,35 @@ jobs:
                   {"espn_league_id": "71580", "database_name": "tfl_of_extraordinary_gentleman", "import_mode": "full"},
               ]
 
-          elif source == "motherduck":
+          elif source in ("motherduck", "full", "quick"):
               import duckdb
               token = os.environ["MOTHERDUCK_TOKEN"]
               conn = duckdb.connect(f"md:?motherduck_token={token}")
               rows = conn.execute("""
-                  SELECT espn_league_id, database_name, league_name
-                  FROM ___ops.main.espn_leagues
+                  SELECT league_id, database_name, entitled_mode
+                  FROM ___ops.accounts.league_inventory
+                  WHERE platform = 'espn'
+                    AND league_id IS NOT NULL
                   ORDER BY database_name
               """).fetchall()
               conn.close()
 
-              leagues = [
-                  {"espn_league_id": str(lid), "database_name": db, "league_name": name, "import_mode": "full"}
-                  for lid, db, name in rows
+              all_leagues = [
+                  {"espn_league_id": str(lid), "database_name": db, "import_mode": mode or "quick"}
+                  for lid, db, mode in rows
               ]
+
+              # Filter by source type
+              if source == "full":
+                  all_leagues = [v for v in all_leagues if v["import_mode"] == "full"]
+                  print(f"Full-only fleet: {len(all_leagues)} paid/grandfathered leagues")
+              elif source == "quick":
+                  all_leagues = [v for v in all_leagues if v["import_mode"] == "quick"]
+                  print(f"Quick-only fleet: {len(all_leagues)} free leagues")
+              else:
+                  print(f"All leagues: {len(all_leagues)} ({sum(1 for v in all_leagues if v['import_mode'] == 'full')} full, {sum(1 for v in all_leagues if v['import_mode'] != 'full')} quick)")
+
+              leagues = all_leagues
           else:
               print(f"ERROR: Unknown source '{source}'")
               sys.exit(1)

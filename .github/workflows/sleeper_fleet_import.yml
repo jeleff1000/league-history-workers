@@ -104,13 +104,17 @@ jobs:
                   {"sleeper_league_id": "1180216138503110656", "database_name": "zootown_dynasty", "import_mode": "full"},
               ]
 
-          elif source == "motherduck":
+          elif source in ("motherduck", "full", "quick"):
               import duckdb
               token = os.environ["MOTHERDUCK_TOKEN"]
               conn = duckdb.connect(f"md:?motherduck_token={token}")
+
+              # Read from league_inventory (source of truth for entitlements)
               rows = conn.execute("""
-                  SELECT sleeper_league_id, database_name, import_mode
-                  FROM ___ops.main.sleeper_leagues
+                  SELECT league_id, database_name, entitled_mode
+                  FROM ___ops.accounts.league_inventory
+                  WHERE platform = 'sleeper'
+                    AND league_id IS NOT NULL
                   ORDER BY database_name
               """).fetchall()
               conn.close()
@@ -118,13 +122,27 @@ jobs:
               # Deduplicate by database_name, take the latest (highest numeric) league_id
               db_map = {}
               for lid, db, mode in rows:
-                  lid_int = int(lid)
+                  try:
+                      lid_int = int(lid)
+                  except (ValueError, TypeError):
+                      continue
                   if db not in db_map or lid_int > db_map[db]["lid_int"]:
-                      db_map[db] = {"lid_int": lid_int, "sleeper_league_id": lid, "database_name": db, "import_mode": mode or "quick"}
+                      db_map[db] = {"lid_int": lid_int, "sleeper_league_id": str(lid), "database_name": db, "import_mode": mode or "quick"}
 
               all_leagues = sorted(db_map.values(), key=lambda x: x["database_name"])
 
-              # Exclude specific databases (e.g. already reimported)
+              # Filter by source type
+              if source == "full":
+                  all_leagues = [v for v in all_leagues if v["import_mode"] == "full"]
+                  print(f"Full-only fleet: {len(all_leagues)} paid/grandfathered leagues")
+              elif source == "quick":
+                  all_leagues = [v for v in all_leagues if v["import_mode"] == "quick"]
+                  print(f"Quick-only fleet: {len(all_leagues)} free leagues")
+              else:
+                  # "motherduck" = all leagues, respecting entitled_mode
+                  print(f"All leagues: {len(all_leagues)} ({sum(1 for v in all_leagues if v['import_mode'] == 'full')} full, {sum(1 for v in all_leagues if v['import_mode'] != 'full')} quick)")
+
+              # Exclude specific databases
               exclude = set(x.strip() for x in os.environ.get("EXCLUDE_DBS", "").split(",") if x.strip())
               if exclude:
                   all_leagues = [v for v in all_leagues if v["database_name"] not in exclude]
@@ -139,7 +157,7 @@ jobs:
               print(f"Batch {batch}: leagues {start+1}-{min(end, len(all_leagues))} of {len(all_leagues)}")
 
               leagues = [
-                  {"sleeper_league_id": v["sleeper_league_id"], "database_name": v["database_name"], "import_mode": "full"}
+                  {"sleeper_league_id": v["sleeper_league_id"], "database_name": v["database_name"], "import_mode": v["import_mode"]}
                   for v in batched
               ]
           else:
