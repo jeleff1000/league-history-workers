@@ -139,7 +139,7 @@ jobs:
               print(f"Batch {batch}: leagues {start+1}-{min(end, len(all_leagues))} of {len(all_leagues)}")
 
               leagues = [
-                  {"sleeper_league_id": v["sleeper_league_id"], "database_name": v["database_name"], "import_mode": v["import_mode"]}
+                  {"sleeper_league_id": v["sleeper_league_id"], "database_name": v["database_name"], "import_mode": "full"}
                   for v in batched
               ]
           else:
