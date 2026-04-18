@@ -298,7 +298,7 @@ jobs:
           mkdir -p "$DATA_DIR"
 
           # Build import flags
-          IMPORT_FLAGS="--league ${{ env.DB_NAME }}"
+          IMPORT_FLAGS="--league ${{ env.DB_NAME }} --data-dir $DATA_DIR"
           if [ "${{ env.IMPORT_MODE }}" = "quick" ]; then
             IMPORT_FLAGS="$IMPORT_FLAGS --quick"
           fi
