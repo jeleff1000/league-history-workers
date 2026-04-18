@@ -12,14 +12,16 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: 'League source: "test" (7 test leagues), "motherduck" (all sleeper leagues), or "custom" (provide leagues_json)'
+        description: 'League source: "full" (paid/grandfathered), "quick" (free only), "motherduck" (all), "test", or "custom"'
         required: true
         type: choice
         options:
-          - test
+          - full
+          - quick
           - motherduck
+          - test
           - custom
-        default: test
+        default: full
       leagues_json:
         description: 'JSON array of leagues (only used when source=custom). Format: [{"sleeper_league_id":"...", "database_name":"...", "start_year":2021}]'
         required: false
