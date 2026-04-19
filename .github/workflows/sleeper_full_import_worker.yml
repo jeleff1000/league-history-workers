@@ -178,6 +178,19 @@ jobs:
           username = league_data.get('username', '').strip()
           start_year = int(league_data.get('start_year', 2024))
           end_year = int(league_data.get('end_year') or league_data.get('season', 2025))
+          league_ids = league_data.get('league_ids') or {}
+          history_years = []
+          for year_key in league_ids:
+              try:
+                  history_years.append(int(year_key))
+              except (TypeError, ValueError):
+                  continue
+          if history_years:
+              start_year = min(history_years)
+              end_year = max(history_years)
+              league_data['start_year'] = start_year
+              league_data['end_year'] = end_year
+              league_data['season'] = end_year
 
           # Validate required fields
           if not sleeper_league_id:
