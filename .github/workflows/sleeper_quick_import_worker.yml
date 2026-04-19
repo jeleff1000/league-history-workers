@@ -33,9 +33,86 @@ permissions:
   contents: read
 
 jobs:
+  resolve-db-lock:
+    runs-on: ubuntu-latest
+    outputs:
+      database_name: ${{ steps.resolve.outputs.database_name }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Resolve lock key
+        id: resolve
+        run: |
+          python - <<'PYEOF'
+          import base64
+          import json
+          import os
+          import re
+          import subprocess
+
+          league_data_b64 = os.environ.get('LEAGUE_DATA_B64', '')
+          league_data_raw = os.environ.get('LEAGUE_DATA_RAW', '')
+
+          if league_data_b64:
+              try:
+                  league_data = json.loads(base64.b64decode(league_data_b64).decode('utf-8'))
+              except Exception:
+                  league_data = json.loads(league_data_b64)
+          elif league_data_raw:
+              league_data = json.loads(league_data_raw)
+          else:
+              raise SystemExit("ERROR: No league data provided")
+
+          sleeper_league_id = league_data.get('sleeper_league_id') or league_data.get('league_id')
+          league_name = league_data.get('league_name', 'Sleeper League')
+          if not sleeper_league_id:
+              raise SystemExit("ERROR: sleeper_league_id (or league_id) is required")
+
+          pre_computed_db = os.environ.get('PRE_RESOLVED_DATABASE_NAME', '').strip()
+          if not pre_computed_db:
+              pre_computed_db = league_data.get('database_name', '').strip()
+          result = subprocess.run(
+              ['python', '.github/scripts/resolve_db_name.py',
+               '--league-id', str(sleeper_league_id),
+               '--league-name', league_name,
+               '--platform', 'sleeper',
+               '--database-name', pre_computed_db],
+              capture_output=True, text=True
+          )
+          if result.returncode != 0:
+              print(f"WARNING: resolve_db_name.py failed: {result.stderr}")
+              db_name = re.sub(r'[^a-zA-Z0-9]+', '_', league_name.strip().lower()).strip('_') or 'sleeper_league'
+              if db_name[0].isdigit():
+                  db_name = 'l_' + db_name
+              db_name = db_name[:63]
+          else:
+              db_name = result.stdout.strip().split('\n')[-1]
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"database_name={db_name}\n")
+          print(f"Resolved database name for lock: {db_name}")
+          PYEOF
+        env:
+          LEAGUE_DATA_B64: ${{ github.event.inputs.league_data_b64 || github.event.client_payload.league_data_b64 }}
+          LEAGUE_DATA_RAW: ${{ github.event.inputs.league_data || github.event.client_payload.league_data }}
+          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+
   import-sleeper-league:
+    needs: resolve-db-lock
     runs-on: ubuntu-latest
     timeout-minutes: 60  # Sleeper imports are faster (no OAuth, public API)
+    concurrency:
+      group: central-db-write-${{ needs.resolve-db-lock.outputs.database_name }}
+      cancel-in-progress: false
 
     env:
       PYTHONUNBUFFERED: 1
@@ -168,6 +245,7 @@ jobs:
           USER_ID: ${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
           IMPORT_MODE: ${{ github.event.inputs.import_mode || github.event.client_payload.import_mode || 'full' }}
           MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          PRE_RESOLVED_DATABASE_NAME: ${{ needs.resolve-db-lock.outputs.database_name }}
 
       # ==================== REGISTER LEAGUE (EARLY) ====================
       # Register league in MotherDuck immediately so it's tracked even if import fails.

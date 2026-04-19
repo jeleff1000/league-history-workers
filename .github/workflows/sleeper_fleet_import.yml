@@ -227,6 +227,9 @@ jobs:
     if: ${{ !inputs.dry_run && fromJson(needs.discover.outputs.league_count) > 0 }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    concurrency:
+      group: central-db-write-${{ matrix.database_name }}
+      cancel-in-progress: false
 
     strategy:
       matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
