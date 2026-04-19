@@ -29,6 +29,9 @@ jobs:
   calculate-playoff-odds:
     runs-on: ubuntu-latest
     timeout-minutes: 180
+    concurrency:
+      group: central-db-write-${{ github.event.inputs.database_name }}
+      cancel-in-progress: false
 
     env:
       PYTHONUNBUFFERED: 1
