@@ -288,9 +288,11 @@ runs:
         with open("oauth/Oauth.json", 'w') as f:
             json.dump(oauth_data, f, indent=2)
 
-        # Save league data for context creation (with adjusted start_year)
+        # Save league data for context creation (with adjusted start_year and season)
         league_data['start_year'] = start_year
         league_data['actual_start_year'] = actual_start_year
+        league_data['season'] = season
+        league_data['quick_import_year'] = quick_import_year
         with open("league_data_input.json", 'w') as f:
             json.dump(league_data, f, indent=2)
 
