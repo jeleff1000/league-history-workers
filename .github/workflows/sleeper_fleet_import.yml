@@ -78,20 +78,29 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install duckdb
-        run: pip install duckdb==1.5.1
-
       - name: Build league matrix
         id: build
         env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+          DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
           SOURCE: ${{ github.event.inputs.source }}
           LEAGUES_JSON: ${{ github.event.inputs.leagues_json }}
           BATCH: ${{ github.event.inputs.batch || '1' }}
           EXCLUDE_DBS: ${{ github.event.inputs.exclude_dbs || '' }}
         run: |
           python - <<'PYEOF'
-          import json, os, sys
+          import json, os, sys, urllib.request
+
+          def fly_query(sql, database="___ops"):
+              url = os.environ["DATABASE_SERVER_URL"].rstrip("/") + "/query"
+              token = os.environ["DATABASE_READ_TOKEN"]
+              data = json.dumps({"sql": sql, "database": database}).encode()
+              req = urllib.request.Request(url, data=data, headers={
+                  "Content-Type": "application/json",
+                  "Authorization": f"Bearer {token}",
+              })
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return json.loads(resp.read())
 
           source = os.environ.get("SOURCE", "test")
           leagues_json_raw = os.environ.get("LEAGUES_JSON", "")
@@ -112,19 +121,15 @@ jobs:
               ]
 
           elif source in ("motherduck", "full", "quick"):
-              import duckdb
-              token = os.environ["MOTHERDUCK_TOKEN"]
-              conn = duckdb.connect(f"md:?motherduck_token={token}")
-
-              # Read from league_inventory (source of truth for entitlements)
-              rows = conn.execute("""
+              # Read from league_inventory via Fly.io DuckDB server
+              raw_rows = fly_query("""
                   SELECT league_id, database_name, entitled_mode
-                  FROM ___ops.accounts.league_inventory
+                  FROM accounts.league_inventory
                   WHERE platform = 'sleeper'
                     AND league_id IS NOT NULL
                   ORDER BY database_name
-              """).fetchall()
-              conn.close()
+              """)
+              rows = [(r["league_id"], r["database_name"], r["entitled_mode"]) for r in raw_rows]
 
               # Deduplicate by database_name, take the latest (highest numeric) league_id
               db_map = {}
