@@ -45,6 +45,11 @@ on:
         required: false
         type: boolean
         default: false
+      yahoo_oauth_ref:
+        description: 'yahoo_oauth branch/ref to check out (default main)'
+        required: false
+        type: string
+        default: 'main'
 
 permissions:
   actions: write
@@ -243,6 +248,10 @@ jobs:
       IMPORT_MODE: ${{ matrix.import_mode }}
       MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
       OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
+      DATABASE_BACKEND: fly
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
 
     steps:
       - name: Checkout code
@@ -250,6 +259,7 @@ jobs:
         with:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || 'main' }}
 
       - name: Restore ops cache
         uses: actions/cache@v5
@@ -304,6 +314,7 @@ jobs:
             --league-id ${{ env.SLEEPER_LEAGUE_ID }} \
             --data-dir "$DATA_DIR" \
             --import-mode ${{ env.IMPORT_MODE }} \
+            --database-name ${{ env.DB_NAME }} \
             --skip-track-2-upload \
             2>&1 | tee ../import_${{ env.DB_NAME }}.log
           EXIT_CODE=${PIPESTATUS[0]}
@@ -318,6 +329,30 @@ jobs:
             exit $EXIT_CODE
           fi
 
+      # ==================== DIAGNOSTICS: is_playoffs checkpoint ====================
+      - name: "[DIAG] is_playoffs after import"
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        run: |
+          cd fantasy_football_data_scripts
+          python -c "
+          import duckdb
+          from pathlib import Path
+          p = Path('${{ steps.import.outputs.data_dir }}') / '${{ env.DB_NAME }}.duckdb'
+          conn = duckdb.connect(str(p), read_only=True)
+          rows = conn.execute('''
+              SELECT year,
+                     SUM(CASE WHEN CAST(is_playoffs AS INTEGER) = 1 THEN 1 ELSE 0 END) as po,
+                     SUM(CASE WHEN CAST(champion AS INTEGER) = 1 THEN 1 ELSE 0 END) as ch,
+                     typeof(is_playoffs) as tp
+              FROM public.matchup GROUP BY year ORDER BY year
+          ''').fetchall()
+          for r in rows:
+              status = 'OK' if r[1] > 0 else '*** MISSING ***'
+              print(f'[DIAG:post-import] {r[0]}: is_playoffs={r[1]}, champion={r[2]}, type={r[3]} {status}')
+          conn.close()
+          "
+
       # ==================== SIMS ====================
       - name: Calculate expected records
         if: steps.import.outputs.exit_code == '0'
@@ -329,6 +364,27 @@ jobs:
             --data-dir ${{ steps.import.outputs.data_dir }} \
             --n-sims 10000
 
+      - name: "[DIAG] is_playoffs after expected_record"
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        run: |
+          cd fantasy_football_data_scripts
+          python -c "
+          import duckdb
+          from pathlib import Path
+          p = Path('${{ steps.import.outputs.data_dir }}') / '${{ env.DB_NAME }}.duckdb'
+          conn = duckdb.connect(str(p), read_only=True)
+          rows = conn.execute('''
+              SELECT year,
+                     SUM(CASE WHEN CAST(is_playoffs AS INTEGER) = 1 THEN 1 ELSE 0 END) as po
+              FROM public.matchup GROUP BY year ORDER BY year
+          ''').fetchall()
+          for r in rows:
+              status = 'OK' if r[1] > 0 else '*** MISSING ***'
+              print(f'[DIAG:post-expected-record] {r[0]}: is_playoffs={r[1]} {status}')
+          conn.close()
+          "
+
       - name: Calculate playoff odds
         if: steps.import.outputs.exit_code == '0'
         continue-on-error: true
@@ -338,6 +394,27 @@ jobs:
             --db ${{ env.DB_NAME }} \
             --data-dir ${{ steps.import.outputs.data_dir }} \
             --n-sims 10000
+
+      - name: "[DIAG] is_playoffs after playoff_odds"
+        if: steps.import.outputs.exit_code == '0'
+        continue-on-error: true
+        run: |
+          cd fantasy_football_data_scripts
+          python -c "
+          import duckdb
+          from pathlib import Path
+          p = Path('${{ steps.import.outputs.data_dir }}') / '${{ env.DB_NAME }}.duckdb'
+          conn = duckdb.connect(str(p), read_only=True)
+          rows = conn.execute('''
+              SELECT year,
+                     SUM(CASE WHEN CAST(is_playoffs AS INTEGER) = 1 THEN 1 ELSE 0 END) as po
+              FROM public.matchup GROUP BY year ORDER BY year
+          ''').fetchall()
+          for r in rows:
+              status = 'OK' if r[1] > 0 else '*** MISSING ***'
+              print(f'[DIAG:post-playoff-odds] {r[0]}: is_playoffs={r[1]} {status}')
+          conn.close()
+          "
 
       # Populates keeper_year (consecutive years a player was kept by the same
       # franchise) in player_fantasy. Previously orphaned — only callable from
@@ -372,17 +449,23 @@ jobs:
             --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
 
       # ==================== UPLOAD ====================
-      - name: Upload to MotherDuck
+      - name: Upload to database
         if: steps.import.outputs.exit_code == '0'
         run: |
           cd fantasy_football_data_scripts
           python -c "
+          import os
           from multi_league.core.local_db import LocalLeagueDB
           db = LocalLeagueDB('${{ steps.import.outputs.data_dir }}', '${{ env.DB_NAME }}')
           db.connect()
-          db.upload_to_motherduck('${{ env.DB_NAME }}')
+          backend = os.environ.get('DATABASE_BACKEND', 'motherduck')
+          if backend == 'fly':
+              db.upload_to_fly('${{ env.DB_NAME }}')
+              print('Upload to Fly complete: ${{ env.DB_NAME }}')
+          else:
+              db.upload_to_motherduck('${{ env.DB_NAME }}')
+              print('Upload to MotherDuck complete: ${{ env.DB_NAME }}')
           db.close()
-          print('Upload to MotherDuck complete: ${{ env.DB_NAME }}')
           "
 
       # ==================== STATUS ====================

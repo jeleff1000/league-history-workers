@@ -242,6 +242,10 @@ jobs:
       YAHOO_CLIENT_ID: ${{ secrets.YAHOO_CLIENT_ID }}
       YAHOO_CLIENT_SECRET: ${{ secrets.YAHOO_CLIENT_SECRET }}
       OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
+      DATABASE_BACKEND: fly
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
 
     steps:
       - name: Checkout code
@@ -360,17 +364,23 @@ jobs:
             --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
 
       # ==================== UPLOAD ====================
-      - name: Upload to MotherDuck
+      - name: Upload to database
         if: steps.import.outputs.exit_code == '0'
         run: |
           cd fantasy_football_data_scripts
           python -c "
+          import os
           from multi_league.core.local_db import LocalLeagueDB
           db = LocalLeagueDB('${{ steps.import.outputs.data_dir }}', '${{ env.DB_NAME }}')
           db.connect()
-          db.upload_to_motherduck('${{ env.DB_NAME }}')
+          backend = os.environ.get('DATABASE_BACKEND', 'motherduck')
+          if backend == 'fly':
+              db.upload_to_fly('${{ env.DB_NAME }}')
+              print('Upload to Fly complete: ${{ env.DB_NAME }}')
+          else:
+              db.upload_to_motherduck('${{ env.DB_NAME }}')
+              print('Upload to MotherDuck complete: ${{ env.DB_NAME }}')
           db.close()
-          print('Upload to MotherDuck complete: ${{ env.DB_NAME }}')
           "
 
       # ==================== STATUS ====================

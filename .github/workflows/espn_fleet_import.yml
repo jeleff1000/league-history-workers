@@ -201,6 +201,10 @@ jobs:
       MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
       CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
       OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
+      DATABASE_BACKEND: fly
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
 
     steps:
       - name: Checkout code
@@ -324,7 +328,7 @@ jobs:
               "manager_name_overrides": {},
               "created_at": datetime.now().isoformat(),
               "platform": "espn",
-              "import_mode": "full",
+              "import_mode": os.environ.get("IMPORT_MODE", "full"),
               "require_oauth": False,
               "league_ids": {},
           }
@@ -355,7 +359,7 @@ jobs:
           set +e
           python espn_initial_import.py \
             --context ../espn_context.json \
-            --import-mode full \
+            --import-mode ${{ env.IMPORT_MODE }} \
             --skip-track-2-upload \
             2>&1 | tee ../import_${{ env.DB_NAME }}.log
           EXIT_CODE=${PIPESTATUS[0]}
@@ -424,17 +428,23 @@ jobs:
             --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
 
       # ==================== UPLOAD ====================
-      - name: Upload to MotherDuck
+      - name: Upload to database
         if: steps.import.outputs.exit_code == '0'
         run: |
           cd fantasy_football_data_scripts
           python -c "
+          import os
           from multi_league.core.local_db import LocalLeagueDB
           db = LocalLeagueDB('${{ steps.import.outputs.data_dir }}', '${{ env.DB_NAME }}')
           db.connect()
-          db.upload_to_motherduck('${{ env.DB_NAME }}')
+          backend = os.environ.get('DATABASE_BACKEND', 'motherduck')
+          if backend == 'fly':
+              db.upload_to_fly('${{ env.DB_NAME }}')
+              print('Upload to Fly complete: ${{ env.DB_NAME }}')
+          else:
+              db.upload_to_motherduck('${{ env.DB_NAME }}')
+              print('Upload to MotherDuck complete: ${{ env.DB_NAME }}')
           db.close()
-          print('Upload to MotherDuck complete: ${{ env.DB_NAME }}')
           "
 
       # ==================== CLEANUP ====================
