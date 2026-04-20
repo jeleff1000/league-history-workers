@@ -5,7 +5,7 @@ name: Sleeper Fleet Import
 #
 # Usage:
 #   Manual: provide leagues_json with array of {sleeper_league_id, database_name, start_year}
-#   Or: set source=motherduck to auto-discover from ___ops.main.sleeper_leagues
+#   Or: set source=motherduck to auto-discover from ___ops via Fly.io
 #   Or: set source=test to run the 7 test leagues
 
 on:
@@ -223,7 +223,8 @@ jobs:
       - name: Build ops cache (on miss)
         if: steps.cache.outputs.cache-hit != 'true'
         env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+          DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
         run: |
           pip install duckdb==1.5.1
           python fantasy_football_data_scripts/build_ops_cache.py \
@@ -251,7 +252,6 @@ jobs:
       DB_NAME: ${{ matrix.database_name }}
       SLEEPER_LEAGUE_ID: ${{ matrix.sleeper_league_id }}
       IMPORT_MODE: ${{ matrix.import_mode }}
-      MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
       OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
       DATABASE_BACKEND: fly
       DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
@@ -459,17 +459,11 @@ jobs:
         run: |
           cd fantasy_football_data_scripts
           python -c "
-          import os
           from multi_league.core.local_db import LocalLeagueDB
           db = LocalLeagueDB('${{ steps.import.outputs.data_dir }}', '${{ env.DB_NAME }}')
           db.connect()
-          backend = os.environ.get('DATABASE_BACKEND', 'motherduck')
-          if backend == 'fly':
-              db.upload_to_fly('${{ env.DB_NAME }}')
-              print('Upload to Fly complete: ${{ env.DB_NAME }}')
-          else:
-              db.upload_to_motherduck('${{ env.DB_NAME }}')
-              print('Upload to MotherDuck complete: ${{ env.DB_NAME }}')
+          db.upload_to_fly('${{ env.DB_NAME }}')
+          print('Upload to Fly complete: ${{ env.DB_NAME }}')
           db.close()
           "
 

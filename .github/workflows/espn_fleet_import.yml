@@ -4,7 +4,7 @@ name: ESPN Fleet Import
 # Each league runs as its own independent job so failures are isolated.
 #
 # Usage:
-#   source=motherduck: auto-discover from ___ops.main.espn_leagues
+#   source=full/quick/motherduck: auto-discover from ___ops via Fly.io
 #   source=custom: provide leagues_json
 #   source=test: run tfl_of_extraordinary_gentleman only
 
@@ -178,7 +178,8 @@ jobs:
       - name: Build ops cache (on miss)
         if: steps.cache.outputs.cache-hit != 'true'
         env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+          DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
         run: |
           pip install duckdb==1.5.1
           python fantasy_football_data_scripts/build_ops_cache.py \
@@ -203,7 +204,6 @@ jobs:
       DB_NAME: ${{ matrix.database_name }}
       ESPN_LEAGUE_ID: ${{ matrix.espn_league_id }}
       IMPORT_MODE: ${{ matrix.import_mode }}
-      MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
       CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
       OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
       DATABASE_BACKEND: fly
@@ -253,14 +253,24 @@ jobs:
         run: echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
 
       # ==================== RETRIEVE COOKIES ====================
-      - name: Retrieve ESPN cookies from MotherDuck
+      - name: Retrieve ESPN cookies
         id: cookies
         run: |
           python - <<'PYEOF'
-          import duckdb, os, sys
+          import json, os, sys, urllib.request
+
+          def fly_query(sql, database="___ops"):
+              url = os.environ["DATABASE_SERVER_URL"].rstrip("/") + "/query"
+              token = os.environ["DATABASE_READ_TOKEN"]
+              data = json.dumps({"sql": sql, "database": database}).encode()
+              req = urllib.request.Request(url, data=data, headers={
+                  "Content-Type": "application/json",
+                  "Authorization": f"Bearer {token}",
+              })
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return json.loads(resp.read())
 
           db_name = os.environ['DB_NAME']
-          token = os.environ['MOTHERDUCK_TOKEN']
           enc_key = os.environ.get('CREDENTIAL_ENCRYPTION_KEY', '')
 
           if not enc_key:
@@ -269,15 +279,13 @@ jobs:
               with open(".espn_swid", "w") as f: f.write("")
               sys.exit(0)
 
-          conn = duckdb.connect(f"md:?motherduck_token={token}")
-          result = conn.execute("""
+          rows = fly_query(f"""
               SELECT encrypted_espn_s2, encrypted_swid
-              FROM ___ops.main.espn_leagues
-              WHERE database_name = ?
-          """, [db_name]).fetchone()
-          conn.close()
+              FROM main.espn_leagues
+              WHERE database_name = '{db_name}'
+          """)
 
-          if not result or not result[0]:
+          if not rows or not rows[0].get("encrypted_espn_s2"):
               print(f"No stored cookies for {db_name} — public league")
               with open(".espn_s2", "w") as f: f.write("")
               with open(".espn_swid", "w") as f: f.write("")
@@ -285,8 +293,8 @@ jobs:
 
           from cryptography.fernet import Fernet
           f = Fernet(enc_key.encode())
-          espn_s2 = f.decrypt(result[0].encode()).decode()
-          swid = f.decrypt(result[1].encode()).decode()
+          espn_s2 = f.decrypt(rows[0]["encrypted_espn_s2"].encode()).decode()
+          swid = f.decrypt(rows[0]["encrypted_swid"].encode()).decode()
 
           with open(".espn_s2", "w") as fh: fh.write(espn_s2)
           with open(".espn_swid", "w") as fh: fh.write(swid)
@@ -438,17 +446,11 @@ jobs:
         run: |
           cd fantasy_football_data_scripts
           python -c "
-          import os
           from multi_league.core.local_db import LocalLeagueDB
           db = LocalLeagueDB('${{ steps.import.outputs.data_dir }}', '${{ env.DB_NAME }}')
           db.connect()
-          backend = os.environ.get('DATABASE_BACKEND', 'motherduck')
-          if backend == 'fly':
-              db.upload_to_fly('${{ env.DB_NAME }}')
-              print('Upload to Fly complete: ${{ env.DB_NAME }}')
-          else:
-              db.upload_to_motherduck('${{ env.DB_NAME }}')
-              print('Upload to MotherDuck complete: ${{ env.DB_NAME }}')
+          db.upload_to_fly('${{ env.DB_NAME }}')
+          print('Upload to Fly complete: ${{ env.DB_NAME }}')
           db.close()
           "
 

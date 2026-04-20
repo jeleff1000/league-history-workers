@@ -60,7 +60,10 @@ jobs:
 
       - name: Run fleet validation
         env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+          DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+          DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
+          DATABASE_BACKEND: fly
           PYTHONUNBUFFERED: '1'
         run: |
           cd fantasy_football_data_scripts
@@ -97,19 +100,27 @@ jobs:
       - name: Query results summary
         if: always()
         env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+          DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
         run: |
-          pip install duckdb==1.5.1 -q 2>/dev/null || true
           python - <<'PYEOF'
-          import duckdb, os
+          import json, os, urllib.request
 
-          token = os.environ['MOTHERDUCK_TOKEN']
-          conn = duckdb.connect(f"md:___ops?motherduck_token={token}")
+          def fly_query(sql, database="___ops"):
+              url = os.environ["DATABASE_SERVER_URL"].rstrip("/") + "/query"
+              token = os.environ["DATABASE_READ_TOKEN"]
+              data = json.dumps({"sql": sql, "database": database}).encode()
+              req = urllib.request.Request(url, data=data, headers={
+                  "Content-Type": "application/json",
+                  "Authorization": f"Bearer {token}",
+              })
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return json.loads(resp.read())
 
           print("\n=== FLEET HEALTH SUMMARY ===\n")
 
           try:
-              run = conn.execute("""
+              rows = fly_query("""
                   SELECT run_id, run_timestamp,
                          COUNT(DISTINCT db_name) as leagues,
                          SUM(CASE WHEN NOT passed AND NOT suppressed THEN 1 ELSE 0 END) as visible_failures,
@@ -118,15 +129,16 @@ jobs:
                   FROM fleet_health.validation_results
                   GROUP BY run_id, run_timestamp
                   ORDER BY run_timestamp DESC LIMIT 1
-              """).fetchone()
+              """)
 
-              if run:
-                  print(f"Run: {run[0]} at {run[1]}")
-                  print(f"Leagues: {run[2]}")
-                  print(f"Passed: {run[5]}, Failed: {run[3]}, Suppressed: {run[4]}")
+              if rows:
+                  run = rows[0]
+                  print(f"Run: {run['run_id']} at {run['run_timestamp']}")
+                  print(f"Leagues: {run['leagues']}")
+                  print(f"Passed: {run['passed']}, Failed: {run['visible_failures']}, Suppressed: {run['suppressed_failures']}")
 
               print("\n--- By Severity ---")
-              rows = conn.execute("""
+              rows = fly_query("""
                   SELECT severity,
                          COUNT(*) FILTER (WHERE NOT passed AND NOT suppressed) as failures,
                          COUNT(DISTINCT db_name) FILTER (WHERE NOT passed AND NOT suppressed) as leagues
@@ -136,13 +148,13 @@ jobs:
                   ORDER BY CASE severity
                       WHEN 'BLOCKER' THEN 1 WHEN 'ERROR' THEN 2
                       WHEN 'WARNING' THEN 3 WHEN 'INFO' THEN 4 END
-              """).fetchall()
-              for sev, failures, leagues in rows:
-                  if failures > 0:
-                      print(f"  {sev}: {failures} failures across {leagues} leagues")
+              """)
+              for row in rows:
+                  if row['failures'] > 0:
+                      print(f"  {row['severity']}: {row['failures']} failures across {row['leagues']} leagues")
 
               print("\n--- Top 15 Failing Checks ---")
-              rows = conn.execute("""
+              rows = fly_query("""
                   SELECT check_name, severity,
                          COUNT(DISTINCT db_name) as leagues,
                          SUM(fail_count) as total_rows
@@ -154,12 +166,10 @@ jobs:
                       CASE severity WHEN 'BLOCKER' THEN 1 WHEN 'ERROR' THEN 2 ELSE 3 END,
                       leagues DESC
                   LIMIT 15
-              """).fetchall()
-              for check, sev, leagues, total in rows:
-                  print(f"  [{sev}] {leagues:>4} leagues  {check}")
+              """)
+              for row in rows:
+                  print(f"  [{row['severity']}] {row['leagues']:>4} leagues  {row['check_name']}")
 
           except Exception as e:
               print(f"Could not query results: {e}")
-
-          conn.close()
           PYEOF

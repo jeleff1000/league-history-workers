@@ -40,14 +40,17 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install duckdb requests cryptography yahoo_oauth
+        run: pip install requests cryptography yahoo_oauth
 
       - name: Validate and refresh token
         id: validate
         env:
           YAHOO_CLIENT_ID: ${{ secrets.YAHOO_CLIENT_ID }}
           YAHOO_CLIENT_SECRET: ${{ secrets.YAHOO_CLIENT_SECRET }}
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_BACKEND: fly
+          DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+          DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+          DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
           CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
           INPUT_REFRESH_TOKEN: ${{ github.event.inputs.refresh_token }}
           TARGET_DB: ${{ github.event.inputs.target_database }}
@@ -58,22 +61,32 @@ jobs:
           import json
           import time
           import requests
-          import duckdb
+          import urllib.request
+
+          def fly_query(sql, database="___ops"):
+              url = os.environ["DATABASE_SERVER_URL"].rstrip("/") + "/query"
+              token = os.environ["DATABASE_READ_TOKEN"]
+              data = json.dumps({"sql": sql, "database": database}).encode()
+              req = urllib.request.Request(url, data=data, headers={
+                  "Content-Type": "application/json",
+                  "Authorization": f"Bearer {token}",
+              })
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return json.loads(resp.read())
 
           # Get inputs
           refresh_token = os.environ.get('INPUT_REFRESH_TOKEN', '').strip()
           consumer_key = os.environ.get('YAHOO_CLIENT_ID')
           consumer_secret = os.environ.get('YAHOO_CLIENT_SECRET')
-          md_token = os.environ.get('MOTHERDUCK_TOKEN')
           encryption_key = os.environ.get('CREDENTIAL_ENCRYPTION_KEY')
           target_db = os.environ.get('TARGET_DB', '').strip()
 
           if not refresh_token:
-              print("❌ No refresh token provided")
+              print("No refresh token provided")
               sys.exit(1)
 
           if not consumer_key or not consumer_secret:
-              print("❌ YAHOO_CLIENT_ID or YAHOO_CLIENT_SECRET not set in secrets")
+              print("YAHOO_CLIENT_ID or YAHOO_CLIENT_SECRET not set in secrets")
               sys.exit(1)
 
           print("=" * 60)
@@ -97,7 +110,7 @@ jobs:
               )
 
               if response.status_code != 200:
-                  print(f"❌ Token refresh failed: {response.status_code}")
+                  print(f"Token refresh failed: {response.status_code}")
                   print(f"   Response: {response.text[:500]}")
                   print("\nCommon causes:")
                   print("  1. Refresh token was created with different Yahoo app credentials")
@@ -110,10 +123,10 @@ jobs:
               new_refresh_token = tokens.get('refresh_token', refresh_token)
 
               if not new_access_token:
-                  print(f"❌ No access_token in response: {tokens}")
+                  print(f"No access_token in response: {tokens}")
                   sys.exit(1)
 
-              print(f"✅ Token validated successfully!")
+              print(f"Token validated successfully!")
               print(f"   Access token: {new_access_token[:30]}...")
               print(f"   Refresh token: {new_refresh_token[:30]}...")
 
@@ -126,41 +139,32 @@ jobs:
                   timeout=30
               )
               if test_resp.status_code == 200:
-                  print("   ✅ API call successful - token is fully working!")
+                  print("   API call successful - token is fully working!")
               else:
-                  print(f"   ⚠️ API call returned {test_resp.status_code} - token may have limited access")
+                  print(f"   API call returned {test_resp.status_code} - token may have limited access")
 
           except Exception as e:
-              print(f"❌ Token validation failed: {e}")
+              print(f"Token validation failed: {e}")
               sys.exit(1)
 
           print("\n" + "=" * 60)
           print("STEP 2: Discovering league databases")
           print("=" * 60)
 
-          if not md_token:
-              print("⚠️ MOTHERDUCK_TOKEN not set - cannot update stored credentials")
-              print("   Token is valid but won't be stored in MotherDuck")
-              sys.exit(0)
-
-          # Find all league databases from registry (fast — avoids scanning 500+ attached DBs)
-          conn = duckdb.connect(f"md:?motherduck_token={md_token}")
-
-          registry_rows = conn.execute("""
+          # Find all league databases from registry via Fly.io
+          registry_rows = fly_query("""
               SELECT DISTINCT database_name FROM (
-                  SELECT database_name FROM ___ops.main.league_credentials
+                  SELECT database_name FROM main.league_credentials
                   UNION ALL
-                  SELECT database_name FROM ___ops.main.sleeper_leagues
+                  SELECT database_name FROM main.sleeper_leagues
                   UNION ALL
-                  SELECT database_name FROM ___ops.main.espn_leagues
+                  SELECT database_name FROM main.espn_leagues
               )
               ORDER BY database_name
-          """).fetchall()
-          league_dbs = [row[0] for row in registry_rows if row[0]]
+          """)
+          league_dbs = [row["database_name"] for row in registry_rows if row.get("database_name")]
 
-          conn.close()
-
-          print(f"Found {len(league_dbs)} league databases: {league_dbs}")
+          print(f"Found {len(league_dbs)} league databases")
 
           # Filter to target if specified
           if target_db:
@@ -168,76 +172,23 @@ jobs:
                   league_dbs = [target_db]
                   print(f"Targeting specific database: {target_db}")
               else:
-                  print(f"⚠️ Target database '{target_db}' not found in league list")
-                  print(f"   Available: {league_dbs}")
+                  print(f"Target database '{target_db}' not found in league list")
                   sys.exit(1)
 
           print("\n" + "=" * 60)
-          print("STEP 3: Updating credentials in MotherDuck")
+          print("STEP 3: Credential update")
           print("=" * 60)
 
-          if not encryption_key:
-              print("⚠️ CREDENTIAL_ENCRYPTION_KEY not set - cannot encrypt tokens")
-              print("   Token is valid but won't be stored securely")
-              sys.exit(0)
-
-          # Import credential store
-          sys.path.insert(0, 'fantasy_football_data_scripts')
-          from multi_league.utils.credential_store import store_league_credentials
-
-          success_count = 0
-          for db_name in league_dbs:
-              try:
-                  # Get league info from the database
-                  conn = duckdb.connect(f"md:{db_name}?motherduck_token={md_token}")
-
-                  # Try to get league_id from various sources
-                  league_id = db_name
-                  league_name = db_name.replace('_', ' ').title()
-
-                  try:
-                      result = conn.execute("SELECT league_key FROM league_settings ORDER BY year DESC LIMIT 1").fetchone()
-                      if result:
-                          league_id = result[0]
-                  except:
-                      pass
-
-                  try:
-                      result = conn.execute("SELECT league_id, league_name FROM league_context LIMIT 1").fetchone()
-                      if result:
-                          league_id = result[0] or league_id
-                          league_name = result[1] or league_name
-                  except:
-                      pass
-
-                  conn.close()
-
-                  # Store the credentials
-                  success = store_league_credentials(
-                      database_name=db_name,
-                      refresh_token=new_refresh_token,
-                      league_id=league_id,
-                      league_name=league_name
-                  )
-
-                  if success:
-                      print(f"✅ {db_name}: Credentials updated")
-                      success_count += 1
-                  else:
-                      print(f"❌ {db_name}: Failed to store credentials")
-
-              except Exception as e:
-                  print(f"❌ {db_name}: Error - {e}")
-
-          print("\n" + "=" * 60)
-          print("SUMMARY")
-          print("=" * 60)
-          print(f"✅ Updated {success_count}/{len(league_dbs)} league databases")
+          # NOTE: On Fly.io, credential writes are managed separately.
+          # This workflow validates the token and reports which leagues would be updated.
+          # Actual credential storage is handled by the import pipeline.
+          print(f"Token is valid. {len(league_dbs)} leagues would be updated.")
+          print("NOTE: Credential writes are managed by the import pipeline on Fly.io.")
 
           # Save new refresh token for output
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f"new_refresh_token={new_refresh_token}\n")
-              f.write(f"leagues_updated={success_count}\n")
+              f.write(f"leagues_updated=0\n")
 
           PYEOF
 

@@ -1,7 +1,7 @@
 name: Yahoo Quick Import Worker (Free Tier)
 
 # Free Yahoo import: fetches current year, runs sims + aggregations locally,
-# uploads to MotherDuck once at the end. Self-contained — no trigger-downstream.
+# uploads via Fly.io once at the end. Self-contained — no trigger-downstream.
 # Called from: Next.js frontend via repository_dispatch
 
 on:
@@ -15,6 +15,11 @@ on:
         description: 'Unique identifier for this user/import job'
         required: true
         type: string
+      yahoo_oauth_ref:
+        description: 'yahoo_oauth branch/ref to check out (workers-repo override; default main)'
+        required: false
+        type: string
+        default: 'main'
 
   repository_dispatch:
     types: [yahoo_quick_import]
@@ -34,6 +39,10 @@ jobs:
 
     env:
       PYTHONUNBUFFERED: 1
+      DATABASE_BACKEND: fly
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
 
     steps:
       - name: Checkout code
@@ -41,6 +50,7 @@ jobs:
         with:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || github.event.client_payload.yahoo_oauth_ref || 'main' }}
 
       - name: Setup Python
         id: setup-python
@@ -77,7 +87,6 @@ jobs:
           import_mode: ${{ github.event.client_payload.import_mode || github.event.inputs.import_mode || 'quick' }}
           yahoo_client_id: ${{ secrets.YAHOO_CLIENT_ID }}
           yahoo_client_secret: ${{ secrets.YAHOO_CLIENT_SECRET }}
-          motherduck_token: ${{ secrets.MOTHERDUCK_TOKEN }}
 
       # ==================== COMPUTE DATA_DIR / DB_NAME ====================
       - name: Set DATA_DIR and DB_NAME
@@ -155,7 +164,6 @@ jobs:
       # for debugging even if the import fails downstream.
       - name: Store credentials (early)
         env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
           DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
           LEAGUE_ID: ${{ steps.parse.outputs.league_id }}
@@ -256,7 +264,6 @@ jobs:
         id: import
         env:
           AUTO_CONFIRM: "1"
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         working-directory: fantasy_football_data_scripts
         run: |
           echo "========================================"
@@ -293,8 +300,6 @@ jobs:
       - name: Calculate expected records
         if: steps.import.outputs.exit_code == '0'
         continue-on-error: true
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         run: |
           cd fantasy_football_data_scripts
           python -m multi_league.transformations.matchup.expected_record_v2 \
@@ -306,8 +311,6 @@ jobs:
       - name: Calculate playoff odds
         if: steps.import.outputs.exit_code == '0'
         continue-on-error: true
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         run: |
           cd fantasy_football_data_scripts
           python -m multi_league.transformations.matchup.playoff_odds_import \
@@ -319,8 +322,6 @@ jobs:
       - name: Run aggregations
         if: steps.import.outputs.exit_code == '0'
         continue-on-error: true
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         run: |
           cd fantasy_football_data_scripts
           python -m multi_league.transformations.aggregation.aggregate_matchup_context \
@@ -336,23 +337,32 @@ jobs:
           python -m multi_league.transformations.aggregation.homepage_summary \
             --db ${{ env.DB_NAME }} --data-dir ${{ env.DATA_DIR }}
 
-      # ==================== UPLOAD TO MOTHERDUCK ====================
-      - name: Upload to MotherDuck
+      # ==================== UPLOAD LEAGUE DATA ====================
+      - name: Upload league data
         if: steps.import.outputs.exit_code == '0'
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         run: |
           cd fantasy_football_data_scripts
-          python -c "
+          python - <<'PYEOF'
           import sys, os
           sys.path.insert(0, '.')
           from multi_league.core.local_db import LocalLeagueDB
-          db = LocalLeagueDB('${{ env.DATA_DIR }}', '${{ env.DB_NAME }}')
+
+          data_dir = os.environ['DATA_DIR']
+          db_name = os.environ['DB_NAME']
+          backend = os.environ.get('DATABASE_BACKEND', 'motherduck')
+
+          db = LocalLeagueDB(data_dir, db_name)
           db.connect()
-          db.upload_to_motherduck('${{ env.DB_NAME }}')
+
+          if backend == 'fly':
+              db.upload_to_fly(db_name)
+              print('Upload to Fly complete')
+          else:
+              db.upload_to_motherduck(db_name)
+              print('Upload complete')
+
           db.close()
-          print('Upload to MotherDuck complete')
-          "
+          PYEOF
 
       # ==================== STORE CREDENTIALS ====================
       # Always store credentials, even if import fails — they're needed for
@@ -361,7 +371,6 @@ jobs:
       - name: Store credentials for weekly updates
         if: always()
         env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
           DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
           LEAGUE_ID: ${{ steps.parse.outputs.league_id }}

@@ -15,8 +15,11 @@ inputs:
   yahoo_client_secret:
     description: 'Yahoo OAuth client secret'
     required: true
-  motherduck_token:
-    description: 'MotherDuck authentication token'
+  database_server_url:
+    description: 'Fly.io database server URL'
+    required: false
+  database_read_token:
+    description: 'Fly.io database read token'
     required: false
 
 outputs:
@@ -57,7 +60,8 @@ runs:
       env:
         YAHOO_CLIENT_ID: ${{ inputs.yahoo_client_id }}
         YAHOO_CLIENT_SECRET: ${{ inputs.yahoo_client_secret }}
-        MOTHERDUCK_TOKEN: ${{ inputs.motherduck_token }}
+        DATABASE_SERVER_URL: ${{ inputs.database_server_url }}
+        DATABASE_READ_TOKEN: ${{ inputs.database_read_token }}
         LEAGUE_DATA_B64: ${{ inputs.league_data_b64 }}
         IMPORT_MODE: ${{ inputs.import_mode }}
       run: |

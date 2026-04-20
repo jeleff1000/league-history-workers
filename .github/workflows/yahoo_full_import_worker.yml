@@ -1,7 +1,7 @@
 name: Yahoo Full Import Worker (Paid Tier)
 
 # Paid Yahoo import: runs quick import (uploads for fast site), then full historical
-# import + sims + aggregations locally, uploads final result to MotherDuck.
+# import + sims + aggregations locally, uploads final result via Fly.io.
 # All on one runner — no trigger-downstream to playoff_odds_worker.
 
 on:
@@ -41,6 +41,10 @@ jobs:
 
     env:
       PYTHONUNBUFFERED: 1
+      DATABASE_BACKEND: fly
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
 
     steps:
       - name: Checkout code
@@ -85,7 +89,6 @@ jobs:
           import_mode: 'full'
           yahoo_client_id: ${{ secrets.YAHOO_CLIENT_ID }}
           yahoo_client_secret: ${{ secrets.YAHOO_CLIENT_SECRET }}
-          motherduck_token: ${{ secrets.MOTHERDUCK_TOKEN }}
 
       # ==================== COMPUTE DB_NAME AND DATA_DIR ====================
       - name: Set DATA_DIR
@@ -162,7 +165,6 @@ jobs:
       # for debugging even if the import fails downstream.
       - name: Store credentials (early)
         env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
           DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
           LEAGUE_ID: ${{ steps.parse.outputs.league_id }}
@@ -204,7 +206,7 @@ jobs:
           mkdir -p fantasy_football_data/{matchup_data,player_data,draft_data,transaction_data,schedule_data}
 
       # ==================== CREATE LEAGUE CONTEXT (QUICK) ====================
-      # Quick import context: current year only, uploads to MD for fast site
+      # Quick import context: current year only, uploads for fast site
       - name: Create league context (quick)
         id: create_quick_context
         run: |
@@ -259,12 +261,11 @@ jobs:
       # (drop_league_tables) — no need for a separate workflow step.
 
       # ==================== RUN QUICK IMPORT ====================
-      # Quick import uploads to MotherDuck so the site becomes usable immediately
-      - name: Run quick import (current year, uploads to MD)
+      # Quick import uploads so the site becomes usable immediately
+      - name: Run quick import (current year, uploads)
         id: quick_import
         env:
           AUTO_CONFIRM: "1"
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         working-directory: fantasy_football_data_scripts
         run: |
           echo "========================================"
@@ -414,7 +415,6 @@ jobs:
         id: import
         env:
           AUTO_CONFIRM: "1"
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         working-directory: fantasy_football_data_scripts
         run: |
           echo "========================================"
@@ -455,8 +455,6 @@ jobs:
       - name: Run expected record calculator
         if: steps.import.outputs.exit_code == '0'
         continue-on-error: true
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         working-directory: fantasy_football_data_scripts
         run: |
           echo "========================================"
@@ -480,8 +478,6 @@ jobs:
       - name: Run playoff odds calculator
         if: steps.import.outputs.exit_code == '0'
         continue-on-error: true
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         working-directory: fantasy_football_data_scripts
         run: |
           echo "========================================"
@@ -507,8 +503,6 @@ jobs:
       - name: Aggregate matchup context
         if: steps.import.outputs.exit_code == '0'
         continue-on-error: true
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         working-directory: fantasy_football_data_scripts
         run: |
           python -m multi_league.transformations.aggregation.aggregate_matchup_context \
@@ -525,8 +519,6 @@ jobs:
       - name: Aggregate draft context
         if: steps.import.outputs.exit_code == '0'
         continue-on-error: true
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         working-directory: fantasy_football_data_scripts
         run: |
           python -m multi_league.transformations.aggregation.aggregate_draft_context \
@@ -543,8 +535,6 @@ jobs:
       - name: Aggregate transaction context
         if: steps.import.outputs.exit_code == '0'
         continue-on-error: true
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         working-directory: fantasy_football_data_scripts
         run: |
           python -m multi_league.transformations.aggregation.aggregate_transaction_context \
@@ -561,8 +551,6 @@ jobs:
       - name: Aggregate fantasy context
         if: steps.import.outputs.exit_code == '0'
         continue-on-error: true
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         working-directory: fantasy_football_data_scripts
         run: |
           python -m multi_league.transformations.aggregation.aggregate_fantasy_context \
@@ -579,8 +567,6 @@ jobs:
       - name: Aggregate standings
         if: steps.import.outputs.exit_code == '0'
         continue-on-error: true
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         working-directory: fantasy_football_data_scripts
         run: |
           python -m multi_league.transformations.aggregation.aggregate_standings \
@@ -597,8 +583,6 @@ jobs:
       - name: Aggregate homepage summary
         if: steps.import.outputs.exit_code == '0'
         continue-on-error: true
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         working-directory: fantasy_football_data_scripts
         run: |
           python -m multi_league.transformations.aggregation.homepage_summary \
@@ -613,16 +597,14 @@ jobs:
             echo "Homepage summary failed (non-critical)"
           fi
 
-      # ==================== FINAL UPLOAD TO MOTHERDUCK ====================
-      # Upload all local tables (core + aggregation + sims) to MotherDuck.
+      # ==================== UPLOAD LEAGUE DATA ====================
+      # Upload all local tables (core + aggregation + sims) to the database.
       # This replaces the quick import data with the full historical dataset.
-      - name: Upload to MotherDuck (final)
+      - name: Upload league data
         if: steps.import.outputs.exit_code == '0'
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         run: |
           echo "========================================"
-          echo "Uploading all tables to MotherDuck"
+          echo "Uploading all tables"
           echo "Database: ${DB_NAME}"
           echo "Data dir: ${DATA_DIR}"
           echo "========================================"
@@ -636,16 +618,22 @@ jobs:
 
           data_dir = os.environ['DATA_DIR']
           db_name = os.environ['DB_NAME']
+          backend = os.environ.get('DATABASE_BACKEND', 'motherduck')
 
           print(f"[UPLOAD] Opening local DB: {data_dir}/{db_name}.duckdb")
           db = LocalLeagueDB(data_dir, db_name)
           db.connect()
 
-          print(f"[UPLOAD] Uploading to MotherDuck database: {db_name}")
-          db.upload_to_motherduck(db_name)
+          if backend == 'fly':
+              print(f"[UPLOAD] Uploading to Fly.io database: {db_name}")
+              db.upload_to_fly(db_name)
+              print("[UPLOAD] Upload to Fly complete")
+          else:
+              print(f"[UPLOAD] Uploading to MotherDuck database: {db_name}")
+              db.upload_to_motherduck(db_name)
+              print("[UPLOAD] Upload complete")
 
           db.close()
-          print("[UPLOAD] Final upload complete")
           PYEOF
 
       # ==================== STORE CREDENTIALS ====================
@@ -654,7 +642,6 @@ jobs:
       - name: Store credentials for weekly updates
         if: always()
         env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
           DATABASE_NAME: ${{ steps.parse.outputs.database_name }}
           LEAGUE_ID: ${{ steps.parse.outputs.league_id }}
@@ -692,22 +679,6 @@ jobs:
               print(f"Credentials stored - weekly updates enabled")
           PYEOF
 
-      - name: Gracefully shut down Duckling
-        if: always()
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
-        run: |
-          if [ -z "$MOTHERDUCK_TOKEN" ]; then
-            echo "MOTHERDUCK_TOKEN not set - skipping shutdown"
-            exit 0
-          fi
-
-          cd fantasy_football_data_scripts
-          python -m multi_league.core.duckling_manager || {
-            echo "Duckling shutdown failed (non-critical)"
-            exit 0
-          }
-
       # ==================== UPLOAD ARTIFACTS ====================
       - name: Upload artifacts
         if: always()
@@ -740,11 +711,11 @@ jobs:
           echo "- **Database**: \`${{ steps.parse.outputs.database_name }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Pipeline" >> $GITHUB_STEP_SUMMARY
-          echo "1. Quick import (current year) -> upload to MD (site usable)" >> $GITHUB_STEP_SUMMARY
+          echo "1. Quick import (current year) -> upload (site usable)" >> $GITHUB_STEP_SUMMARY
           echo "2. Full import (all years) -> local only" >> $GITHUB_STEP_SUMMARY
           echo "3. Sims (expected record + playoff odds) -> local" >> $GITHUB_STEP_SUMMARY
           echo "4. Aggregations (6 scripts) -> local" >> $GITHUB_STEP_SUMMARY
-          echo "5. Final upload -> replaces everything in MotherDuck" >> $GITHUB_STEP_SUMMARY
+          echo "5. Final upload -> replaces everything" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           if [ "${{ steps.quick_import.outputs.exit_code }}" != "0" ]; then
@@ -754,5 +725,5 @@ jobs:
             echo "Quick import succeeded - site has current year data" >> $GITHUB_STEP_SUMMARY
           else
             echo "## Status: SUCCESS" >> $GITHUB_STEP_SUMMARY
-            echo "All steps completed. Full historical data uploaded to MotherDuck." >> $GITHUB_STEP_SUMMARY
+            echo "All steps completed. Full historical data uploaded." >> $GITHUB_STEP_SUMMARY
           fi

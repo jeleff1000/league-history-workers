@@ -5,11 +5,11 @@ name: Yahoo Fleet Import
 #
 # Usage:
 #   Manual: set source=test for QA leagues, or source=custom with leagues_json
-#   Or: set source=motherduck to auto-discover from ___ops.main.league_credentials
+#   Or: set source=motherduck to auto-discover from ___ops via Fly.io
 #
 # Yahoo-specific: each league needs OAuth credentials (encrypted refresh token
 # stored in ___ops.main.league_credentials). The importer uses --league flag
-# which pulls credentials from MotherDuck automatically.
+# which pulls credentials via Fly.io automatically.
 
 on:
   workflow_dispatch:
@@ -220,7 +220,8 @@ jobs:
       - name: Build ops cache (on miss)
         if: steps.cache.outputs.cache-hit != 'true'
         env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+          DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
         run: |
           pip install duckdb==1.5.1
           python fantasy_football_data_scripts/build_ops_cache.py \
@@ -244,7 +245,6 @@ jobs:
       PYTHONUNBUFFERED: 1
       DB_NAME: ${{ matrix.database_name }}
       IMPORT_MODE: ${{ matrix.import_mode }}
-      MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
       CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
       YAHOO_CLIENT_ID: ${{ secrets.YAHOO_CLIENT_ID }}
       YAHOO_CLIENT_SECRET: ${{ secrets.YAHOO_CLIENT_SECRET }}
@@ -376,17 +376,11 @@ jobs:
         run: |
           cd fantasy_football_data_scripts
           python -c "
-          import os
           from multi_league.core.local_db import LocalLeagueDB
           db = LocalLeagueDB('${{ steps.import.outputs.data_dir }}', '${{ env.DB_NAME }}')
           db.connect()
-          backend = os.environ.get('DATABASE_BACKEND', 'motherduck')
-          if backend == 'fly':
-              db.upload_to_fly('${{ env.DB_NAME }}')
-              print('Upload to Fly complete: ${{ env.DB_NAME }}')
-          else:
-              db.upload_to_motherduck('${{ env.DB_NAME }}')
-              print('Upload to MotherDuck complete: ${{ env.DB_NAME }}')
+          db.upload_to_fly('${{ env.DB_NAME }}')
+          print('Upload to Fly complete: ${{ env.DB_NAME }}')
           db.close()
           "
 

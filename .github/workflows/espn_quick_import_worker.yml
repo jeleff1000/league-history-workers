@@ -1,7 +1,7 @@
 name: ESPN Quick Import Worker (Current Year Only)
 
 # Free ESPN import: fetches current year, runs sims + aggregations locally,
-# uploads to MotherDuck once at the end. Self-contained — no trigger-downstream.
+# uploads to Fly.io once at the end. Self-contained — no trigger-downstream.
 # Called from: Next.js frontend via repository_dispatch
 
 on:
@@ -35,6 +35,10 @@ jobs:
 
     env:
       PYTHONUNBUFFERED: 1
+      DATABASE_BACKEND: fly
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
 
     steps:
       - name: Checkout code
@@ -165,53 +169,57 @@ jobs:
         env:
           LEAGUE_DATA_B64: ${{ github.event.inputs.league_data_b64 || github.event.client_payload.league_data_b64 }}
           USER_ID: ${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
 
       # ==================== RETRIEVE STORED COOKIES (if not in payload) ====================
-      - name: Retrieve ESPN cookies from MotherDuck (fallback)
+      - name: Retrieve ESPN cookies
         if: steps.parse.outputs.database_name != ''
         env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+          DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+          DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
         run: |
           # Check if cookies were provided in the payload
           if [ -s .espn_s2 ] && [ "$(cat .espn_s2 | tr -d '[:space:]')" != "" ]; then
-            echo "ESPN cookies provided in payload — skipping MotherDuck lookup"
+            echo "ESPN cookies provided in payload — skipping lookup"
             exit 0
           fi
 
-          echo "No ESPN cookies in payload — retrieving from MotherDuck..."
+          echo "No ESPN cookies in payload — retrieving from Fly..."
           python - <<'PYEOF'
-          import duckdb, os, sys
+          import json, os, sys, urllib.request
           from cryptography.fernet import Fernet
 
           db_name = "${{ steps.parse.outputs.database_name }}"
-          token = os.environ['MOTHERDUCK_TOKEN']
           enc_key = os.environ.get('CREDENTIAL_ENCRYPTION_KEY', '')
           if not enc_key:
-              print("WARNING: CREDENTIAL_ENCRYPTION_KEY not set — cannot decrypt stored cookies")
+              print("WARNING: CREDENTIAL_ENCRYPTION_KEY not set")
               sys.exit(0)
 
-          conn = duckdb.connect(f"md:?motherduck_token={token}")
-          result = conn.execute("""
-              SELECT encrypted_espn_s2, encrypted_swid
-              FROM ___ops.espn_leagues
-              WHERE database_name = ?
-          """, [db_name]).fetchone()
+          def fly_query(sql, database="___ops"):
+              url = os.environ["DATABASE_SERVER_URL"].rstrip("/") + "/query"
+              token = os.environ["DATABASE_READ_TOKEN"]
+              data = json.dumps({"sql": sql, "database": database}).encode()
+              req = urllib.request.Request(url, data=data, headers={
+                  "Content-Type": "application/json",
+                  "Authorization": f"Bearer {token}",
+              })
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return json.loads(resp.read())
 
-          if not result or not result[0]:
-              print(f"No stored cookies for {db_name} — league may be public")
+          safe_db = db_name.replace("'", "''")
+          rows = fly_query(f"SELECT encrypted_espn_s2, encrypted_swid FROM main.espn_leagues WHERE database_name = '{safe_db}'")
+
+          if not rows or not rows[0].get('encrypted_espn_s2'):
+              print(f"No stored cookies for {db_name}")
               sys.exit(0)
 
           f = Fernet(enc_key.encode())
-          espn_s2 = f.decrypt(result[0].encode()).decode()
-          swid = f.decrypt(result[1].encode()).decode()
+          espn_s2 = f.decrypt(rows[0]['encrypted_espn_s2'].encode()).decode()
+          swid = f.decrypt(rows[0]['encrypted_swid'].encode()).decode()
 
-          with open(".espn_s2", "w") as fh:
-              fh.write(espn_s2)
-          with open(".espn_swid", "w") as fh:
-              fh.write(swid)
-          print(f"Retrieved and decrypted ESPN cookies for {db_name}")
+          with open(".espn_s2", "w") as fh: fh.write(espn_s2)
+          with open(".espn_swid", "w") as fh: fh.write(swid)
+          print(f"Retrieved ESPN cookies for {db_name}")
           PYEOF
 
       # ==================== SET DATA_DIR AND DB_NAME ====================
@@ -228,10 +236,9 @@ jobs:
           echo "DATA_DIR=${DATA_DIR}"
 
       # ==================== REGISTER LEAGUE (EARLY) ====================
-      # Register league in MotherDuck immediately so it's tracked even if import fails.
+      # Register league immediately so it's tracked even if import fails.
       - name: Register league (early)
         env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
           ESPN_LEAGUE_ID: ${{ steps.parse.outputs.espn_league_id }}
           LEAGUE_NAME: ${{ steps.parse.outputs.league_name }}
@@ -376,7 +383,6 @@ jobs:
         id: import
         env:
           AUTO_CONFIRM: "1"
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
         working-directory: fantasy_football_data_scripts
         run: |
@@ -426,8 +432,6 @@ jobs:
       - name: Calculate expected records
         if: steps.import.outputs.exit_code == '0'
         continue-on-error: true
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         run: |
           cd fantasy_football_data_scripts
           python -m multi_league.transformations.matchup.expected_record_v2 \
@@ -439,8 +443,6 @@ jobs:
       - name: Calculate playoff odds
         if: steps.import.outputs.exit_code == '0'
         continue-on-error: true
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         run: |
           cd fantasy_football_data_scripts
           python -m multi_league.transformations.matchup.playoff_odds_import \
@@ -452,8 +454,6 @@ jobs:
       - name: Run aggregations
         if: steps.import.outputs.exit_code == '0'
         continue-on-error: true
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         run: |
           cd fantasy_football_data_scripts
           python -m multi_league.transformations.aggregation.aggregate_matchup_context \
@@ -469,27 +469,33 @@ jobs:
           python -m multi_league.transformations.aggregation.homepage_summary \
             --db ${{ env.DB_NAME }} --data-dir ${{ env.DATA_DIR }}
 
-      # ==================== UPLOAD TO MOTHERDUCK ====================
-      - name: Upload to MotherDuck
+      # ==================== UPLOAD LEAGUE DATA ====================
+      - name: Upload league data
         if: steps.import.outputs.exit_code == '0'
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
         run: |
           cd fantasy_football_data_scripts
-          python -c "
+          python - <<'PYEOF'
+          import os, sys
+          sys.path.insert(0, '.')
           from multi_league.core.local_db import LocalLeagueDB
-          db = LocalLeagueDB('${{ env.DATA_DIR }}', '${{ env.DB_NAME }}')
+          data_dir = os.environ['DATA_DIR']
+          db_name = os.environ['DB_NAME']
+          backend = os.environ.get('DATABASE_BACKEND', 'motherduck')
+          db = LocalLeagueDB(data_dir, db_name)
           db.connect()
-          db.upload_to_motherduck('${{ env.DB_NAME }}')
+          if backend == 'fly':
+              db.upload_to_fly(db_name)
+              print('Upload to Fly complete')
+          else:
+              db.upload_to_motherduck(db_name)
+              print('Upload to MotherDuck complete')
           db.close()
-          print('Upload to MotherDuck complete')
-          "
+          PYEOF
 
       # ==================== STORE ESPN LEAGUE INFO ====================
       - name: Store ESPN league info
         if: steps.import.outputs.exit_code == '0'
         env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
           CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
           ESPN_LEAGUE_ID: ${{ steps.parse.outputs.espn_league_id }}
           LEAGUE_NAME: ${{ steps.parse.outputs.league_name }}

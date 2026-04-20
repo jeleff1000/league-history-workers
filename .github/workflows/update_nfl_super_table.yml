@@ -52,7 +52,10 @@ jobs:
 
       - name: Update NFL Super Table
         env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_BACKEND: fly
+          DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+          DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+          DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
           GITHUB_ACTIONS: 'true'
         run: |
           cd fantasy_football_data_scripts/multi_league/data_fetchers
@@ -78,7 +81,10 @@ jobs:
 
       - name: Update Season/Career Aggregations
         env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_BACKEND: fly
+          DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+          DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+          DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
         run: |
           cd fantasy_football_data_scripts/multi_league/data_fetchers
 
@@ -92,35 +98,37 @@ jobs:
 
       - name: Verify update
         env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+          DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+          DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
         run: |
           python - <<'PYEOF'
-          import duckdb
-          import os
+          import json, os, urllib.request
           from datetime import datetime
 
-          token = os.environ.get('MOTHERDUCK_TOKEN', '')
-          if not token:
-              print("No MOTHERDUCK_TOKEN - skipping verification")
-              exit(0)
+          def fly_query(sql, database="___ops"):
+              url = os.environ["DATABASE_SERVER_URL"].rstrip("/") + "/query"
+              token = os.environ["DATABASE_READ_TOKEN"]
+              data = json.dumps({"sql": sql, "database": database}).encode()
+              req = urllib.request.Request(url, data=data, headers={
+                  "Content-Type": "application/json",
+                  "Authorization": f"Bearer {token}",
+              })
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return json.loads(resp.read())
 
-          conn = duckdb.connect(f"md:___ops?motherduck_token={token}")
-
-          # Get current year stats
           current_year = datetime.now().year
-          result = conn.execute(f"""
+          rows = fly_query(f"""
               SELECT year, COUNT(*) as rows, MAX(week) as max_week
               FROM nfl_historical.nfl_player_stats_all
               WHERE year = {current_year}
               GROUP BY year
-          """).fetchone()
+          """)
 
-          if result:
-              print(f"Super table {current_year}: {result[1]:,} rows, through week {result[2]}")
+          if rows:
+              r = rows[0]
+              print(f"Super table {current_year}: {r['rows']:,} rows, through week {r['max_week']}")
           else:
               print(f"WARNING: No data found for {current_year}")
-
-          conn.close()
           PYEOF
 
   # Trigger the weekly league updates after super table is ready

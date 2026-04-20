@@ -1,7 +1,7 @@
 name: Playoff Odds & Expected Record Calculator
 
-# Downloads league data from ___leagues to local DuckDB, runs all sims and
-# aggregations locally, then uploads results back to ___leagues.
+# Downloads league data from Fly.io to local DuckDB, runs all sims and
+# aggregations locally, then uploads results back via Fly.io.
 
 on:
   workflow_dispatch:
@@ -35,7 +35,10 @@ jobs:
 
     env:
       PYTHONUNBUFFERED: 1
-      MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
+      DATABASE_BACKEND: fly
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
       DATABASE_NAME: ${{ github.event.inputs.database_name }}
       N_SIMS: ${{ github.event.inputs.n_sims }}
       DATA_DIR: ${{ github.workspace }}/playoff_odds_data
@@ -58,12 +61,12 @@ jobs:
       - name: Install dependencies
         run: uv pip install --system -r requirements.txt
 
-      # ==================== DOWNLOAD FROM ___leagues TO LOCAL DUCKDB ====================
+      # ==================== DOWNLOAD FROM Fly.io TO LOCAL DUCKDB ====================
       - name: Download league data to local DuckDB
         working-directory: fantasy_football_data_scripts
         run: |
           echo "========================================"
-          echo "Downloading ${DATABASE_NAME} from ___leagues to local DuckDB"
+          echo "Downloading ${DATABASE_NAME} from Fly.io to local DuckDB"
           echo "Data dir: ${DATA_DIR}"
           echo "========================================"
 
@@ -71,71 +74,74 @@ jobs:
 
           python - <<'PYEOF'
           import duckdb
+          import json
           import os
           import sys
+          import urllib.request
+
+          def fly_query(sql, database="___ops"):
+              url = os.environ["DATABASE_SERVER_URL"].rstrip("/") + "/query"
+              token = os.environ["DATABASE_READ_TOKEN"]
+              data = json.dumps({"sql": sql, "database": database}).encode()
+              req = urllib.request.Request(url, data=data, headers={
+                  "Content-Type": "application/json",
+                  "Authorization": f"Bearer {token}",
+              })
+              with urllib.request.urlopen(req, timeout=120) as resp:
+                  return json.loads(resp.read())
 
           db_name = os.environ['DATABASE_NAME']
           data_dir = os.environ['DATA_DIR']
-          token = os.environ['MOTHERDUCK_TOKEN']
           local_path = f"{data_dir}/{db_name}.duckdb"
 
           # Connect to local DuckDB
           local = duckdb.connect(local_path)
           local.execute("CREATE SCHEMA IF NOT EXISTS public")
 
-          # Connect to MotherDuck ___leagues
-          local.execute("INSTALL motherduck")
-          local.execute("LOAD motherduck")
-          local.execute(f"SET motherduck_token='{token}'")
-          local.execute("ATTACH 'md:___leagues' AS _md_source (READ_ONLY)")
-
-          # Discover all tables for this league
-          tables = local.execute(
+          # Discover all tables for this league via Fly.io
+          tables_result = fly_query(
               "SELECT DISTINCT table_name FROM information_schema.tables "
-              "WHERE table_catalog = '_md_source' AND table_schema = 'public'"
-          ).fetchall()
-          table_names = [r[0] for r in tables]
-          print(f"Found {len(table_names)} tables in ___leagues")
+              "WHERE table_schema = 'public'",
+              database=db_name
+          )
+          table_names = [r["table_name"] for r in tables_result]
+          print(f"Found {len(table_names)} tables for {db_name}")
 
           total_rows = 0
           for table_name in table_names:
-              # Check if this table has db_name column (league-scoped)
-              cols = [r[0] for r in local.execute(
-                  f"DESCRIBE _md_source.public.{table_name}"
-              ).fetchall()]
+              try:
+                  # Get row count
+                  cnt_result = fly_query(f"SELECT COUNT(*) as cnt FROM public.{table_name}", database=db_name)
+                  cnt = cnt_result[0]["cnt"] if cnt_result else 0
 
-              if 'db_name' not in cols:
-                  print(f"  SKIP {table_name} (no db_name column)")
-                  continue
+                  if cnt == 0:
+                      print(f"  SKIP {table_name} (0 rows)")
+                      continue
 
-              # Check if any rows exist for this league
-              cnt = local.execute(
-                  f"SELECT COUNT(*) FROM _md_source.public.{table_name} WHERE db_name = ?",
-                  [db_name]
-              ).fetchone()[0]
+                  # Download data
+                  rows = fly_query(f"SELECT * FROM public.{table_name}", database=db_name)
 
-              if cnt == 0:
-                  print(f"  SKIP {table_name} (0 rows for {db_name})")
-                  continue
+                  if not rows:
+                      print(f"  SKIP {table_name} (empty result)")
+                      continue
 
-              # Download: strip db_name column (local files don't use it)
-              non_db_cols = [c for c in cols if c != 'db_name']
-              col_list = ', '.join(f'"{c}"' for c in non_db_cols)
+                  # Create table locally from downloaded data
+                  local.execute(f"DROP TABLE IF EXISTS public.{table_name}")
 
-              # Create table locally with same schema (minus db_name)
-              local.execute(f"DROP TABLE IF EXISTS public.{table_name}")
-              local.execute(
-                  f"CREATE TABLE public.{table_name} AS "
-                  f"SELECT {col_list} FROM _md_source.public.{table_name} "
-                  f"WHERE db_name = ?",
-                  [db_name]
-              )
-              print(f"  {table_name}: {cnt:,} rows")
-              total_rows += cnt
+                  # Use DuckDB's ability to query from Python objects
+                  import pyarrow as pa
+                  columns = list(rows[0].keys())
+                  arrays = {col: [r.get(col) for r in rows] for col in columns}
+                  table = pa.table(arrays)
+                  local.execute(f"CREATE TABLE public.{table_name} AS SELECT * FROM table")
 
-          local.execute("DETACH _md_source")
+                  print(f"  {table_name}: {cnt:,} rows")
+                  total_rows += cnt
+
+              except Exception as e:
+                  print(f"  ERROR {table_name}: {e}")
+
           local.close()
-
           print(f"\nDownloaded {total_rows:,} total rows to {local_path}")
           PYEOF
 
@@ -242,12 +248,12 @@ jobs:
             echo "Homepage summary failed (non-critical)"
           fi
 
-      # ==================== UPLOAD RESULTS TO ___leagues ====================
-      - name: Upload results to MotherDuck
+      # ==================== UPLOAD RESULTS TO Fly.io ====================
+      - name: Upload results to Fly.io
         working-directory: fantasy_football_data_scripts
         run: |
           echo "========================================"
-          echo "Uploading results to ___leagues"
+          echo "Uploading results to Fly.io"
           echo "========================================"
 
           python -c "
@@ -257,66 +263,58 @@ jobs:
 
           db = LocalLeagueDB('${DATA_DIR}', '${DATABASE_NAME}')
           db.connect()
-          db.upload_to_motherduck('${DATABASE_NAME}')
+          db.upload_to_fly('${DATABASE_NAME}')
           db.close()
-          print('Upload to MotherDuck complete')
+          print('Upload to Fly complete')
           "
 
       # ==================== VERIFY ====================
       - name: Verify results
         run: |
           python - <<'PYEOF'
-          import duckdb, os
+          import json, os, urllib.request
+
+          def fly_query(sql, database="___ops"):
+              url = os.environ["DATABASE_SERVER_URL"].rstrip("/") + "/query"
+              token = os.environ["DATABASE_READ_TOKEN"]
+              data = json.dumps({"sql": sql, "database": database}).encode()
+              req = urllib.request.Request(url, data=data, headers={
+                  "Content-Type": "application/json",
+                  "Authorization": f"Bearer {token}",
+              })
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  return json.loads(resp.read())
 
           db_name = os.environ['DATABASE_NAME']
-          token = os.environ['MOTHERDUCK_TOKEN']
-          conn = duckdb.connect(f'md:___leagues?motherduck_token={token}')
 
           print("Expected record columns check:")
           for col in ['shuffle_avg_wins', 'shuffle_avg_seed', 'wins_vs_shuffle_wins']:
               try:
-                  cnt = conn.execute(f"SELECT COUNT(\"{col}\") FROM public.matchup WHERE \"{col}\" IS NOT NULL AND db_name = '{db_name}'").fetchone()[0]
-                  print(f"  {col}: {cnt:,} non-null values")
+                  rows = fly_query(f'SELECT COUNT("{col}") as cnt FROM public.matchup WHERE "{col}" IS NOT NULL', database=db_name)
+                  print(f"  {col}: {rows[0]['cnt']:,} non-null values")
               except Exception as e:
                   print(f"  {col}: {e}")
 
           print("\nPlayoff odds columns check:")
           for col in ['p_playoffs', 'p_bye', 'p_champ', 'avg_seed', 'power_rating']:
               try:
-                  cnt = conn.execute(f"SELECT COUNT(\"{col}\") FROM public.matchup WHERE \"{col}\" IS NOT NULL AND db_name = '{db_name}'").fetchone()[0]
-                  print(f"  {col}: {cnt:,} non-null values")
+                  rows = fly_query(f'SELECT COUNT("{col}") as cnt FROM public.matchup WHERE "{col}" IS NOT NULL', database=db_name)
+                  print(f"  {col}: {rows[0]['cnt']:,} non-null values")
               except Exception as e:
                   print(f"  {col}: {e}")
 
           print("\nClutch equity check:")
           try:
-              cnt = conn.execute(f"SELECT COUNT(clutch_equity) FROM public.player_fantasy WHERE clutch_equity IS NOT NULL AND clutch_equity != 0 AND db_name = '{db_name}'").fetchone()[0]
-              print(f"  clutch_equity: {cnt:,} non-zero values")
+              rows = fly_query("SELECT COUNT(clutch_equity) as cnt FROM public.player_fantasy WHERE clutch_equity IS NOT NULL AND clutch_equity != 0", database=db_name)
+              print(f"  clutch_equity: {rows[0]['cnt']:,} non-zero values")
           except Exception as e:
               print(f"  clutch_equity: {e}")
 
-          total = conn.execute(f"SELECT COUNT(*) FROM public.matchup WHERE db_name = '{db_name}'").fetchone()[0]
-          print(f"\nTotal matchup rows for {db_name}: {total:,}")
-          conn.close()
+          rows = fly_query("SELECT COUNT(*) as cnt FROM public.matchup", database=db_name)
+          print(f"\nTotal matchup rows for {db_name}: {rows[0]['cnt']:,}")
           PYEOF
 
       # ==================== CLEANUP ====================
-      - name: Gracefully shut down Duckling
-        if: always()
-        env:
-          MOTHERDUCK_TOKEN: ${{ secrets.MOTHERDUCK_TOKEN }}
-        working-directory: fantasy_football_data_scripts
-        run: |
-          if [ -z "$MOTHERDUCK_TOKEN" ]; then
-            echo "MOTHERDUCK_TOKEN not set - skipping shutdown"
-            exit 0
-          fi
-
-          python -m multi_league.core.duckling_manager || {
-            echo "Duckling shutdown failed (non-critical)"
-            exit 0
-          }
-
       - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v6
@@ -341,13 +339,13 @@ jobs:
           echo "- **Simulations**: ${N_SIMS}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "## Architecture" >> $GITHUB_STEP_SUMMARY
-          echo "1. Download league data from \`___leagues\` to local DuckDB" >> $GITHUB_STEP_SUMMARY
+          echo "1. Download league data from Fly.io to local DuckDB" >> $GITHUB_STEP_SUMMARY
           echo "2. Run all sims + aggregations locally (free GH Actions compute)" >> $GITHUB_STEP_SUMMARY
-          echo "3. Upload results back to \`___leagues\`" >> $GITHUB_STEP_SUMMARY
+          echo "3. Upload results back to Fly.io" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Steps:" >> $GITHUB_STEP_SUMMARY
           echo "1. Download \`${DATABASE_NAME}\` → local DuckDB" >> $GITHUB_STEP_SUMMARY
           echo "2. Expected record (shuffle sims)" >> $GITHUB_STEP_SUMMARY
           echo "3. Playoff odds + clutch equity" >> $GITHUB_STEP_SUMMARY
           echo "4. Aggregation (matchup, draft, transaction, homepage)" >> $GITHUB_STEP_SUMMARY
-          echo "5. Upload all results → \`___leagues\`" >> $GITHUB_STEP_SUMMARY
+          echo "5. Upload all results → Fly.io" >> $GITHUB_STEP_SUMMARY
