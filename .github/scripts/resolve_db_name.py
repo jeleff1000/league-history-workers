@@ -35,7 +35,7 @@ def fly_query(sql, database="___ops"):
 
 def slugify(name: str) -> str:
     """Convert league name to a valid database name.
-    Matches sanitize_database_name() in motherduck_utils.py."""
+    Matches sanitize_database_name() in db_utils.py."""
     x = re.sub(r"[^a-zA-Z0-9]+", "_", name.strip().lower()).strip("_")
     if not x:
         return "league"

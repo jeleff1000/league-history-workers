@@ -19,6 +19,11 @@ on:
         description: 'Unique identifier for this user/import job'
         required: true
         type: string
+      yahoo_oauth_ref:
+        description: 'yahoo_oauth branch/ref to check out (workers-repo override; default main)'
+        required: false
+        type: string
+        default: 'main'
 
   repository_dispatch:
     types: [sleeper_quick_import]
@@ -41,8 +46,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || 'main' }}
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -127,9 +131,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
 
       - name: Setup Python
         id: setup-python
@@ -623,6 +624,15 @@ jobs:
           PYEOF
 
       # ==================== STORE SLEEPER LEAGUE INFO ====================
+      - name: Gracefully shut down Duckling
+        if: always()
+        run: |
+          cd fantasy_football_data_scripts
+          python -m multi_league.core.duckling_manager || {
+            echo "Duckling shutdown failed (non-critical)"
+            exit 0
+          }
+
       # ==================== SUMMARY ====================
       - name: Print summary
         if: always()

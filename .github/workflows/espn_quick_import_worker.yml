@@ -15,6 +15,11 @@ on:
         description: 'Unique identifier for this user/import job'
         required: true
         type: string
+      yahoo_oauth_ref:
+        description: 'yahoo_oauth branch/ref to check out (workers-repo override; default main)'
+        required: false
+        type: string
+        default: 'main'
 
   repository_dispatch:
     types: [espn_quick_import]
@@ -46,6 +51,7 @@ jobs:
         with:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || github.event.client_payload.yahoo_oauth_ref || 'main' }}
 
       - name: Setup Python
         id: setup-python
@@ -532,6 +538,15 @@ jobs:
           else:
               print("ESPN league info stored (public league, no cookies)")
           PYEOF
+
+      - name: Gracefully shut down Duckling
+        if: always()
+        run: |
+          cd fantasy_football_data_scripts
+          python -m multi_league.core.duckling_manager || {
+            echo "Duckling shutdown failed (non-critical)"
+            exit 0
+          }
 
       # ==================== CLEANUP SENSITIVE FILES ====================
       - name: Cleanup sensitive files
