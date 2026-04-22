@@ -150,6 +150,22 @@ jobs:
           PYEOF
 
   # ================================================================
+  # Job 1.1: Scale up Fly server for fleet import
+  # ================================================================
+  scale-up:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Scale Fly to 8GB RAM
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          curl -sL https://fly.io/install.sh | sh
+          export PATH="$HOME/.fly/bin:$PATH"
+          flyctl scale memory 8192 -a league-history-duckdb -y
+          echo "Scaled to 8GB for fleet import"
+
+  # ================================================================
   # Job 1.5: Build or restore ___ops cache
   # ================================================================
   build-cache:
@@ -189,7 +205,7 @@ jobs:
   # Job 2: Import each league in parallel (matrix)
   # ================================================================
   import-league:
-    needs: [discover, build-cache]
+    needs: [discover, build-cache, scale-up]
     if: ${{ !inputs.dry_run && fromJson(needs.discover.outputs.league_count) > 0 }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -485,3 +501,21 @@ jobs:
           echo "Source: ${{ github.event.inputs.source }}"
           echo "Max parallel: ${{ github.event.inputs.max_parallel || 5 }}"
           echo "========================================"
+
+  # ================================================================
+  # Job 4: Scale down Fly server after fleet import
+  # ================================================================
+  scale-down:
+    needs: [import-league]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Scale Fly back to 4GB RAM
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          curl -sL https://fly.io/install.sh | sh
+          export PATH="$HOME/.fly/bin:$PATH"
+          flyctl scale memory 4096 -a league-history-duckdb -y
+          echo "Scaled back to 4GB after fleet import"
