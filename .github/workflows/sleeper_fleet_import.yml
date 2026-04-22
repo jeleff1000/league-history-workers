@@ -349,7 +349,7 @@ jobs:
               SELECT year,
                      SUM(CASE WHEN CAST(is_playoffs AS INTEGER) = 1 THEN 1 ELSE 0 END) as po,
                      SUM(CASE WHEN CAST(champion AS INTEGER) = 1 THEN 1 ELSE 0 END) as ch,
-                     typeof(is_playoffs) as tp
+                     ANY_VALUE(typeof(is_playoffs)) as tp
               FROM public.matchup GROUP BY year ORDER BY year
           ''').fetchall()
           for r in rows:
