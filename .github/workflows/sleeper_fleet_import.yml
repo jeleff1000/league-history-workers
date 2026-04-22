@@ -207,7 +207,7 @@ jobs:
         run: |
           curl -sL https://fly.io/install.sh | sh
           export PATH="$HOME/.fly/bin:$PATH"
-          flyctl scale memory 8192 -a league-history-duckdb -y
+          flyctl scale memory 8192 -a league-history-duckdb
           echo "Scaled to 8GB for fleet import"
 
   # ================================================================
@@ -526,5 +526,5 @@ jobs:
         run: |
           curl -sL https://fly.io/install.sh | sh
           export PATH="$HOME/.fly/bin:$PATH"
-          flyctl scale memory 4096 -a league-history-duckdb -y
+          flyctl scale memory 4096 -a league-history-duckdb
           echo "Scaled back to 4GB after fleet import"
