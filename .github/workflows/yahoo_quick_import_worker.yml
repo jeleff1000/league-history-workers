@@ -106,6 +106,8 @@ jobs:
           import_mode: ${{ github.event.client_payload.import_mode || github.event.inputs.import_mode || 'quick' }}
           yahoo_client_id: ${{ secrets.YAHOO_CLIENT_ID }}
           yahoo_client_secret: ${{ secrets.YAHOO_CLIENT_SECRET }}
+          database_server_url: ${{ secrets.DATABASE_SERVER_URL }}
+          database_read_token: ${{ secrets.DATABASE_READ_TOKEN }}
 
       # ==================== COMPUTE DATA_DIR / DB_NAME ====================
       - name: Set DATA_DIR and DB_NAME
