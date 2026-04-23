@@ -54,53 +54,10 @@ jobs:
       - name: Resolve lock key
         id: resolve
         run: |
-          python - <<'PYEOF'
-          import base64
-          import json
-          import os
-          import re
-          import subprocess
-
-          league_data_b64 = os.environ.get('LEAGUE_DATA_B64', '')
-          if league_data_b64:
-              try:
-                  league_data = json.loads(base64.b64decode(league_data_b64).decode('utf-8'))
-              except Exception:
-                  league_data = json.loads(league_data_b64)
-          else:
-              raise SystemExit("ERROR: No league data provided")
-
-          sleeper_league_id = league_data.get('sleeper_league_id') or league_data.get('league_id')
-          league_name = league_data.get('league_name', 'Sleeper League')
-          if not sleeper_league_id:
-              raise SystemExit("ERROR: sleeper_league_id (or league_id) is required")
-
-          pre_computed_db = os.environ.get('PRE_RESOLVED_DATABASE_NAME', '').strip()
-          if not pre_computed_db:
-              pre_computed_db = league_data.get('database_name', '').strip()
-          result = subprocess.run(
-              ['python', '.github/scripts/resolve_db_name.py',
-               '--league-id', str(sleeper_league_id),
-               '--league-name', league_name,
-               '--platform', 'sleeper',
-               '--database-name', pre_computed_db],
-              capture_output=True, text=True
-          )
-          if result.returncode != 0:
-              print(f"WARNING: resolve_db_name.py failed: {result.stderr}")
-              db_name = re.sub(r'[^a-zA-Z0-9]+', '_', league_name.strip().lower()).strip('_') or 'sleeper_league'
-              if db_name[0].isdigit():
-                  db_name = 'l_' + db_name
-              db_name = db_name[:63]
-          else:
-              db_name = result.stdout.strip().split('\n')[-1]
-
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"database_name={db_name}\n")
-          print(f"Resolved database name for lock: {db_name}")
-          PYEOF
+          python .github/scripts/resolve_sleeper_workflow_input.py
         env:
           LEAGUE_DATA_B64: ${{ github.event.inputs.league_data_b64 || github.event.client_payload.league_data_b64 }}
+          IMPORT_MODE: full
           DATABASE_BACKEND: fly
           DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
           DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
@@ -182,98 +139,13 @@ jobs:
         id: parse
         run: |
           source .venv/bin/activate
-          python - <<'PYEOF'
-          import json
-          import os
-          import base64
-          import re
-
-          # Get input from either workflow_dispatch or repository_dispatch
-          league_data_b64 = os.environ.get('LEAGUE_DATA_B64', '')
-          user_id = os.environ.get('USER_ID', '')
-          import_mode = 'full'  # ALWAYS full - this is the full import worker
-
-          # Decode base64 if provided
-          if league_data_b64:
-              try:
-                  league_data = json.loads(base64.b64decode(league_data_b64).decode('utf-8'))
-              except:
-                  league_data = json.loads(league_data_b64)
-          else:
-              print("ERROR: No league data provided")
-              exit(1)
-
-          # Extract Sleeper-specific fields
-          sleeper_league_id = league_data.get('sleeper_league_id') or league_data.get('league_id')
-          league_name = league_data.get('league_name', 'Sleeper League')
-          username = league_data.get('username', '').strip()
-          start_year = int(league_data.get('start_year', 2024))
-          end_year = int(league_data.get('end_year') or league_data.get('season', 2025))
-          league_ids = league_data.get('league_ids') or {}
-          history_years = []
-          for year_key in league_ids:
-              try:
-                  history_years.append(int(year_key))
-              except (TypeError, ValueError):
-                  continue
-          if history_years:
-              start_year = min(history_years)
-              end_year = max(history_years)
-              league_data['start_year'] = start_year
-              league_data['end_year'] = end_year
-              league_data['season'] = end_year
-
-          # Validate required fields
-          if not sleeper_league_id:
-              print("ERROR: sleeper_league_id (or league_id) is required")
-              exit(1)
-
-          # Resolve database name using shared resolver
-          import subprocess
-          pre_computed_db = league_data.get('database_name', '').strip()
-          result = subprocess.run(
-              ['python', '.github/scripts/resolve_db_name.py',
-               '--league-id', str(sleeper_league_id),
-               '--league-name', league_name,
-               '--platform', 'sleeper',
-               '--database-name', pre_computed_db],
-              capture_output=True, text=True
-          )
-          if result.returncode != 0:
-              print(f"WARNING: resolve_db_name.py failed: {result.stderr}")
-              db_name = re.sub(r'[^a-zA-Z0-9]+', '_', league_name.strip().lower()).strip('_') or 'sleeper_league'
-              if db_name[0].isdigit():
-                  db_name = 'l_' + db_name
-              db_name = db_name[:63]
-          else:
-              db_name = result.stdout.strip().split('\n')[-1]
-          print(f"Using database name: {db_name}")
-
-          # Save parsed data for next steps
-          with open("league_data_input.json", 'w') as f:
-              json.dump(league_data, f, indent=2)
-
-          # Output for GitHub Actions
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"sleeper_league_id={sleeper_league_id}\n")
-              f.write(f"league_name={league_name}\n")
-              f.write(f"username={username}\n")
-              f.write(f"database_name={db_name}\n")
-              f.write(f"user_id={user_id}\n")
-              f.write(f"import_mode={import_mode}\n")
-              f.write(f"start_year={start_year}\n")
-              f.write(f"end_year={end_year}\n")
-
-          print(f"Parsed Sleeper league: {league_name}")
-          print(f"  League ID: {sleeper_league_id}")
-          print(f"  Historical range: {start_year}-{end_year}")
-          print(f"  Database: {db_name}")
-          print(f"  Import mode: {import_mode}")
-          PYEOF
+          python .github/scripts/resolve_sleeper_workflow_input.py
         env:
           LEAGUE_DATA_B64: ${{ github.event.inputs.league_data_b64 || github.event.client_payload.league_data_b64 }}
           USER_ID: ${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
+          IMPORT_MODE: full
           PRE_RESOLVED_DATABASE_NAME: ${{ needs.resolve-db-lock.outputs.database_name }}
+          OUTPUT_JSON_PATH: league_data_input.json
 
       # ==================== SET DB_NAME AND DATA_DIR ====================
       - name: Set DB_NAME and DATA_DIR
