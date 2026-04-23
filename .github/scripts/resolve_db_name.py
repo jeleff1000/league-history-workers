@@ -188,19 +188,31 @@ def resolve(league_id: str, league_name: str, platform: str, pre_computed_db: st
         return slugify(league_name)
 
     try:
-        # 1. Trust pre-computed name if db exists
-        if pre_computed_db:
-            if check_db_exists(pre_computed_db):
-                print(f"[resolve] Using pre-computed database_name: {pre_computed_db}", file=sys.stderr)
-                return pre_computed_db
-            else:
-                print(f"[resolve] Pre-computed '{pre_computed_db}' does not exist, resolving fresh", file=sys.stderr)
-
-        # 2. Check mapping table for THIS league (source of truth for reimports)
+        # 1. Check mapping table for THIS league (source of truth for reimports)
         mapped = lookup_mapping_table(league_id, platform)
         if mapped:
             print(f"[resolve] Found in {platform} mapping table: {mapped}", file=sys.stderr)
             return mapped
+
+        # 2. Trust an explicit database_name when it does not belong to another league.
+        # In Fly-first centralized storage the db_name may be canonical without existing as
+        # a separate catalog, so registry ownership is a better idempotence signal than
+        # catalog existence.
+        if pre_computed_db:
+            if check_registry_collision(pre_computed_db, league_id, platform):
+                print(
+                    f"[resolve] Pre-computed '{pre_computed_db}' collides with another league, resolving fresh",
+                    file=sys.stderr,
+                )
+            else:
+                if check_db_exists(pre_computed_db):
+                    print(f"[resolve] Using pre-computed database_name: {pre_computed_db}", file=sys.stderr)
+                else:
+                    print(
+                        f"[resolve] Trusting pre-computed database_name without catalog: {pre_computed_db}",
+                        file=sys.stderr,
+                    )
+                return pre_computed_db
 
         # 3. Slugify and check for collisions
         base_name = slugify(league_name)
