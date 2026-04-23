@@ -377,7 +377,6 @@ jobs:
       # ==================== SIMS ====================
       - name: Calculate expected records
         if: steps.import.outputs.exit_code == '0'
-        continue-on-error: true
         run: |
           cd fantasy_football_data_scripts
           python -m multi_league.transformations.matchup.expected_record_v2 \
@@ -408,7 +407,6 @@ jobs:
 
       - name: Calculate playoff odds
         if: steps.import.outputs.exit_code == '0'
-        continue-on-error: true
         run: |
           cd fantasy_football_data_scripts
           python -m multi_league.transformations.matchup.playoff_odds_import \
@@ -443,7 +441,6 @@ jobs:
       # first-class workflow step so keepers_keeper_year_populated clears.
       - name: Calculate keeper economics
         if: steps.import.outputs.exit_code == '0'
-        continue-on-error: true
         run: |
           cd fantasy_football_data_scripts
           python -m multi_league.transformations.player.keeper_economics \
@@ -453,21 +450,11 @@ jobs:
       # ==================== AGGREGATIONS ====================
       - name: Run aggregations
         if: steps.import.outputs.exit_code == '0'
-        continue-on-error: true
         run: |
           cd fantasy_football_data_scripts
-          python -m multi_league.transformations.aggregation.aggregate_matchup_context \
-            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
-          python -m multi_league.transformations.aggregation.aggregate_fantasy_context \
-            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
-          python -m multi_league.transformations.aggregation.aggregate_draft_context \
-            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
-          python -m multi_league.transformations.aggregation.aggregate_transaction_context \
-            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
-          python -m multi_league.transformations.aggregation.aggregate_standings \
-            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
-          python -m multi_league.transformations.aggregation.homepage_summary \
-            --db ${{ env.DB_NAME }} --data-dir ${{ steps.import.outputs.data_dir }}
+          python ../scripts/refresh_aggregates.py \
+            --db ${{ env.DB_NAME }} \
+            --data-dir ${{ steps.import.outputs.data_dir }}
 
       # ==================== UPLOAD ====================
       - name: Upload to database

@@ -473,7 +473,6 @@ jobs:
       # ==================== EXPECTED RECORD CALCULATOR ====================
       - name: Run expected record calculator
         if: steps.import.outputs.exit_code == '0'
-        continue-on-error: true
         working-directory: fantasy_football_data_scripts
         run: |
           echo "========================================"
@@ -490,13 +489,14 @@ jobs:
           if [ $EXIT_CODE -eq 0 ]; then
             echo "Expected record calculation complete"
           else
-            echo "Expected record calculation failed (non-critical, continuing)"
+            echo "Expected record calculation failed"
+            tail -50 ../expected_record.log
+            exit $EXIT_CODE
           fi
 
       # ==================== PLAYOFF ODDS CALCULATOR ====================
       - name: Run playoff odds calculator
         if: steps.import.outputs.exit_code == '0'
-        continue-on-error: true
         working-directory: fantasy_football_data_scripts
         run: |
           echo "========================================"
@@ -513,108 +513,21 @@ jobs:
           if [ $EXIT_CODE -eq 0 ]; then
             echo "Playoff odds calculation complete"
           else
-            echo "Playoff odds calculation failed (non-critical, continuing)"
+            echo "Playoff odds calculation failed"
+            tail -50 ../playoff_odds.log
+            exit $EXIT_CODE
           fi
 
       # Clutch equity now runs in-process inside playoff_odds_import (no separate step needed)
 
-      # ==================== AGGREGATION: MATCHUP CONTEXT ====================
-      - name: Aggregate matchup context
+      # ==================== RUN AGGREGATIONS ====================
+      - name: Run aggregations
         if: steps.import.outputs.exit_code == '0'
-        continue-on-error: true
         working-directory: fantasy_football_data_scripts
         run: |
-          python -m multi_league.transformations.aggregation.aggregate_matchup_context \
+          python ../scripts/refresh_aggregates.py \
             --db ${DB_NAME} \
-            --data-dir ${DATA_DIR} \
-            2>&1 | tee ../agg_matchup.log
-          if [ ${PIPESTATUS[0]} -eq 0 ]; then
-            echo "Matchup aggregation complete"
-          else
-            echo "Matchup aggregation failed (non-critical)"
-          fi
-
-      # ==================== AGGREGATION: DRAFT CONTEXT ====================
-      - name: Aggregate draft context
-        if: steps.import.outputs.exit_code == '0'
-        continue-on-error: true
-        working-directory: fantasy_football_data_scripts
-        run: |
-          python -m multi_league.transformations.aggregation.aggregate_draft_context \
-            --db ${DB_NAME} \
-            --data-dir ${DATA_DIR} \
-            2>&1 | tee ../agg_draft.log
-          if [ ${PIPESTATUS[0]} -eq 0 ]; then
-            echo "Draft aggregation complete"
-          else
-            echo "Draft aggregation failed (non-critical)"
-          fi
-
-      # ==================== AGGREGATION: TRANSACTION CONTEXT ====================
-      - name: Aggregate transaction context
-        if: steps.import.outputs.exit_code == '0'
-        continue-on-error: true
-        working-directory: fantasy_football_data_scripts
-        run: |
-          python -m multi_league.transformations.aggregation.aggregate_transaction_context \
-            --db ${DB_NAME} \
-            --data-dir ${DATA_DIR} \
-            2>&1 | tee ../agg_transaction.log
-          if [ ${PIPESTATUS[0]} -eq 0 ]; then
-            echo "Transaction aggregation complete"
-          else
-            echo "Transaction aggregation failed (non-critical)"
-          fi
-
-      # ==================== AGGREGATION: FANTASY CONTEXT ====================
-      - name: Aggregate fantasy context
-        if: steps.import.outputs.exit_code == '0'
-        continue-on-error: true
-        working-directory: fantasy_football_data_scripts
-        run: |
-          python -m multi_league.transformations.aggregation.aggregate_fantasy_context \
-            --db ${DB_NAME} \
-            --data-dir ${DATA_DIR} \
-            2>&1 | tee ../agg_fantasy.log
-          if [ ${PIPESTATUS[0]} -eq 0 ]; then
-            echo "Fantasy context aggregation complete"
-          else
-            echo "Fantasy context aggregation failed (non-critical)"
-          fi
-
-      # ==================== AGGREGATION: STANDINGS ====================
-      - name: Aggregate standings
-        if: steps.import.outputs.exit_code == '0'
-        continue-on-error: true
-        working-directory: fantasy_football_data_scripts
-        run: |
-          python -m multi_league.transformations.aggregation.aggregate_standings \
-            --db ${DB_NAME} \
-            --data-dir ${DATA_DIR} \
-            2>&1 | tee ../agg_standings.log
-          if [ ${PIPESTATUS[0]} -eq 0 ]; then
-            echo "Standings aggregation complete"
-          else
-            echo "Standings aggregation failed (non-critical)"
-          fi
-
-      # ==================== AGGREGATION: HOMEPAGE SUMMARY ====================
-      - name: Aggregate homepage summary
-        if: steps.import.outputs.exit_code == '0'
-        continue-on-error: true
-        working-directory: fantasy_football_data_scripts
-        run: |
-          python -m multi_league.transformations.aggregation.homepage_summary \
-            --db ${DB_NAME} \
-            --data-dir ${DATA_DIR} \
-            2>&1 | tee ../agg_homepage.log
-
-          EXIT_CODE=${PIPESTATUS[0]}
-          if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 139 ]; then
-            echo "Homepage summary complete"
-          else
-            echo "Homepage summary failed (non-critical)"
-          fi
+            --data-dir ${DATA_DIR}
 
       # ==================== UPLOAD LEAGUE DATA ====================
       # Upload all local tables (core + aggregation + sims) to the database.

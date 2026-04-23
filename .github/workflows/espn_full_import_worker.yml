@@ -436,7 +436,6 @@ jobs:
       # ==================== CALCULATE EXPECTED RECORDS ====================
       - name: Calculate expected records
         if: steps.import.outputs.exit_code == '0'
-        continue-on-error: true
         run: |
           cd fantasy_football_data_scripts
           python -m multi_league.transformations.matchup.expected_record_v2 \
@@ -447,7 +446,6 @@ jobs:
       # ==================== CALCULATE PLAYOFF ODDS ====================
       - name: Calculate playoff odds
         if: steps.import.outputs.exit_code == '0'
-        continue-on-error: true
         run: |
           cd fantasy_football_data_scripts
           python -m multi_league.transformations.matchup.playoff_odds_import \
@@ -460,21 +458,11 @@ jobs:
       # ==================== RUN AGGREGATIONS ====================
       - name: Run aggregations
         if: steps.import.outputs.exit_code == '0'
-        continue-on-error: true
         run: |
           cd fantasy_football_data_scripts
-          python -m multi_league.transformations.aggregation.aggregate_matchup_context \
-            --db ${DB_NAME} --data-dir ${DATA_DIR}
-          python -m multi_league.transformations.aggregation.aggregate_fantasy_context \
-            --db ${DB_NAME} --data-dir ${DATA_DIR}
-          python -m multi_league.transformations.aggregation.aggregate_draft_context \
-            --db ${DB_NAME} --data-dir ${DATA_DIR}
-          python -m multi_league.transformations.aggregation.aggregate_transaction_context \
-            --db ${DB_NAME} --data-dir ${DATA_DIR}
-          python -m multi_league.transformations.aggregation.aggregate_standings \
-            --db ${DB_NAME} --data-dir ${DATA_DIR}
-          python -m multi_league.transformations.aggregation.homepage_summary \
-            --db ${DB_NAME} --data-dir ${DATA_DIR}
+          python ../scripts/refresh_aggregates.py \
+            --db ${DB_NAME} \
+            --data-dir ${DATA_DIR}
 
       # ==================== UPLOAD LEAGUE DATA ====================
       - name: Upload league data

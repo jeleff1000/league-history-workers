@@ -194,59 +194,13 @@ jobs:
       # Clutch equity now runs in-process inside playoff_odds_import (no separate step needed)
 
       # ==================== AGGREGATIONS (LOCAL) ====================
-      - name: Re-aggregate matchup tables
-        continue-on-error: true
+      - name: Refresh aggregate tables
         working-directory: fantasy_football_data_scripts
         run: |
-          python -m multi_league.transformations.aggregation.aggregate_matchup_context \
-            --db ${DATABASE_NAME} --data-dir ${DATA_DIR} \
-            2>&1 | tee ../matchup_aggregation.log
-          if [ ${PIPESTATUS[0]} -eq 0 ]; then
-            echo "Matchup aggregation complete"
-          else
-            echo "Matchup aggregation failed (non-critical)"
-          fi
-
-      - name: Aggregate draft context
-        continue-on-error: true
-        working-directory: fantasy_football_data_scripts
-        run: |
-          python -m multi_league.transformations.aggregation.aggregate_draft_context \
-            --db ${DATABASE_NAME} --data-dir ${DATA_DIR} \
-            2>&1 | tee ../draft_aggregation.log
-          if [ ${PIPESTATUS[0]} -eq 0 ]; then
-            echo "Draft aggregation complete"
-          else
-            echo "Draft aggregation failed (non-critical)"
-          fi
-
-      - name: Aggregate transaction context
-        continue-on-error: true
-        working-directory: fantasy_football_data_scripts
-        run: |
-          python -m multi_league.transformations.aggregation.aggregate_transaction_context \
-            --db ${DATABASE_NAME} --data-dir ${DATA_DIR} \
-            2>&1 | tee ../transaction_aggregation.log
-          if [ ${PIPESTATUS[0]} -eq 0 ]; then
-            echo "Transaction aggregation complete"
-          else
-            echo "Transaction aggregation failed (non-critical)"
-          fi
-
-      - name: Compute homepage summary
-        continue-on-error: true
-        working-directory: fantasy_football_data_scripts
-        run: |
-          python -m multi_league.transformations.aggregation.homepage_summary \
-            --db ${DATABASE_NAME} --data-dir ${DATA_DIR} \
-            2>&1 | tee ../homepage_summary.log
-
-          EXIT_CODE=${PIPESTATUS[0]}
-          if [ $EXIT_CODE -eq 0 ] || [ $EXIT_CODE -eq 139 ]; then
-            echo "Homepage summary complete"
-          else
-            echo "Homepage summary failed (non-critical)"
-          fi
+          python ../scripts/refresh_aggregates.py \
+            --db ${DATABASE_NAME} \
+            --data-dir ${DATA_DIR} \
+            --steps matchup,draft,transaction,homepage
 
       # ==================== UPLOAD RESULTS TO Fly.io ====================
       - name: Upload results to Fly.io
