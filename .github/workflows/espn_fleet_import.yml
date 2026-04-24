@@ -355,6 +355,8 @@ jobs:
               "team_to_guid": {},
               "team_to_team_name": {},
               "manager_name_overrides": {},
+              "external_column_maps": [],
+              "external_identity_maps": {},
               "created_at": datetime.now().isoformat(),
               "platform": "espn",
               "import_mode": os.environ.get("IMPORT_MODE", "full"),

@@ -259,6 +259,8 @@ jobs:
               "enable_caching": True,
               "rate_limit_per_sec": 4.0,
               "manager_name_overrides": league_data.get('manager_name_overrides', {}),
+              "external_column_maps": league_data.get('external_column_maps', []),
+              "external_identity_maps": league_data.get('external_identity_maps', {}),
               "keeper_rules": league_data.get('keeper_rules'),
               "has_external_data": league_data.get('has_external_data', False),
               "import_mode": "quick" if import_mode == "quick_to_full" else import_mode,
