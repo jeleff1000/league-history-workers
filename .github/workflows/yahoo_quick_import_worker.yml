@@ -337,6 +337,17 @@ jobs:
             --data-dir ${{ env.DATA_DIR }} \
             --n-sims 10000
 
+      # Populates keeper_year (consecutive years a player was kept by the same
+      # franchise) in player_fantasy. The live worker bypasses LeagueSession,
+      # so this must be an explicit workflow step.
+      - name: Calculate keeper economics
+        if: steps.import.outputs.exit_code == '0'
+        run: |
+          cd fantasy_football_data_scripts
+          python -m multi_league.transformations.player.keeper_economics \
+            --db ${{ env.DB_NAME }} \
+            --data-dir ${{ env.DATA_DIR }}
+
       # ==================== RUN AGGREGATIONS ====================
       - name: Run aggregations
         if: steps.import.outputs.exit_code == '0'
