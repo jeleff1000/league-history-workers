@@ -44,7 +44,7 @@ jobs:
         with:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
-          ref: ${{ github.event.inputs.yahoo_oauth_ref || 'main' }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || github.event.client_payload.yahoo_oauth_ref || 'main' }}
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -87,6 +87,7 @@ jobs:
         with:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || github.event.client_payload.yahoo_oauth_ref || 'main' }}
 
       - name: Setup Python
         id: setup-python
@@ -370,16 +371,6 @@ jobs:
               print('Upload complete')
           db.close()
           "
-
-      # ==================== STORE SLEEPER LEAGUE INFO ====================
-      - name: Gracefully shut down Duckling
-        if: always()
-        run: |
-          cd fantasy_football_data_scripts
-          python -m multi_league.core.duckling_manager || {
-            echo "Duckling shutdown failed (non-critical)"
-            exit 0
-          }
 
       # ==================== SUMMARY ====================
       - name: Print summary

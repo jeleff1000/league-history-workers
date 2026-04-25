@@ -1,14 +1,11 @@
 name: Update NFL Super Table
 
-# Updates the NFL super table in MotherDuck with latest NFLverse data.
-# Runs Tuesdays at 8 AM UTC (3 AM EST), then triggers weekly_update_worker.yml.
+# Updates the NFL super table in ___ops with latest NFLverse data.
 # League imports read from this table - they no longer fetch from NFLverse directly.
+# Run platform fleet imports (yahoo_fleet_import / sleeper_fleet_import / espn_fleet_import)
+# manually after this workflow completes to refresh league-level aggregates.
 
 on:
-  # schedule:
-  #   # 8 AM UTC on Tuesdays = 3 AM EST
-  #   - cron: '0 8 * * 2'
-
   workflow_dispatch:
     inputs:
       year:
@@ -19,15 +16,9 @@ on:
         description: 'Specific week to update (leave empty for all weeks of current year)'
         required: false
         type: string
-      skip_league_updates:
-        description: 'Skip triggering league updates after super table update'
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: read
-  actions: write  # Required to trigger other workflows
 
 jobs:
   update-super-table:
@@ -130,28 +121,3 @@ jobs:
           else:
               print(f"WARNING: No data found for {current_year}")
           PYEOF
-
-  # Trigger the weekly league updates after super table is ready
-  trigger-league-updates:
-    needs: update-super-table
-    if: github.event.inputs.skip_league_updates != 'true'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Trigger Weekly Update Worker
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          echo "Triggering weekly_update_worker.yml..."
-
-          # Pass the week if it was specified
-          WEEK_INPUT=""
-          if [ -n "${{ github.event.inputs.week }}" ]; then
-            WEEK_INPUT="-f week=${{ github.event.inputs.week }}"
-          fi
-
-          gh workflow run weekly_update_worker.yml \
-            --repo ${{ github.repository }} \
-            $WEEK_INPUT
-
-          echo "✅ Weekly Update Worker triggered successfully"

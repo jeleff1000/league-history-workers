@@ -541,15 +541,6 @@ jobs:
               print("ESPN league info stored (public league, no cookies)")
           PYEOF
 
-      - name: Gracefully shut down Duckling
-        if: always()
-        run: |
-          cd fantasy_football_data_scripts
-          python -m multi_league.core.duckling_manager || {
-            echo "Duckling shutdown failed (non-critical)"
-            exit 0
-          }
-
       # ==================== CLEANUP SENSITIVE FILES ====================
       - name: Cleanup sensitive files
         if: always()

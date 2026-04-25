@@ -128,12 +128,14 @@ jobs:
                   # Create table locally from downloaded data
                   local.execute(f"DROP TABLE IF EXISTS public.{table_name}")
 
-                  # Use DuckDB's ability to query from Python objects
+                  # Use DuckDB's ability to query from Python objects.
+                  # Don't name this `table` — it shadows the SQL keyword and the
+                  # outer `table_name` loop variable, both of which have caused bugs.
                   import pyarrow as pa
                   columns = list(rows[0].keys())
                   arrays = {col: [r.get(col) for r in rows] for col in columns}
-                  table = pa.table(arrays)
-                  local.execute(f"CREATE TABLE public.{table_name} AS SELECT * FROM table")
+                  arrow_tbl = pa.table(arrays)
+                  local.execute(f"CREATE TABLE public.{table_name} AS SELECT * FROM arrow_tbl")
 
                   print(f"  {table_name}: {cnt:,} rows")
                   total_rows += cnt

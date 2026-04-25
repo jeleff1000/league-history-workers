@@ -339,6 +339,15 @@ jobs:
           except FileNotFoundError:
               pass
 
+          # NFL season year = the calendar year a season starts in.
+          # Through August: previous season is current; September+: this calendar year.
+          today = datetime.now()
+          current_nfl_year = today.year if today.month >= 9 else today.year - 1
+
+          # Per-league overrides come in via the matrix; fall back to ESPN-fantasy-era defaults.
+          start_year = int("${{ matrix.start_year || 2004 }}")
+          end_year = int("${{ matrix.end_year || 0 }}") or current_nfl_year
+
           context = {
               "league_id": espn_league_id,
               "league_name": league_name,
@@ -346,8 +355,8 @@ jobs:
               "espn_s2": espn_s2,
               "swid": swid,
               "sport": "nfl",
-              "start_year": 2004,
-              "end_year": 2025,
+              "start_year": start_year,
+              "end_year": end_year,
               "data_directory": str(data_dir),
               "max_workers": 3,
               "enable_caching": True,

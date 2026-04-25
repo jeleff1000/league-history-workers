@@ -185,9 +185,8 @@ jobs:
           print(f"Token is valid. {len(league_dbs)} leagues would be updated.")
           print("NOTE: Credential writes are managed by the import pipeline on Fly.io.")
 
-          # Save new refresh token for output
+          # Do NOT write the refresh token to step outputs — that surfaces it in the run log.
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"new_refresh_token={new_refresh_token}\n")
               f.write(f"leagues_updated=0\n")
 
           PYEOF
@@ -196,7 +195,6 @@ jobs:
         if: always()
         env:
           UPDATE_MASTER: ${{ github.event.inputs.update_master_secret }}
-          NEW_TOKEN: ${{ steps.validate.outputs.new_refresh_token }}
         run: |
           echo "# OAuth Token Refresh Results" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

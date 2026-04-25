@@ -46,7 +46,9 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.inputs.yahoo_oauth_ref || 'main' }}
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || github.event.client_payload.yahoo_oauth_ref || 'main' }}
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -84,6 +86,10 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || github.event.client_payload.yahoo_oauth_ref || 'main' }}
 
       - name: Setup Python
         id: setup-python
@@ -141,7 +147,7 @@ jobs:
           LEAGUE_DATA_B64: ${{ github.event.inputs.league_data_b64 || github.event.client_payload.league_data_b64 }}
           LEAGUE_DATA_RAW: ${{ github.event.inputs.league_data || github.event.client_payload.league_data }}
           USER_ID: ${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
-          IMPORT_MODE: ${{ github.event.inputs.import_mode || github.event.client_payload.import_mode || 'full' }}
+          IMPORT_MODE: ${{ github.event.client_payload.import_mode || 'quick' }}
           PRE_RESOLVED_DATABASE_NAME: ${{ needs.resolve-db-lock.outputs.database_name }}
           OUTPUT_JSON_PATH: league_data_input.json
 
@@ -515,16 +521,6 @@ jobs:
 
           print("Updated league_data_input.json with discovered league_ids")
           PYEOF
-
-      # ==================== STORE SLEEPER LEAGUE INFO ====================
-      - name: Gracefully shut down Duckling
-        if: always()
-        run: |
-          cd fantasy_football_data_scripts
-          python -m multi_league.core.duckling_manager || {
-            echo "Duckling shutdown failed (non-critical)"
-            exit 0
-          }
 
       # ==================== SUMMARY ====================
       - name: Print summary
