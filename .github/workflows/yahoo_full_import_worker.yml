@@ -110,6 +110,7 @@ jobs:
           yahoo_client_secret: ${{ secrets.YAHOO_CLIENT_SECRET }}
           database_server_url: ${{ secrets.DATABASE_SERVER_URL }}
           database_read_token: ${{ secrets.DATABASE_READ_TOKEN }}
+          credential_encryption_key: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
 
       # ==================== COMPUTE DB_NAME AND DATA_DIR ====================
       - name: Set DATA_DIR

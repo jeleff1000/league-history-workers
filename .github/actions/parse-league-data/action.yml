@@ -21,6 +21,9 @@ inputs:
   database_read_token:
     description: 'Fly.io database read token'
     required: false
+  credential_encryption_key:
+    description: 'Fernet key for decrypting stored refresh tokens (only required when payload omits oauth_token)'
+    required: false
 
 outputs:
   user_id:
@@ -42,8 +45,11 @@ outputs:
     description: 'Original start year (for historical import trigger)'
     value: ${{ steps.parse.outputs.actual_start_year }}
   database_name:
-    description: 'MotherDuck database name'
+    description: 'Database name'
     value: ${{ steps.parse.outputs.database_name }}
+  quick_import_year:
+    description: 'Resolved year for Yahoo quick imports'
+    value: ${{ steps.parse.outputs.quick_import_year }}
   import_mode:
     description: 'Resolved import mode'
     value: ${{ steps.parse.outputs.import_mode }}
@@ -62,6 +68,7 @@ runs:
         YAHOO_CLIENT_SECRET: ${{ inputs.yahoo_client_secret }}
         DATABASE_SERVER_URL: ${{ inputs.database_server_url }}
         DATABASE_READ_TOKEN: ${{ inputs.database_read_token }}
+        CREDENTIAL_ENCRYPTION_KEY: ${{ inputs.credential_encryption_key }}
         LEAGUE_DATA_B64: ${{ inputs.league_data_b64 }}
         IMPORT_MODE: ${{ inputs.import_mode }}
       run: |
@@ -171,7 +178,91 @@ runs:
         # ============================================================
 
         league_id = validate_league_id(league_data.get('league_id'))
-        oauth_raw = validate_oauth_token(league_data.get('oauth_token'))
+
+        # ============================================================
+        # FETCH STORED CREDENTIAL (when payload omits oauth_token)
+        # ============================================================
+        # Frontend sets use_stored_credentials=true after writing the encrypted
+        # refresh_token to ___ops.main.league_credentials. We decrypt here so
+        # the rest of the action stays unchanged — no workflow YAML branch
+        # required, and the plaintext token never travels through
+        # repository_dispatch.
+        use_stored = bool(league_data.get('use_stored_credentials'))
+        if use_stored:
+            db_for_lookup = (league_data.get('database_name') or '').strip()
+            if not db_for_lookup:
+                validation_errors.append(
+                    "use_stored_credentials=true but database_name missing from payload"
+                )
+            db_url = os.environ.get('DATABASE_SERVER_URL', '').rstrip('/')
+            db_tok = os.environ.get('DATABASE_READ_TOKEN', '')
+            enc_key = os.environ.get('CREDENTIAL_ENCRYPTION_KEY', '')
+            if not (db_url and db_tok and enc_key):
+                validation_errors.append(
+                    "use_stored_credentials=true requires DATABASE_SERVER_URL, "
+                    "DATABASE_READ_TOKEN, and CREDENTIAL_ENCRYPTION_KEY to be set"
+                )
+            if not validation_errors:
+                import urllib.request
+                # Lookup is parameterized via SQL string with the db we already
+                # validated upstream (DB_NAME_RE on the frontend). Defense in
+                # depth: re-escape single quotes here too.
+                safe_db = db_for_lookup.replace("'", "''")
+                sql = (
+                    "SELECT encrypted_refresh_token FROM main.league_credentials "
+                    f"WHERE database_name = '{safe_db}' LIMIT 1"
+                )
+                req = urllib.request.Request(
+                    f"{db_url}/query",
+                    data=json.dumps({"sql": sql, "database": "___ops"}).encode(),
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {db_tok}",
+                    },
+                )
+                try:
+                    with urllib.request.urlopen(req, timeout=30) as resp:
+                        rows = json.loads(resp.read())
+                except Exception as e:
+                    validation_errors.append(f"Failed to fetch stored credential: {e}")
+                    rows = []
+                if not rows:
+                    validation_errors.append(
+                        f"No credential row in ___ops.main.league_credentials for db='{db_for_lookup}'"
+                    )
+                else:
+                    encrypted = rows[0].get('encrypted_refresh_token')
+                    if not encrypted:
+                        validation_errors.append(
+                            f"Credential row for '{db_for_lookup}' has empty encrypted_refresh_token"
+                        )
+                    else:
+                        try:
+                            from cryptography.fernet import Fernet
+                            refresh_token = Fernet(enc_key.encode()).decrypt(
+                                encrypted.encode()
+                            ).decode()
+                        except Exception as e:
+                            validation_errors.append(
+                                f"Failed to decrypt stored refresh_token: {e}"
+                            )
+                            refresh_token = None
+                        if refresh_token:
+                            # Synthesize the oauth_token shape the rest of the
+                            # action expects. access_token is intentionally a
+                            # placeholder — initial_import_v3 will refresh on
+                            # first call.
+                            oauth_raw = {
+                                'access_token': 'expired',
+                                'refresh_token': refresh_token,
+                                'token_type': 'bearer',
+                                'token_time': 0,
+                            }
+                            print("[PARSE] Loaded refresh_token from ___ops (use_stored_credentials)")
+                        else:
+                            oauth_raw = None
+        else:
+            oauth_raw = validate_oauth_token(league_data.get('oauth_token'))
 
         league_name = league_data.get('league_name', '').strip()
         if not league_name:
@@ -284,6 +375,7 @@ runs:
             f.write(f"start_year={start_year}\n")
             f.write(f"actual_start_year={actual_start_year}\n")
             f.write(f"database_name={final_db_name}\n")
+            f.write(f"quick_import_year={season}\n")
             f.write(f"import_mode={import_mode}\n")
             f.write(f"validation_warnings={json.dumps(validation_warnings)}\n")
 
