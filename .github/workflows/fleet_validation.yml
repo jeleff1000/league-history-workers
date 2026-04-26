@@ -157,7 +157,10 @@ jobs:
                          COUNT(*) FILTER (WHERE NOT passed AND NOT suppressed) as failures,
                          COUNT(DISTINCT db_name) FILTER (WHERE NOT passed AND NOT suppressed) as leagues
                   FROM fleet_health.validation_results
-                  WHERE run_id = (SELECT MAX(run_id) FROM fleet_health.validation_results)
+                  WHERE run_id = (
+                      SELECT run_id FROM fleet_health.validation_results
+                      ORDER BY run_timestamp DESC LIMIT 1
+                  )
                   GROUP BY severity
                   ORDER BY CASE severity
                       WHEN 'BLOCKER' THEN 1 WHEN 'ERROR' THEN 2
@@ -174,7 +177,10 @@ jobs:
                          SUM(fail_count) as total_rows
                   FROM fleet_health.validation_results
                   WHERE NOT passed AND NOT suppressed
-                    AND run_id = (SELECT MAX(run_id) FROM fleet_health.validation_results)
+                    AND run_id = (
+                        SELECT run_id FROM fleet_health.validation_results
+                        ORDER BY run_timestamp DESC LIMIT 1
+                    )
                   GROUP BY check_name, severity
                   ORDER BY
                       CASE severity WHEN 'BLOCKER' THEN 1 WHEN 'ERROR' THEN 2 ELSE 3 END,
