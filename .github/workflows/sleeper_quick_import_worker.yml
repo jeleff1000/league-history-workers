@@ -453,15 +453,10 @@ jobs:
           from multi_league.core.local_db import LocalLeagueDB
           data_dir = '${{ github.workspace }}/fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}'
           db_name = '${{ steps.parse.outputs.database_name }}'
-          backend = os.environ.get('DATABASE_BACKEND', 'motherduck')
           db = LocalLeagueDB(data_dir, db_name)
           db.connect()
-          if backend == 'fly':
-              db.upload_to_fly(db_name)
-              print('Upload to Fly complete')
-          else:
-              db.upload_to_motherduck(db_name)
-              print('Upload complete')
+          db.upload_to_fly(db_name)
+          print('Upload to Fly complete')
           db.close()
           "
 

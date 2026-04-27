@@ -372,17 +372,11 @@ jobs:
 
           data_dir = os.environ['DATA_DIR']
           db_name = os.environ['DB_NAME']
-          backend = os.environ.get('DATABASE_BACKEND', 'motherduck')
-
           db = LocalLeagueDB(data_dir, db_name)
           db.connect()
 
-          if backend == 'fly':
-              db.upload_to_fly(db_name)
-              print('Upload to Fly complete')
-          else:
-              db.upload_to_motherduck(db_name)
-              print('Upload complete')
+          db.upload_to_fly(db_name)
+          print('Upload to Fly complete')
 
           db.close()
           PYEOF
