@@ -65,8 +65,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ops_cache
-          key: ops-cache-v1-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
-          restore-keys: ops-cache-v1-
+          key: ops-cache-v2-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
+          restore-keys: ops-cache-v2-
 
       - name: Build ops cache (on miss)
         if: steps.ops-cache.outputs.cache-hit != 'true'
