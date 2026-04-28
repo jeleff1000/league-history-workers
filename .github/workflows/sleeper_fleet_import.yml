@@ -233,8 +233,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ops_cache
-          key: ops-cache-v2-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
-          restore-keys: ops-cache-v2-
+          key: ops-cache-v1-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
+          restore-keys: ops-cache-v1-
 
       - name: Build ops cache (on miss)
         if: steps.cache.outputs.cache-hit != 'true'
@@ -286,8 +286,8 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ops_cache
-          key: ops-cache-v2-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
-          restore-keys: ops-cache-v2-
+          key: ops-cache-v1-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
+          restore-keys: ops-cache-v1-
 
       - name: Setup Python
         id: setup-python
@@ -314,6 +314,18 @@ jobs:
 
       - name: Activate venv
         run: echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
+
+      - name: Apply ops_cache fixups
+        run: |
+          source .venv/bin/activate
+          python -c "
+          import duckdb
+          conn = duckdb.connect('${{ github.workspace }}/ops_cache/ops_cache.duckdb')
+          with open('fantasy_football_data_scripts/ops_cache_fixups.sql') as f:
+              conn.execute(f.read())
+          conn.close()
+          print('[ops-cache] Applied data fixups')
+          "
 
       # ==================== IMPORT ====================
       - name: Run import
