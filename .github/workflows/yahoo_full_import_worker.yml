@@ -527,17 +527,6 @@ jobs:
 
       # Clutch equity now runs in-process inside playoff_odds_import (no separate step needed)
 
-      # Populates keeper_year (consecutive years a player was kept by the same
-      # franchise) in player_fantasy. The live worker bypasses LeagueSession,
-      # so this must be an explicit workflow step.
-      - name: Calculate keeper economics
-        if: steps.import.outputs.exit_code == '0'
-        working-directory: fantasy_football_data_scripts
-        run: |
-          python -m multi_league.transformations.player.keeper_economics \
-            --db ${DB_NAME} \
-            --data-dir ${DATA_DIR}
-
       # ==================== RUN AGGREGATIONS ====================
       - name: Run aggregations
         if: steps.import.outputs.exit_code == '0'

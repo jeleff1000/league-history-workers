@@ -455,17 +455,6 @@ jobs:
             --data-dir ${DATA_DIR} \
             --n-sims 10000
 
-      # Populates keeper_year (consecutive years a player was kept by the same
-      # franchise) in player_fantasy. The live worker bypasses LeagueSession,
-      # so this must be an explicit workflow step.
-      - name: Calculate keeper economics
-        if: steps.import.outputs.exit_code == '0'
-        run: |
-          cd fantasy_football_data_scripts
-          python -m multi_league.transformations.player.keeper_economics \
-            --db ${DB_NAME} \
-            --data-dir ${DATA_DIR}
-
       # Clutch equity now runs in-process inside playoff_odds_import (no separate step needed)
 
       # ==================== RUN AGGREGATIONS ====================
