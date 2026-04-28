@@ -70,7 +70,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install duckdb==1.5.1
+        run: pip install duckdb==1.5.1 pandas
 
       - name: Run fleet validation
         env:

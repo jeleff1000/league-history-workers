@@ -197,7 +197,7 @@ jobs:
           DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
           DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
         run: |
-          pip install duckdb==1.5.1
+          pip install duckdb==1.5.1 pandas
           python fantasy_football_data_scripts/build_ops_cache.py \
             --output ops_cache/ops_cache.duckdb
 
