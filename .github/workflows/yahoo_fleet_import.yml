@@ -310,30 +310,17 @@ jobs:
       - name: Activate venv
         run: echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
 
-      - name: Apply ops_cache fixups (non-fatal)
-        # Ops cache writes MUST NEVER block an import. Apply each statement in
-        # isolation; log + continue on failure. See feedback memory:
-        # ops cache must not block imports.
+      - name: Overlay ops cache from committed parquets (non-fatal)
+        # Source of truth for player_bio + platform-id maps lives in the
+        # yahoo_oauth repo at ops_data/. This step DROPs + RELOADs those four
+        # tables in ops_cache.duckdb so workers always run against the latest
+        # committed identity-resolution data — no Fly call, no fixups SQL,
+        # no schema drift. Super_table is left untouched.
+        # Ops cache writes MUST NEVER block an import. See feedback memory.
         run: |
           source .venv/bin/activate
-          python -c "
-          import duckdb, re
-          conn = duckdb.connect('${{ github.workspace }}/ops_cache/ops_cache.duckdb')
-          with open('fantasy_football_data_scripts/ops_cache_fixups.sql') as f:
-              text = f.read()
-          stripped = re.sub(r'--[^\n]*', '', text)
-          stmts = [s.strip() for s in stripped.split(';') if s.strip()]
-          ok = fail = 0
-          for s in stmts:
-              try:
-                  conn.execute(s)
-                  ok += 1
-              except Exception as e:
-                  fail += 1
-                  print(f'[ops-cache] WARN skipped fixup: {e} :: stmt={s[:120]!r}')
-          conn.close()
-          print(f'[ops-cache] Fixups: {ok} applied, {fail} skipped (non-fatal)')
-          "
+          python fantasy_football_data_scripts/overlay_ops_cache_from_parquet.py \
+            --cache ${{ github.workspace }}/ops_cache/ops_cache.duckdb
         continue-on-error: true
 
       # ==================== IMPORT ====================
