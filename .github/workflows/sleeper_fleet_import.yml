@@ -315,17 +315,31 @@ jobs:
       - name: Activate venv
         run: echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
 
-      - name: Apply ops_cache fixups
+      - name: Apply ops_cache fixups (non-fatal)
+        # Ops cache writes MUST NEVER block an import. Apply each statement in
+        # isolation; log + continue on failure. See feedback memory:
+        # ops cache must not block imports.
         run: |
           source .venv/bin/activate
           python -c "
-          import duckdb
+          import duckdb, re
           conn = duckdb.connect('${{ github.workspace }}/ops_cache/ops_cache.duckdb')
           with open('fantasy_football_data_scripts/ops_cache_fixups.sql') as f:
-              conn.execute(f.read())
+              text = f.read()
+          stripped = re.sub(r'--[^\n]*', '', text)
+          stmts = [s.strip() for s in stripped.split(';') if s.strip()]
+          ok = fail = 0
+          for s in stmts:
+              try:
+                  conn.execute(s)
+                  ok += 1
+              except Exception as e:
+                  fail += 1
+                  print(f'[ops-cache] WARN skipped fixup: {e} :: stmt={s[:120]!r}')
           conn.close()
-          print('[ops-cache] Applied data fixups')
+          print(f'[ops-cache] Fixups: {ok} applied, {fail} skipped (non-fatal)')
           "
+        continue-on-error: true
 
       # ==================== IMPORT ====================
       - name: Run import
