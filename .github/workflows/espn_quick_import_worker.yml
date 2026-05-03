@@ -383,6 +383,7 @@ jobs:
               "manager_name_overrides": league_data.get('manager_name_overrides', {}),
               "external_column_maps": league_data.get('external_column_maps', []),
               "external_identity_maps": league_data.get('external_identity_maps', {}),
+              "has_external_data": league_data.get('has_external_data', False),
               "created_at": datetime.now().isoformat(),
               "updated_at": datetime.now().isoformat(),
               "platform": "espn",
