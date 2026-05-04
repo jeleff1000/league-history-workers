@@ -286,7 +286,11 @@ jobs:
         id: cookies
         run: |
           python - <<'PYEOF'
-          import json, os, sys, urllib.request
+          import json, os, sys, time, urllib.error, urllib.request
+
+          RETRY_STATUS = {500, 502, 503, 504}
+          MAX_RETRIES = 6
+          RETRY_MAX_DELAY = 15
 
           def fly_query(sql, database="___ops"):
               url = os.environ["DATABASE_SERVER_URL"].rstrip("/") + "/query"
@@ -296,8 +300,29 @@ jobs:
                   "Content-Type": "application/json",
                   "Authorization": f"Bearer {token}",
               })
-              with urllib.request.urlopen(req, timeout=30) as resp:
-                  return json.loads(resp.read())
+              last_error = None
+              for attempt in range(MAX_RETRIES):
+                  try:
+                      with urllib.request.urlopen(req, timeout=75) as resp:
+                          return json.loads(resp.read())
+                  except urllib.error.HTTPError as exc:
+                      last_error = f"HTTP {exc.code}: {exc.read().decode(errors='replace')[:300]}"
+                      should_retry = exc.code in RETRY_STATUS
+                  except (TimeoutError, OSError, urllib.error.URLError) as exc:
+                      last_error = str(exc)
+                      should_retry = True
+
+                  if should_retry and attempt < MAX_RETRIES - 1:
+                      delay = min(2 ** attempt, RETRY_MAX_DELAY)
+                      print(
+                          f"[ESPN-COOKIES] Fly query attempt {attempt + 1}/{MAX_RETRIES} "
+                          f"failed transiently: {last_error}. Retrying in {delay}s..."
+                      )
+                      time.sleep(delay)
+                      continue
+                  raise RuntimeError(f"Fly query failed after {attempt + 1}/{MAX_RETRIES} attempts: {last_error}")
+
+              raise RuntimeError(f"Fly query exhausted retries: {last_error}")
 
           db_name = os.environ['DB_NAME']
           enc_key = os.environ.get('CREDENTIAL_ENCRYPTION_KEY', '')
@@ -308,10 +333,11 @@ jobs:
               with open(".espn_swid", "w") as f: f.write("")
               sys.exit(0)
 
+          safe_db_name = db_name.replace("'", "''")
           rows = fly_query(f"""
               SELECT encrypted_espn_s2, encrypted_swid
               FROM main.espn_leagues
-              WHERE database_name = '{db_name}'
+              WHERE database_name = '{safe_db_name}'
           """)
 
           if not rows or not rows[0].get("encrypted_espn_s2"):
