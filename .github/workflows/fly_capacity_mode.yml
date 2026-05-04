@@ -14,42 +14,38 @@ on:
           - emergency
           - status
         default: status
-      duration_hours:
-        description: "Optional event duration for cost estimate"
-        required: false
+      password:
+        description: "Capacity mode password"
+        required: true
         type: string
-      primary_ram_level:
-        description: "Primary machine RAM override"
+      duration_minutes:
+        description: "Planned event length for cost estimate"
         required: false
         type: choice
         options:
-          - auto
-          - 4gb
-          - 8gb
-        default: auto
-      replica_ram_level:
-        description: "Replica machine RAM override"
+          - "30"
+          - "60"
+          - "120"
+          - "240"
+        default: "60"
+      ram_level:
+        description: "RAM level for database machines"
         required: false
         type: choice
         options:
-          - auto
           - 4gb
           - 8gb
-        default: auto
+          - 16gb
+        default: 4gb
       storage_level:
-        description: "Volume storage level; only extends upward"
+        description: "Volume size level; only extends upward"
         required: false
         type: choice
         options:
-          - keep
           - 50gb
           - 100gb
           - 200gb
-        default: keep
-      confirm:
-        description: "Type 'scale' to change capacity; not required for status"
-        required: false
-        type: string
+        default: 50gb
       dry_run:
         description: "Print Fly commands without applying changes"
         required: false
@@ -93,16 +89,14 @@ jobs:
           FLY_PRIMARY_VOLUME_ID: ${{ secrets.FLY_PRIMARY_VOLUME_ID }}
           FLY_REPLICA_VOLUME_IDS: ${{ secrets.FLY_REPLICA_VOLUME_IDS }}
           DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+          DUCKDB_CAPACITY_MODE_PASSWORD: ${{ secrets.DUCKDB_CAPACITY_MODE_PASSWORD }}
+          DUCKDB_CAPACITY_MODE_PASSWORD_INPUT: ${{ inputs.password }}
         run: |
           ARGS=(--mode "${{ inputs.mode }}")
-          ARGS+=(--primary-ram-level "${{ inputs.primary_ram_level }}")
-          ARGS+=(--replica-ram-level "${{ inputs.replica_ram_level }}")
+          ARGS+=(--ram-level "${{ inputs.ram_level }}")
           ARGS+=(--storage-level "${{ inputs.storage_level }}")
-          if [ "${{ inputs.mode }}" != "status" ]; then
-            ARGS+=(--confirm "${{ inputs.confirm }}")
-          fi
-          if [ -n "${{ inputs.duration_hours }}" ]; then
-            ARGS+=(--duration-hours "${{ inputs.duration_hours }}")
+          if [ -n "${{ inputs.duration_minutes }}" ]; then
+            ARGS+=(--duration-minutes "${{ inputs.duration_minutes }}")
           fi
           if [ "${{ inputs.dry_run }}" = "true" ]; then
             ARGS+=(--dry-run)
