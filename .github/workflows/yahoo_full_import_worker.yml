@@ -264,6 +264,7 @@ jobs:
               "external_identity_maps": league_data.get('external_identity_maps', {}),
               "keeper_rules": league_data.get('keeper_rules'),
               "has_external_data": league_data.get('has_external_data', False),
+              "merge_source": league_data.get('merge_source'),
               "import_mode": "quick",
               "motherduck_db_name": "${{ steps.parse.outputs.database_name }}",
           }
@@ -420,6 +421,7 @@ jobs:
               "external_identity_maps": league_data.get('external_identity_maps', {}),
               "keeper_rules": league_data.get('keeper_rules'),
               "has_external_data": league_data.get('has_external_data', False),
+              "merge_source": league_data.get('merge_source'),
               "import_mode": "full",
               "motherduck_db_name": "${{ steps.parse.outputs.database_name }}",
           }

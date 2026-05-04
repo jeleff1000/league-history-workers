@@ -378,6 +378,7 @@ jobs:
               "external_column_maps": league_data.get('external_column_maps', []),
               "external_identity_maps": league_data.get('external_identity_maps', {}),
               "has_external_data": league_data.get('has_external_data', False),
+              "merge_source": league_data.get('merge_source'),
               "created_at": datetime.now().isoformat(),
               "updated_at": datetime.now().isoformat(),
               "platform": "espn",
