@@ -18,6 +18,34 @@ on:
         description: "Optional event duration for cost estimate"
         required: false
         type: string
+      primary_ram_level:
+        description: "Primary machine RAM override"
+        required: false
+        type: choice
+        options:
+          - auto
+          - 4gb
+          - 8gb
+        default: auto
+      replica_ram_level:
+        description: "Replica machine RAM override"
+        required: false
+        type: choice
+        options:
+          - auto
+          - 4gb
+          - 8gb
+        default: auto
+      storage_level:
+        description: "Volume storage level; only extends upward"
+        required: false
+        type: choice
+        options:
+          - keep
+          - 50gb
+          - 100gb
+          - 200gb
+        default: keep
       confirm:
         description: "Type 'scale' to change capacity; not required for status"
         required: false
@@ -62,9 +90,14 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           FLY_PRIMARY_MACHINE_ID: ${{ secrets.FLY_PRIMARY_MACHINE_ID }}
           FLY_REPLICA_MACHINE_IDS: ${{ secrets.FLY_REPLICA_MACHINE_IDS }}
+          FLY_PRIMARY_VOLUME_ID: ${{ secrets.FLY_PRIMARY_VOLUME_ID }}
+          FLY_REPLICA_VOLUME_IDS: ${{ secrets.FLY_REPLICA_VOLUME_IDS }}
           DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
         run: |
           ARGS=(--mode "${{ inputs.mode }}")
+          ARGS+=(--primary-ram-level "${{ inputs.primary_ram_level }}")
+          ARGS+=(--replica-ram-level "${{ inputs.replica_ram_level }}")
+          ARGS+=(--storage-level "${{ inputs.storage_level }}")
           if [ "${{ inputs.mode }}" != "status" ]; then
             ARGS+=(--confirm "${{ inputs.confirm }}")
           fi
