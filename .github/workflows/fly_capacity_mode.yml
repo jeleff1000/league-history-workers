@@ -1,0 +1,77 @@
+name: DuckDB Capacity Mode
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Capacity mode to apply"
+        required: true
+        type: choice
+        options:
+          - normal
+          - event
+          - fleet
+          - emergency
+          - status
+        default: status
+      duration_hours:
+        description: "Optional event duration for cost estimate"
+        required: false
+        type: string
+      confirm:
+        description: "Type 'scale' to change capacity; not required for status"
+        required: false
+        type: string
+      dry_run:
+        description: "Print Fly commands without applying changes"
+        required: false
+        type: boolean
+        default: false
+      yahoo_oauth_ref:
+        description: "yahoo_oauth branch/ref to check out"
+        required: false
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: duckdb-capacity-mode
+  cancel-in-progress: false
+
+jobs:
+  capacity-mode:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout yahoo_oauth
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref || 'main' }}
+
+      - name: Install flyctl
+        run: |
+          curl -sL https://fly.io/install.sh | sh
+          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
+
+      - name: Apply capacity mode
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_PRIMARY_MACHINE_ID: ${{ secrets.FLY_PRIMARY_MACHINE_ID }}
+          FLY_REPLICA_MACHINE_IDS: ${{ secrets.FLY_REPLICA_MACHINE_IDS }}
+          DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+        run: |
+          ARGS=(--mode "${{ inputs.mode }}")
+          if [ "${{ inputs.mode }}" != "status" ]; then
+            ARGS+=(--confirm "${{ inputs.confirm }}")
+          fi
+          if [ -n "${{ inputs.duration_hours }}" ]; then
+            ARGS+=(--duration-hours "${{ inputs.duration_hours }}")
+          fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          python scripts/fly_capacity_mode.py "${ARGS[@]}"

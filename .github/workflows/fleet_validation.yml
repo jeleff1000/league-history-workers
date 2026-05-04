@@ -38,34 +38,7 @@ permissions:
   contents: read
 
 jobs:
-  scale-up:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Scale Fly to 8GB RAM
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          curl -sL https://fly.io/install.sh | sh
-          export PATH="$HOME/.fly/bin:$PATH"
-          flyctl scale memory 8192 -a league-history-duckdb
-          echo "Scaled to 8GB for validation"
-
-      - name: Wait for DuckDB API readiness
-        run: |
-          deadline=$((SECONDS + 300))
-          until curl -fsS https://league-history-duckdb.fly.dev/ready | grep -q '"ready":true'; do
-            if [ "$SECONDS" -ge "$deadline" ]; then
-              echo "DuckDB API did not become ready within 5 minutes"
-              exit 1
-            fi
-            echo "Waiting for DuckDB API to finish restarting..."
-            sleep 10
-          done
-          echo "DuckDB API is ready"
-
   validate-fleet:
-    needs: [scale-up]
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -208,18 +181,3 @@ jobs:
           except Exception as e:
               print(f"Could not query results: {e}")
           PYEOF
-
-  scale-down:
-    needs: [validate-fleet]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Scale Fly back to 4GB RAM
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          curl -sL https://fly.io/install.sh | sh
-          export PATH="$HOME/.fly/bin:$PATH"
-          flyctl scale memory 4096 -a league-history-duckdb
-          echo "Scaled back to 4GB after validation"
