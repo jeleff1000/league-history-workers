@@ -38,6 +38,25 @@ on:
           - 8gb
           - 16gb
         default: auto
+      cpu_level:
+        description: "CPU shape for database machines"
+        required: false
+        type: choice
+        options:
+          - auto
+          - shared4x
+          - shared8x
+        default: auto
+      machine_count:
+        description: "Total active machines; requires configured replica IDs"
+        required: false
+        type: choice
+        options:
+          - "2"
+          - "3"
+          - "4"
+          - "5"
+        default: "2"
       storage_level:
         description: "Volume size level; only extends upward"
         required: false
@@ -97,6 +116,8 @@ jobs:
           if [ "${{ inputs.ram_level }}" != "auto" ]; then
             ARGS+=(--ram-level "${{ inputs.ram_level }}")
           fi
+          ARGS+=(--cpu-level "${{ inputs.cpu_level }}")
+          ARGS+=(--machine-count "${{ inputs.machine_count }}")
           ARGS+=(--storage-level "${{ inputs.storage_level }}")
           if [ -n "${{ inputs.duration_minutes }}" ]; then
             ARGS+=(--duration-minutes "${{ inputs.duration_minutes }}")
