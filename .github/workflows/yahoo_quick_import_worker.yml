@@ -385,7 +385,8 @@ jobs:
             --secret "$REVALIDATION_SECRET" \
             --site-url "https://leaguehistory.app" \
             --mode quick \
-            --strategy expire
+            --strategy expire \
+            --jitter-seconds 60
 
       # ==================== STORE CREDENTIALS ====================
       # Always store credentials, even if import fails — they're needed for

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import re
 import sys
 import time
@@ -107,6 +108,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=25)
     parser.add_argument("--concurrency", type=int, default=3)
     parser.add_argument(
+        "--jitter-seconds",
+        type=int,
+        default=0,
+        help="Sleep 0..N seconds before revalidation to spread concurrent worker cache refreshes.",
+    )
+    parser.add_argument(
         "--strict",
         action="store_true",
         help="Return non-zero if revalidation or any warm request fails.",
@@ -124,6 +131,12 @@ def main() -> int:
     if not args.secret:
         print("REVALIDATION_SECRET is not set; skipping Vercel cache warm-up")
         return 0
+
+    if args.jitter_seconds > 0:
+        delay = random.randint(0, args.jitter_seconds)
+        if delay > 0:
+            print(f"Sleeping {delay}s before cache refresh jitter window={args.jitter_seconds}s")
+            time.sleep(delay)
 
     site_url = args.site_url.rstrip("/")
     print(f"Revalidating {db} on {site_url} with strategy={args.strategy}")

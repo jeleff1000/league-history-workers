@@ -372,7 +372,8 @@ jobs:
             --secret "$REVALIDATION_SECRET" \
             --site-url "https://leaguehistory.app" \
             --mode full \
-            --strategy expire
+            --strategy expire \
+            --jitter-seconds 60
 
       # ==================== SUMMARY ====================
       - name: Print summary
