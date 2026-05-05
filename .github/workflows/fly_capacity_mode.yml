@@ -29,14 +29,15 @@ on:
           - "240"
         default: "60"
       ram_level:
-        description: "RAM level for database machines"
+        description: "RAM override for database machines"
         required: false
         type: choice
         options:
+          - auto
           - 4gb
           - 8gb
           - 16gb
-        default: 4gb
+        default: auto
       storage_level:
         description: "Volume size level; only extends upward"
         required: false
@@ -93,7 +94,9 @@ jobs:
           DUCKDB_CAPACITY_MODE_PASSWORD_INPUT: ${{ inputs.password }}
         run: |
           ARGS=(--mode "${{ inputs.mode }}")
-          ARGS+=(--ram-level "${{ inputs.ram_level }}")
+          if [ "${{ inputs.ram_level }}" != "auto" ]; then
+            ARGS+=(--ram-level "${{ inputs.ram_level }}")
+          fi
           ARGS+=(--storage-level "${{ inputs.storage_level }}")
           if [ -n "${{ inputs.duration_minutes }}" ]; then
             ARGS+=(--duration-minutes "${{ inputs.duration_minutes }}")
