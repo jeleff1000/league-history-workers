@@ -226,6 +226,19 @@ jobs:
           print('Upload to Fly complete')
           "
 
+      # ==================== REVALIDATE VERCEL CACHE ====================
+      - name: Revalidate Vercel cache
+        env:
+          REVALIDATION_SECRET: ${{ secrets.REVALIDATION_SECRET }}
+          DB_NAME: ${{ env.DATABASE_NAME }}
+        run: |
+          python scripts/warm_vercel_cache.py \
+            --db "$DB_NAME" \
+            --secret "$REVALIDATION_SECRET" \
+            --site-url "https://leaguehistory.app" \
+            --mode none \
+            --strategy expire
+
       # ==================== VERIFY ====================
       - name: Verify results
         run: |

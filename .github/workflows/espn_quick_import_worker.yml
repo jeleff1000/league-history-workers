@@ -506,6 +506,20 @@ jobs:
           db.close()
           PYEOF
 
+      # ==================== REVALIDATE + WARM VERCEL CACHE ====================
+      - name: Revalidate and warm Vercel cache
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          REVALIDATION_SECRET: ${{ secrets.REVALIDATION_SECRET }}
+          DB_NAME: ${{ env.DB_NAME }}
+        run: |
+          python scripts/warm_vercel_cache.py \
+            --db "$DB_NAME" \
+            --secret "$REVALIDATION_SECRET" \
+            --site-url "https://leaguehistory.app" \
+            --mode quick \
+            --strategy expire
+
       # ==================== STORE ESPN LEAGUE INFO ====================
       - name: Store ESPN league info
         if: steps.import.outputs.exit_code == '0'

@@ -453,6 +453,20 @@ jobs:
           db.close()
           "
 
+      # ==================== REVALIDATE + WARM VERCEL CACHE ====================
+      - name: Revalidate and warm Vercel cache
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          REVALIDATION_SECRET: ${{ secrets.REVALIDATION_SECRET }}
+          DB_NAME: ${{ steps.parse.outputs.database_name }}
+        run: |
+          python scripts/warm_vercel_cache.py \
+            --db "$DB_NAME" \
+            --secret "$REVALIDATION_SECRET" \
+            --site-url "https://leaguehistory.app" \
+            --mode quick \
+            --strategy expire
+
       # ==================== UPDATE LEAGUE DATA WITH DISCOVERED IDS ====================
       # The import discovers year-specific league_ids which are critical for
       # historical imports to fetch bracket/championship data correctly

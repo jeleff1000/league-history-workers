@@ -360,6 +360,20 @@ jobs:
           db.close()
           "
 
+      # ==================== REVALIDATE + WARM VERCEL CACHE ====================
+      - name: Revalidate and warm Vercel cache
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          REVALIDATION_SECRET: ${{ secrets.REVALIDATION_SECRET }}
+          DB_NAME: ${{ env.DB_NAME }}
+        run: |
+          python scripts/warm_vercel_cache.py \
+            --db "$DB_NAME" \
+            --secret "$REVALIDATION_SECRET" \
+            --site-url "https://leaguehistory.app" \
+            --mode full \
+            --strategy expire
+
       # ==================== SUMMARY ====================
       - name: Print summary
         if: always()

@@ -387,6 +387,22 @@ jobs:
           db.close()
           "
 
+      # ==================== REVALIDATE VERCEL CACHE ====================
+      # Fleet runs may touch many leagues in parallel, so invalidate precisely
+      # but do not warm every URL for every league.
+      - name: Revalidate Vercel cache
+        if: steps.import.outputs.exit_code == '0'
+        env:
+          REVALIDATION_SECRET: ${{ secrets.REVALIDATION_SECRET }}
+          DB_NAME: ${{ env.DB_NAME }}
+        run: |
+          python scripts/warm_vercel_cache.py \
+            --db "$DB_NAME" \
+            --secret "$REVALIDATION_SECRET" \
+            --site-url "https://leaguehistory.app" \
+            --mode none \
+            --strategy expire
+
       # ==================== STATUS ====================
       - name: Print status
         if: always()
