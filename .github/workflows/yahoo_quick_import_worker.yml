@@ -259,7 +259,7 @@ jobs:
               "league_name": league_data.get('league_name'),
               "oauth_file_path": str(oauth_file),
               "game_code": league_data.get('game_code', 'nfl'),
-              "start_year": season,  # Quick = current year only
+              "start_year": season,  # Quick target shell; importer may include prior scored season
               "end_year": season,
               "num_teams": int(league_data.get('num_teams', 10)),
               "playoff_teams": int(league_data.get('playoff_teams', 6)),
@@ -287,7 +287,7 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"season={season}\n")
 
-          print(f"[QUICK IMPORT] League context created for year {season} (db: {context.get('database_name', 'N/A')})")
+          print(f"[QUICK IMPORT] League context created for target year {season} (db: {context.get('database_name', 'N/A')})")
           PYEOF
 
       # NOTE: Clean-slate table drop is handled by initial_import_v3.py Phase 0

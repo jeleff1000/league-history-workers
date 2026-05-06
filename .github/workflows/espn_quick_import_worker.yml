@@ -341,7 +341,7 @@ jobs:
               league_data = json.load(f)
 
           import_mode = league_data.get('import_mode', 'quick')  # "quick" (free) or "quick_to_full" (paid)
-          # Quick import: only current year (same as Yahoo quick import)
+          # Quick target shell; importer may include the prior scored season.
           season = int("${{ steps.parse.outputs.end_year }}")
           data_dir = Path(os.environ['DATA_DIR'])
 
@@ -375,7 +375,7 @@ jobs:
               "espn_s2": espn_s2,
               "swid": swid,
               "sport": "nfl",
-              "start_year": season,  # Quick = current year only
+              "start_year": season,  # Quick target shell; importer may include prior scored season
               "end_year": season,
               "num_teams": league_data.get('num_teams'),
               "playoff_teams": playoff_teams,
@@ -412,7 +412,7 @@ jobs:
           with open("espn_context.json", 'w') as f:
               json.dump(context, f, indent=2)
 
-          print(f"[QUICK IMPORT] ESPN context created for year {season}")
+          print(f"[QUICK IMPORT] ESPN context created for target year {season}")
           print(f"Context path: {context_path}")
           PYEOF
 
@@ -428,7 +428,7 @@ jobs:
           echo "========================================"
           echo "Starting ESPN QUICK import for ${{ steps.parse.outputs.league_name }}"
           echo "League ID: ${{ steps.parse.outputs.espn_league_id }}"
-          echo "Year: ${{ steps.parse.outputs.end_year }} (current year only)"
+          echo "Target year: ${{ steps.parse.outputs.end_year }} (importer may include prior scored season)"
           echo "Import Mode: ${{ steps.parse.outputs.import_mode }}"
           echo "========================================"
 
