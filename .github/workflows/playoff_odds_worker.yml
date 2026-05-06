@@ -149,8 +149,39 @@ jobs:
           print(f"\nDownloaded {total_rows:,} total rows to {local_path}")
           PYEOF
 
+      # ==================== COUNT MATCHUP ROWS ====================
+      - name: Count matchup rows
+        id: matchup_rows
+        run: |
+          python - <<'PYEOF'
+          import os
+          import sys
+          from pathlib import Path
+
+          import duckdb
+
+          db_name = os.environ["DATABASE_NAME"]
+          data_dir = Path(os.environ["DATA_DIR"])
+          db_path = data_dir / f"{db_name}.duckdb"
+
+          if not db_path.exists():
+              print(f"ERROR: Local DuckDB not found: {db_path}")
+              sys.exit(1)
+
+          conn = duckdb.connect(str(db_path), read_only=True)
+          try:
+              count = conn.execute("SELECT COUNT(*) FROM public.matchup").fetchone()[0]
+          finally:
+              conn.close()
+
+          print(f"matchup: {count}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write(f"matchup_count={count}\n")
+          PYEOF
+
       # ==================== EXPECTED RECORD CALCULATOR ====================
       - name: Run Expected Record Calculator
+        if: steps.matchup_rows.outputs.matchup_count != '0'
         working-directory: fantasy_football_data_scripts
         run: |
           echo "========================================"
@@ -174,6 +205,7 @@ jobs:
 
       # ==================== PLAYOFF ODDS CALCULATOR ====================
       - name: Run Playoff Odds Calculator (+ clutch equity)
+        if: steps.matchup_rows.outputs.matchup_count != '0'
         working-directory: fantasy_football_data_scripts
         run: |
           echo "========================================"
