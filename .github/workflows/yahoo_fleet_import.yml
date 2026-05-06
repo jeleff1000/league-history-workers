@@ -413,10 +413,8 @@ jobs:
           db.close()
           "
 
-      # ==================== REVALIDATE VERCEL CACHE ====================
-      # Fleet runs may touch many leagues in parallel, so invalidate precisely
-      # but do not warm every URL for every league.
-      - name: Revalidate Vercel cache
+      # ==================== REVALIDATE + WARM VERCEL CACHE ====================
+      - name: Revalidate and warm Vercel cache
         if: steps.import.outputs.exit_code == '0'
         env:
           REVALIDATION_SECRET: ${{ secrets.REVALIDATION_SECRET }}
@@ -426,7 +424,7 @@ jobs:
             --db "$DB_NAME" \
             --secret "$REVALIDATION_SECRET" \
             --site-url "https://www.leaguehistory.app" \
-            --mode none \
+            --mode "$IMPORT_MODE" \
             --strategy expire \
             --jitter-seconds 0 \
             --strict \
