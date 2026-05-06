@@ -397,18 +397,21 @@ jobs:
               sys.exit(1)
 
           print("Canonical table row counts:")
+          counts = {}
           for table in required:
               count = conn.execute(f"SELECT COUNT(*) FROM public.{table}").fetchone()[0]
+              counts[table] = count
               print(f"  {table}: {count}")
 
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
               fh.write(f"local_db_path={db_path.as_posix()}\n")
               fh.write(f"table_count={len(required)}\n")
+              fh.write(f"matchup_count={counts.get('matchup', 0)}\n")
           PYEOF
 
       # ==================== CALCULATE EXPECTED RECORDS ====================
       - name: Calculate expected records
-        if: steps.import.outputs.exit_code == '0'
+        if: steps.import.outputs.exit_code == '0' && steps.verify.outputs.matchup_count != '0'
         run: |
           cd fantasy_football_data_scripts
           python -m multi_league.transformations.matchup.expected_record_v2 \
@@ -418,7 +421,7 @@ jobs:
 
       # ==================== CALCULATE PLAYOFF ODDS ====================
       - name: Calculate playoff odds
-        if: steps.import.outputs.exit_code == '0'
+        if: steps.import.outputs.exit_code == '0' && steps.verify.outputs.matchup_count != '0'
         run: |
           cd fantasy_football_data_scripts
           python -m multi_league.transformations.matchup.playoff_odds_import \
