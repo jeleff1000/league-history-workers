@@ -217,11 +217,9 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ops_cache
-          key: ops-cache-v1-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
-          restore-keys: ops-cache-v1-
+          key: ops-cache-v2-${{ github.run_id }}
 
-      - name: Build ops cache (on miss)
-        if: steps.cache.outputs.cache-hit != 'true'
+      - name: Build fresh ops cache from Fly
         env:
           DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
           DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
@@ -259,8 +257,10 @@ jobs:
       DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
       FLY_PRIMARY_MACHINE_ID: ${{ secrets.FLY_PRIMARY_MACHINE_ID }}
       FLY_REPLICA_MACHINE_IDS: ${{ secrets.FLY_REPLICA_MACHINE_IDS }}
+      FLY_UPLOAD_MAX_RETRIES: 10
       FLY_UPLOAD_RETRY_BASE_DELAY: 3
       FLY_UPLOAD_RETRY_MAX_DELAY: 30
+      FLY_UPLOAD_RETRY_JITTER_SECONDS: 2
 
     steps:
       - name: Checkout code
@@ -274,8 +274,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ops_cache
-          key: ops-cache-v1-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
-          restore-keys: ops-cache-v1-
+          key: ops-cache-v2-${{ github.run_id }}
 
       - name: Setup Python
         id: setup-python

@@ -41,8 +41,10 @@ jobs:
       DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
       FLY_PRIMARY_MACHINE_ID: ${{ secrets.FLY_PRIMARY_MACHINE_ID }}
       FLY_REPLICA_MACHINE_IDS: ${{ secrets.FLY_REPLICA_MACHINE_IDS }}
+      FLY_UPLOAD_MAX_RETRIES: 10
       FLY_UPLOAD_RETRY_BASE_DELAY: 3
       FLY_UPLOAD_RETRY_MAX_DELAY: 30
+      FLY_UPLOAD_RETRY_JITTER_SECONDS: 2
       DATABASE_NAME: ${{ github.event.inputs.database_name }}
       N_SIMS: ${{ github.event.inputs.n_sims }}
       DATA_DIR: ${{ github.workspace }}/playoff_odds_data
