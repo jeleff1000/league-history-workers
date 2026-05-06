@@ -62,10 +62,11 @@ on:
         required: false
         type: choice
         options:
+          - keep
           - 50gb
           - 100gb
           - 200gb
-        default: 50gb
+        default: keep
       dry_run:
         description: "Print Fly commands without applying changes"
         required: false
