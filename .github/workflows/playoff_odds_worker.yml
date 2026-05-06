@@ -46,6 +46,7 @@ jobs:
       FLY_UPLOAD_RETRY_JITTER_SECONDS: 2
       FLY_PUBLISH_FORMAT: delta
       FLY_DELTA_FALLBACK_TO_DUCKDB: '1'
+      FLY_FINALIZE_INVENTORY: '0'
       DATABASE_NAME: ${{ github.event.inputs.database_name }}
       N_SIMS: ${{ github.event.inputs.n_sims }}
       DATA_DIR: ${{ github.workspace }}/playoff_odds_data

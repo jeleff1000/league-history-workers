@@ -206,6 +206,7 @@ jobs:
       FLY_UPLOAD_RETRY_JITTER_SECONDS: 2
       FLY_PUBLISH_FORMAT: delta
       FLY_DELTA_FALLBACK_TO_DUCKDB: '1'
+      FLY_FINALIZE_INVENTORY: '0'
 
     steps:
       - name: Checkout code

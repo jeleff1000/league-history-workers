@@ -84,6 +84,7 @@ jobs:
       FLY_UPLOAD_RETRY_JITTER_SECONDS: 2
       FLY_PUBLISH_FORMAT: delta
       FLY_DELTA_FALLBACK_TO_DUCKDB: '1'
+      FLY_FINALIZE_INVENTORY: '0'
       OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
       DB_NAME: ${{ github.event.inputs.league_data_b64 && '' || '' }}  # set after parse step
       DATA_DIR: ""  # set after parse step
