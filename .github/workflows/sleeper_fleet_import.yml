@@ -195,48 +195,10 @@ jobs:
           PYEOF
 
   # ================================================================
-  # Job 1.5: Build or restore ___ops cache
-  # ================================================================
-  build-cache:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
-
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-
-      - name: Restore ops cache
-        id: cache
-        uses: actions/cache@v5
-        with:
-          path: ops_cache
-          key: ops-cache-v4-${{ runner.os }}-${{ vars.OPS_CACHE_VERSION || 'manual-v1' }}-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
-          restore-keys: |
-            ops-cache-v4-${{ runner.os }}-${{ vars.OPS_CACHE_VERSION || 'manual-v1' }}-
-            ops-cache-v4-${{ runner.os }}-
-
-      - name: Build fresh ops cache from Fly
-        if: steps.cache.outputs.cache-hit != 'true'
-        env:
-          DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
-          DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
-        run: |
-          pip install duckdb==1.5.1 pandas
-          python fantasy_football_data_scripts/build_ops_cache.py \
-            --output ops_cache/ops_cache.duckdb
-
-  # ================================================================
   # Job 2: Import each league in parallel (matrix)
   # ================================================================
   import-league:
-    needs: [discover, build-cache]
+    needs: [discover]
     if: ${{ !inputs.dry_run && fromJson(needs.discover.outputs.league_count) > 0 }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
@@ -275,14 +237,19 @@ jobs:
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           ref: ${{ github.event.inputs.yahoo_oauth_ref || 'main' }}
 
-      - name: Restore ops cache
-        uses: actions/cache@v5
+      - name: Restore preseeded ops cache
+        uses: actions/cache/restore@v4
         with:
           path: ops_cache
           key: ops-cache-v4-${{ runner.os }}-${{ vars.OPS_CACHE_VERSION || 'manual-v1' }}-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
-          restore-keys: |
-            ops-cache-v4-${{ runner.os }}-${{ vars.OPS_CACHE_VERSION || 'manual-v1' }}-
-            ops-cache-v4-${{ runner.os }}-
+          fail-on-cache-miss: true
+
+      - name: Verify preseeded ops cache
+        run: |
+          test -s ops_cache/ops_cache.duckdb || {
+            echo "::error::ops_cache.duckdb is missing after cache restore. Run the Seed Ops Cache workflow before imports."
+            exit 1
+          }
 
       - name: Setup Python
         id: setup-python
@@ -309,19 +276,6 @@ jobs:
 
       - name: Activate venv
         run: echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
-
-      - name: Overlay ops cache from committed parquets (non-fatal)
-        # Source of truth for player_bio + platform-id maps lives in the
-        # yahoo_oauth repo at ops_data/. This step DROPs + RELOADs those four
-        # tables in ops_cache.duckdb so workers always run against the latest
-        # committed identity-resolution data — no Fly call, no fixups SQL,
-        # no schema drift. Super_table is left untouched.
-        # Ops cache writes MUST NEVER block an import. See feedback memory.
-        run: |
-          source .venv/bin/activate
-          python fantasy_football_data_scripts/overlay_ops_cache_from_parquet.py \
-            --cache ${{ github.workspace }}/ops_cache/ops_cache.duckdb
-        continue-on-error: true
 
       # ==================== IMPORT ====================
       - name: Run import

@@ -67,25 +67,19 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Restore ops cache
-        id: ops-cache
-        uses: actions/cache@v5
+      - name: Restore preseeded ops cache
+        uses: actions/cache/restore@v4
         with:
           path: ops_cache
           key: ops-cache-v4-${{ runner.os }}-${{ vars.OPS_CACHE_VERSION || 'manual-v1' }}-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
-          restore-keys: |
-            ops-cache-v4-${{ runner.os }}-${{ vars.OPS_CACHE_VERSION || 'manual-v1' }}-
-            ops-cache-v4-${{ runner.os }}-
+          fail-on-cache-miss: true
 
-      - name: Build fresh ops cache from Fly
-        if: steps.ops-cache.outputs.cache-hit != 'true'
-        env:
-          DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
-          DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      - name: Verify preseeded ops cache
         run: |
-          pip install duckdb==1.5.1 pandas
-          python fantasy_football_data_scripts/build_ops_cache.py \
-            --output ops_cache/ops_cache.duckdb
+          test -s ops_cache/ops_cache.duckdb || {
+            echo "::error::ops_cache.duckdb is missing after cache restore. Run the Seed Ops Cache workflow before imports."
+            exit 1
+          }
 
       - name: Cache Python virtualenv
         uses: actions/cache@v5
