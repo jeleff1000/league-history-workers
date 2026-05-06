@@ -109,9 +109,13 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ops_cache
-          key: ops-cache-v2-${{ github.run_id }}
+          key: ops-cache-v4-${{ runner.os }}-${{ vars.OPS_CACHE_VERSION || 'manual-v1' }}-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
+          restore-keys: |
+            ops-cache-v4-${{ runner.os }}-${{ vars.OPS_CACHE_VERSION || 'manual-v1' }}-
+            ops-cache-v4-${{ runner.os }}-
 
       - name: Build fresh ops cache from Fly
+        if: steps.ops-cache.outputs.cache-hit != 'true'
         env:
           DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
           DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
