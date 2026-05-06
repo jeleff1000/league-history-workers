@@ -51,6 +51,8 @@ jobs:
       FLY_UPLOAD_RETRY_BASE_DELAY: 3
       FLY_UPLOAD_RETRY_MAX_DELAY: 30
       FLY_UPLOAD_RETRY_JITTER_SECONDS: 2
+      FLY_PUBLISH_FORMAT: delta
+      FLY_DELTA_FALLBACK_TO_DUCKDB: '1'
       OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
 
     steps:
@@ -270,7 +272,7 @@ jobs:
               "has_external_data": league_data.get('has_external_data', False),
               "merge_source": league_data.get('merge_source'),
               "import_mode": "quick",
-              "motherduck_db_name": "${{ steps.parse.outputs.database_name }}",
+              "database_name": "${{ steps.parse.outputs.database_name }}",
           }
 
           # Pass through league_ids mapping (year -> league_key) for combined leagues
@@ -283,7 +285,7 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"season={season}\n")
 
-          print(f"[QUICK CONTEXT] Created for year {season} (db: {context.get('motherduck_db_name', 'N/A')})")
+          print(f"[QUICK CONTEXT] Created for year {season} (db: {context.get('database_name', 'N/A')})")
           PYEOF
 
       # NOTE: Clean-slate table drop is handled by initial_import_v3.py Phase 0
@@ -427,7 +429,7 @@ jobs:
               "has_external_data": league_data.get('has_external_data', False),
               "merge_source": league_data.get('merge_source'),
               "import_mode": "full",
-              "motherduck_db_name": "${{ steps.parse.outputs.database_name }}",
+              "database_name": "${{ steps.parse.outputs.database_name }}",
           }
 
           # Pass through league_ids mapping (year -> league_key) for combined leagues
@@ -438,7 +440,7 @@ jobs:
           with open("league_context.json", 'w') as f:
               json.dump(context, f, indent=2)
 
-          print(f"League context created: {start_year}-{end_year} (mode: full, db: {context.get('motherduck_db_name', 'N/A')})")
+          print(f"League context created: {start_year}-{end_year} (mode: full, db: {context.get('database_name', 'N/A')})")
           PYEOF
 
       # ==================== RUN FULL IMPORT (LOCAL ONLY) ====================
@@ -620,7 +622,8 @@ jobs:
             --mode full \
             --strategy expire \
             --jitter-seconds 0 \
-            --strict
+            --strict \
+            --verify-hot
 
       # ==================== STORE CREDENTIALS ====================
       # Always store credentials, even if import fails — they're needed for

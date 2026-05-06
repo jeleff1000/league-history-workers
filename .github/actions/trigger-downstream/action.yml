@@ -3,7 +3,7 @@ description: 'Trigger playoff odds calculation and/or full historical import aft
 
 inputs:
   database_name:
-    description: 'MotherDuck database name'
+    description: 'League database name'
     required: true
   user_id:
     description: 'User ID for this import job'

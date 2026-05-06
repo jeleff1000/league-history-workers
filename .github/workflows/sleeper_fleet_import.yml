@@ -5,20 +5,20 @@ name: Sleeper Fleet Import
 #
 # Usage:
 #   Manual: provide leagues_json with array of {sleeper_league_id, database_name, start_year}
-#   Or: set source=motherduck to auto-discover from ___ops via Fly.io
+#   Or: set source=all to auto-discover from ___ops via Fly.io
 #   Or: set source=test to run the 7 test leagues
 
 on:
   workflow_dispatch:
     inputs:
       source:
-        description: 'League source: "full" (paid/grandfathered), "quick" (free only), "motherduck" (all), "test", or "custom"'
+        description: 'League source: "full" (paid/grandfathered), "quick" (free only), "all", "test", or "custom"'
         required: true
         type: choice
         options:
           - full
           - quick
-          - motherduck
+          - all
           - test
           - custom
         default: full
@@ -32,7 +32,7 @@ on:
         type: number
         default: 5
       batch:
-        description: 'Batch number for motherduck source (1=first 250, 2=remaining). Ignored for test/custom.'
+        description: 'Batch number for all source (1=first 250, 2=remaining). Ignored for test/custom.'
         required: false
         type: number
         default: 1
@@ -120,7 +120,7 @@ jobs:
                   {"sleeper_league_id": "1180216138503110656", "database_name": "zootown_dynasty", "import_mode": "full"},
               ]
 
-          elif source in ("motherduck", "full", "quick"):
+          elif source in ("all", "full", "quick"):
               # Read from league_inventory via Fly.io DuckDB server
               raw_rows = fly_query("""
                   SELECT league_id, database_name, entitled_mode
@@ -151,7 +151,7 @@ jobs:
                   all_leagues = [v for v in all_leagues if v["import_mode"] == "quick"]
                   print(f"Quick-only fleet: {len(all_leagues)} free leagues")
               else:
-                  # "motherduck" = all leagues, respecting entitled_mode
+                  # "all" = all leagues, respecting entitled_mode
                   print(f"All leagues: {len(all_leagues)} ({sum(1 for v in all_leagues if v['import_mode'] == 'full')} full, {sum(1 for v in all_leagues if v['import_mode'] != 'full')} quick)")
 
               # Exclude specific databases
@@ -261,6 +261,8 @@ jobs:
       FLY_UPLOAD_RETRY_BASE_DELAY: 3
       FLY_UPLOAD_RETRY_MAX_DELAY: 30
       FLY_UPLOAD_RETRY_JITTER_SECONDS: 2
+      FLY_PUBLISH_FORMAT: delta
+      FLY_DELTA_FALLBACK_TO_DUCKDB: '1'
 
     steps:
       - name: Checkout code
@@ -505,7 +507,8 @@ jobs:
             --mode none \
             --strategy expire \
             --jitter-seconds 0 \
-            --strict
+            --strict \
+            --verify-hot
 
       # ==================== STATUS ====================
       - name: Print status

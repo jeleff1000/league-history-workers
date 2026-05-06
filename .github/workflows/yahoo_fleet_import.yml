@@ -5,7 +5,7 @@ name: Yahoo Fleet Import
 #
 # Usage:
 #   Manual: set source=test for QA leagues, or source=custom with leagues_json
-#   Or: set source=motherduck to auto-discover from ___ops via Fly.io
+#   Or: set source=all to auto-discover from ___ops via Fly.io
 #
 # Yahoo-specific: each league needs OAuth credentials (encrypted refresh token
 # stored in ___ops.main.league_credentials). The importer uses --league flag
@@ -15,12 +15,12 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: 'League source: "test" (6 QA leagues), "motherduck" (all yahoo leagues), or "custom" (provide leagues_json)'
+        description: 'League source: "test" (6 QA leagues), "all" (all yahoo leagues), or "custom" (provide leagues_json)'
         required: true
         type: choice
         options:
           - test
-          - motherduck
+          - all
           - custom
         default: test
       leagues_json:
@@ -33,7 +33,7 @@ on:
         type: number
         default: 3
       batch:
-        description: 'Batch number for motherduck source (1=first 250, 2=remaining). Ignored for test/custom.'
+        description: 'Batch number for all source (1=first 250, 2=remaining). Ignored for test/custom.'
         required: false
         type: number
         default: 1
@@ -124,7 +124,7 @@ jobs:
                   {"database_name": "yk_jff_vilde_hatzooleh_league", "import_mode": "full"},
               ]
 
-          elif source == "motherduck":
+          elif source == "all":
               from datetime import datetime
 
               raw_rows = fly_query("""
@@ -257,6 +257,8 @@ jobs:
       FLY_UPLOAD_RETRY_BASE_DELAY: 3
       FLY_UPLOAD_RETRY_MAX_DELAY: 30
       FLY_UPLOAD_RETRY_JITTER_SECONDS: 2
+      FLY_PUBLISH_FORMAT: delta
+      FLY_DELTA_FALLBACK_TO_DUCKDB: '1'
 
     steps:
       - name: Checkout code
@@ -436,7 +438,8 @@ jobs:
             --mode none \
             --strategy expire \
             --jitter-seconds 0 \
-            --strict
+            --strict \
+            --verify-hot
 
       # ==================== STATUS ====================
       - name: Print status

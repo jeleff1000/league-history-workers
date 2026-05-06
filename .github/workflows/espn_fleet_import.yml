@@ -4,7 +4,7 @@ name: ESPN Fleet Import
 # Each league runs as its own independent job so failures are isolated.
 #
 # Usage:
-#   source=full/quick/motherduck: auto-discover from ___ops via Fly.io
+#   source=full/quick/all: auto-discover from ___ops via Fly.io
 #   source=custom: provide leagues_json
 #   source=test: run tfl_of_extraordinary_gentleman only
 
@@ -12,13 +12,13 @@ on:
   workflow_dispatch:
     inputs:
       source:
-        description: 'League source: "full" (paid/grandfathered), "quick" (free only), "motherduck" (all), "test", or "custom"'
+        description: 'League source: "full" (paid/grandfathered), "quick" (free only), "all", "test", or "custom"'
         required: true
         type: choice
         options:
           - full
           - quick
-          - motherduck
+          - all
           - test
           - custom
         default: full
@@ -102,7 +102,7 @@ jobs:
                   {"espn_league_id": "71580", "database_name": "tfl_of_extraordinary_gentleman", "import_mode": "full"},
               ]
 
-          elif source in ("motherduck", "full", "quick"):
+          elif source in ("all", "full", "quick"):
               raw_rows = fly_query("""
                   SELECT league_id, database_name, entitled_mode
                   FROM accounts.league_inventory
@@ -214,6 +214,8 @@ jobs:
       FLY_UPLOAD_RETRY_BASE_DELAY: 3
       FLY_UPLOAD_RETRY_MAX_DELAY: 30
       FLY_UPLOAD_RETRY_JITTER_SECONDS: 2
+      FLY_PUBLISH_FORMAT: delta
+      FLY_DELTA_FALLBACK_TO_DUCKDB: '1'
 
     steps:
       - name: Checkout code
@@ -377,7 +379,7 @@ jobs:
           context = {
               "league_id": espn_league_id,
               "league_name": league_name,
-              "motherduck_db_name": db_name,
+              "database_name": db_name,
               "espn_s2": espn_s2,
               "swid": swid,
               "sport": "nfl",
@@ -529,7 +531,8 @@ jobs:
             --mode none \
             --strategy expire \
             --jitter-seconds 0 \
-            --strict
+            --strict \
+            --verify-hot
 
       # ==================== CLEANUP ====================
       - name: Cleanup sensitive files

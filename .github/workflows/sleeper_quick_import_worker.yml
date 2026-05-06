@@ -87,6 +87,8 @@ jobs:
       FLY_UPLOAD_RETRY_BASE_DELAY: 3
       FLY_UPLOAD_RETRY_MAX_DELAY: 30
       FLY_UPLOAD_RETRY_JITTER_SECONDS: 2
+      FLY_PUBLISH_FORMAT: delta
+      FLY_DELTA_FALLBACK_TO_DUCKDB: '1'
       OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
 
     steps:
@@ -258,7 +260,7 @@ jobs:
           context = {
               "league_id": "${{ steps.parse.outputs.sleeper_league_id }}",
               "league_name": os.environ["LEAGUE_NAME"],
-              "motherduck_db_name": "${{ steps.parse.outputs.database_name }}",
+              "database_name": "${{ steps.parse.outputs.database_name }}",
               "username": "${{ steps.parse.outputs.username }}",
               "sport": "nfl",
               "start_year": int("${{ steps.parse.outputs.start_year }}"),
@@ -472,7 +474,8 @@ jobs:
             --mode quick \
             --strategy expire \
             --jitter-seconds 0 \
-            --strict
+            --strict \
+            --verify-hot
 
       # ==================== UPDATE LEAGUE DATA WITH DISCOVERED IDS ====================
       # The import discovers year-specific league_ids which are critical for

@@ -1,6 +1,6 @@
 name: DuckDB Compatibility Smoke
 
-# Manual repro workflow for MotherDuck + DuckDB client version issues.
+# Manual repro workflow for Fly DuckDB client version issues.
 # Purpose: compare a known-good DuckDB pin against a candidate version in the
 # same GitHub Actions environment where the segfault has been observed.
 
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       database_name:
-        description: "MotherDuck database name to target (e.g. kmffl)"
+        description: "League database name to target (e.g. the_league)"
         required: true
         type: string
       target:
