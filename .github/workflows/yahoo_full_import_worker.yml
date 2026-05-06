@@ -68,18 +68,17 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Download prebuilt ops cache
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Restore cached ops cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ops_cache
+          key: ops-cache-v4-${{ runner.os }}-manual-v1
+          fail-on-cache-miss: true
+
+      - name: Verify cached ops cache
         run: |
-          mkdir -p ops_cache
-          gh release download ops-cache \
-            --repo jeleff1000/league-history-workers \
-            --pattern ops_cache.duckdb \
-            --dir ops_cache \
-            --clobber
           test -s ops_cache/ops_cache.duckdb || {
-            echo "::error::ops_cache.duckdb release asset is missing or empty. Run the Seed Ops Cache workflow before imports."
+            echo "::error::ops_cache.duckdb is missing after cache restore. Run the Seed Ops Cache workflow before imports."
             exit 1
           }
 
