@@ -20,6 +20,9 @@ jobs:
   seed:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    concurrency:
+      group: ops-cache-seed
+      cancel-in-progress: false
 
     env:
       OPS_CACHE_KEY: ops-cache-v4-Linux-manual-v1
@@ -38,10 +41,42 @@ jobs:
           python-version: '3.11'
 
       - name: Restore current ops cache
+        id: ops-cache
         uses: actions/cache/restore@v4
         with:
           path: ops_cache
           key: ${{ env.OPS_CACHE_KEY }}
+
+      - name: Log seed context
+        run: |
+          echo "[ops-cache] key=${OPS_CACHE_KEY}"
+          echo "[ops-cache] restore-hit=${{ steps.ops-cache.outputs.cache-hit }}"
+          echo "[ops-cache] github-run-id=${{ github.run_id }}"
+          echo "[ops-cache] yahoo_oauth_ref=${{ github.event.inputs.yahoo_oauth_ref || 'main' }}"
+          echo "[ops-cache] yahoo_oauth_sha=$(git rev-parse HEAD)"
+          if [ -s ops_cache/ops_cache.duckdb ]; then
+            echo "[ops-cache] existing-size-bytes=$(stat -c%s ops_cache/ops_cache.duckdb)"
+            echo "[ops-cache] existing-size-human=$(du -h ops_cache/ops_cache.duckdb | cut -f1)"
+            python - <<'PYEOF'
+            import duckdb
+
+            conn = duckdb.connect("ops_cache/ops_cache.duckdb", read_only=True)
+            try:
+                for schema, table in [
+                    ("nfl_historical", "nfl_player_stats_all"),
+                    ("nfl_historical", "player_bio"),
+                ]:
+                    try:
+                        count = conn.execute(f"SELECT COUNT(*) FROM {schema}.{table}").fetchone()[0]
+                        print(f"[ops-cache] before {schema}.{table}: {count:,} rows")
+                    except Exception as exc:
+                        print(f"[ops-cache] before {schema}.{table}: unavailable ({exc})")
+            finally:
+                conn.close()
+            PYEOF
+          else
+            echo "[ops-cache] existing-cache-file=missing"
+          fi
 
       - name: Upsert ops cache from Fly
         env:
@@ -87,6 +122,9 @@ jobs:
           finally:
               conn.close()
           PYEOF
+          echo "[ops-cache] final-size-bytes=$(stat -c%s ops_cache/ops_cache.duckdb)"
+          echo "[ops-cache] final-size-human=$(du -h ops_cache/ops_cache.duckdb | cut -f1)"
+          echo "[ops-cache] final-sha256=$(sha256sum ops_cache/ops_cache.duckdb | awk '{print $1}')"
           ls -lh ops_cache/ops_cache.duckdb
 
       - name: Delete previous ops cache key
@@ -98,7 +136,11 @@ jobs:
             --key "$OPS_CACHE_KEY" \
             --json id \
             --jq '.[].id')"
+          if [ -z "$ids" ]; then
+            echo "[ops-cache] previous-cache-ids=none"
+          fi
           for id in $ids; do
+            echo "[ops-cache] deleting-previous-cache-id=${id}"
             gh cache delete "$id" \
               --repo jeleff1000/league-history-workers \
               --confirm
@@ -109,3 +151,7 @@ jobs:
         with:
           path: ops_cache
           key: ${{ env.OPS_CACHE_KEY }}
+
+      - name: Log saved ops cache key
+        run: |
+          echo "[ops-cache] saved-key=${OPS_CACHE_KEY}"

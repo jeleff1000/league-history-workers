@@ -1,0 +1,79 @@
+name: Verify Ops Cache
+
+# One-time/manual verification for the prebuilt worker ops cache.
+# This workflow never builds, updates, deletes, or saves the cache.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    env:
+      OPS_CACHE_KEY: ops-cache-v4-Linux-manual-v1
+      OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
+
+    steps:
+      - name: Restore cached ops cache
+        id: ops-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ops_cache
+          key: ${{ env.OPS_CACHE_KEY }}
+          fail-on-cache-miss: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Verify cache contents
+        run: |
+          echo "[ops-cache] key=${OPS_CACHE_KEY}"
+          echo "[ops-cache] restore-hit=${{ steps.ops-cache.outputs.cache-hit }}"
+          echo "[ops-cache] OPS_CACHE_PATH=${OPS_CACHE_PATH}"
+          test -s "${OPS_CACHE_PATH}" || {
+            echo "::error::ops_cache.duckdb is missing after cache restore."
+            exit 1
+          }
+          echo "[ops-cache] size-bytes=$(stat -c%s "${OPS_CACHE_PATH}")"
+          echo "[ops-cache] size-human=$(du -h "${OPS_CACHE_PATH}" | cut -f1)"
+          echo "[ops-cache] sha256=$(sha256sum "${OPS_CACHE_PATH}" | awk '{print $1}')"
+
+          pip install duckdb==1.5.1
+          python - <<'PYEOF'
+          import os
+          import duckdb
+
+          required = [
+              ("nfl_historical", "nfl_player_stats_all"),
+              ("nfl_historical", "player_bio"),
+          ]
+          conn = duckdb.connect(os.environ["OPS_CACHE_PATH"], read_only=True)
+          try:
+              for schema, table in required:
+                  count = conn.execute(f"SELECT COUNT(*) FROM {schema}.{table}").fetchone()[0]
+                  if count <= 0:
+                      raise SystemExit(f"{schema}.{table} is empty")
+                  print(f"[ops-cache] {schema}.{table}: {count:,} rows")
+              data_tables = {
+                  (schema, table)
+                  for schema, table in conn.execute("""
+                      SELECT table_schema, table_name
+                      FROM information_schema.tables
+                      WHERE table_type = 'BASE TABLE'
+                        AND table_schema != 'main'
+                      ORDER BY table_schema, table_name
+                  """).fetchall()
+              }
+              extra = data_tables - set(required)
+              if extra:
+                  raise SystemExit(f"Unexpected data tables in ops cache: {sorted(extra)}")
+          finally:
+              conn.close()
+          PYEOF

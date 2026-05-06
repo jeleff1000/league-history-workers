@@ -238,18 +238,24 @@ jobs:
           ref: ${{ github.event.inputs.yahoo_oauth_ref || 'main' }}
 
       - name: Restore cached ops cache
+        id: ops-cache
         uses: actions/cache/restore@v4
         with:
           path: ops_cache
           key: ops-cache-v4-${{ runner.os }}-manual-v1
           fail-on-cache-miss: true
 
-      - name: Verify cached ops cache
+      - name: Log cached ops cache
         run: |
-          test -s ops_cache/ops_cache.duckdb || {
+          echo "[ops-cache] key=ops-cache-v4-${{ runner.os }}-manual-v1"
+          echo "[ops-cache] restore-hit=${{ steps.ops-cache.outputs.cache-hit }}"
+          echo "[ops-cache] OPS_CACHE_PATH=${OPS_CACHE_PATH}"
+          test -s "${OPS_CACHE_PATH}" || {
             echo "::error::ops_cache.duckdb is missing after cache restore. Run the Seed Ops Cache workflow before imports."
             exit 1
           }
+          echo "[ops-cache] size-bytes=$(stat -c%s "${OPS_CACHE_PATH}")"
+          echo "[ops-cache] size-human=$(du -h "${OPS_CACHE_PATH}" | cut -f1)"
 
       - name: Setup Python
         id: setup-python
