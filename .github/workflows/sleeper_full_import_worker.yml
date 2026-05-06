@@ -407,7 +407,7 @@ jobs:
             --site-url "https://www.leaguehistory.app" \
             --mode full \
             --strategy expire \
-            --jitter-seconds 60 \
+            --jitter-seconds 0 \
             --strict
 
       # ==================== SUMMARY ====================

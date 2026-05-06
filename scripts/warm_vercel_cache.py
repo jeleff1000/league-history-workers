@@ -118,7 +118,7 @@ def parse_args() -> argparse.Namespace:
         help="Use expire after imports so the warmer refreshes caches before users arrive.",
     )
     parser.add_argument("--timeout", type=int, default=25)
-    parser.add_argument("--concurrency", type=int, default=3)
+    parser.add_argument("--concurrency", type=int, default=6)
     parser.add_argument(
         "--jitter-seconds",
         type=int,

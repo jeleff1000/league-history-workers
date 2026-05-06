@@ -83,6 +83,8 @@ jobs:
       DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
       FLY_PRIMARY_MACHINE_ID: ${{ secrets.FLY_PRIMARY_MACHINE_ID }}
       FLY_REPLICA_MACHINE_IDS: ${{ secrets.FLY_REPLICA_MACHINE_IDS }}
+      FLY_UPLOAD_RETRY_BASE_DELAY: 3
+      FLY_UPLOAD_RETRY_MAX_DELAY: 30
       OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
 
     steps:
@@ -469,7 +471,7 @@ jobs:
             --site-url "https://www.leaguehistory.app" \
             --mode quick \
             --strategy expire \
-            --jitter-seconds 60 \
+            --jitter-seconds 0 \
             --strict
 
       # ==================== UPDATE LEAGUE DATA WITH DISCOVERED IDS ====================
