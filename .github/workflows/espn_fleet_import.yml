@@ -31,10 +31,10 @@ on:
         required: false
         type: string
       max_parallel:
-        description: 'Max parallel imports'
+        description: 'Requested max parallel imports. Full-import fleets are capped server-side safe.'
         required: false
         type: number
-        default: 5
+        default: 10
       dry_run:
         description: 'Dry run - discover leagues but skip import'
         required: false
@@ -60,6 +60,7 @@ jobs:
     outputs:
       matrix: ${{ steps.build.outputs.matrix }}
       league_count: ${{ steps.build.outputs.league_count }}
+      safe_max_parallel: ${{ steps.build.outputs.safe_max_parallel }}
 
     steps:
       - name: Checkout code
@@ -81,6 +82,7 @@ jobs:
           SOURCE: ${{ github.event.inputs.source }}
           LEAGUES_JSON: ${{ github.event.inputs.leagues_json }}
           LEAGUES_JSON_B64: ${{ github.event.inputs.leagues_json_b64 }}
+          MAX_PARALLEL: ${{ github.event.inputs.max_parallel || '10' }}
         run: |
           python - <<'PYEOF'
           import base64, json, os, sys, urllib.request
@@ -164,12 +166,18 @@ jobs:
                   lg["import_mode"] = "full"
 
           matrix = {"include": leagues}
+          requested_parallel = int(os.environ.get("MAX_PARALLEL") or "10")
+          has_full = any(str(lg.get("import_mode", "full")).lower() == "full" for lg in leagues)
+          parallel_cap = 2 if has_full else 10
+          safe_max_parallel = max(1, min(requested_parallel, parallel_cap))
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"matrix={json.dumps(matrix)}\n")
               f.write(f"league_count={len(leagues)}\n")
+              f.write(f"safe_max_parallel={safe_max_parallel}\n")
 
           print(f"Discovered {len(leagues)} ESPN leagues:")
+          print(f"Requested max_parallel={requested_parallel}; safe_max_parallel={safe_max_parallel} (cap={parallel_cap}, has_full={has_full})")
           for lg in leagues:
               print(f"  {lg['database_name']} (ID={lg['espn_league_id']}, mode={lg['import_mode']})")
           PYEOF
@@ -185,7 +193,7 @@ jobs:
 
     strategy:
       matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
-      max-parallel: ${{ fromJson(github.event.inputs.max_parallel || '5') }}
+      max-parallel: ${{ fromJson(needs.discover.outputs.safe_max_parallel) }}
       fail-fast: false
 
     env:
