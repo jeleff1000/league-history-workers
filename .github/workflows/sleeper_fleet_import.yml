@@ -26,6 +26,10 @@ on:
         description: 'JSON array of leagues (only used when source=custom). Format: [{"sleeper_league_id":"...", "database_name":"...", "start_year":2021}]'
         required: false
         type: string
+      leagues_json_b64:
+        description: 'Base64-encoded JSON array of leagues (safer for CLI/PowerShell custom runs).'
+        required: false
+        type: string
       max_parallel:
         description: 'Max parallel imports (GitHub free = 20 concurrent jobs)'
         required: false
@@ -85,11 +89,12 @@ jobs:
           DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
           SOURCE: ${{ github.event.inputs.source }}
           LEAGUES_JSON: ${{ github.event.inputs.leagues_json }}
+          LEAGUES_JSON_B64: ${{ github.event.inputs.leagues_json_b64 }}
           BATCH: ${{ github.event.inputs.batch || '1' }}
           EXCLUDE_DBS: ${{ github.event.inputs.exclude_dbs || '' }}
         run: |
           python - <<'PYEOF'
-          import json, os, sys, urllib.request
+          import base64, json, os, sys, urllib.request
 
           def fly_query(sql, database="___ops"):
               url = os.environ["DATABASE_SERVER_URL"].rstrip("/") + "/query"
@@ -104,9 +109,29 @@ jobs:
 
           source = os.environ.get("SOURCE", "test")
           leagues_json_raw = os.environ.get("LEAGUES_JSON", "")
+          leagues_json_b64 = os.environ.get("LEAGUES_JSON_B64", "")
 
-          if source == "custom" and leagues_json_raw:
-              leagues = json.loads(leagues_json_raw)
+          def parse_custom_leagues():
+              raw = leagues_json_raw.strip()
+              if leagues_json_b64.strip():
+                  try:
+                      raw = base64.b64decode(leagues_json_b64.strip()).decode("utf-8")
+                  except Exception as exc:
+                      print(f"ERROR: leagues_json_b64 is not valid base64 UTF-8: {exc}")
+                      sys.exit(1)
+              if not raw:
+                  print("ERROR: source=custom requires leagues_json or leagues_json_b64")
+                  sys.exit(1)
+              try:
+                  return json.loads(raw)
+              except json.JSONDecodeError as exc:
+                  print(f"ERROR: custom league JSON is invalid: {exc}")
+                  print("Use strict JSON with quoted keys/strings, or pass base64 JSON via leagues_json_b64.")
+                  print(f"Received: {raw!r}")
+                  sys.exit(1)
+
+          if source == "custom":
+              leagues = parse_custom_leagues()
 
           elif source == "test":
               # 7 Sleeper test leagues with correct IDs and actual start years
