@@ -232,17 +232,18 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
 
-      - name: Restore preseeded ops cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ops_cache
-          key: ops-cache-v4-${{ runner.os }}-${{ vars.OPS_CACHE_VERSION || 'manual-v1' }}-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
-          fail-on-cache-miss: true
-
-      - name: Verify preseeded ops cache
+      - name: Download prebuilt ops cache
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          mkdir -p ops_cache
+          gh release download ops-cache \
+            --repo jeleff1000/league-history-workers \
+            --pattern ops_cache.duckdb \
+            --dir ops_cache \
+            --clobber
           test -s ops_cache/ops_cache.duckdb || {
-            echo "::error::ops_cache.duckdb is missing after cache restore. Run the Seed Ops Cache workflow before imports."
+            echo "::error::ops_cache.duckdb release asset is missing or empty. Run the Seed Ops Cache workflow before imports."
             exit 1
           }
 

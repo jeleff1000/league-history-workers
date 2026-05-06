@@ -1,16 +1,11 @@
 name: Seed Ops Cache
 
 # One-off/manual publisher for the shared ___ops DuckDB cache.
-# Import workflows are restore-only consumers of this cache.
+# Import workflows only download and verify this release asset.
 
 on:
   workflow_dispatch:
     inputs:
-      cache_version:
-        description: 'Must match OPS_CACHE_VERSION used by import workflows. Bump to replace immutable caches.'
-        required: true
-        type: string
-        default: 'manual-v1'
       yahoo_oauth_ref:
         description: 'yahoo_oauth branch/ref to check out'
         required: false
@@ -18,8 +13,7 @@ on:
         default: 'main'
 
 permissions:
-  actions: write
-  contents: read
+  contents: write
 
 jobs:
   seed:
@@ -39,22 +33,18 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Check existing cache key
-        id: existing-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: ops_cache
-          key: ops-cache-v4-${{ runner.os }}-${{ inputs.cache_version }}-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
-          lookup-only: true
-
-      - name: Stop if cache key already exists
-        if: steps.existing-cache.outputs.cache-hit == 'true'
+      - name: Download current ops cache if present
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          echo "Ops cache already exists for cache_version=${{ inputs.cache_version }}."
-          echo "GitHub Actions caches are immutable; bump OPS_CACHE_VERSION and rerun to publish a replacement."
+          mkdir -p ops_cache
+          gh release download ops-cache \
+            --repo jeleff1000/league-history-workers \
+            --pattern ops_cache.duckdb \
+            --dir ops_cache \
+            --clobber || true
 
-      - name: Build ops cache from Fly
-        if: steps.existing-cache.outputs.cache-hit != 'true'
+      - name: Upsert ops cache from Fly
         env:
           DATABASE_BACKEND: fly
           DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
@@ -62,16 +52,15 @@ jobs:
         run: |
           pip install duckdb==1.5.1 pandas
           python fantasy_football_data_scripts/build_ops_cache.py \
-            --output ops_cache/ops_cache.duckdb
+            --output ops_cache/ops_cache.duckdb \
+            --update-existing
 
       - name: Overlay committed ops parquets
-        if: steps.existing-cache.outputs.cache-hit != 'true'
         run: |
           python fantasy_football_data_scripts/overlay_ops_cache_from_parquet.py \
             --cache ops_cache/ops_cache.duckdb
 
       - name: Validate ops cache
-        if: steps.existing-cache.outputs.cache-hit != 'true'
         run: |
           test -s ops_cache/ops_cache.duckdb
           python - <<'PYEOF'
@@ -96,9 +85,16 @@ jobs:
           PYEOF
           ls -lh ops_cache/ops_cache.duckdb
 
-      - name: Save ops cache
-        if: steps.existing-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ops_cache
-          key: ops-cache-v4-${{ runner.os }}-${{ inputs.cache_version }}-${{ hashFiles('fantasy_football_data_scripts/build_ops_cache.py') }}
+      - name: Publish stable ops cache release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view ops-cache --repo jeleff1000/league-history-workers >/dev/null 2>&1 || \
+            gh release create ops-cache \
+              --repo jeleff1000/league-history-workers \
+              --title "Ops Cache" \
+              --notes "Stable prebuilt ops_cache.duckdb for import workers."
+
+          gh release upload ops-cache ops_cache/ops_cache.duckdb \
+            --repo jeleff1000/league-history-workers \
+            --clobber
