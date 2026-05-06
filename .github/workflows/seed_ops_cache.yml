@@ -1,6 +1,6 @@
 name: Seed Ops Cache
 
-# One-off/manual publisher for the shared ___ops DuckDB cache.
+# One-off/manual publisher for the two-table shared ___ops DuckDB cache.
 # Import workflows only download and verify this release asset.
 
 on:
@@ -55,11 +55,6 @@ jobs:
             --output ops_cache/ops_cache.duckdb \
             --update-existing
 
-      - name: Overlay committed ops parquets
-        run: |
-          python fantasy_football_data_scripts/overlay_ops_cache_from_parquet.py \
-            --cache ops_cache/ops_cache.duckdb
-
       - name: Validate ops cache
         run: |
           test -s ops_cache/ops_cache.duckdb
@@ -69,9 +64,6 @@ jobs:
           required = [
               ("nfl_historical", "nfl_player_stats_all"),
               ("nfl_historical", "player_bio"),
-              ("public", "yahoo_nfl_player_map"),
-              ("public", "sleeper_nfl_player_map"),
-              ("public", "espn_nfl_player_map"),
           ]
           conn = duckdb.connect("ops_cache/ops_cache.duckdb", read_only=True)
           try:
@@ -80,6 +72,19 @@ jobs:
                   if count <= 0:
                       raise SystemExit(f"{schema}.{table} is empty")
                   print(f"{schema}.{table}: {count:,} rows")
+              data_tables = {
+                  (schema, table)
+                  for schema, table in conn.execute("""
+                      SELECT table_schema, table_name
+                      FROM information_schema.tables
+                      WHERE table_type = 'BASE TABLE'
+                        AND table_schema != 'main'
+                      ORDER BY table_schema, table_name
+                  """).fetchall()
+              }
+              extra = data_tables - set(required)
+              if extra:
+                  raise SystemExit(f"Unexpected data tables in ops cache: {sorted(extra)}")
           finally:
               conn.close()
           PYEOF
