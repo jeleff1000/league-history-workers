@@ -498,7 +498,7 @@ jobs:
           python scripts/warm_vercel_cache.py \
             --db "$DB_NAME" \
             --secret "$REVALIDATION_SECRET" \
-            --site-url "https://leaguehistory.app" \
+            --site-url "https://www.leaguehistory.app" \
             --mode full \
             --strategy expire \
             --jitter-seconds 60 \

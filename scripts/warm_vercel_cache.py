@@ -17,6 +17,7 @@ import time
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from urllib.error import HTTPError
 from urllib.parse import quote, urlencode, urljoin
 from urllib.request import Request, urlopen
 
@@ -61,14 +62,25 @@ def build_url(site_url: str, path: str) -> str:
 def revalidate(site_url: str, db: str, secret: str, strategy: str, timeout: int) -> None:
     params = urlencode({"db": db, "secret": secret, "strategy": strategy})
     url = build_url(site_url, f"/api/revalidate?{params}")
-    req = Request(url, method="POST")
-    with urlopen(req, timeout=timeout) as resp:
-        body = resp.read().decode("utf-8", errors="replace")
-        if resp.status >= 400:
-            raise RuntimeError(f"revalidate failed ({resp.status}): {body}")
-        payload = json.loads(body)
-        if not payload.get("revalidated"):
-            raise RuntimeError(f"revalidate did not confirm success: {body}")
+    for _ in range(3):
+        req = Request(url, method="POST")
+        try:
+            with urlopen(req, timeout=timeout) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+                if resp.status >= 400:
+                    raise RuntimeError(f"revalidate failed ({resp.status}): {body}")
+                payload = json.loads(body)
+                if not payload.get("revalidated"):
+                    raise RuntimeError(f"revalidate did not confirm success: {body}")
+                return
+        except HTTPError as exc:
+            if exc.code not in (307, 308):
+                raise
+            location = exc.headers.get("Location")
+            if not location:
+                raise
+            url = urljoin(url, location)
+    raise RuntimeError("revalidate redirected too many times")
 
 
 def warm_one(url: str, timeout: int) -> WarmResult:
