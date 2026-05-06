@@ -54,7 +54,6 @@ jobs:
       DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
       DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
       FLY_PRIMARY_MACHINE_ID: ${{ secrets.FLY_PRIMARY_MACHINE_ID }}
-      FLY_REPLICA_MACHINE_IDS: ${{ secrets.FLY_REPLICA_MACHINE_IDS }}
       DATABASE_NAME: ${{ github.event.inputs.database_name }}
       TARGET: ${{ github.event.inputs.target }}
       ITERATIONS: ${{ github.event.inputs.iterations }}

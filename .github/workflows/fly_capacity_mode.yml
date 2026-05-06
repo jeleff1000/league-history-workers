@@ -48,16 +48,12 @@ on:
           - shared8x
         default: auto
       machine_count:
-        description: "Total active machines; requires configured replica IDs"
+        description: "Total active database machines (primary-only = 1)"
         required: false
         type: choice
         options:
           - "1"
-          - "2"
-          - "3"
-          - "4"
-          - "5"
-        default: "2"
+        default: "1"
       storage_level:
         description: "Volume size level; only extends upward"
         required: false
@@ -107,9 +103,7 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
           FLY_PRIMARY_MACHINE_ID: ${{ secrets.FLY_PRIMARY_MACHINE_ID }}
-          FLY_REPLICA_MACHINE_IDS: ${{ secrets.FLY_REPLICA_MACHINE_IDS }}
           FLY_PRIMARY_VOLUME_ID: ${{ secrets.FLY_PRIMARY_VOLUME_ID }}
-          FLY_REPLICA_VOLUME_IDS: ${{ secrets.FLY_REPLICA_VOLUME_IDS }}
           DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
           DUCKDB_CAPACITY_MODE_PASSWORD: ${{ secrets.DUCKDB_CAPACITY_MODE_PASSWORD }}
           DUCKDB_CAPACITY_MODE_PASSWORD_INPUT: ${{ inputs.password }}
