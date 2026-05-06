@@ -238,7 +238,8 @@ jobs:
             --site-url "https://leaguehistory.app" \
             --mode none \
             --strategy expire \
-            --jitter-seconds 60
+            --jitter-seconds 60 \
+            --strict
 
       # ==================== VERIFY ====================
       - name: Verify results

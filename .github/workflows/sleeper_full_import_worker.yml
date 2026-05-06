@@ -373,7 +373,8 @@ jobs:
             --site-url "https://leaguehistory.app" \
             --mode full \
             --strategy expire \
-            --jitter-seconds 60
+            --jitter-seconds 60 \
+            --strict
 
       # ==================== SUMMARY ====================
       - name: Print summary

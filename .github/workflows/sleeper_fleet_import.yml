@@ -471,7 +471,8 @@ jobs:
             --site-url "https://leaguehistory.app" \
             --mode none \
             --strategy expire \
-            --jitter-seconds 60
+            --jitter-seconds 60 \
+            --strict
 
       # ==================== STATUS ====================
       - name: Print status

@@ -386,7 +386,8 @@ jobs:
             --site-url "https://leaguehistory.app" \
             --mode quick \
             --strategy expire \
-            --jitter-seconds 60
+            --jitter-seconds 60 \
+            --strict
 
       # ==================== STORE CREDENTIALS ====================
       # Always store credentials, even if import fails — they're needed for

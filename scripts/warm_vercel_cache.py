@@ -129,8 +129,8 @@ def main() -> int:
         return 2
 
     if not args.secret:
-        print("REVALIDATION_SECRET is not set; skipping Vercel cache warm-up")
-        return 0
+        print("REVALIDATION_SECRET is not set; cannot revalidate Vercel cache", file=sys.stderr)
+        return 1 if args.strict else 0
 
     if args.jitter_seconds > 0:
         delay = random.randint(0, args.jitter_seconds)

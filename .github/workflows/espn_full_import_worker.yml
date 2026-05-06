@@ -501,7 +501,8 @@ jobs:
             --site-url "https://leaguehistory.app" \
             --mode full \
             --strategy expire \
-            --jitter-seconds 60
+            --jitter-seconds 60 \
+            --strict
 
       # ==================== STORE ESPN LEAGUE INFO ====================
       - name: Store ESPN league info
