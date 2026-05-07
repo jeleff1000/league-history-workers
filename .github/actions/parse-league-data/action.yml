@@ -117,6 +117,30 @@ runs:
                 validation_warnings.append(f"league_id '{league_id}' has unusual format (expected: 449.l.123456)")
             return str(league_id)
 
+        YAHOO_NFL_GAME_KEY_TO_SEASON = {
+            348: 2015,
+            359: 2016,
+            371: 2017,
+            380: 2018,
+            390: 2019,
+            399: 2020,
+            406: 2021,
+            414: 2022,
+            423: 2023,
+            449: 2024,
+            461: 2025,
+            470: 2026,
+        }
+
+        def infer_yahoo_season_from_league_key(league_key):
+            """Infer NFL season from Yahoo's numeric game key before falling back to wall-clock year."""
+            if not league_key:
+                return None
+            match = re.match(r'^\s*(\d+)\.l\.\d+\s*$', str(league_key))
+            if not match:
+                return None
+            return YAHOO_NFL_GAME_KEY_TO_SEASON.get(int(match.group(1)))
+
         def validate_oauth_token(oauth_raw):
             """Validate OAuth token structure."""
             if not oauth_raw:
@@ -269,10 +293,15 @@ runs:
             league_name = f"League {league_id}" if league_id else "Unknown League"
             validation_warnings.append(f"No league_name provided, using: {league_name}")
 
-        season = validate_year(
-            league_data.get('season', league_data.get('end_year', datetime.now().year)),
-            'season'
-        )
+        season_source = league_data.get('season', league_data.get('end_year'))
+        if season_source in (None, ''):
+            inferred_season = infer_yahoo_season_from_league_key(league_id)
+            if inferred_season is not None:
+                season_source = inferred_season
+                print(f"[PARSE] Inferred Yahoo season {season_source} from league key {league_id}")
+            else:
+                season_source = datetime.now().year
+        season = validate_year(season_source, 'season')
         actual_start_year = validate_year(
             league_data.get('start_year', season),
             'start_year'
