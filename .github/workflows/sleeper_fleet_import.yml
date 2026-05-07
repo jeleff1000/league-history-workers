@@ -31,7 +31,7 @@ on:
         required: false
         type: string
       max_parallel:
-        description: 'Requested max parallel imports. Full-import fleets are capped server-side safe.'
+        description: 'Requested max parallel imports. Full-import fleets are capped at 20 for pressure testing.'
         required: false
         type: number
         default: 10
@@ -213,7 +213,7 @@ jobs:
           matrix = {"include": leagues}
           requested_parallel = int(os.environ.get("MAX_PARALLEL") or "10")
           has_full = any(str(lg.get("import_mode", "quick")).lower() == "full" for lg in leagues)
-          parallel_cap = 2 if has_full else 10
+          parallel_cap = 20 if has_full else 10
           safe_max_parallel = max(1, min(requested_parallel, parallel_cap))
 
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
