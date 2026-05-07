@@ -252,6 +252,10 @@ jobs:
 
           # Quick import: use the league's most recent mapped year when available.
           season = int(league_data.get('quick_import_year', league_data.get('season', league_data.get('end_year'))))
+          actual_start_year = int(league_data.get('actual_start_year', league_data.get('start_year', season)) or season)
+          quick_start_year = season
+          if actual_start_year < season:
+              quick_start_year = max(actual_start_year, season - 1)
 
           import_mode = league_data.get('import_mode', 'quick')  # "quick" (free) or "quick_to_full" (paid)
 
@@ -260,7 +264,7 @@ jobs:
               "league_name": league_data.get('league_name'),
               "oauth_file_path": str(oauth_file),
               "game_code": league_data.get('game_code', 'nfl'),
-              "start_year": season,  # Quick target shell; importer may include prior scored season
+              "start_year": quick_start_year,  # Quick target shell plus prior fallback when available
               "end_year": season,
               "num_teams": int(league_data.get('num_teams', 10)),
               "playoff_teams": int(league_data.get('playoff_teams', 6)),
@@ -288,7 +292,10 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"season={season}\n")
 
-          print(f"[QUICK IMPORT] League context created for target year {season} (db: {context.get('database_name', 'N/A')})")
+          print(
+              f"[QUICK IMPORT] League context created for years {quick_start_year}-{season} "
+              f"(db: {context.get('database_name', 'N/A')})"
+          )
           PYEOF
 
       # NOTE: Clean-slate table drop is handled by initial_import_v3.py Phase 0
