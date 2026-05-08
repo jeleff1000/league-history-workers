@@ -25,12 +25,45 @@ def fly_query(sql, database="___ops"):
     url = os.environ["DATABASE_SERVER_URL"].rstrip("/") + "/query"
     token = os.environ["DATABASE_READ_TOKEN"]
     data = json.dumps({"sql": sql, "database": database}).encode()
-    req = urllib.request.Request(url, data=data, headers={
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}",
-    })
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        },
+    )
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read())
+
+
+_DB_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
+_YAHOO_LEAGUE_ID_RE = re.compile(r"^\d+\.l\.\d+$|^\d+$")
+_SLEEPER_LEAGUE_ID_RE = re.compile(r"^[a-zA-Z0-9_]{1,64}$")
+
+
+def _safe_db_name(name: str) -> str:
+    """Validate a database name matches sanitize_database_name() output. Raises on bad input."""
+    if not name or not _DB_NAME_RE.match(name):
+        raise ValueError(f"Invalid database name (must match {_DB_NAME_RE.pattern}): {name!r}")
+    return name
+
+
+def _safe_league_id(league_id: str, platform: str) -> str:
+    """Validate platform-specific league_id format. Raises on bad input."""
+    s = str(league_id)
+    if platform == "yahoo":
+        if not _YAHOO_LEAGUE_ID_RE.match(s):
+            raise ValueError(f"Invalid Yahoo league_id: {s!r}")
+    elif platform == "sleeper":
+        if not _SLEEPER_LEAGUE_ID_RE.match(s):
+            raise ValueError(f"Invalid Sleeper league_id: {s!r}")
+    elif platform == "espn":
+        if not s.isdigit():
+            raise ValueError(f"Invalid ESPN league_id (must be numeric): {s!r}")
+    else:
+        raise ValueError(f"Unknown platform: {platform!r}")
+    return s
 
 
 def slugify(name: str) -> str:
@@ -61,10 +94,10 @@ def extract_yahoo_league_number(yahoo_league_key: str) -> str | None:
 def check_db_exists(db_name: str) -> bool:
     """Check if a database exists via Fly.io."""
     try:
+        safe_db = _safe_db_name(db_name)
         result = fly_query(
-            "SELECT 1 FROM information_schema.schemata "
-            f"WHERE catalog_name = '{db_name}' LIMIT 1",
-            database=db_name
+            f"SELECT 1 FROM information_schema.schemata WHERE catalog_name = '{safe_db}' LIMIT 1",
+            database=safe_db,
         )
         return len(result) > 0
     except Exception:
@@ -74,22 +107,22 @@ def check_db_exists(db_name: str) -> bool:
 def check_league_id_in_db(db_name: str, league_id: str, platform: str) -> bool:
     """Check if a league_id exists in a database's matchup table."""
     try:
+        safe_db = _safe_db_name(db_name)
+        safe_id = _safe_league_id(league_id, platform)
         if platform == "yahoo":
-            yahoo_number = extract_yahoo_league_number(league_id)
+            yahoo_number = extract_yahoo_league_number(safe_id)
             if yahoo_number:
                 result = fly_query(
                     f"SELECT 1 FROM public.matchup "
                     f"WHERE CAST(league_id AS VARCHAR) LIKE '%.l.{yahoo_number}' "
                     "LIMIT 1",
-                    database=db_name
+                    database=safe_db,
                 )
                 return len(result) > 0
 
         result = fly_query(
-            f"SELECT 1 FROM public.matchup "
-            f"WHERE CAST(league_id AS VARCHAR) = '{league_id}' "
-            "LIMIT 1",
-            database=db_name
+            f"SELECT 1 FROM public.matchup WHERE CAST(league_id AS VARCHAR) = '{safe_id}' LIMIT 1",
+            database=safe_db,
         )
         return len(result) > 0
     except Exception:
@@ -99,8 +132,9 @@ def check_league_id_in_db(db_name: str, league_id: str, platform: str) -> bool:
 def lookup_mapping_table(league_id: str, platform: str) -> str | None:
     """Check the ___ops mapping table for an existing database name."""
     try:
+        safe_id = _safe_league_id(league_id, platform)
         if platform == "yahoo":
-            yahoo_number = extract_yahoo_league_number(league_id)
+            yahoo_number = extract_yahoo_league_number(safe_id)
             if yahoo_number:
                 result = fly_query(
                     "SELECT database_name FROM main.league_credentials "
@@ -111,17 +145,13 @@ def lookup_mapping_table(league_id: str, platform: str) -> str | None:
                     return result[0]["database_name"]
         elif platform == "sleeper":
             result = fly_query(
-                "SELECT database_name FROM main.sleeper_leagues "
-                f"WHERE sleeper_league_id = '{league_id}' "
-                "LIMIT 1"
+                f"SELECT database_name FROM main.sleeper_leagues WHERE sleeper_league_id = '{safe_id}' LIMIT 1"
             )
             if result and result[0].get("database_name"):
                 return result[0]["database_name"]
         elif platform == "espn":
             result = fly_query(
-                "SELECT database_name FROM main.espn_leagues "
-                f"WHERE espn_league_id = {int(league_id)} "
-                "LIMIT 1"
+                f"SELECT database_name FROM main.espn_leagues WHERE espn_league_id = {int(safe_id)} LIMIT 1"
             )
             if result and result[0].get("database_name"):
                 return result[0]["database_name"]
@@ -130,26 +160,106 @@ def lookup_mapping_table(league_id: str, platform: str) -> str | None:
     return None
 
 
+def lookup_inventory_owner(db_name: str) -> dict | None:
+    """Return league_inventory ownership for a db name, if present."""
+    try:
+        safe_db = _safe_db_name(db_name)
+        result = fly_query(
+            "SELECT database_name, platform, league_id, league_name "
+            "FROM accounts.league_inventory "
+            f"WHERE database_name = '{safe_db}' "
+            "LIMIT 1",
+        )
+        if result:
+            return result[0]
+    except Exception as e:
+        print(f"[resolve] league_inventory owner lookup failed for {db_name}: {e}", file=sys.stderr)
+    return None
+
+
+def lookup_inventory_identity(base_name: str, league_id: str, platform: str) -> dict | None:
+    """Return an existing base or hashed db for this exact platform league identity."""
+    try:
+        safe_base = _safe_db_name(base_name)
+        safe_id = _safe_league_id(league_id, platform)
+        prefix = f"{safe_base}_"
+        result = fly_query(
+            "SELECT database_name, platform, league_id, league_name "
+            "FROM accounts.league_inventory "
+            f"WHERE LOWER(platform) = '{platform}' "
+            f"AND CAST(league_id AS VARCHAR) = '{safe_id}' "
+            "AND ("
+            f"database_name = '{safe_base}' "
+            f"OR substr(database_name, 1, {len(prefix)}) = '{prefix}'"
+            ") "
+            "ORDER BY "
+            f"CASE WHEN database_name = '{safe_base}' THEN 0 ELSE 1 END, "
+            "updated_at DESC NULLS LAST, database_name "
+            "LIMIT 1",
+        )
+        if result:
+            return result[0]
+    except Exception as e:
+        print(f"[resolve] league_inventory identity lookup failed for {platform}:{league_id}: {e}", file=sys.stderr)
+    return None
+
+
+def same_inventory_owner(owner: dict | None, league_id: str, platform: str) -> bool:
+    if not owner:
+        return False
+    return str(owner.get("platform", "")).lower() == platform and str(owner.get("league_id", "")) == str(league_id)
+
+
+def provisional_inventory_owner(owner: dict | None, platform: str) -> bool:
+    """Return True for same-platform inventory rows that do not yet carry identity.
+
+    Checkout and payment flows can create a league_inventory reservation before the
+    import has written its platform league_id. Those rows should not force a
+    hash-suffixed database name when a platform registry or payload already knows
+    the canonical slug.
+    """
+    if not owner:
+        return False
+    owner_platform = str(owner.get("platform") or "").strip().lower()
+    owner_league_id = str(owner.get("league_id") or "").strip()
+    return owner_platform == platform and not owner_league_id
+
+
+def choose_hashed_name(base_name: str, league_id: str, platform: str) -> str:
+    """Return a stable hash-suffixed db name that preserves the suffix."""
+    digest = hashlib.md5(f"{platform}:{league_id}".encode()).hexdigest()
+    for length in (4, 6, 8, 12):
+        suffix = digest[:length]
+        base_room = max(1, 63 - len(suffix) - 1)
+        candidate = f"{base_name[:base_room]}_{suffix}"
+        owner = lookup_inventory_owner(candidate)
+        if (
+            not owner
+            or same_inventory_owner(owner, league_id, platform)
+            or provisional_inventory_owner(owner, platform)
+        ):
+            return candidate
+    raise RuntimeError("Unable to resolve a unique database name")
+
+
 def check_registry_collision(base_name: str, league_id: str, platform: str) -> bool:
     """Check if base_name is registered to a DIFFERENT league in ANY platform's registry.
 
     Returns True if another league owns the name (collision), False if free.
     """
+    safe_base = _safe_db_name(base_name)
     registry_queries = [
         (
             "yahoo",
-            "SELECT league_id FROM main.league_credentials "
-            f"WHERE database_name = '{base_name}' LIMIT 1",
+            f"SELECT league_id FROM main.league_credentials WHERE database_name = '{safe_base}' LIMIT 1",
         ),
         (
             "sleeper",
-            "SELECT sleeper_league_id as league_id FROM main.sleeper_leagues "
-            f"WHERE database_name = '{base_name}' LIMIT 1",
+            f"SELECT sleeper_league_id as league_id FROM main.sleeper_leagues WHERE database_name = '{safe_base}' LIMIT 1",
         ),
         (
             "espn",
-            "SELECT espn_league_id as league_id FROM main.espn_leagues "
-            f"WHERE database_name = '{base_name}' LIMIT 1",
+            f"SELECT espn_league_id as league_id FROM main.espn_leagues WHERE database_name = '{safe_base}' LIMIT 1",
         ),
     ]
     for reg_platform, query in registry_queries:
@@ -168,8 +278,7 @@ def check_registry_collision(base_name: str, league_id: str, platform: str) -> b
                         continue
                 # Different league or different platform owns this name
                 print(
-                    f"[resolve] Registry collision: {base_name} owned by "
-                    f"{reg_platform} league {registered_id}",
+                    f"[resolve] Registry collision: {base_name} owned by " f"{reg_platform} league {registered_id}",
                     file=sys.stderr,
                 )
                 return True
@@ -188,17 +297,76 @@ def resolve(league_id: str, league_name: str, platform: str, pre_computed_db: st
         return slugify(league_name)
 
     try:
-        # 1. Check mapping table for THIS league (source of truth for reimports)
-        mapped = lookup_mapping_table(league_id, platform)
-        if mapped:
-            print(f"[resolve] Found in {platform} mapping table: {mapped}", file=sys.stderr)
+        base_name = slugify(league_name)
+
+        # 1. Fly league_inventory is the live source of truth. This catches
+        # cross-platform collisions even when legacy credential registries are stale.
+        inventory_identity = lookup_inventory_identity(base_name, league_id, platform)
+        if inventory_identity and inventory_identity.get("database_name"):
+            mapped = inventory_identity["database_name"]
+            print(f"[resolve] Found in league_inventory: {mapped}", file=sys.stderr)
             return mapped
 
-        # 2. Trust an explicit database_name when it does not belong to another league.
+        base_owner = lookup_inventory_owner(base_name)
+        if base_owner:
+            if same_inventory_owner(base_owner, league_id, platform):
+                print(f"[resolve] league_inventory owns base name for this league: {base_name}", file=sys.stderr)
+                return base_name
+            if provisional_inventory_owner(base_owner, platform):
+                print(
+                    f"[resolve] league_inventory has provisional base row without league_id: {base_name}",
+                    file=sys.stderr,
+                )
+            else:
+                hashed_name = choose_hashed_name(base_name, league_id, platform)
+                owner_label = base_owner.get("league_name") or base_owner.get("database_name")
+                print(
+                    f"[resolve] league_inventory collision: {base_name} owned by {owner_label}, using: {hashed_name}",
+                    file=sys.stderr,
+                )
+                return hashed_name
+
+        # 2. Check mapping table for THIS league, but do not let stale
+        # mappings override an inventory owner for another league.
+        mapped = lookup_mapping_table(league_id, platform)
+        if mapped:
+            mapped_owner = lookup_inventory_owner(mapped)
+            if (
+                not mapped_owner
+                or same_inventory_owner(mapped_owner, league_id, platform)
+                or provisional_inventory_owner(mapped_owner, platform)
+            ):
+                print(f"[resolve] Found in {platform} mapping table: {mapped}", file=sys.stderr)
+                return mapped
+            print(
+                f"[resolve] Ignoring stale {platform} mapping table db '{mapped}' "
+                f"owned by {mapped_owner.get('platform')}:{mapped_owner.get('league_id')}",
+                file=sys.stderr,
+            )
+
+        # 3. Trust an explicit database_name when it does not belong to another league.
         # In Fly-first centralized storage the db_name may be canonical without existing as
         # a separate catalog, so registry ownership is a better idempotence signal than
         # catalog existence.
         if pre_computed_db:
+            pre_owner = lookup_inventory_owner(pre_computed_db)
+            if (
+                pre_owner
+                and not same_inventory_owner(pre_owner, league_id, platform)
+                and not provisional_inventory_owner(pre_owner, platform)
+            ):
+                hashed_name = choose_hashed_name(base_name, league_id, platform)
+                print(
+                    f"[resolve] Pre-computed '{pre_computed_db}' collides in league_inventory, "
+                    f"using: {hashed_name}",
+                    file=sys.stderr,
+                )
+                return hashed_name
+            if provisional_inventory_owner(pre_owner, platform):
+                print(
+                    f"[resolve] Pre-computed '{pre_computed_db}' has provisional inventory owner; trusting registry/payload",
+                    file=sys.stderr,
+                )
             if check_registry_collision(pre_computed_db, league_id, platform):
                 print(
                     f"[resolve] Pre-computed '{pre_computed_db}' collides with another league, resolving fresh",
@@ -214,14 +382,12 @@ def resolve(league_id: str, league_name: str, platform: str, pre_computed_db: st
                     )
                 return pre_computed_db
 
-        # 3. Slugify and check for collisions
-        base_name = slugify(league_name)
+        # 4. Slugify and check for legacy collisions
         print(f"[resolve] Not in mapping table, checking base name: {base_name}", file=sys.stderr)
 
-        # 3a. Check ALL registry tables for ownership (catches deleted-but-registered DBs)
+        # 4a. Check ALL registry tables for ownership (catches deleted-but-registered DBs)
         if check_registry_collision(base_name, league_id, platform):
-            hash_suffix = hashlib.md5(str(league_id).encode()).hexdigest()[:6]
-            hashed_name = f"{base_name}_{hash_suffix}"
+            hashed_name = choose_hashed_name(base_name, league_id, platform)
             print(f"[resolve] Registry collision, using: {hashed_name}", file=sys.stderr)
             return hashed_name
 
@@ -235,8 +401,7 @@ def resolve(league_id: str, league_name: str, platform: str, pre_computed_db: st
             return base_name
 
         # Different league owns the base name - collision
-        hash_suffix = hashlib.md5(str(league_id).encode()).hexdigest()[:6]
-        hashed_name = f"{base_name}_{hash_suffix}"
+        hashed_name = choose_hashed_name(base_name, league_id, platform)
         print(f"[resolve] Collision detected, using: {hashed_name}", file=sys.stderr)
         return hashed_name
 

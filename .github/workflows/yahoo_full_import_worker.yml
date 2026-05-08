@@ -223,13 +223,16 @@ jobs:
               print("No refresh_token found - skipping early credential store")
               exit(0)
 
-          store_league_credentials(
+          success = store_league_credentials(
               database_name=os.environ['DATABASE_NAME'],
               refresh_token=refresh_token,
               league_id=os.environ['LEAGUE_ID'],
               league_name=os.environ['LEAGUE_NAME']
           )
-          print("Credentials stored (early)")
+          if success:
+              print("Credentials stored (early)")
+          else:
+              print("Credentials were not stored (early)")
           PYEOF
 
       # ==================== CREATE DATA DIRECTORIES ====================
