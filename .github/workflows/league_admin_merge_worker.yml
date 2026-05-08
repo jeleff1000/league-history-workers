@@ -1,0 +1,64 @@
+name: League Admin Merge Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      merge_data_b64:
+        description: 'Base64-encoded JSON with source_db, target_db, and merge_years'
+        required: true
+        type: string
+      user_id:
+        description: 'Unique identifier for this merge job'
+        required: true
+        type: string
+      yahoo_oauth_ref:
+        description: 'yahoo_oauth branch/ref to check out'
+        required: false
+        type: string
+        default: 'main'
+
+  repository_dispatch:
+    types: [league_admin_merge]
+
+concurrency:
+  group: league-admin-merge-${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  merge-league:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      PYTHONUNBUFFERED: 1
+      DATABASE_BACKEND: fly
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
+      FLY_PRIMARY_MACHINE_ID: ${{ secrets.FLY_PRIMARY_MACHINE_ID }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || github.event.client_payload.yahoo_oauth_ref || 'main' }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Run league merge
+        env:
+          MERGE_DATA_B64: ${{ github.event.inputs.merge_data_b64 || github.event.client_payload.merge_data_b64 }}
+        run: python scripts/merge_league_admin.py
