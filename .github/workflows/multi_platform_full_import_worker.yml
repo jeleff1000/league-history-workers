@@ -1,0 +1,437 @@
+name: Multi-Platform Full Import Worker
+
+# One workflow run that imports a historical source platform first, then imports
+# the target platform and merges the freshly updated source rows after upload.
+
+on:
+  workflow_dispatch:
+    inputs:
+      import_data_b64:
+        description: 'Base64 JSON with yahoo_source_db, sleeper target config, merge_years, manager_mapping'
+        required: true
+        type: string
+      user_id:
+        description: 'Unique identifier for this import job'
+        required: true
+        type: string
+      yahoo_oauth_ref:
+        description: 'yahoo_oauth branch/ref to check out'
+        required: false
+        type: string
+        default: 'main'
+
+  repository_dispatch:
+    types: [multi_platform_full_import]
+
+concurrency:
+  group: multi-platform-import-${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  import-multi-platform:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    env:
+      PYTHONUNBUFFERED: 1
+      DATABASE_BACKEND: fly
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
+      FLY_PRIMARY_MACHINE_ID: ${{ secrets.FLY_PRIMARY_MACHINE_ID }}
+      FLY_UPLOAD_MAX_RETRIES: 40
+      FLY_UPLOAD_RETRY_BASE_DELAY: 3
+      FLY_UPLOAD_RETRY_MAX_DELAY: 30
+      FLY_UPLOAD_RETRY_JITTER_SECONDS: 2
+      FLY_PUBLISH_FORMAT: delta
+      FLY_DELTA_FALLBACK_TO_DUCKDB: '0'
+      FLY_FINALIZE_INVENTORY: '0'
+      OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
+      YAHOO_CLIENT_ID: ${{ secrets.YAHOO_CLIENT_ID }}
+      YAHOO_CLIENT_SECRET: ${{ secrets.YAHOO_CLIENT_SECRET }}
+      CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || github.event.client_payload.yahoo_oauth_ref || 'main' }}
+
+      - name: Setup Python
+        id: setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Restore cached ops cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache
+          key: ops-cache-v4-${{ runner.os }}-manual-v1
+          fail-on-cache-miss: true
+
+      - name: Log cached ops cache
+        run: |
+          echo "[ops-cache] OPS_CACHE_PATH=${OPS_CACHE_PATH}"
+          test -s "${OPS_CACHE_PATH}" || {
+            echo "::error::ops_cache.duckdb is missing after cache restore. Run the Seed Ops Cache workflow before imports."
+            exit 1
+          }
+          echo "[ops-cache] size-human=$(du -h "${OPS_CACHE_PATH}" | cut -f1)"
+
+      - name: Cache Python virtualenv
+        uses: actions/cache@v5
+        id: cache-venv
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Create virtualenv
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: python -m venv .venv
+
+      - name: Install dependencies
+        run: |
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Activate venv
+        run: echo "${{ github.workspace }}/.venv/bin" >> $GITHUB_PATH
+
+      - name: Parse multi-platform payload
+        id: parse
+        env:
+          IMPORT_DATA_B64: ${{ github.event.inputs.import_data_b64 || github.event.client_payload.import_data_b64 }}
+          USER_ID: ${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
+        run: |
+          python - <<'PYEOF'
+          import base64
+          import json
+          import os
+          import re
+          import sys
+
+          raw = os.environ.get("IMPORT_DATA_B64", "").strip()
+          if not raw:
+              raise SystemExit("IMPORT_DATA_B64 is required")
+
+          try:
+              payload = json.loads(base64.b64decode(raw).decode("utf-8"))
+          except Exception:
+              payload = json.loads(raw)
+
+          db_re = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]{0,62}$")
+          yahoo_source_db = str(
+              payload.get("yahoo_source_db") or payload.get("source_db") or ""
+          ).strip()
+          target_db = str(
+              payload.get("target_db") or payload.get("database_name") or ""
+          ).strip()
+          sleeper_league_id = str(
+              payload.get("sleeper_league_id") or payload.get("league_id") or ""
+          ).strip()
+          league_name = str(payload.get("league_name") or "Multi-Platform League").strip()
+
+          errors = []
+          for label, value in {
+              "yahoo_source_db": yahoo_source_db,
+              "target_db": target_db,
+          }.items():
+              if not db_re.match(value):
+                  errors.append(f"{label} must be a safe db_name, got {value!r}")
+          if not sleeper_league_id:
+              errors.append("sleeper_league_id is required")
+          if not payload.get("league_ids"):
+              errors.append("league_ids year -> Sleeper league id mapping is required")
+          if errors:
+              raise SystemExit("Payload validation failed: " + "; ".join(errors))
+
+          payload["yahoo_source_db"] = yahoo_source_db
+          payload["target_db"] = target_db
+          payload["database_name"] = target_db
+          payload["sleeper_league_id"] = sleeper_league_id
+          payload["league_id"] = sleeper_league_id
+          payload["league_name"] = league_name
+          payload["has_external_data"] = True
+
+          with open("multi_platform_payload.json", "w", encoding="utf-8") as handle:
+              json.dump(payload, handle, indent=2)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"yahoo_source_db={yahoo_source_db}\n")
+              handle.write(f"target_db={target_db}\n")
+              handle.write(f"sleeper_league_id={sleeper_league_id}\n")
+              handle.write(f"league_name={league_name}\n")
+              handle.write(f"user_id={os.environ.get('USER_ID', '')}\n")
+
+          print(json.dumps(payload, indent=2))
+          PYEOF
+
+      - name: Import Yahoo source league
+        id: yahoo_import
+        working-directory: fantasy_football_data_scripts
+        env:
+          AUTO_CONFIRM: "1"
+        run: |
+          echo "========================================"
+          echo "YAHOO SOURCE IMPORT"
+          echo "Source DB: ${{ steps.parse.outputs.yahoo_source_db }}"
+          echo "========================================"
+
+          set +e
+          python initial_import_v3.py \
+            --league "${{ steps.parse.outputs.yahoo_source_db }}" \
+            --data-dir "../fantasy_football_data/yahoo_${{ steps.parse.outputs.yahoo_source_db }}" \
+            2>&1 | tee ../yahoo_import.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+
+          echo "exit_code=${EXIT_CODE}" >> $GITHUB_OUTPUT
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "Yahoo source import failed"
+            tail -300 ../yahoo_import.log
+            exit $EXIT_CODE
+          fi
+
+      - name: Create Sleeper context with Yahoo merge source
+        id: sleeper_context
+        run: |
+          source .venv/bin/activate
+          python - <<'PYEOF'
+          import json
+          import os
+          from datetime import datetime
+          from pathlib import Path
+
+          with open("multi_platform_payload.json", encoding="utf-8") as handle:
+              payload = json.load(handle)
+
+          target_db = payload["target_db"]
+          yahoo_source_db = payload["yahoo_source_db"]
+          league_ids = payload["league_ids"]
+          years = sorted(int(year) for year in league_ids)
+          start_year = int(payload.get("start_year") or min(years))
+          end_year = int(payload.get("end_year") or payload.get("season") or max(years))
+          season = int(payload.get("season") or end_year)
+          merge_years = payload.get("merge_years")
+          if not merge_years:
+              merge_years = list(range(2000, start_year))
+
+          merge_source = payload.get("merge_source") or {}
+          merge_source["source_db"] = yahoo_source_db
+          merge_source["merge_years"] = [int(year) for year in merge_years]
+          merge_source["manager_mapping"] = (
+              payload.get("manager_mapping")
+              or merge_source.get("manager_mapping")
+              or {}
+          )
+
+          data_dir = Path("fantasy_football_data") / f"sleeper_{target_db}"
+          data_dir = data_dir.resolve()
+          for child in ("league_settings", "rosters", "matchups", "drafts", "transactions"):
+              (data_dir / child).mkdir(parents=True, exist_ok=True)
+
+          context = {
+              "league_id": str(payload["sleeper_league_id"]),
+              "league_name": payload.get("league_name", target_db),
+              "database_name": target_db,
+              "username": str(payload.get("username") or ""),
+              "sport": "nfl",
+              "start_year": start_year,
+              "end_year": end_year,
+              "num_teams": payload.get("num_teams"),
+              "playoff_teams": payload.get("playoff_teams", 6),
+              "bye_teams": payload.get("bye_teams"),
+              "playoff_start_week": payload.get("playoff_start_week"),
+              "regular_season_weeks": payload.get("regular_season_weeks"),
+              "uses_median_scoring": payload.get("uses_median_scoring", False),
+              "data_directory": str(data_dir),
+              "max_workers": 3,
+              "enable_caching": True,
+              "rate_limit_per_min": 1000,
+              "roster_to_manager": {},
+              "roster_to_guid": {},
+              "manager_name_overrides": payload.get("manager_name_overrides", {}),
+              "external_column_maps": payload.get("external_column_maps", []),
+              "external_identity_maps": payload.get("external_identity_maps", {}),
+              "has_external_data": True,
+              "merge_source": merge_source,
+              "merge_sources": [merge_source],
+              "league_ids": {str(year): str(value) for year, value in league_ids.items()},
+              "created_at": datetime.now().isoformat(),
+              "updated_at": datetime.now().isoformat(),
+              "platform": "sleeper",
+              "import_mode": "full",
+              "require_oauth": False,
+              "keeper_rules": payload.get("keeper_rules"),
+              "league_rules": payload.get("league_rules"),
+              "standings_weights": payload.get("standings_weights"),
+          }
+
+          context_path = data_dir / "sleeper_context.json"
+          context_path.write_text(json.dumps(context, indent=2), encoding="utf-8")
+          Path("sleeper_context.json").write_text(json.dumps(context, indent=2), encoding="utf-8")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"db_name={target_db}\n")
+              handle.write(f"data_dir={data_dir}\n")
+              handle.write(f"start_year={start_year}\n")
+              handle.write(f"end_year={end_year}\n")
+              handle.write(f"season={season}\n")
+
+          print(json.dumps(context, indent=2))
+          PYEOF
+
+      - name: Set Sleeper env
+        run: |
+          echo "DB_NAME=${{ steps.sleeper_context.outputs.db_name }}" >> $GITHUB_ENV
+          echo "DATA_DIR=${{ steps.sleeper_context.outputs.data_dir }}" >> $GITHUB_ENV
+
+      - name: Run Sleeper target import
+        id: sleeper_import
+        env:
+          AUTO_CONFIRM: "1"
+        working-directory: fantasy_football_data_scripts
+        run: |
+          echo "========================================"
+          echo "SLEEPER TARGET IMPORT"
+          echo "Target DB: ${{ steps.sleeper_context.outputs.db_name }}"
+          echo "Years: ${{ steps.sleeper_context.outputs.start_year }}-${{ steps.sleeper_context.outputs.end_year }}"
+          echo "========================================"
+
+          set +e
+          python sleeper_initial_import.py \
+            --context ../sleeper_context.json \
+            --import-mode full \
+            --skip-track-2-upload \
+            2>&1 | tee ../sleeper_import.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          set -e
+
+          echo "exit_code=${EXIT_CODE}" >> $GITHUB_OUTPUT
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "Sleeper target import failed"
+            tail -300 ../sleeper_import.log
+            exit $EXIT_CODE
+          fi
+
+      - name: Count Sleeper matchup rows
+        if: steps.sleeper_import.outputs.exit_code == '0'
+        id: matchup_rows
+        run: |
+          source .venv/bin/activate
+          python - <<'PYEOF'
+          import os
+          import sys
+          from pathlib import Path
+
+          import duckdb
+
+          db_path = Path(os.environ["DATA_DIR"]) / f"{os.environ['DB_NAME']}.duckdb"
+          if not db_path.exists():
+              print(f"ERROR: Local DuckDB not found: {db_path}")
+              sys.exit(1)
+          conn = duckdb.connect(str(db_path), read_only=True)
+          try:
+              count = conn.execute("SELECT COUNT(*) FROM public.matchup").fetchone()[0]
+          finally:
+              conn.close()
+          print(f"matchup: {count}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"matchup_count={count}\n")
+          PYEOF
+
+      - name: Calculate expected records
+        if: steps.sleeper_import.outputs.exit_code == '0' && steps.matchup_rows.outputs.matchup_count != '0'
+        working-directory: fantasy_football_data_scripts
+        run: |
+          python -m multi_league.transformations.matchup.expected_record_v2 \
+            --db "$DB_NAME" \
+            --data-dir "$DATA_DIR" \
+            --n-sims 10000
+
+      - name: Calculate playoff odds
+        if: steps.sleeper_import.outputs.exit_code == '0' && steps.matchup_rows.outputs.matchup_count != '0'
+        working-directory: fantasy_football_data_scripts
+        run: |
+          python -m multi_league.transformations.matchup.playoff_odds_import \
+            --db "$DB_NAME" \
+            --data-dir "$DATA_DIR" \
+            --n-sims 10000
+
+      - name: Run aggregations
+        if: steps.sleeper_import.outputs.exit_code == '0'
+        working-directory: fantasy_football_data_scripts
+        run: |
+          python ../scripts/refresh_aggregates.py \
+            --db "$DB_NAME" \
+            --data-dir "$DATA_DIR"
+
+      - name: Upload Sleeper target and merge Yahoo source
+        if: steps.sleeper_import.outputs.exit_code == '0'
+        run: |
+          python - <<'PYEOF'
+          import os
+          import sys
+          sys.path.insert(0, "fantasy_football_data_scripts")
+
+          from multi_league.core.local_db import LocalLeagueDB
+
+          db = LocalLeagueDB(os.environ["DATA_DIR"], os.environ["DB_NAME"])
+          db.connect()
+          try:
+              db.upload_to_fly(os.environ["DB_NAME"])
+          finally:
+              db.close()
+          print("Sleeper target upload + Yahoo source merge complete")
+          PYEOF
+
+      - name: Validate merged target
+        if: steps.sleeper_import.outputs.exit_code == '0'
+        working-directory: fantasy_football_data_scripts
+        run: |
+          python -m multi_league.validation_v2 --db "$DB_NAME" -v 2>&1 | tee ../validation.log
+
+      - name: Revalidate and warm Vercel cache
+        if: steps.sleeper_import.outputs.exit_code == '0'
+        env:
+          REVALIDATION_SECRET: ${{ secrets.REVALIDATION_SECRET }}
+        run: |
+          python scripts/warm_vercel_cache.py \
+            --db "$DB_NAME" \
+            --secret "$REVALIDATION_SECRET" \
+            --site-url "https://www.leaguehistory.app" \
+            --mode full \
+            --strategy expire \
+            --jitter-seconds 0 \
+            --strict \
+            --verify-hot
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: multi-platform-import-${{ steps.parse.outputs.user_id || github.run_id }}
+          path: |
+            yahoo_import.log
+            sleeper_import.log
+            validation.log
+          retention-days: 30
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "# Multi-Platform Full Import" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- Yahoo source DB: \`${{ steps.parse.outputs.yahoo_source_db }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Sleeper target DB: \`${{ steps.sleeper_context.outputs.db_name }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Sleeper years: ${{ steps.sleeper_context.outputs.start_year }}-${{ steps.sleeper_context.outputs.end_year }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Yahoo import exit: ${{ steps.yahoo_import.outputs.exit_code }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Sleeper import exit: ${{ steps.sleeper_import.outputs.exit_code }}" >> $GITHUB_STEP_SUMMARY
