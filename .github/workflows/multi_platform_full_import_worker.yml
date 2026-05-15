@@ -502,7 +502,7 @@ jobs:
         if: steps.sleeper_import.outputs.exit_code == '0'
         working-directory: fantasy_football_data_scripts
         run: |
-          python -m multi_league.validation_v2 --db "$DB_NAME" -v 2>&1 | tee ../validation.log
+          python -m multi_league.validation_v2 --db "$DB_NAME" -v --ci 2>&1 | tee ../validation.log
 
       - name: Revalidate and warm Vercel cache
         if: steps.sleeper_import.outputs.exit_code == '0'
