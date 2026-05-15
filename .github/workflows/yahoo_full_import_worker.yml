@@ -282,6 +282,7 @@ jobs:
               "keeper_rules": league_data.get('keeper_rules'),
               "has_external_data": league_data.get('has_external_data', False),
               "merge_source": league_data.get('merge_source'),
+              "merge_sources": league_data.get('merge_sources', []),
               "import_mode": "quick",
               "database_name": "${{ steps.parse.outputs.database_name }}",
           }
@@ -442,6 +443,7 @@ jobs:
               "keeper_rules": league_data.get('keeper_rules'),
               "has_external_data": league_data.get('has_external_data', False),
               "merge_source": league_data.get('merge_source'),
+              "merge_sources": league_data.get('merge_sources', []),
               "import_mode": "full",
               "database_name": "${{ steps.parse.outputs.database_name }}",
           }

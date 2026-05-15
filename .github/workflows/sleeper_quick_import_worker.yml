@@ -286,6 +286,7 @@ jobs:
               "external_identity_maps": league_data.get('external_identity_maps', {}),
               "has_external_data": league_data.get('has_external_data', False),
               "merge_source": league_data.get('merge_source'),
+              "merge_sources": league_data.get('merge_sources', []),
               "league_ids": league_data.get('league_ids', {}),  # Pre-seeded if combining, else populated by fetcher
               "user_id": None,  # Will be populated by fetcher
               "created_at": datetime.now().isoformat(),
