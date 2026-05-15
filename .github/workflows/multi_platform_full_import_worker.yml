@@ -171,7 +171,106 @@ jobs:
               handle.write(f"league_name={league_name}\n")
               handle.write(f"user_id={os.environ.get('USER_ID', '')}\n")
 
-          print(json.dumps(payload, indent=2))
+          sanitized = json.loads(json.dumps(payload))
+          yahoo_payload = sanitized.get("yahoo")
+          if isinstance(yahoo_payload, dict):
+              yahoo_payload.pop("oauth_token", None)
+              yahoo_payload.pop("refresh_token", None)
+          sanitized.pop("yahoo_oauth_token", None)
+          sanitized.pop("oauth_token", None)
+          print(json.dumps(sanitized, indent=2))
+          PYEOF
+
+      - name: Create Yahoo source context
+        id: yahoo_context
+        run: |
+          python - <<'PYEOF'
+          import json
+          import os
+          import time
+          from pathlib import Path
+
+          with open("multi_platform_payload.json", encoding="utf-8") as handle:
+              payload = json.load(handle)
+
+          yahoo = payload.get("yahoo") if isinstance(payload.get("yahoo"), dict) else {}
+          oauth_token = (
+              yahoo.get("oauth_token")
+              or payload.get("yahoo_oauth_token")
+              or payload.get("oauth_token")
+          )
+          if not oauth_token:
+              print("[YAHOO CONTEXT] No OAuth payload supplied; will use --league stored credential path.")
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+                  handle.write("mode=stored\n")
+              raise SystemExit(0)
+
+          source_db = payload["yahoo_source_db"]
+          league_ids = yahoo.get("league_ids") or payload.get("yahoo_league_ids") or {}
+          if not league_ids:
+              raise SystemExit("Yahoo OAuth path requires yahoo.league_ids or yahoo_league_ids")
+          years = sorted(int(year) for year in league_ids)
+          start_year = int(yahoo.get("start_year") or payload.get("yahoo_start_year") or min(years))
+          end_year = int(yahoo.get("end_year") or payload.get("yahoo_end_year") or max(years))
+          league_id = str(yahoo.get("league_id") or league_ids.get(str(end_year)) or league_ids[str(max(years))])
+          league_name = str(yahoo.get("league_name") or payload.get("league_name") or source_db)
+
+          oauth_dir = Path("oauth")
+          oauth_dir.mkdir(exist_ok=True)
+          oauth_file = oauth_dir / "YahooSourceOauth.json"
+          oauth_data = {
+              "access_token": oauth_token.get("access_token", "expired"),
+              "refresh_token": oauth_token.get("refresh_token"),
+              "consumer_key": os.environ.get("YAHOO_CLIENT_ID"),
+              "consumer_secret": os.environ.get("YAHOO_CLIENT_SECRET"),
+              "token_type": oauth_token.get("token_type", "bearer"),
+              "expires_in": oauth_token.get("expires_in", 3600),
+              "token_time": oauth_token.get("token_time", 0),
+              "guid": oauth_token.get("xoauth_yahoo_guid") or oauth_token.get("guid"),
+          }
+          if not oauth_data["refresh_token"]:
+              raise SystemExit("Yahoo OAuth payload missing refresh_token")
+          oauth_file.write_text(json.dumps(oauth_data, indent=2), encoding="utf-8")
+
+          data_dir = Path("fantasy_football_data") / f"yahoo_{source_db}"
+          data_dir = data_dir.resolve()
+          for child in ("matchup_data", "player_data", "draft_data", "transaction_data", "schedule_data"):
+              (data_dir / child).mkdir(parents=True, exist_ok=True)
+
+          context = {
+              "league_id": league_id,
+              "league_name": league_name,
+              "oauth_file_path": str(oauth_file.resolve()),
+              "game_code": "nfl",
+              "start_year": start_year,
+              "end_year": end_year,
+              "num_teams": int(yahoo.get("num_teams") or payload.get("yahoo_num_teams") or payload.get("num_teams") or 12),
+              "playoff_teams": int(yahoo.get("playoff_teams") or payload.get("yahoo_playoff_teams") or 6),
+              "regular_season_weeks": int(yahoo.get("regular_season_weeks") or payload.get("yahoo_regular_season_weeks") or 14),
+              "data_directory": str(data_dir),
+              "max_workers": 5,
+              "enable_caching": True,
+              "rate_limit_per_sec": 4.0,
+              "manager_name_overrides": yahoo.get("manager_name_overrides") or {},
+              "external_column_maps": [],
+              "external_identity_maps": {},
+              "keeper_rules": yahoo.get("keeper_rules"),
+              "has_external_data": False,
+              "import_mode": "full",
+              "database_name": source_db,
+              "league_ids": {str(year): str(value) for year, value in league_ids.items()},
+          }
+
+          Path("league_context_yahoo_source.json").write_text(json.dumps(context, indent=2), encoding="utf-8")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write("mode=oauth\n")
+              handle.write("context=league_context_yahoo_source.json\n")
+              handle.write(f"start_year={start_year}\n")
+              handle.write(f"end_year={end_year}\n")
+          print(
+              f"[YAHOO CONTEXT] Created OAuth context for {league_name}: "
+              f"{start_year}-{end_year} -> {source_db}"
+          )
           PYEOF
 
       - name: Import Yahoo source league
@@ -186,10 +285,16 @@ jobs:
           echo "========================================"
 
           set +e
-          python initial_import_v3.py \
-            --league "${{ steps.parse.outputs.yahoo_source_db }}" \
-            --data-dir "../fantasy_football_data/yahoo_${{ steps.parse.outputs.yahoo_source_db }}" \
-            2>&1 | tee ../yahoo_import.log
+          if [ "${{ steps.yahoo_context.outputs.mode }}" = "oauth" ]; then
+            python initial_import_v3.py \
+              --context "../${{ steps.yahoo_context.outputs.context }}" \
+              2>&1 | tee ../yahoo_import.log
+          else
+            python initial_import_v3.py \
+              --league "${{ steps.parse.outputs.yahoo_source_db }}" \
+              --data-dir "../fantasy_football_data/yahoo_${{ steps.parse.outputs.yahoo_source_db }}" \
+              2>&1 | tee ../yahoo_import.log
+          fi
           EXIT_CODE=${PIPESTATUS[0]}
           set -e
 
