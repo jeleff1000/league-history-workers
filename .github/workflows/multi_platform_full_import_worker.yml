@@ -50,7 +50,7 @@ jobs:
       FLY_UPLOAD_RETRY_JITTER_SECONDS: 2
       FLY_PUBLISH_FORMAT: delta
       FLY_DELTA_FALLBACK_TO_DUCKDB: '0'
-      FLY_FINALIZE_INVENTORY: '0'
+      FLY_FINALIZE_INVENTORY: '1'
       OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
       YAHOO_CLIENT_ID: ${{ secrets.YAHOO_CLIENT_ID }}
       YAHOO_CLIENT_SECRET: ${{ secrets.YAHOO_CLIENT_SECRET }}
