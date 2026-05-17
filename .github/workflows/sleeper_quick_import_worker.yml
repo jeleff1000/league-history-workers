@@ -74,9 +74,6 @@ jobs:
     needs: resolve-db-lock
     runs-on: ubuntu-latest
     timeout-minutes: 60  # Sleeper imports are faster (no OAuth, public API)
-    concurrency:
-      group: central-db-write-${{ needs.resolve-db-lock.outputs.database_name }}
-      cancel-in-progress: false
 
     env:
       PYTHONUNBUFFERED: 1
