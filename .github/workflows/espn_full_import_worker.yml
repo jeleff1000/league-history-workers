@@ -37,6 +37,9 @@ jobs:
   import-espn-history:
     runs-on: ubuntu-latest
     timeout-minutes: 90  # Historical imports may take longer
+    concurrency:
+      group: central-db-write
+      cancel-in-progress: false
 
     env:
       PYTHONUNBUFFERED: 1

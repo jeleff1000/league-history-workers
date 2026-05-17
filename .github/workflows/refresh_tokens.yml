@@ -26,6 +26,9 @@ permissions:
 jobs:
   refresh-tokens:
     runs-on: ubuntu-latest
+    concurrency:
+      group: central-db-write
+      cancel-in-progress: false
 
     steps:
       - name: Checkout code
