@@ -36,6 +36,9 @@ jobs:
   import-multi-platform:
     runs-on: ubuntu-latest
     timeout-minutes: 240
+    concurrency:
+      group: central-db-write
+      cancel-in-progress: false
 
     env:
       PYTHONUNBUFFERED: 1

@@ -41,6 +41,9 @@ jobs:
   validate-fleet:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    concurrency:
+      group: central-db-write
+      cancel-in-progress: false
 
     steps:
       - name: Checkout code

@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     concurrency:
-      group: central-db-write-${{ github.event.inputs.database_name }}
+      group: central-db-write
       cancel-in-progress: false
 
     env:

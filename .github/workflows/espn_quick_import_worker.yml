@@ -37,6 +37,9 @@ jobs:
   import-espn-league:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    concurrency:
+      group: central-db-write
+      cancel-in-progress: false
 
     env:
       PYTHONUNBUFFERED: 1

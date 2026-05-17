@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90  # Historical imports may take longer
     concurrency:
-      group: central-db-write-${{ needs.resolve-db-lock.outputs.database_name }}
+      group: central-db-write
       cancel-in-progress: false
 
     env:

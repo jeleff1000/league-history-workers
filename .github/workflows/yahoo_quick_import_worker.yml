@@ -36,6 +36,9 @@ jobs:
   quick-import:
     runs-on: ubuntu-latest
     timeout-minutes: 60  # Quick imports should be fast
+    concurrency:
+      group: central-db-write
+      cancel-in-progress: false
 
     env:
       PYTHONUNBUFFERED: 1

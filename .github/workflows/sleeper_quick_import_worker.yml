@@ -71,7 +71,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60  # Sleeper imports are faster (no OAuth, public API)
     concurrency:
-      group: central-db-write-${{ needs.resolve-db-lock.outputs.database_name }}
+      group: central-db-write
       cancel-in-progress: false
 
     env:
