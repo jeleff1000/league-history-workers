@@ -31,9 +31,6 @@ jobs:
   merge-league:
     runs-on: ubuntu-latest
     timeout-minutes: 45
-    concurrency:
-      group: central-db-write
-      cancel-in-progress: false
 
     env:
       PYTHONUNBUFFERED: 1

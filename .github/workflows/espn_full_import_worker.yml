@@ -41,9 +41,6 @@ jobs:
   import-espn-history:
     runs-on: ubuntu-latest
     timeout-minutes: 90  # Historical imports may take longer
-    concurrency:
-      group: central-db-write-${{ github.event.inputs.import_lock_key || github.event.client_payload.import_lock_key || github.event.inputs.user_id || github.event.client_payload.user_id }}
-      cancel-in-progress: false
 
     env:
       PYTHONUNBUFFERED: 1
