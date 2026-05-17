@@ -78,9 +78,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: duckdb-capacity-mode
-  cancel-in-progress: false
 
 jobs:
   capacity-mode:

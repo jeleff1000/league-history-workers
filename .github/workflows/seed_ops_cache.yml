@@ -20,9 +20,6 @@ jobs:
   seed:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    concurrency:
-      group: ops-cache-seed
-      cancel-in-progress: false
 
     env:
       OPS_CACHE_KEY: ops-cache-v4-Linux-manual-v1

@@ -20,9 +20,6 @@ on:
   repository_dispatch:
     types: [league_admin_merge]
 
-concurrency:
-  group: league-admin-merge-${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
-  cancel-in-progress: false
 
 permissions:
   contents: read
