@@ -28,10 +28,6 @@ on:
   repository_dispatch:
     types: [espn_full_import]
 
-# Prevent multiple imports for the same user running simultaneously
-concurrency:
-  group: espn-full-import-${{ github.event.inputs.import_lock_key || github.event.client_payload.import_lock_key || github.event.inputs.user_id || github.event.client_payload.user_id }}
-  cancel-in-progress: false
 
 permissions:
   actions: write
