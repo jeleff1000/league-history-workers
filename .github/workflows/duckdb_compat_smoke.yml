@@ -39,9 +39,6 @@ jobs:
     name: py${{ matrix.python-version }} / duckdb ${{ matrix.duckdb-version }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
-    concurrency:
-      group: central-db-write
-      cancel-in-progress: false
     strategy:
       fail-fast: false
       max-parallel: 1
