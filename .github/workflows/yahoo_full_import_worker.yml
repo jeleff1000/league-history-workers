@@ -15,6 +15,10 @@ on:
         description: 'Unique identifier for this user/import job'
         required: true
         type: string
+      import_lock_key:
+        description: 'Stable import concurrency key, usually the resolved db_name'
+        required: false
+        type: string
       yahoo_oauth_ref:
         description: 'yahoo_oauth branch/ref to check out (workers-repo override; default main)'
         required: false
@@ -24,10 +28,10 @@ on:
   repository_dispatch:
     types: [yahoo_full_import]
 
-# Prevent multiple imports for the same user running simultaneously
+# Prevent multiple imports for the same league running simultaneously
 # If a new import is triggered while one is running, let the first one finish
 concurrency:
-  group: league-import-${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
+  group: league-import-${{ github.event.inputs.import_lock_key || github.event.client_payload.import_lock_key || github.event.inputs.user_id || github.event.client_payload.user_id }}
   cancel-in-progress: false
 
 permissions:
@@ -39,7 +43,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     concurrency:
-      group: central-db-write
+      group: central-db-write-${{ github.event.inputs.import_lock_key || github.event.client_payload.import_lock_key || github.event.inputs.user_id || github.event.client_payload.user_id }}
       cancel-in-progress: false
 
     env:

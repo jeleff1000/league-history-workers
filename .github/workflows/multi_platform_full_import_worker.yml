@@ -15,6 +15,10 @@ on:
         description: 'Unique identifier for this import job'
         required: true
         type: string
+      import_lock_key:
+        description: 'Stable import concurrency key, usually the resolved db_name'
+        required: false
+        type: string
       yahoo_oauth_ref:
         description: 'yahoo_oauth branch/ref to check out'
         required: false
@@ -25,7 +29,7 @@ on:
     types: [multi_platform_full_import]
 
 concurrency:
-  group: multi-platform-import-${{ github.event.inputs.user_id || github.event.client_payload.user_id }}
+  group: multi-platform-import-${{ github.event.inputs.import_lock_key || github.event.client_payload.import_lock_key || github.event.inputs.user_id || github.event.client_payload.user_id }}
   cancel-in-progress: false
 
 permissions:
@@ -37,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 240
     concurrency:
-      group: central-db-write
+      group: central-db-write-${{ github.event.inputs.import_lock_key || github.event.client_payload.import_lock_key || github.event.inputs.user_id || github.event.client_payload.user_id }}
       cancel-in-progress: false
 
     env:
@@ -112,13 +116,13 @@ jobs:
 
       - name: Parse import plan
         env:
-          IMPORT_DATA_B64: ${{ github.event.inputs.import_data_b64 || github.event.client_payload.import_data_b64 }}
+          IMPORT_DATA_B64: ${{ github.event.inputs.import_data_b64 || github.event.client_payload.import_data_b64 || github.event.client_payload.league_data_b64 }}
         run: |
           python .github/scripts/run_multi_platform_import.py --plan-only
 
       - name: Run multi-platform import
         env:
-          IMPORT_DATA_B64: ${{ github.event.inputs.import_data_b64 || github.event.client_payload.import_data_b64 }}
+          IMPORT_DATA_B64: ${{ github.event.inputs.import_data_b64 || github.event.client_payload.import_data_b64 || github.event.client_payload.league_data_b64 }}
         run: |
           python .github/scripts/run_multi_platform_import.py
 
