@@ -33,10 +33,6 @@ permissions:
   actions: write
   contents: read
 
-concurrency:
-  group: league-import-${{ inputs.import_lock_key || github.event.client_payload.import_lock_key || github.run_id }}
-  cancel-in-progress: false
-
 jobs:
   resolve-db-lock:
     runs-on: ubuntu-latest
