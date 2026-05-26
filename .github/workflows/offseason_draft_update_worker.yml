@@ -1,0 +1,218 @@
+name: Offseason Draft Update Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to check'
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - sleeper
+          - espn
+          - yahoo
+      db_names:
+        description: 'Optional comma/newline-separated db_name list'
+        required: false
+        type: string
+      draft_year:
+        description: 'Optional draft year override, e.g. 2026'
+        required: false
+        type: string
+      execute:
+        description: 'Apply changed/missing draft updates'
+        required: true
+        type: boolean
+        default: false
+      allow_incomplete_draft:
+        description: 'Compare/update incomplete drafts when supported'
+        required: true
+        type: boolean
+        default: false
+      limit:
+        description: 'Optional maximum number of leagues to check'
+        required: false
+        type: string
+      api_retries:
+        description: 'API fetch attempts per league'
+        required: true
+        type: string
+        default: '3'
+      skip_sql_enrichments:
+        description: 'When executing, skip draft SQL enrichments'
+        required: true
+        type: boolean
+        default: false
+      include_ops_enrichments:
+        description: 'When executing, include ops-backed draft SQL enrichments'
+        required: true
+        type: boolean
+        default: false
+      strict_sql_enrichments:
+        description: 'When executing, fail on draft SQL enrichment errors'
+        required: true
+        type: boolean
+        default: false
+      skip_aggregates:
+        description: 'When executing, skip draft aggregate rebuilds'
+        required: true
+        type: boolean
+        default: false
+      skip_homepage:
+        description: 'When executing, skip homepage aggregate rebuilds'
+        required: true
+        type: boolean
+        default: false
+      yahoo_oauth_ref:
+        description: 'yahoo_oauth branch/ref to check out'
+        required: false
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  offseason-draft-update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    env:
+      PYTHONUNBUFFERED: 1
+      DATABASE_BACKEND: fly
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
+      YAHOO_CLIENT_ID: ${{ secrets.YAHOO_CLIENT_ID }}
+      YAHOO_CLIENT_SECRET: ${{ secrets.YAHOO_CLIENT_SECRET }}
+      CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref || 'main' }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Cache Python virtualenv
+        uses: actions/cache@v5
+        id: cache-venv
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py3.11-${{ hashFiles('requirements.txt') }}
+
+      - name: Create virtualenv
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: python -m venv .venv
+
+      - name: Install dependencies
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: |
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Activate virtualenv
+        run: echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Run offseason draft checker
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          DB_NAMES: ${{ inputs.db_names }}
+          DRAFT_YEAR: ${{ inputs.draft_year }}
+          EXECUTE: ${{ inputs.execute }}
+          ALLOW_INCOMPLETE_DRAFT: ${{ inputs.allow_incomplete_draft }}
+          LIMIT: ${{ inputs.limit }}
+          API_RETRIES: ${{ inputs.api_retries }}
+          SKIP_SQL_ENRICHMENTS: ${{ inputs.skip_sql_enrichments }}
+          INCLUDE_OPS_ENRICHMENTS: ${{ inputs.include_ops_enrichments }}
+          STRICT_SQL_ENRICHMENTS: ${{ inputs.strict_sql_enrichments }}
+          SKIP_AGGREGATES: ${{ inputs.skip_aggregates }}
+          SKIP_HOMEPAGE: ${{ inputs.skip_homepage }}
+        run: |
+          set -euo pipefail
+          args=(--platform "${PLATFORM}" --api-retries "${API_RETRIES}" --json-out offseason_draft_results.json)
+          if [ -n "${DRAFT_YEAR}" ]; then
+            args+=(--draft-year "${DRAFT_YEAR}")
+          fi
+          if [ -n "${LIMIT}" ]; then
+            args+=(--limit "${LIMIT}")
+          fi
+          if [ "${EXECUTE}" = "true" ]; then
+            args+=(--execute)
+          fi
+          if [ "${ALLOW_INCOMPLETE_DRAFT}" = "true" ]; then
+            args+=(--allow-incomplete-draft)
+          fi
+          if [ "${SKIP_SQL_ENRICHMENTS}" = "true" ]; then
+            args+=(--skip-sql-enrichments)
+          fi
+          if [ "${INCLUDE_OPS_ENRICHMENTS}" = "true" ]; then
+            args+=(--include-ops-enrichments)
+          fi
+          if [ "${STRICT_SQL_ENRICHMENTS}" = "true" ]; then
+            args+=(--strict-sql-enrichments)
+          fi
+          if [ "${SKIP_AGGREGATES}" = "true" ]; then
+            args+=(--skip-aggregates)
+          fi
+          if [ "${SKIP_HOMEPAGE}" = "true" ]; then
+            args+=(--skip-homepage)
+          fi
+          normalized_db_names="${DB_NAMES//$'\n'/,}"
+          IFS=',' read -ra dbs <<< "${normalized_db_names}"
+          for db in "${dbs[@]}"; do
+            trimmed="$(echo "${db}" | xargs)"
+            if [ -n "${trimmed}" ]; then
+              args+=(--db "${trimmed}")
+            fi
+          done
+          python scripts/check_offseason_drafts.py "${args[@]}"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: offseason-draft-results-${{ github.run_id }}
+          path: offseason_draft_results.json
+          retention-days: 30
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "# Offseason Draft Update" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f offseason_draft_results.json ]; then
+            python - <<'PYEOF' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from collections import Counter
+
+          with open("offseason_draft_results.json", encoding="utf-8") as handle:
+              results = json.load(handle)
+
+          counts = Counter(row.get("status") for row in results)
+          print("## Status Counts")
+          for status, count in sorted(counts.items()):
+              print(f"- `{status}`: {count}")
+          print("")
+          print("## Leagues")
+          print("| DB | Platform | Year | Status | API Picks | Stored Picks | Updated |")
+          print("|---|---|---:|---|---:|---:|---|")
+          for row in results:
+              print(
+                  f"| `{row.get('db_name')}` | {row.get('platform')} | {row.get('draft_year')} | "
+                  f"`{row.get('status')}` | {row.get('api_pick_count')} | "
+                  f"{row.get('stored_pick_count')} | {row.get('updated')} |"
+              )
+          PYEOF
+          else
+            echo "No offseason_draft_results.json artifact was produced." >> "$GITHUB_STEP_SUMMARY"
+          fi
