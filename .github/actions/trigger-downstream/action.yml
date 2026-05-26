@@ -206,7 +206,8 @@ runs:
               gh workflow run "${FULL_WORKFLOW}" \
                 --repo "${GH_REPO}" \
                 -f league_data_b64="${FULL_IMPORT_DATA}" \
-                -f user_id="${USER_ID}_full"
+                -f user_id="${USER_ID}_full" \
+                -f import_lock_key="${DATABASE_NAME}"
 
               if [ $? -eq 0 ]; then
                 echo "✓ Full import workflow triggered successfully"
