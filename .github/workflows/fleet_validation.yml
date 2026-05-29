@@ -3,6 +3,7 @@ name: Fleet Validation
 # Page-oriented, fleet-wide validator for ___leagues.
 # ~299 checks, ~20-35 queries via GROUP BY db_name batching.
 # Runs from league-history-workers (unlimited Actions minutes).
+# Scheduled runs are intentionally disabled; use workflow_dispatch for manual runs.
 
 on:
   workflow_dispatch:
@@ -31,9 +32,6 @@ on:
         required: false
         type: string
         default: main
-  schedule:
-    - cron: '0 6 * * *'  # Daily at 6am UTC
-
 permissions:
   contents: read
 
