@@ -96,6 +96,14 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           ref: ${{ inputs.yahoo_oauth_ref || 'main' }}
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/
+            /fantasy_football_data_scripts/
+            /scripts/
+            /requirements.txt
+            /pyproject.toml
 
       - name: Setup Python
         uses: actions/setup-python@v6

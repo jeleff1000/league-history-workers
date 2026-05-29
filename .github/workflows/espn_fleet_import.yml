@@ -68,6 +68,14 @@ jobs:
         with:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/
+            /fantasy_football_data_scripts/
+            /scripts/
+            /requirements.txt
+            /pyproject.toml
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -223,6 +231,14 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           ref: ${{ github.event.inputs.yahoo_oauth_ref || 'main' }}
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/
+            /fantasy_football_data_scripts/
+            /scripts/
+            /requirements.txt
+            /pyproject.toml
 
       - name: Restore cached ops cache
         id: ops-cache
@@ -262,6 +278,7 @@ jobs:
         run: python -m venv .venv
 
       - name: Install dependencies
+        if: steps.cache-venv.outputs.cache-hit != 'true'
         run: |
           source .venv/bin/activate
           python -m pip install --upgrade pip
