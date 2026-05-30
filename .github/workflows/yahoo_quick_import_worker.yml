@@ -287,6 +287,7 @@ jobs:
               "enable_caching": True,
               "rate_limit_per_sec": 4.0,
               "manager_name_overrides": league_data.get('manager_name_overrides', {}),
+              "franchise_merges": league_data.get('franchise_merges', []),
               "external_column_maps": league_data.get('external_column_maps', []),
               "external_identity_maps": league_data.get('external_identity_maps', {}),
               "keeper_rules": league_data.get('keeper_rules'),
