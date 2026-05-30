@@ -11,6 +11,10 @@ on:
         description: 'Unique identifier for this merge job'
         required: true
         type: string
+      import_lock_key:
+        description: 'Stable merge concurrency key, usually target/source db names'
+        required: false
+        type: string
       yahoo_oauth_ref:
         description: 'yahoo_oauth branch/ref to check out'
         required: false
@@ -23,6 +27,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.inputs.import_lock_key || github.event.client_payload.import_lock_key || github.event.inputs.user_id || github.event.client_payload.user_id || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   merge-league:
