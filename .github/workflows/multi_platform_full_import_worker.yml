@@ -33,6 +33,10 @@ permissions:
   actions: write
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.inputs.import_lock_key || github.event.client_payload.import_lock_key || github.event.inputs.user_id || github.event.client_payload.user_id || github.run_id }}
+  cancel-in-progress: false
+
 jobs:
   import-multi-platform:
     runs-on: ubuntu-latest
