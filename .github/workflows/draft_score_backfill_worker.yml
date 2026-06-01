@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       execute:
-        description: "Apply score, draft aggregate, and homepage updates"
+        description: "Apply score, aggregate, and homepage updates"
         required: true
         type: boolean
         default: false
@@ -12,30 +12,21 @@ on:
         description: "Optional comma/newline-separated db_name list. Leave blank for fleet."
         required: false
         type: string
-      shard_count:
-        description: "Fleet shard count, max 16 for this workflow"
+      skip_aggregates:
+        description: "Skip draft aggregate table rebuilds"
         required: true
-        type: choice
-        default: "16"
-        options:
-          - "1"
-          - "2"
-          - "4"
-          - "8"
-          - "16"
-      limit:
-        description: "Optional maximum number of leagues for fleet mode"
-        required: false
-        type: string
-      offset:
-        description: "Optional fleet offset"
-        required: false
-        type: string
+        type: boolean
+        default: false
       skip_homepage:
         description: "Skip homepage draft highlight refresh"
         required: true
         type: boolean
         default: false
+      timeout_seconds:
+        description: "Fly write timeout per phase"
+        required: false
+        type: string
+        default: "1800"
       yahoo_oauth_ref:
         description: "yahoo_oauth branch/ref to check out"
         required: false
@@ -46,94 +37,9 @@ permissions:
   contents: read
 
 jobs:
-  build-global-source-cache:
+  draft-score-bulk-backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
-
-    env:
-      PYTHONUNBUFFERED: 1
-      DATABASE_BACKEND: fly
-      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
-      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
-      DRAFT_SCORE_SOURCE_TIMEOUT_SECONDS: "420"
-      DRAFT_SCORE_SOURCE_MAX_RETRIES: "12"
-      DRAFT_SCORE_SOURCE_RETRY_MAX_DELAY: "60"
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
-          ref: ${{ inputs.yahoo_oauth_ref || 'main' }}
-          filter: blob:none
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            /fantasy_football_data_scripts/
-            /scripts/
-            /requirements.txt
-            /pyproject.toml
-
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Cache Python virtualenv
-        uses: actions/cache@v5
-        id: cache-venv
-        with:
-          path: .venv
-          key: venv-${{ runner.os }}-py3.11-${{ hashFiles('requirements.txt') }}
-
-      - name: Create virtualenv
-        if: steps.cache-venv.outputs.cache-hit != 'true'
-        run: python -m venv .venv
-
-      - name: Install dependencies
-        if: steps.cache-venv.outputs.cache-hit != 'true'
-        run: |
-          source .venv/bin/activate
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-
-      - name: Activate virtualenv
-        run: echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
-
-      - name: Build global source cache
-        run: |
-          set -euo pipefail
-          mkdir -p tmp
-          python - <<'PYEOF'
-          from pathlib import Path
-
-          from scripts.backfill_draft_scores import REPO_ROOT, build_global_source_cache, load_dotenv
-          from multi_league.core.readers.fly_reader import FlyReader
-
-          load_dotenv(REPO_ROOT / ".env")
-          build_global_source_cache(
-              FlyReader(),
-              Path("tmp/draft_score_global_source.parquet"),
-              refresh=True,
-          )
-          PYEOF
-
-      - name: Upload global source cache
-        uses: actions/upload-artifact@v6
-        with:
-          name: draft-score-global-source-${{ github.run_id }}
-          path: tmp/draft_score_global_source.parquet
-          retention-days: 1
-
-  draft-score-backfill:
-    runs-on: ubuntu-latest
-    timeout-minutes: 360
-    needs: build-global-source-cache
-    strategy:
-      fail-fast: false
-      max-parallel: 3
-      matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+    timeout-minutes: 120
 
     env:
       PYTHONUNBUFFERED: 1
@@ -141,30 +47,10 @@ jobs:
       DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
       DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
       DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
-      DRAFT_SCORE_SOURCE_TIMEOUT_SECONDS: "420"
-      DRAFT_SCORE_SOURCE_MAX_RETRIES: "12"
-      DRAFT_SCORE_SOURCE_RETRY_MAX_DELAY: "60"
+      DRAFT_SCORE_BULK_MAX_RETRIES: "2"
 
     steps:
-      - name: Skip inactive shard
-        id: shard
-        env:
-          DB_NAMES: ${{ inputs.db_names }}
-          SHARD_INDEX: ${{ matrix.shard }}
-          SHARD_COUNT: ${{ inputs.shard_count }}
-        run: |
-          set -euo pipefail
-          should_run=true
-          if [ -n "${DB_NAMES}" ] && [ "${SHARD_INDEX}" != "0" ]; then
-            should_run=false
-          fi
-          if [ -z "${DB_NAMES}" ] && [ "${SHARD_INDEX}" -ge "${SHARD_COUNT}" ]; then
-            should_run=false
-          fi
-          echo "should_run=${should_run}" >> "$GITHUB_OUTPUT"
-
       - name: Checkout code
-        if: steps.shard.outputs.should_run == 'true'
         uses: actions/checkout@v5
         with:
           repository: jeleff1000/yahoo_oauth
@@ -173,20 +59,17 @@ jobs:
           filter: blob:none
           sparse-checkout-cone-mode: false
           sparse-checkout: |
-            /.github/
             /fantasy_football_data_scripts/
             /scripts/
             /requirements.txt
             /pyproject.toml
 
       - name: Setup Python
-        if: steps.shard.outputs.should_run == 'true'
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
       - name: Cache Python virtualenv
-        if: steps.shard.outputs.should_run == 'true'
         uses: actions/cache@v5
         id: cache-venv
         with:
@@ -194,107 +77,52 @@ jobs:
           key: venv-${{ runner.os }}-py3.11-${{ hashFiles('requirements.txt') }}
 
       - name: Create virtualenv
-        if: steps.shard.outputs.should_run == 'true' && steps.cache-venv.outputs.cache-hit != 'true'
+        if: steps.cache-venv.outputs.cache-hit != 'true'
         run: python -m venv .venv
 
       - name: Install dependencies
-        if: steps.shard.outputs.should_run == 'true' && steps.cache-venv.outputs.cache-hit != 'true'
+        if: steps.cache-venv.outputs.cache-hit != 'true'
         run: |
           source .venv/bin/activate
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
       - name: Activate virtualenv
-        if: steps.shard.outputs.should_run == 'true'
         run: echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
 
-      - name: Download global source cache
-        if: steps.shard.outputs.should_run == 'true'
-        uses: actions/download-artifact@v6
-        with:
-          name: draft-score-global-source-${{ github.run_id }}
-          path: tmp
-
-      - name: Run draft score backfill
-        if: steps.shard.outputs.should_run == 'true'
+      - name: Run bulk draft score backfill
         env:
           EXECUTE: ${{ inputs.execute }}
           DB_NAMES: ${{ inputs.db_names }}
-          SHARD_INDEX: ${{ matrix.shard }}
-          SHARD_COUNT: ${{ inputs.shard_count }}
-          LIMIT: ${{ inputs.limit }}
-          OFFSET: ${{ inputs.offset }}
+          SKIP_AGGREGATES: ${{ inputs.skip_aggregates }}
           SKIP_HOMEPAGE: ${{ inputs.skip_homepage }}
+          TIMEOUT_SECONDS: ${{ inputs.timeout_seconds }}
         run: |
           set -euo pipefail
-          mkdir -p tmp
-          common=(--continue-on-error --ledger "draft_score_backfill_${SHARD_INDEX}.jsonl" --global-source-cache tmp/draft_score_global_source.parquet)
+          args=(--timeout-seconds "${TIMEOUT_SECONDS}")
           if [ "${EXECUTE}" = "true" ]; then
-            common+=(--apply)
+            args+=(--apply)
           else
-            common+=(--dry-run)
+            args+=(--dry-run)
+          fi
+          if [ "${SKIP_AGGREGATES}" = "true" ]; then
+            args+=(--skip-aggregates)
           fi
           if [ "${SKIP_HOMEPAGE}" = "true" ]; then
-            common+=(--skip-homepage)
+            args+=(--skip-homepage)
           fi
-
           normalized_db_names="${DB_NAMES//$'\n'/,}"
           if [ -n "${normalized_db_names}" ]; then
-            IFS=',' read -ra dbs <<< "${normalized_db_names}"
-            for db in "${dbs[@]}"; do
-              trimmed="$(echo "${db}" | xargs)"
-              if [ -n "${trimmed}" ]; then
-                python scripts/backfill_draft_scores.py --db "${trimmed}" "${common[@]}"
-              fi
-            done
-          else
-            args=(--all --shard-index "${SHARD_INDEX}" --shard-count "${SHARD_COUNT}" "${common[@]}")
-            if [ -n "${LIMIT}" ]; then
-              args+=(--limit "${LIMIT}")
-            fi
-            if [ -n "${OFFSET}" ]; then
-              args+=(--offset "${OFFSET}")
-            fi
-            python scripts/backfill_draft_scores.py "${args[@]}"
+            args+=(--db "${normalized_db_names}")
           fi
-
-      - name: Upload ledger
-        if: always() && steps.shard.outputs.should_run == 'true'
-        uses: actions/upload-artifact@v6
-        with:
-          name: draft-score-backfill-${{ github.run_id }}-${{ matrix.shard }}
-          path: draft_score_backfill_${{ matrix.shard }}.jsonl
-          if-no-files-found: ignore
-          retention-days: 30
+          python scripts/bulk_backfill_draft_scores.py "${args[@]}"
 
       - name: Summary
-        if: always() && steps.shard.outputs.should_run == 'true'
+        if: always()
         run: |
-          echo "# Draft Score Backfill" >> "$GITHUB_STEP_SUMMARY"
+          echo "# Draft Score Bulk Backfill" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Shard: ${{ matrix.shard }} / ${{ inputs.shard_count }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- Execute: ${{ inputs.execute }}" >> "$GITHUB_STEP_SUMMARY"
-          if [ -f "draft_score_backfill_${{ matrix.shard }}.jsonl" ]; then
-            python - <<'PYEOF' >> "$GITHUB_STEP_SUMMARY"
-          import json
-          from collections import Counter
-          from pathlib import Path
-
-          path = Path("draft_score_backfill_${{ matrix.shard }}.jsonl")
-          rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-          counts = Counter(row.get("status") for row in rows)
-          print("## Status Counts")
-          for status, count in sorted(counts.items()):
-              print(f"- `{status}`: {count}")
-          print("")
-          print("## Leagues")
-          print("| DB | Status | Draft Rows | Scored | Error |")
-          print("|---|---|---:|---:|---|")
-          for row in rows:
-              print(
-                  f"| `{row.get('db_name')}` | `{row.get('status')}` | "
-                  f"{row.get('draft_rows') or 0} | {row.get('scored_rows') or 0} | "
-                  f"{(row.get('error') or '').replace('|', '/')[:180]} |"
-              )
-          PYEOF
-          fi
+          echo "- Target: ${{ inputs.db_names || 'fleet' }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Skip aggregates: ${{ inputs.skip_aggregates }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Skip homepage: ${{ inputs.skip_homepage }}" >> "$GITHUB_STEP_SUMMARY"
