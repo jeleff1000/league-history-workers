@@ -36,11 +36,6 @@ on:
         required: true
         type: boolean
         default: false
-      refresh_global_source_cache:
-        description: "Rebuild the per-worker global draft source cache"
-        required: true
-        type: boolean
-        default: true
       yahoo_oauth_ref:
         description: "yahoo_oauth branch/ref to check out"
         required: false
@@ -51,9 +46,89 @@ permissions:
   contents: read
 
 jobs:
+  build-global-source-cache:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    env:
+      PYTHONUNBUFFERED: 1
+      DATABASE_BACKEND: fly
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      DRAFT_SCORE_SOURCE_TIMEOUT_SECONDS: "420"
+      DRAFT_SCORE_SOURCE_MAX_RETRIES: "12"
+      DRAFT_SCORE_SOURCE_RETRY_MAX_DELAY: "60"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref || 'main' }}
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /fantasy_football_data_scripts/
+            /scripts/
+            /requirements.txt
+            /pyproject.toml
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Cache Python virtualenv
+        uses: actions/cache@v5
+        id: cache-venv
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py3.11-${{ hashFiles('requirements.txt') }}
+
+      - name: Create virtualenv
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: python -m venv .venv
+
+      - name: Install dependencies
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: |
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Activate virtualenv
+        run: echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Build global source cache
+        run: |
+          set -euo pipefail
+          mkdir -p tmp
+          python - <<'PYEOF'
+          from pathlib import Path
+
+          from scripts.backfill_draft_scores import REPO_ROOT, build_global_source_cache, load_dotenv
+          from multi_league.core.readers.fly_reader import FlyReader
+
+          load_dotenv(REPO_ROOT / ".env")
+          build_global_source_cache(
+              FlyReader(),
+              Path("tmp/draft_score_global_source.parquet"),
+              refresh=True,
+          )
+          PYEOF
+
+      - name: Upload global source cache
+        uses: actions/upload-artifact@v6
+        with:
+          name: draft-score-global-source-${{ github.run_id }}
+          path: tmp/draft_score_global_source.parquet
+          retention-days: 1
+
   draft-score-backfill:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    needs: build-global-source-cache
     strategy:
       fail-fast: false
       max-parallel: 3
@@ -133,6 +208,13 @@ jobs:
         if: steps.shard.outputs.should_run == 'true'
         run: echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
 
+      - name: Download global source cache
+        if: steps.shard.outputs.should_run == 'true'
+        uses: actions/download-artifact@v6
+        with:
+          name: draft-score-global-source-${{ github.run_id }}
+          path: tmp
+
       - name: Run draft score backfill
         if: steps.shard.outputs.should_run == 'true'
         env:
@@ -143,7 +225,6 @@ jobs:
           LIMIT: ${{ inputs.limit }}
           OFFSET: ${{ inputs.offset }}
           SKIP_HOMEPAGE: ${{ inputs.skip_homepage }}
-          REFRESH_GLOBAL_SOURCE_CACHE: ${{ inputs.refresh_global_source_cache }}
         run: |
           set -euo pipefail
           mkdir -p tmp
@@ -155,9 +236,6 @@ jobs:
           fi
           if [ "${SKIP_HOMEPAGE}" = "true" ]; then
             common+=(--skip-homepage)
-          fi
-          if [ "${REFRESH_GLOBAL_SOURCE_CACHE}" = "true" ]; then
-            common+=(--refresh-global-source-cache)
           fi
 
           normalized_db_names="${DB_NAMES//$'\n'/,}"
