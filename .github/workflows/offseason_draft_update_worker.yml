@@ -41,10 +41,10 @@ on:
         type: string
         default: '3'
       skip_sql_enrichments:
-        description: 'When executing, skip draft SQL enrichments'
+        description: 'When executing, skip draft SQL enrichments. Leave true for draft-table-only updates.'
         required: true
         type: boolean
-        default: false
+        default: true
       include_ops_enrichments:
         description: 'When executing, include ops-backed draft SQL enrichments'
         required: true
@@ -56,15 +56,15 @@ on:
         type: boolean
         default: false
       skip_aggregates:
-        description: 'When executing, skip draft aggregate rebuilds'
+        description: 'When executing, skip draft aggregate rebuilds. Leave true for draft-table-only updates.'
         required: true
         type: boolean
-        default: false
+        default: true
       skip_homepage:
-        description: 'When executing, skip homepage aggregate rebuilds'
+        description: 'When executing, skip homepage aggregate rebuilds. Leave true for draft-table-only updates.'
         required: true
         type: boolean
-        default: false
+        default: true
       yahoo_oauth_ref:
         description: 'yahoo_oauth branch/ref to check out'
         required: false
