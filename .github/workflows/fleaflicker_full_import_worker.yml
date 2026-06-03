@@ -1,0 +1,214 @@
+name: Fleaflicker Full Import Worker (Manual QA)
+
+# Manual-only QA worker for bringing Fleaflicker into the shared DDL/import
+# pipeline. This checks out yahoo_oauth, runs the Fleaflicker import script,
+# then optionally runs fleet validators against the uploaded Fly database.
+
+on:
+  workflow_dispatch:
+    inputs:
+      league_id:
+        description: 'Fleaflicker league ID'
+        required: true
+        type: string
+        default: '30323'
+      start_year:
+        description: 'First season to import'
+        required: true
+        type: string
+        default: '2025'
+      end_year:
+        description: 'Last season to import'
+        required: true
+        type: string
+        default: '2025'
+      database_name:
+        description: 'Target db_name in ___leagues'
+        required: true
+        type: string
+        default: 'fleaflicker_public_30323'
+      import_mode:
+        description: 'Import mode'
+        required: true
+        type: choice
+        options:
+          - full
+          - quick
+        default: full
+      yahoo_oauth_ref:
+        description: 'yahoo_oauth branch/ref to check out'
+        required: false
+        type: string
+        default: 'main'
+      skip_track_1:
+        description: 'Skip NFL super table verification'
+        required: false
+        type: boolean
+        default: false
+      skip_upload:
+        description: 'Skip Fly upload'
+        required: false
+        type: boolean
+        default: false
+      run_validators:
+        description: 'Run validation_v2 after upload'
+        required: false
+        type: boolean
+        default: true
+
+  repository_dispatch:
+    types: [fleaflicker_full_import]
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.inputs.database_name || github.event.client_payload.database_name || github.event.inputs.league_id || github.event.client_payload.league_id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  import-fleaflicker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    env:
+      PYTHONUNBUFFERED: 1
+      IMPORT_PIPELINE_V2: ${{ vars.IMPORT_PIPELINE_V2 }}
+      DATABASE_BACKEND: fly
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
+      FLY_PRIMARY_MACHINE_ID: ${{ secrets.FLY_PRIMARY_MACHINE_ID }}
+      FLY_UPLOAD_MAX_RETRIES: 40
+      FLY_UPLOAD_RETRY_BASE_DELAY: 3
+      FLY_UPLOAD_RETRY_MAX_DELAY: 30
+      FLY_UPLOAD_RETRY_JITTER_SECONDS: 2
+      FLY_PUBLISH_FORMAT: delta
+      FLY_DELTA_FALLBACK_TO_DUCKDB: '0'
+      FLY_FINALIZE_INVENTORY: '1'
+      OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
+      LEAGUE_ID: ${{ github.event.inputs.league_id || github.event.client_payload.league_id || '30323' }}
+      START_YEAR: ${{ github.event.inputs.start_year || github.event.client_payload.start_year || '2025' }}
+      END_YEAR: ${{ github.event.inputs.end_year || github.event.client_payload.end_year || '2025' }}
+      DB_NAME: ${{ github.event.inputs.database_name || github.event.client_payload.database_name || 'fleaflicker_public_30323' }}
+      IMPORT_MODE: ${{ github.event.inputs.import_mode || github.event.client_payload.import_mode || 'full' }}
+      SKIP_TRACK_1: ${{ github.event.inputs.skip_track_1 || github.event.client_payload.skip_track_1 || 'false' }}
+      SKIP_UPLOAD: ${{ github.event.inputs.skip_upload || github.event.client_payload.skip_upload || 'false' }}
+      RUN_VALIDATORS: ${{ github.event.inputs.run_validators || github.event.client_payload.run_validators || 'true' }}
+      DATA_DIR: ${{ github.workspace }}/fantasy_football_data/fleaflicker
+
+    steps:
+      - name: Checkout yahoo_oauth
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || github.event.client_payload.yahoo_oauth_ref || 'main' }}
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /.github/
+            /fantasy_football_data_scripts/
+            /scripts/
+            /requirements.txt
+            /pyproject.toml
+
+      - name: Setup Python
+        id: setup-python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Restore cached ops cache
+        id: ops-cache
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache
+          key: ops-cache-v4-${{ runner.os }}-manual-v1
+          fail-on-cache-miss: true
+
+      - name: Log cached ops cache
+        run: |
+          echo "[ops-cache] key=ops-cache-v4-${{ runner.os }}-manual-v1"
+          echo "[ops-cache] restore-hit=${{ steps.ops-cache.outputs.cache-hit }}"
+          echo "[ops-cache] OPS_CACHE_PATH=${OPS_CACHE_PATH}"
+          test -s "${OPS_CACHE_PATH}" || {
+            echo "::error::ops_cache.duckdb is missing after cache restore. Run the Seed Ops Cache workflow before imports."
+            exit 1
+          }
+          echo "[ops-cache] size-bytes=$(stat -c%s "${OPS_CACHE_PATH}")"
+          echo "[ops-cache] size-human=$(du -h "${OPS_CACHE_PATH}" | cut -f1)"
+
+      - name: Cache Python virtualenv
+        uses: actions/cache@v5
+        id: cache-venv
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('requirements.txt') }}
+
+      - name: Create virtualenv
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: python -m venv .venv
+
+      - name: Install dependencies
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: |
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Activate venv
+        run: |
+          echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Echo import parameters
+        run: |
+          echo "league_id=${LEAGUE_ID}"
+          echo "years=${START_YEAR}-${END_YEAR}"
+          echo "db_name=${DB_NAME}"
+          echo "import_mode=${IMPORT_MODE}"
+          echo "skip_track_1=${SKIP_TRACK_1}"
+          echo "skip_upload=${SKIP_UPLOAD}"
+          echo "run_validators=${RUN_VALIDATORS}"
+          echo "data_dir=${DATA_DIR}"
+
+      - name: Run Fleaflicker import
+        run: |
+          source .venv/bin/activate
+          mkdir -p "${DATA_DIR}"
+
+          args=(
+            --league-id "${LEAGUE_ID}"
+            --start-year "${START_YEAR}"
+            --end-year "${END_YEAR}"
+            --database-name "${DB_NAME}"
+            --data-dir "${DATA_DIR}"
+            --import-mode "${IMPORT_MODE}"
+          )
+
+          if [ "${SKIP_TRACK_1}" = "true" ]; then
+            args+=(--skip-track-1)
+          fi
+
+          if [ "${SKIP_UPLOAD}" = "true" ]; then
+            args+=(--skip-track-2-upload)
+          fi
+
+          python fantasy_football_data_scripts/fleaflicker_initial_import.py "${args[@]}"
+
+      - name: Run validators
+        if: ${{ env.RUN_VALIDATORS == 'true' && env.SKIP_UPLOAD != 'true' }}
+        run: |
+          source .venv/bin/activate
+          python -m multi_league.validation_v2 --db "${DB_NAME}" -v
+
+      - name: Upload local DuckDB artifact
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: fleaflicker-import-${{ env.DB_NAME }}-${{ github.run_id }}
+          path: |
+            fantasy_football_data/fleaflicker/
+          if-no-files-found: ignore
+          retention-days: 7
