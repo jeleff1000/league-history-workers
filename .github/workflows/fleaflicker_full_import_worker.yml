@@ -217,6 +217,7 @@ jobs:
         if: ${{ env.RUN_VALIDATORS == 'true' && env.SKIP_UPLOAD != 'true' }}
         run: |
           source .venv/bin/activate
+          export PYTHONPATH="${{ github.workspace }}/fantasy_football_data_scripts:${PYTHONPATH:-}"
           python -m multi_league.validation_v2 --db "${DB_NAME}" -v
 
       - name: Upload local DuckDB artifact
