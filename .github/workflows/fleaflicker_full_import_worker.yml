@@ -13,15 +13,15 @@ on:
         type: string
         default: '30323'
       start_year:
-        description: 'First season to import'
-        required: true
+        description: 'First season to import; leave blank/auto for full-history discovery'
+        required: false
         type: string
-        default: '2025'
+        default: ''
       end_year:
-        description: 'Last season to import'
-        required: true
+        description: 'Last season to import; leave blank/auto for latest scored season'
+        required: false
         type: string
-        default: '2025'
+        default: ''
       database_name:
         description: 'Target db_name in ___leagues'
         required: true
@@ -99,8 +99,8 @@ jobs:
       FLY_FINALIZE_INVENTORY: '1'
       OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
       LEAGUE_ID: ${{ github.event.inputs.league_id || github.event.client_payload.league_id || '30323' }}
-      START_YEAR: ${{ github.event.inputs.start_year || github.event.client_payload.start_year || '2025' }}
-      END_YEAR: ${{ github.event.inputs.end_year || github.event.client_payload.end_year || '2025' }}
+      START_YEAR: ${{ github.event.inputs.start_year || github.event.client_payload.start_year || '' }}
+      END_YEAR: ${{ github.event.inputs.end_year || github.event.client_payload.end_year || '' }}
       DB_NAME: ${{ github.event.inputs.database_name || github.event.client_payload.database_name || 'fleaflicker_public_30323' }}
       IMPORT_MODE: ${{ github.event.inputs.import_mode || github.event.client_payload.import_mode || 'full' }}
       SKIP_TRACK_1: ${{ github.event.inputs.skip_track_1 || github.event.client_payload.skip_track_1 || 'false' }}
@@ -177,7 +177,7 @@ jobs:
       - name: Echo import parameters
         run: |
           echo "league_id=${LEAGUE_ID}"
-          echo "years=${START_YEAR}-${END_YEAR}"
+          echo "years=${START_YEAR:-auto}-${END_YEAR:-auto}"
           echo "db_name=${DB_NAME}"
           echo "import_mode=${IMPORT_MODE}"
           echo "skip_track_1=${SKIP_TRACK_1}"
@@ -194,14 +194,24 @@ jobs:
 
           args=(
             --league-id "${LEAGUE_ID}"
-            --start-year "${START_YEAR}"
-            --end-year "${END_YEAR}"
             --database-name "${DB_NAME}"
             --data-dir "${DATA_DIR}"
             --import-mode "${IMPORT_MODE}"
             --rate-limit-per-min "${FLEAFLICKER_RATE_LIMIT_PER_MIN}"
             --max-workers "${FLEAFLICKER_MAX_WORKERS}"
           )
+
+          if [ -n "${START_YEAR}" ] && [ "${START_YEAR}" != "auto" ]; then
+            args+=(--start-year "${START_YEAR}")
+          fi
+
+          if [ -n "${END_YEAR}" ] && [ "${END_YEAR}" != "auto" ]; then
+            args+=(--end-year "${END_YEAR}")
+          fi
+
+          if [ "${IMPORT_MODE}" = "full" ] && { [ -z "${START_YEAR}" ] || [ "${START_YEAR}" = "auto" ] || [ -z "${END_YEAR}" ] || [ "${END_YEAR}" = "auto" ]; }; then
+            args+=(--discover-years)
+          fi
 
           if [ "${SKIP_TRACK_1}" = "true" ]; then
             args+=(--skip-track-1)
