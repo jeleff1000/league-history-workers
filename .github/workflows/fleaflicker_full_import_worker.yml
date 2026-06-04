@@ -220,6 +220,23 @@ jobs:
           export PYTHONPATH="${{ github.workspace }}/fantasy_football_data_scripts:${PYTHONPATH:-}"
           python -m multi_league.validation_v2 --db "${DB_NAME}" -v
 
+      # ==================== REVALIDATE + WARM VERCEL CACHE ====================
+      - name: Revalidate and warm Vercel cache
+        if: ${{ env.SKIP_UPLOAD != 'true' }}
+        env:
+          REVALIDATION_SECRET: ${{ secrets.REVALIDATION_SECRET }}
+        run: |
+          source .venv/bin/activate
+          python scripts/warm_vercel_cache.py \
+            --db "${DB_NAME}" \
+            --secret "${REVALIDATION_SECRET}" \
+            --site-url "https://www.leaguehistory.app" \
+            --mode "${IMPORT_MODE}" \
+            --strategy expire \
+            --jitter-seconds 0 \
+            --strict \
+            --verify-hot
+
       - name: Upload local DuckDB artifact
         if: always()
         uses: actions/upload-artifact@v5
