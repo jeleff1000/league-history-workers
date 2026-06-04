@@ -56,10 +56,10 @@ on:
         type: boolean
         default: true
       rate_limit_per_min:
-        description: 'Fleaflicker API request budget per minute'
+        description: 'Fleaflicker API request budget per minute (0 disables client-side throttling)'
         required: false
         type: string
-        default: '300'
+        default: '0'
       max_workers:
         description: 'Concurrent Fleaflicker roster requests per week'
         required: false
@@ -106,7 +106,7 @@ jobs:
       SKIP_TRACK_1: ${{ github.event.inputs.skip_track_1 || github.event.client_payload.skip_track_1 || 'false' }}
       SKIP_UPLOAD: ${{ github.event.inputs.skip_upload || github.event.client_payload.skip_upload || 'false' }}
       RUN_VALIDATORS: ${{ github.event.inputs.run_validators || github.event.client_payload.run_validators || 'true' }}
-      FLEAFLICKER_RATE_LIMIT_PER_MIN: ${{ github.event.inputs.rate_limit_per_min || github.event.client_payload.rate_limit_per_min || '300' }}
+      FLEAFLICKER_RATE_LIMIT_PER_MIN: ${{ github.event.inputs.rate_limit_per_min || github.event.client_payload.rate_limit_per_min || '0' }}
       FLEAFLICKER_MAX_WORKERS: ${{ github.event.inputs.max_workers || github.event.client_payload.max_workers || '12' }}
       DATA_DIR: ${{ github.workspace }}/fantasy_football_data/fleaflicker
 
