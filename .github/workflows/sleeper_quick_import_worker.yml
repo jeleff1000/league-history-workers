@@ -498,7 +498,9 @@ jobs:
             --mode quick \
             --strategy expire \
             --jitter-seconds 0 \
+            --warm-attempts 2 \
             --strict \
+            --soft-warm-failures \
             --verify-hot
 
       # ==================== UPDATE LEAGUE DATA WITH DISCOVERED IDS ====================

@@ -547,7 +547,9 @@ jobs:
             --mode "$IMPORT_MODE" \
             --strategy expire \
             --jitter-seconds 0 \
+            --warm-attempts 2 \
             --strict \
+            --soft-warm-failures \
             --verify-hot
 
       # ==================== CLEANUP ====================

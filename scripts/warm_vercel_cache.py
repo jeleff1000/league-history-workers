@@ -535,6 +535,14 @@ def parse_args() -> argparse.Namespace:
         help="Return non-zero if revalidation or any warm request fails.",
     )
     parser.add_argument(
+        "--soft-warm-failures",
+        action="store_true",
+        help=(
+            "Keep strict revalidation/read-visibility checks, but report warm/verify "
+            "failures as warnings after the import has already committed."
+        ),
+    )
+    parser.add_argument(
         "--verify-hot",
         action="store_true",
         help="Repeat the warm URLs and verify cache-required routes are hot enough.",
@@ -628,6 +636,9 @@ def main() -> int:
 
     if failures:
         print(f"Warm-up completed with {failures} failure(s)", file=sys.stderr)
+        if args.soft_warm_failures:
+            print("Warm-up failures are warnings; committed import remains successful", file=sys.stderr)
+            return 0
         return 1 if args.strict else 0
     print("Warm-up complete")
     return 0

@@ -557,7 +557,9 @@ jobs:
             --mode full \
             --strategy expire \
             --jitter-seconds 0 \
+            --warm-attempts 2 \
             --strict \
+            --soft-warm-failures \
             --verify-hot
 
       # ==================== STORE ESPN LEAGUE INFO ====================
