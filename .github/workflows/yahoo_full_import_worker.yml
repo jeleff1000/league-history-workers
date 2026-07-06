@@ -701,23 +701,10 @@ jobs:
           PYEOF
 
       # ==================== UPLOAD ARTIFACTS ====================
-      - name: Upload artifacts
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: league-import-${{ steps.parse.outputs.user_id }}
-          path: |
-            quick_import.log
-            import.log
-            expected_record.log
-            playoff_odds.log
-            agg_matchup.log
-            agg_draft.log
-            agg_transaction.log
-            agg_fantasy.log
-            agg_standings.log
-            agg_homepage.log
-          retention-days: 30
+      # G10 remediation (2026-07-06): artifact upload removed. Logs and
+      # data files on a PUBLIC repo are downloadable by any GitHub user
+      # and contained league/manager-identifying data. Diagnostics belong
+      # in PRIVATE storage (see weekly-update-system-plan.md, G10).
 
       # ==================== WORKFLOW SUMMARY ====================
       - name: Create workflow summary

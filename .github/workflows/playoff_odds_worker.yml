@@ -330,19 +330,10 @@ jobs:
           PYEOF
 
       # ==================== CLEANUP ====================
-      - name: Upload logs
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: playoff-odds-${{ github.event.inputs.user_id || github.event.inputs.database_name }}
-          path: |
-            expected_record.log
-            playoff_odds.log
-            matchup_aggregation.log
-            draft_aggregation.log
-            transaction_aggregation.log
-            homepage_summary.log
-          retention-days: 7
+      # G10 remediation (2026-07-06): artifact upload removed. Logs and
+      # data files on a PUBLIC repo are downloadable by any GitHub user
+      # and contained league/manager-identifying data. Diagnostics belong
+      # in PRIVATE storage (see weekly-update-system-plan.md, G10).
 
       - name: Create workflow summary
         if: always()

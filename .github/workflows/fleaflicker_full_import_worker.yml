@@ -251,12 +251,7 @@ jobs:
             --soft-warm-failures \
             --verify-hot
 
-      - name: Upload local DuckDB artifact
-        if: always()
-        uses: actions/upload-artifact@v5
-        with:
-          name: fleaflicker-import-${{ env.DB_NAME }}-${{ github.run_id }}
-          path: |
-            fantasy_football_data/fleaflicker/
-          if-no-files-found: ignore
-          retention-days: 7
+      # G10 remediation (2026-07-06): artifact upload removed. Logs and
+      # data files on a PUBLIC repo are downloadable by any GitHub user
+      # and contained league/manager-identifying data. Diagnostics belong
+      # in PRIVATE storage (see weekly-update-system-plan.md, G10).

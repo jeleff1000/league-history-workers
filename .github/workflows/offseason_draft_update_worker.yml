@@ -185,13 +185,10 @@ jobs:
           done
           python scripts/check_offseason_drafts.py "${args[@]}"
 
-      - name: Upload results
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: offseason-draft-results-${{ github.run_id }}
-          path: offseason_draft_results.json
-          retention-days: 30
+      # G10 remediation (2026-07-06): artifact upload removed. Logs and
+      # data files on a PUBLIC repo are downloadable by any GitHub user
+      # and contained league/manager-identifying data. Diagnostics belong
+      # in PRIVATE storage (see weekly-update-system-plan.md, G10).
 
       - name: Summary
         if: always()

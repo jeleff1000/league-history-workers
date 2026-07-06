@@ -505,12 +505,7 @@ jobs:
       # ==================== UPDATE JOB STATUS - FINAL ====================
 
       # ==================== UPLOAD ARTIFACTS ====================
-      - name: Upload artifacts
-        if: always()
-        uses: actions/upload-artifact@v6
-        with:
-          name: quick-import-${{ steps.parse.outputs.user_id }}
-          path: |
-            import.log
-            league_context.json
-          retention-days: 7
+      # G10 remediation (2026-07-06): artifact upload removed. Logs and
+      # data files on a PUBLIC repo are downloadable by any GitHub user
+      # and contained league/manager-identifying data. Diagnostics belong
+      # in PRIVATE storage (see weekly-update-system-plan.md, G10).
