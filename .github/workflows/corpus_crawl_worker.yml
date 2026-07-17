@@ -27,10 +27,15 @@ on:
   workflow_dispatch:
     inputs:
       batches:
-        description: 'Parallel jobs, each its own runner. 20 = GitHub concurrency cap. Use 2 for a test.'
+        description: 'How many slices to split the plan into. All of them run; max_parallel caps how many at once.'
         required: false
         type: string
         default: '20'
+      max_parallel:
+        description: 'How many slices run CONCURRENTLY. Account-wide cap is 20 across ALL repos, so keep headroom for customer imports + ff-assets harvests.'
+        required: false
+        type: string
+        default: '15'
       batch_size:
         description: 'Leagues per job = one artifact drop. ~960 fits a 6h job at 4 workers. Use 5 for a test.'
         required: false
@@ -76,14 +81,19 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       batch_list: ${{ steps.mk.outputs.batch_list }}
+      max_parallel: ${{ steps.mk.outputs.max_parallel }}
     steps:
       - name: Build batch index list
         id: mk
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import json, os
-          n = int("${{ github.event.inputs.batches || '7' }}")
+          import json
+          n  = int("${{ github.event.inputs.batches || '20' }}")
+          # cap concurrency, and never exceed the batch count (max-parallel > jobs is a no-op)
+          mp = min(int("${{ github.event.inputs.max_parallel || '15' }}"), n)
           print("batch_list=" + json.dumps(list(range(n))))
+          print("max_parallel=" + str(mp))
+          print(f"[prepare] {n} batches, max {mp} concurrent -> {20-mp} slots left for imports")
           PY
 
   crawl:
@@ -92,6 +102,11 @@ jobs:
     timeout-minutes: 350          # under the 6h hard job cap
     strategy:
       fail-fast: false            # one bad slice must not kill the others
+      # Concurrency is per-ACCOUNT (20 on the Free plan), shared across every repo -- so an
+      # unrestrained crawl starves customer imports in league-history-workers AND the
+      # nflcom-harvest in ff-assets. 15 leaves 5 slots open so an import never queues behind
+      # the crawl. The batch COUNT is unaffected: all batches still run, 5 just wait.
+      max-parallel: ${{ fromJSON(needs.prepare.outputs.max_parallel) }}
       matrix:
         batch: ${{ fromJSON(needs.prepare.outputs.batch_list) }}
 
