@@ -1,0 +1,204 @@
+name: Corpus Extra-Platform Crawl
+
+# Crawls MFL or Fleaflicker leagues into the research corpus and ships one folded snapshot
+# artifact per batch, mirroring corpus_crawl_worker.yml. Same offline guarantees: CORPUS_MODE=1
+# and NO Fly credentials, so the ingest reads the super-table/draft baseline from the local
+# ops cache and can never touch Fly (proven by the extra-platform smoke).
+#
+# Unlike the Sleeper crawl (CPU-bound), these are API-THROTTLE-bound (MFL hard 429 at ~15/min
+# per IP; Fleaflicker soft 403). Throughput therefore comes from MORE matrix jobs (each its own
+# runner IP), not more workers -- keep workers low and batch_size small.
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Which corpus to crawl'
+        required: true
+        type: choice
+        options: ['mfl', 'fleaflicker']
+      batches:
+        description: 'How many disjoint slices (each its own runner/IP). All run; max_parallel caps concurrency.'
+        required: false
+        type: string
+        default: '10'
+      max_parallel:
+        description: 'Concurrent slices. Account cap is 20 across ALL repos -- leave slack for customer imports.'
+        required: false
+        type: string
+        default: '10'
+      batch_size:
+        description: 'Leagues per job. MFL ~15 min/league (use 20-30); Fleaflicker 10-40 min/league (use 15-20).'
+        required: false
+        type: string
+        default: '20'
+      workers:
+        description: 'Parallel ingests per runner. Rate limit divides across them, so keep at 1 (MFL) or 2 (Fleaflicker).'
+        required: false
+        type: string
+        default: '1'
+      prune:
+        description: 'Delete each raw league dir after folding (ONE-WAY: cannot re-fold/re-sim without re-crawling). Off for pilots.'
+        required: false
+        type: boolean
+        default: false
+      yahoo_oauth_ref:
+        description: 'yahoo_oauth branch/ref to check out'
+        required: false
+        type: string
+        default: 'corpus-pilot-mfl-fleaflicker'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: corpus-extraplatform-${{ github.event.inputs.platform }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      batch_list: ${{ steps.mk.outputs.batch_list }}
+      max_parallel: ${{ steps.mk.outputs.max_parallel }}
+    steps:
+      - name: Build batch index list
+        id: mk
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, sys
+          n  = int("${{ github.event.inputs.batches || '10' }}")
+          mp = min(int("${{ github.event.inputs.max_parallel || '10' }}"), n)
+          print("batch_list=" + json.dumps(list(range(n))))
+          print("max_parallel=" + str(mp))
+          print(f"[prepare] {n} batches, max {mp} concurrent", file=sys.stderr)
+          PY
+
+  crawl:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(needs.prepare.outputs.max_parallel) }}
+      matrix:
+        batch: ${{ fromJSON(needs.prepare.outputs.batch_list) }}
+
+    env:
+      CORPUS_DIR: ${{ github.workspace }}/corpus
+      YAHOO_OAUTH_ROOT: ${{ github.workspace }}/code
+      CORPUS_MODE: 1
+      CORPUS_DEPENDENCY_DIR: ${{ github.workspace }}/corpus_dependencies
+      OPS_CACHE_PATH: ${{ github.workspace }}/corpus_dependencies/ops_cache.duckdb
+      DRAFT_GLOBAL_SOURCE_PATH: ${{ github.workspace }}/corpus_dependencies/draft_global_source.parquet
+      CORPUS_DEPENDENCY_KEY: corpus-dependencies-v1-Linux-20260717
+
+    steps:
+      - name: Checkout crawl seed (this repo)
+        uses: actions/checkout@v5
+        with:
+          path: crawl
+
+      - name: Checkout pipeline code (private)
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || 'corpus-pilot-mfl-fleaflicker' }}
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /fantasy_football_data_scripts/
+            /scripts/
+            /requirements.txt
+            /pyproject.toml
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -r code/requirements.txt
+
+      - name: Restore corpus dependencies
+        id: corpus-dependencies
+        uses: actions/cache/restore@v5
+        with:
+          path: corpus_dependencies
+          key: ${{ env.CORPUS_DEPENDENCY_KEY }}
+
+      - name: Fail fast if corpus dependencies are missing
+        if: steps.corpus-dependencies.outputs.cache-hit != 'true'
+        run: |
+          echo "::error::corpus dependency miss (key=${CORPUS_DEPENDENCY_KEY}). Run 'Seed Corpus Dependencies' first."
+          exit 1
+
+      - name: Assert this job has NO Fly credentials (offline proof)
+        run: |
+          if [ -n "${DATABASE_SERVER_URL:-}" ] || [ -n "${DATABASE_READ_TOKEN:-}" ] || [ -n "${DATABASE_WRITE_TOKEN:-}" ]; then
+            echo "::error::Fly credentials present -- this crawl MUST run with no Fly access."; exit 1
+          fi
+          echo "[offline] no Fly credentials; any Fly access will fail hard."
+
+      - name: Stage crawl seed
+        run: |
+          mkdir -p "$CORPUS_DIR/discovery" "$CORPUS_DIR/leagues"
+          cp "crawl/corpus_seed/${{ github.event.inputs.platform }}_crawl_seed.json" "$CORPUS_DIR/discovery/"
+          python3 -c "import json;d=json.load(open('$CORPUS_DIR/discovery/${{ github.event.inputs.platform }}_crawl_seed.json'));print('[seed]', len(d.get('leagues',[])), 'leagues')"
+
+      - name: Crawl slice ${{ matrix.batch }}
+        env:
+          OFFSET: ${{ matrix.batch }}
+          SIZE: ${{ github.event.inputs.batch_size || '20' }}
+        run: |
+          set -o pipefail
+          PRUNE=""
+          if [ "${{ github.event.inputs.prune }}" = "true" ]; then PRUNE="--prune"; fi
+          python code/scripts/extraplatform_corpus/batch_ingest_extraplatform.py \
+            --platform "${{ github.event.inputs.platform }}" \
+            --workers  "${{ github.event.inputs.workers || '1' }}" \
+            --offset   "$(( OFFSET * SIZE ))" \
+            --limit    "$SIZE" \
+            --fold-into "$CORPUS_DIR/corpus_slice_${{ github.event.inputs.platform }}_${{ matrix.batch }}.duckdb" \
+            $PRUNE \
+            > "crawl_${{ matrix.batch }}.log" 2>&1 || CRAWL_RC=$?
+          LOG="crawl_${{ matrix.batch }}.log"
+          OK=$(grep -c ' -> OK' "$LOG" || true)
+          FAILED=$(grep -cE ' -> (IMPORT_FAILED|SIM_FAILED)' "$LOG" || true)
+          echo "[crawl] rc=${CRAWL_RC:-0}  ok=$OK  failed=$FAILED"
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::group::failure reasons (first 20)"; grep -E ' -> (IMPORT_FAILED|SIM_FAILED)' "$LOG" | head -20; echo "::endgroup::"
+            echo "::group::driver tail (last 60)"; tail -60 "$LOG"; echo "::endgroup::"
+          fi
+          if [ "$OK" -eq 0 ]; then
+            echo "::error::0 of $((OK+FAILED)) leagues ingested -- nothing worked."; exit 1
+          fi
+          if [ "$FAILED" -gt "$OK" ]; then
+            echo "::error::$FAILED failed vs $OK ok -- majority failure."; exit 1
+          fi
+          exit "${CRAWL_RC:-0}"
+
+      - name: Slice summary
+        if: always()
+        run: |
+          SLICE="$CORPUS_DIR/corpus_slice_${{ github.event.inputs.platform }}_${{ matrix.batch }}.duckdb"
+          if [ -s "$SLICE" ]; then
+            python3 - <<PY
+          import duckdb
+          c = duckdb.connect("$SLICE", read_only=True)
+          import os; print(f"[slice ${{ matrix.batch }}] {c.execute('SELECT COUNT(*) FROM _sources').fetchone()[0]} leagues, {os.path.getsize('$SLICE')/1048576:.1f} MB")
+          for t in ("league_settings","draft","transactions","player_fantasy"):
+              print(f"   {t}: {c.execute(f'SELECT COUNT(*) FROM public.{t}').fetchone()[0]:,} rows")
+          PY
+          fi
+
+      - name: Upload slice
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-slice-${{ github.event.inputs.platform }}-${{ matrix.batch }}
+          path: ${{ github.workspace }}/corpus/corpus_slice_${{ github.event.inputs.platform }}_${{ matrix.batch }}.duckdb
+          if-no-files-found: ignore
