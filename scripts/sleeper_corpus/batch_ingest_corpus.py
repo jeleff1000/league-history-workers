@@ -138,6 +138,22 @@ def build_plan(target: int, years: tuple[int, int], partitions: list[str],
     return dedup
 
 
+def _err(p) -> str:
+    """Exception line FIRST, then traceback tail.
+
+    A traceback's last line is the exception; everything above is File frames. Slicing the
+    front of a tail therefore shows paths and hides the message -- which is exactly how two
+    GH pilots failed 15/15 and 3/3 without ever revealing why.
+    """
+    out = (p.stderr or p.stdout or "").strip()
+    if not out:
+        return "(no stderr)"
+    lines = [ln for ln in out.splitlines() if ln.strip()]
+    exc = next((ln.strip() for ln in reversed(lines)
+                if ln.strip() and not ln.strip().startswith(("File ", "  ", "Traceback"))), lines[-1].strip())
+    return f"{exc}  ||tail|| {out[-600:]}"
+
+
 def ingest_one(r: dict, env: dict) -> tuple[str, str]:
     lid = r["league_id"]
     ddir = SMPL_DIR / f"smpl_{lid}"
@@ -147,16 +163,13 @@ def ingest_one(r: dict, env: dict) -> tuple[str, str]:
          "--database-name", db, "--skip-track-1", "--stop-after", "3"],
         env=env, capture_output=True, text=True, timeout=3000)
     if p1.returncode != 0:
-        # 1200 not 300: the tail of a traceback is mostly the File "..." frame, so a short
-        # slice shows the path and hides the actual exception. That is how a 15/15 failure
-        # on the first GH pilot stayed undiagnosable.
-        return "import_failed", (p1.stderr or p1.stdout)[-1200:]
+        return "import_failed", _err(p1)
     if not r.get("skip_sim"):
         p2 = subprocess.run(
             [sys.executable, str(SIM_PY), "--db", db, "--data-dir", str(ddir)],
             env=env, capture_output=True, text=True, timeout=3000)
         if p2.returncode != 0:
-            return "sim_failed", (p2.stderr or p2.stdout)[-300:]
+            return "sim_failed", _err(p2)
     return "done", ""
 
 
@@ -249,7 +262,7 @@ def main() -> None:
             # NOTE single quotes inside the f-string: nested SAME-type quotes are PEP 701 and
             # only parse on Python 3.12+. The GH runner is 3.11, so a double-quoted nesting
             # here is a SyntaxError that kills the whole driver at import time.
-            detail = (' | ' + msg[:300]) if msg else ''
+            detail = (' | ' + msg) if msg else ''   # _err() already caps it, exception first
             print(f"  [{n}/{len(todo)}] {r['league_id']} {r['partition'][:4]} "
                   f"{r['teams']}/{r['roster']}/{r['ppr']}/{r['td']} {r['season']} -> {tag} "
                   f"({time.time()-t0:.0f}s){detail}", flush=True)
