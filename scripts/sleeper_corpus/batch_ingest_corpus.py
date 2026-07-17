@@ -147,7 +147,10 @@ def ingest_one(r: dict, env: dict) -> tuple[str, str]:
          "--database-name", db, "--skip-track-1", "--stop-after", "3"],
         env=env, capture_output=True, text=True, timeout=3000)
     if p1.returncode != 0:
-        return "import_failed", (p1.stderr or p1.stdout)[-300:]
+        # 1200 not 300: the tail of a traceback is mostly the File "..." frame, so a short
+        # slice shows the path and hides the actual exception. That is how a 15/15 failure
+        # on the first GH pilot stayed undiagnosable.
+        return "import_failed", (p1.stderr or p1.stdout)[-1200:]
     if not r.get("skip_sim"):
         p2 = subprocess.run(
             [sys.executable, str(SIM_PY), "--db", db, "--data-dir", str(ddir)],
@@ -245,7 +248,7 @@ def main() -> None:
             n = counts["done"] + counts["fail"]
             print(f"  [{n}/{len(todo)}] {r['league_id']} {r['partition'][:4]} "
                   f"{r['teams']}/{r['roster']}/{r['ppr']}/{r['td']} {r['season']} -> {tag} "
-                  f"({time.time()-t0:.0f}s){' | '+msg[:100] if msg else ''}", flush=True)
+                  f"({time.time()-t0:.0f}s){" | "+msg[:300] if msg else ""}", flush=True)
 
     if args.workers <= 1:
         for r in todo:

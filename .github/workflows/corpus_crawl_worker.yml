@@ -248,11 +248,17 @@ jobs:
       # metrics), and every row derives from Sleeper's unauthenticated public API. The one
       # identifier is the Sleeper league id, which is already public. This crawl is a one-off
       # and the repo is disposable when it finishes.
-      - name: Upload slice
+      # The crawl log ships too: it carries the same Sleeper league ids the slice does (all
+      # public API data, no manager identity), and without it a failure is undiagnosable --
+      # the driver truncates each error to 100 chars, which is how the first pilot's 15/15
+      # failure stayed a mystery.
+      - name: Upload slice + log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: corpus-slice-${{ matrix.batch }}-${{ github.run_id }}
-          path: ${{ env.CORPUS_DIR }}/corpus_slice_${{ matrix.batch }}.duckdb
+          path: |
+            ${{ env.CORPUS_DIR }}/corpus_slice_${{ matrix.batch }}.duckdb
+            crawl_${{ matrix.batch }}.log
           retention-days: 14
           if-no-files-found: warn
