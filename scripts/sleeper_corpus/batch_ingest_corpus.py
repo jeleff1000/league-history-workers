@@ -246,9 +246,13 @@ def main() -> None:
                     msg = (msg + f" | fold: {fmsg}").strip(" |")
             tag = "OK" if status == "done" else status.upper()
             n = counts["done"] + counts["fail"]
+            # NOTE single quotes inside the f-string: nested SAME-type quotes are PEP 701 and
+            # only parse on Python 3.12+. The GH runner is 3.11, so a double-quoted nesting
+            # here is a SyntaxError that kills the whole driver at import time.
+            detail = (' | ' + msg[:300]) if msg else ''
             print(f"  [{n}/{len(todo)}] {r['league_id']} {r['partition'][:4]} "
                   f"{r['teams']}/{r['roster']}/{r['ppr']}/{r['td']} {r['season']} -> {tag} "
-                  f"({time.time()-t0:.0f}s){" | "+msg[:300] if msg else ""}", flush=True)
+                  f"({time.time()-t0:.0f}s){detail}", flush=True)
 
     if args.workers <= 1:
         for r in todo:
