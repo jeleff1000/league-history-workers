@@ -87,13 +87,16 @@ jobs:
         id: mk
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import json
+          import json, sys
           n  = int("${{ github.event.inputs.batches || '20' }}")
           # cap concurrency, and never exceed the batch count (max-parallel > jobs is a no-op)
           mp = min(int("${{ github.event.inputs.max_parallel || '15' }}"), n)
           print("batch_list=" + json.dumps(list(range(n))))
           print("max_parallel=" + str(mp))
-          print(f"[prepare] {n} batches, max {mp} concurrent -> {20-mp} slots left for imports")
+          # stderr, NOT stdout: this whole heredoc is redirected into $GITHUB_OUTPUT, so a
+          # plain print here is parsed as a key=value output and fails the step.
+          print(f"[prepare] {n} batches, max {mp} concurrent -> {20-mp} account slots free",
+                file=sys.stderr)
           PY
 
   crawl:
