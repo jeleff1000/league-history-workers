@@ -1,0 +1,234 @@
+name: Corpus Crawl Worker
+
+# Crawls Sleeper leagues into the research corpus, folds each into a compact snapshot, and
+# ships one artifact per batch for download to D:.
+#
+# Shape (see docs/runbooks/research-cohort-tables-handoff-2026-07-16.md):
+#   * The crawl is CPU-BOUND, not API-bound. Measured: 41 Sleeper requests and ~4.4s of API
+#     per league, against ~90s end-to-end -- the API is ~5% of a league. One worker sustains
+#     only ~27 req/min, so it takes ~36 workers on ONE runner to approach Sleeper's 1000/min
+#     IP budget. Workers should therefore track vCPU (ubuntu-latest = 4), and throughput comes
+#     from MORE RUNNERS. batch_ingest_corpus.py still divides the IP budget across workers
+#     (SLEEPER_RATE_LIMIT_PER_MIN) as a safety net, which is slack at any sane worker count.
+#   * MATRIX of N batch jobs; each job is its own runner (own vCPU, own IP). GitHub caps
+#     concurrent jobs (20 on the standard plan), so N=20 is the throughput ceiling per run.
+#     Rough rate: 20 jobs x 4 workers x ~40 leagues/hr/worker ~= 3,200 leagues/hour.
+#   * Each job carves a DISJOINT slice via --offset/--limit off the deterministic plan.
+#   * Each job folds as it crawls (--fold-into --prune): 110 KB/league vs 32 MB raw, so even a
+#     ~960-league job ships ~105 MB and runner disk stays flat at ~workers x 32 MB.
+#   * Each job uploads its slice. Merge into D:'s central snapshot with:
+#       py -3 scripts/sleeper_corpus/merge_corpus_slices.py <downloaded_dir>
+#     (_sources dedups, so re-merging a slice is a no-op.)
+#
+# Nothing here writes to Fly: the ingest runs with --skip-track-1 --stop-after 3, which stops
+# before the upload phase. That is why ___leagues has no smpl_* rows.
+
+on:
+  workflow_dispatch:
+    inputs:
+      batches:
+        description: 'Parallel jobs, each its own runner. 20 = GitHub concurrency cap. Use 2 for a test.'
+        required: false
+        type: string
+        default: '20'
+      batch_size:
+        description: 'Leagues per job = one artifact drop. ~960 fits a 6h job at 4 workers. Use 5 for a test.'
+        required: false
+        type: string
+        default: '500'
+      workers:
+        description: 'Parallel ingests PER RUNNER. Crawl is CPU-bound; ubuntu-latest has 4 vCPU. IP budget auto-divides.'
+        required: false
+        type: string
+        default: '4'
+      partitions:
+        description: 'single_season (managed - what the cohort builders keep) | all'
+        required: false
+        type: choice
+        options: ['single_season', 'all']
+        default: 'single_season'
+      target:
+        description: 'Leagues wanted per cohort-year'
+        required: false
+        type: string
+        default: '35'
+      prune:
+        description: 'Delete each raw league dir after folding. ONE-WAY: a pruned league cannot be re-folded with new columns or re-simmed without re-crawling it from Sleeper. Off for pilots.'
+        required: false
+        type: boolean
+        default: false
+      yahoo_oauth_ref:
+        description: 'yahoo_oauth branch/ref to check out'
+        required: false
+        type: string
+        default: 'main'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: corpus-crawl
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      batch_list: ${{ steps.mk.outputs.batch_list }}
+    steps:
+      - name: Build batch index list
+        id: mk
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          n = int("${{ github.event.inputs.batches || '7' }}")
+          print("batch_list=" + json.dumps(list(range(n))))
+          PY
+
+  crawl:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 350          # under the 6h hard job cap
+    strategy:
+      fail-fast: false            # one bad slice must not kill the others
+      matrix:
+        batch: ${{ fromJSON(needs.prepare.outputs.batch_list) }}
+
+    env:
+      CORPUS_DIR: ${{ github.workspace }}/corpus
+      YAHOO_OAUTH_ROOT: ${{ github.workspace }}/code
+      OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
+      OPS_CACHE_KEY: ops-cache-v4-Linux-manual-v1
+      # No DRAFT_COHORT_PARQUET: that file is CUSTOMER-derived and is only read when
+      # --subtract-baseline is passed. The crawl treats the corpus as the population, so it
+      # never needs it -- which is what keeps this public repo free of customer-derived data.
+
+    steps:
+      # THIS repo (public, free minutes) carries BOTH the crawl seed and the crawl driver
+      # (scripts/sleeper_corpus/). Keeping the driver here means nothing has to be pushed to
+      # yahoo_oauth to change how the crawl runs -- only the pipeline it shells out to lives
+      # there. Billing follows the repo the workflow RUNS in, so this is all free.
+      - name: Checkout crawl driver + seed (this repo)
+        uses: actions/checkout@v5
+        with:
+          path: crawl
+
+      # The ingest pipeline (sleeper_initial_import + multi_league) is private and is what
+      # produces manager_lamar / clutch_equity / transaction_score. Token-authed clone via the
+      # PAT this repo already holds -- not a billing event, and the same pattern every other
+      # worker here uses. The alternative is vendoring multi_league into a public repo, i.e.
+      # publishing it.
+      - name: Checkout pipeline code (private)
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || 'main' }}
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /fantasy_football_data_scripts/
+            /requirements.txt
+            /pyproject.toml
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -r code/requirements.txt
+
+      # The super-table cache the ingest needs for NFL name matching (~169 MiB compressed).
+      # Published by seed_ops_cache.yml -- run that first if this misses.
+      - name: Restore ops cache
+        id: ops
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache
+          key: ${{ env.OPS_CACHE_KEY }}
+
+      - name: Fail fast if ops cache missing
+        if: steps.ops.outputs.cache-hit != 'true'
+        run: |
+          echo "::error::ops_cache miss (key=${OPS_CACHE_KEY}). Run 'Seed Ops Cache' first."
+          exit 1
+
+      # Seed lives in THIS repo under corpus_seed/ (~0.9 MB): drain_leagues.parquet (public
+      # Sleeper discovery data) + ingest_ledger.json (Sleeper league ids). Nothing
+      # customer-derived. The ledger is what stops us re-crawling leagues already on D: --
+      # every matrix job reads the SAME ledger, so their slices stay disjoint.
+      - name: Stage corpus seed
+        run: |
+          mkdir -p "$CORPUS_DIR/discovery" "$CORPUS_DIR/leagues"
+          cp crawl/corpus_seed/drain_leagues.parquet "$CORPUS_DIR/discovery/"
+          cp crawl/corpus_seed/ingest_ledger.json    "$CORPUS_DIR/"
+          python3 -c "import json;print('[seed] ledger entries:', len(json.load(open('$CORPUS_DIR/ingest_ledger.json'))))"
+
+      - name: Crawl slice ${{ matrix.batch }}
+        env:
+          OFFSET: ${{ matrix.batch }}
+          SIZE: ${{ github.event.inputs.batch_size || '500' }}
+        run: |
+          set -o pipefail
+          PARTS=""
+          if [ "${{ github.event.inputs.partitions || 'single_season' }}" = "all" ]; then
+            PARTS="--all-partitions"
+          fi
+          # --prune is opt-in and ONE-WAY: it deletes the raw league dir after folding, so a
+          # pruned league can never be re-folded with a widened column contract or re-simmed
+          # without re-crawling it from Sleeper. Today's re-fold (adding playoff_start_week /
+          # roster_K / is_keeper) was only possible BECAUSE the raw dirs still existed.
+          PRUNE=""
+          if [ "${{ github.event.inputs.prune }}" = "true" ]; then PRUNE="--prune"; fi
+          echo "[cfg] partitions=${{ github.event.inputs.partitions || 'single_season' }} workers=${{ github.event.inputs.workers || '4' }} prune=${{ github.event.inputs.prune || 'false' }}"
+          python crawl/scripts/sleeper_corpus/batch_ingest_corpus.py \
+            $PARTS \
+            --target   "${{ github.event.inputs.target || '35' }}" \
+            --workers  "${{ github.event.inputs.workers || '4' }}" \
+            --offset   "$(( OFFSET * SIZE ))" \
+            --limit    "$SIZE" \
+            --fold-into "$CORPUS_DIR/corpus_slice_${{ matrix.batch }}.duckdb" \
+            $PRUNE \
+            > "crawl_${{ matrix.batch }}.log" 2>&1 || CRAWL_RC=$?
+          echo "[crawl] rc=${CRAWL_RC:-0}  ok=$(grep -c ' -> OK' "crawl_${{ matrix.batch }}.log" || true)  failed=$(grep -cE ' -> (IMPORT_FAILED|SIM_FAILED)' "crawl_${{ matrix.batch }}.log" || true)"
+          exit "${CRAWL_RC:-0}"
+
+      - name: Slice summary
+        if: always()
+        run: |
+          SLICE="$CORPUS_DIR/corpus_slice_${{ matrix.batch }}.duckdb"
+          if [ -s "$SLICE" ]; then
+            python3 - <<PY
+          import duckdb
+          c = duckdb.connect("$SLICE", read_only=True)
+          n = c.execute("SELECT COUNT(*) FROM _sources").fetchone()[0]
+          import os; sz = os.path.getsize("$SLICE")
+          print(f"[slice ${{ matrix.batch }}] {n} leagues folded, {sz/1048576:.1f} MB")
+          for t in ("league_settings","draft","transactions","player_fantasy"):
+              print(f"   {t}: {c.execute(f'SELECT COUNT(*) FROM public.{t}').fetchone()[0]:,} rows")
+          PY
+          else
+            echo "[slice ${{ matrix.batch }}] no slice produced"
+          fi
+          echo "[disk] $(df -h "$CORPUS_DIR" | tail -1)"
+
+      # Artifact names must be unique in upload-artifact v4 -- no overwrite semantics.
+      #
+      # Plaintext is a deliberate call (Joe, 2026-07-16). G10 (2026-07-06) removed artifact
+      # uploads from the CUSTOMER import workers, where logs/DBs carried customer league AND
+      # manager-identifying data. A corpus slice is a different risk class: it holds no manager
+      # names, GUIDs, or team names (verified -- the only "manager" columns are manager_lamar
+      # metrics), and every row derives from Sleeper's unauthenticated public API. The one
+      # identifier is the Sleeper league id, which is already public. This crawl is a one-off
+      # and the repo is disposable when it finishes.
+      - name: Upload slice
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-slice-${{ matrix.batch }}-${{ github.run_id }}
+          path: ${{ env.CORPUS_DIR }}/corpus_slice_${{ matrix.batch }}.duckdb
+          retention-days: 14
+          if-no-files-found: warn
