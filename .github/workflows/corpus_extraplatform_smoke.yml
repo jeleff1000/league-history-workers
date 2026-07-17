@@ -1,0 +1,145 @@
+name: Corpus Extra-Platform Smoke
+
+# Quick pilot: run the MFL or Fleaflicker corpus importer on a few PUBLIC leagues to prove
+# (1) they land the canonical tables and (2) they never touch Fly.
+#
+# Fly-safety is proven BY CONSTRUCTION: this job is given NO Fly credentials
+# (no DATABASE_SERVER_URL / DATABASE_READ_TOKEN), and runs with CORPUS_MODE=1 which makes
+# FlyReader/FlyWriter raise. So any Fly access fails hard -- a green run is proof the
+# importer ran fully offline against the local ops cache (same dep bundle the Sleeper crawl
+# uses). Mirrors corpus_crawl_worker.yml, minus the matrix/fold.
+
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Which importer to smoke'
+        required: true
+        type: choice
+        options: ['mfl', 'fleaflicker']
+      leagues:
+        description: 'Space-separated seeds. MFL uses YEAR:ID (e.g. "2024:39859 2024:63886"); Fleaflicker uses numeric ids (e.g. "352000 200000"). Blank = a built-in default.'
+        required: false
+        type: string
+        default: ''
+      yahoo_oauth_ref:
+        description: 'yahoo_oauth branch/ref to check out'
+        required: false
+        type: string
+        default: 'corpus-pilot-mfl-fleaflicker'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      YAHOO_OAUTH_ROOT: ${{ github.workspace }}/code
+      CORPUS_MODE: 1
+      CORPUS_DEPENDENCY_DIR: ${{ github.workspace }}/corpus_dependencies
+      OPS_CACHE_PATH: ${{ github.workspace }}/corpus_dependencies/ops_cache.duckdb
+      DRAFT_GLOBAL_SOURCE_PATH: ${{ github.workspace }}/corpus_dependencies/draft_global_source.parquet
+      CORPUS_DEPENDENCY_KEY: corpus-dependencies-v1-Linux-20260717
+      PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
+
+    steps:
+      - name: Checkout pipeline code (private)
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || 'corpus-pilot-mfl-fleaflicker' }}
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /fantasy_football_data_scripts/
+            /requirements.txt
+            /pyproject.toml
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -r code/requirements.txt
+
+      - name: Restore corpus dependencies
+        id: corpus-dependencies
+        uses: actions/cache/restore@v5
+        with:
+          path: corpus_dependencies
+          key: ${{ env.CORPUS_DEPENDENCY_KEY }}
+
+      - name: Fail fast if corpus dependencies are missing
+        if: steps.corpus-dependencies.outputs.cache-hit != 'true'
+        run: |
+          echo "::error::corpus dependency miss (key=${CORPUS_DEPENDENCY_KEY}). Run 'Seed Corpus Dependencies' first."
+          exit 1
+
+      - name: Assert this job has NO Fly credentials (offline proof)
+        run: |
+          if [ -n "${DATABASE_SERVER_URL:-}" ] || [ -n "${DATABASE_READ_TOKEN:-}" ] || [ -n "${DATABASE_WRITE_TOKEN:-}" ]; then
+            echo "::error::Fly credentials are present -- this smoke MUST run with no Fly access."
+            exit 1
+          fi
+          echo "[offline] no Fly credentials in the environment; any Fly access will fail hard."
+
+      - name: Run importer on pilot leagues
+        env:
+          PLATFORM: ${{ github.event.inputs.platform }}
+          LEAGUES: ${{ github.event.inputs.leagues }}
+          MFL_RATE_LIMIT_PER_MIN: '15'
+          FLEAFLICKER_RATE_LIMIT_PER_MIN: '30'
+        run: |
+          set -euo pipefail
+          if [ "$PLATFORM" = "mfl" ]; then
+            IMPORTER=code/fantasy_football_data_scripts/mfl_initial_import.py
+            DEFAULT_LEAGUES="2024:39859"
+          else
+            IMPORTER=code/fantasy_football_data_scripts/fleaflicker_initial_import.py
+            DEFAULT_LEAGUES="352000"
+          fi
+          LEAGUES="${LEAGUES:-}"
+          [ -z "$LEAGUES" ] && LEAGUES="$DEFAULT_LEAGUES"
+          echo "[smoke] platform=$PLATFORM leagues=[$LEAGUES]"
+          i=0
+          for L in $LEAGUES; do
+            i=$((i+1))
+            DB="smpl_${PLATFORM}_${i}"
+            DDIR="$RUNNER_TEMP/$DB"
+            echo "::group::ingest $PLATFORM $L -> $DB"
+            if [ "$PLATFORM" = "fleaflicker" ]; then
+              python "$IMPORTER" --league-id "$L" --data-dir "$DDIR" --database-name "$DB" \
+                --skip-track-1 --stop-after 3 --discover-years
+            else
+              python "$IMPORTER" --league-id "$L" --data-dir "$DDIR" --database-name "$DB" \
+                --skip-track-1 --stop-after 3
+            fi
+            echo "::endgroup::"
+            python3 - "$DDIR/$DB.duckdb" <<'PY'
+          import duckdb, sys
+          db = sys.argv[1]
+          con = duckdb.connect(db, read_only=True); con.execute("USE public")
+          ok = True
+          for t in ("league_settings", "matchup", "player_fantasy", "draft"):
+              try:
+                  n = con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+              except Exception:
+                  n = -1
+              flag = "OK" if n > 0 else "EMPTY"
+              if n <= 0 and t in ("league_settings", "player_fantasy"):
+                  ok = False
+              print(f"   {t}: {n} rows [{flag}]")
+          started = con.execute("SELECT COALESCE(SUM(is_started), 0) FROM player_fantasy").fetchone()[0]
+          champs = con.execute("SELECT COALESCE(SUM(champion), 0) FROM matchup").fetchone()[0]
+          print(f"   is_started sum={started}  champion rows={champs}")
+          if not ok:
+              print("::error::core tables missing/empty")
+              sys.exit(1)
+          PY
+          done
+          echo "[smoke] PASS -- all leagues landed canonical tables with NO Fly access."
