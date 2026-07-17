@@ -100,6 +100,14 @@ jobs:
       YAHOO_OAUTH_ROOT: ${{ github.workspace }}/code
       OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
       OPS_CACHE_KEY: ops-cache-v4-Linux-manual-v1
+      # The ingest's SQL-enrichment pass includes _sync_keeper_config_from_fly, which reads
+      # ___leagues through FlyReader -- so the crawl DOES need Fly read creds, contrary to my
+      # earlier claim that the ops cache made them unnecessary. Locally it works only because
+      # .env supplies them; on the runner their absence failed every league with
+      # "SQL enrichments failed: _sync_keeper_config_from_fly". READ token only: the crawl
+      # never writes to Fly (the ingest stops at phase 3, before any upload).
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
       # No DRAFT_COHORT_PARQUET: that file is CUSTOMER-derived and is only read when
       # --subtract-baseline is passed. The crawl treats the corpus as the population, so it
       # never needs it -- which is what keeps this public repo free of customer-derived data.
