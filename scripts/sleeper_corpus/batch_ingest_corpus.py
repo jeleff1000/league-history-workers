@@ -33,6 +33,8 @@ DRAFT_COHORT = Path(os.environ.get(
 SMPL_DIR = CORPUS / "leagues"
 DONE = CORPUS / "ingest_ledger.json"
 OPS_CACHE = Path(os.environ.get("OPS_CACHE_PATH", str(CORPUS / "ops_cache.duckdb")))
+DRAFT_GLOBAL_SOURCE = Path(os.environ.get(
+    "DRAFT_GLOBAL_SOURCE_PATH", str(CORPUS / "draft_global_source.parquet")))
 IMPORT_PY = ROOT / "fantasy_football_data_scripts" / "sleeper_initial_import.py"
 SIM_PY = ROOT / "fantasy_football_data_scripts" / "multi_league" / "transformations" / "matchup" / "playoff_odds_import.py"
 
@@ -51,7 +53,22 @@ def load_env(workers: int = 1) -> dict:
             if line and not line.startswith("#") and "=" in line:
                 k, _, v = line.partition("="); os.environ.setdefault(k.strip(), v.strip().strip("'").strip('"'))
     env = dict(os.environ)
+    if not OPS_CACHE.is_file():
+        raise FileNotFoundError(f"Corpus ops cache is missing: {OPS_CACHE}")
+    if not DRAFT_GLOBAL_SOURCE.is_file():
+        raise FileNotFoundError(f"Corpus draft baseline source is missing: {DRAFT_GLOBAL_SOURCE}")
+
+    # A corpus import is an offline transformation. Strip every production
+    # database credential even when the local shell loaded them from .env.
+    for key in (
+        "DATABASE_SERVER_URL", "DATABASE_READ_TOKEN", "DATABASE_ADMIN_TOKEN",
+        "DATABASE_WRITE_TOKEN", "FLY_API_TOKEN", "FLY_PRIMARY_MACHINE_ID",
+        "MOTHERDUCK_TOKEN",
+    ):
+        env.pop(key, None)
+    env["CORPUS_MODE"] = "1"
     env["OPS_CACHE_PATH"] = str(OPS_CACHE)
+    env["DRAFT_GLOBAL_SOURCE_PATH"] = str(DRAFT_GLOBAL_SOURCE)
     env["PYTHONPATH"] = str(ROOT / "fantasy_football_data_scripts")
     # Each ingest is a subprocess with its OWN limiter, so the host's real rate is
     # workers x per-process budget. Divide the IP budget so N workers still total <=1000/min.

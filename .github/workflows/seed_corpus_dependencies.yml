@@ -1,0 +1,62 @@
+name: Seed Corpus Dependencies
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Private yahoo_oauth release containing corpus-dependencies.tar.gz
+        required: true
+        default: corpus-dependencies-v1-20260717
+      cache_key:
+        description: Immutable Actions cache key consumed by corpus jobs
+        required: true
+        default: corpus-dependencies-v1-Linux-20260717
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+      CACHE_KEY: ${{ inputs.cache_key }}
+
+    steps:
+      - name: Checkout worker repository
+        uses: actions/checkout@v5
+
+      - name: Checkout private validation code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Download private local-source bundle
+        run: |
+          gh release download "${{ inputs.release_tag }}" \
+            --repo jeleff1000/yahoo_oauth \
+            --pattern corpus-dependencies.tar.gz
+          mkdir -p corpus_dependencies
+          tar -xzf corpus-dependencies.tar.gz -C corpus_dependencies --strip-components=1
+
+      - name: Validate bundle
+        run: |
+          pip install duckdb==1.5.1 pandas
+          python code/scripts/sleeper_corpus/build_github_dependency_bundle.py \
+            --output corpus_dependencies \
+            --validate-only
+
+      - name: Save immutable dependency cache
+        uses: actions/cache/save@v5
+        with:
+          path: corpus_dependencies
+          key: ${{ env.CACHE_KEY }}
