@@ -193,7 +193,31 @@ jobs:
             --fold-into "$CORPUS_DIR/corpus_slice_${{ matrix.batch }}.duckdb" \
             $PRUNE \
             > "crawl_${{ matrix.batch }}.log" 2>&1 || CRAWL_RC=$?
-          echo "[crawl] rc=${CRAWL_RC:-0}  ok=$(grep -c ' -> OK' "crawl_${{ matrix.batch }}.log" || true)  failed=$(grep -cE ' -> (IMPORT_FAILED|SIM_FAILED)' "crawl_${{ matrix.batch }}.log" || true)"
+          LOG="crawl_${{ matrix.batch }}.log"
+          OK=$(grep -c ' -> OK' "$LOG" || true)
+          FAILED=$(grep -cE ' -> (IMPORT_FAILED|SIM_FAILED)' "$LOG" || true)
+          echo "[crawl] rc=${CRAWL_RC:-0}  ok=$OK  failed=$FAILED"
+
+          # The driver exits 0 even when every league fails -- it counts failures rather than
+          # signalling them. Without this the job goes green on a 100% failure rate, which is
+          # exactly what the first pilot did. Fail loudly instead.
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::group::failure reasons (first 20)"
+            grep -E ' -> (IMPORT_FAILED|SIM_FAILED)' "$LOG" | head -20
+            echo "::endgroup::"
+            echo "::group::driver tail (last 60 lines)"
+            tail -60 "$LOG"
+            echo "::endgroup::"
+          fi
+          if [ "$OK" -eq 0 ]; then
+            echo "::error::0 of $((OK+FAILED)) leagues ingested. Not a partial failure -- nothing worked."
+            exit 1
+          fi
+          # a high failure rate means the slice is junk even if some leagues landed
+          if [ "$FAILED" -gt "$OK" ]; then
+            echo "::error::$FAILED failed vs $OK ok -- majority failure, refusing to report success."
+            exit 1
+          fi
           exit "${CRAWL_RC:-0}"
 
       - name: Slice summary

@@ -258,6 +258,11 @@ def main() -> None:
         snap.close()
     print(f"\n[done] {counts['done']} ok, {counts['fail']} failed, "
           f"{counts['folded']} folded in {(time.time()-t_start)/60:.0f} min -> {SMPL_DIR}", flush=True)
+    # Exit non-zero when nothing worked. Counting failures but returning 0 let a CI job go
+    # green on a 100% failure rate (the first GH pilot did exactly that: ok=0, failed=15,
+    # every step green). A caller cannot distinguish "crawled nothing" from "nothing to do".
+    if todo and not counts["done"]:
+        raise SystemExit(f"[fatal] 0 of {len(todo)} leagues ingested -- see failures above")
 
 
 if __name__ == "__main__":
