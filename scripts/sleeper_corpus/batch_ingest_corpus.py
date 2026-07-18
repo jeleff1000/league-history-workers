@@ -94,7 +94,7 @@ PARTITIONS = {
 
 
 def build_plan(target: int, years: tuple[int, int], partitions: list[str],
-               subtract_baseline: bool = False) -> list[dict]:
+               subtract_baseline: bool = False, pool_cohorts: bool = False) -> list[dict]:
     """Plan the crawl. `subtract_baseline` decides whether the REAL customer leagues count
     toward a cohort's target.
 
@@ -107,6 +107,8 @@ def build_plan(target: int, years: tuple[int, int], partitions: list[str],
     """
     con = duckdb.connect()
     con.execute(f"CREATE VIEW led AS SELECT * FROM '{DRAIN.as_posix()}' WHERE season IS NOT NULL")
+    if pool_cohorts and subtract_baseline:
+        raise ValueError("--pool-cohorts cannot be combined with --subtract-baseline")
     # The baseline view is built from the CUSTOMER-league draft cohort. Only touch it when the
     # caller actually wants it subtracted -- otherwise the crawl needs no customer-derived file
     # at all, which is what keeps the public-repo seed to public Sleeper data only.
@@ -114,12 +116,45 @@ def build_plan(target: int, years: tuple[int, int], partitions: list[str],
         con.execute(f"CREATE VIEW cur AS SELECT teams,roster,ppr,td,year, MAX(n_leagues) cur_n "
                     f"FROM '{DRAFT_COHORT.as_posix()}' WHERE cohort_level=4 GROUP BY 1,2,3,4,5")
     out: list[dict] = []
+    if pool_cohorts:
+        branches = []
+        for part in partitions:
+            where, _, skip_sim = PARTITIONS[part]
+            branches.append(f"""
+                SELECT league_id, teams, roster, ppr, td, season, created_year,
+                       '{part}' AS partition, {'TRUE' if skip_sim else 'FALSE'} AS skip_sim
+                FROM led
+                WHERE {where} AND teams IS NOT NULL AND season BETWEEN {years[0]} AND {years[1]}
+                  AND league_id NOT IN (SELECT prev_league_id FROM led WHERE prev_league_id IS NOT NULL)
+            """)
+        res = con.execute(f"""
+          WITH heads AS ({' UNION ALL '.join(branches)}),
+          ranked AS (
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY teams,roster,ppr,td
+                                         ORDER BY created_year DESC, league_id) AS rn
+            FROM heads
+          )
+          SELECT league_id, teams, roster, ppr, td, season, {target} AS cohort_need,
+                 partition, skip_sim
+          FROM ranked WHERE rn <= {target}
+          ORDER BY teams, roster, ppr, td, season, league_id
+        """)
+        cols = [d[0] for d in res.description]
+        out = [dict(zip(cols, row)) for row in res.fetchall()]
+        seen, dedup = set(), []
+        for row in sorted(out, key=lambda x: (-x["cohort_need"], x["partition"], x["league_id"])):
+            if row["league_id"] not in seen:
+                seen.add(row["league_id"])
+                dedup.append(row)
+        return dedup
+
     for part in partitions:
         where, may_subtract, skip_sim = PARTITIONS[part]
         use_base = may_subtract and subtract_baseline
         base = "COALESCE(c.cur_n,0)" if use_base else "0"
         join = ("LEFT JOIN cur c ON c.teams=h.teams AND c.roster=h.roster "
                 "AND c.ppr=h.ppr AND c.td=h.td AND c.year=h.season") if use_base else ""
+        cohort_keys = "teams,roster,ppr,td" if pool_cohorts else "teams,roster,ppr,td,season"
         res = con.execute(f"""
           WITH heads AS (
             SELECT league_id, teams, roster, ppr, td, season, created_year
@@ -132,7 +167,7 @@ def build_plan(target: int, years: tuple[int, int], partitions: list[str],
             FROM heads h {join}
           ),
           ranked AS (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY teams,roster,ppr,td,season
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY {cohort_keys}
                                          ORDER BY created_year DESC, league_id) AS rn
             FROM need WHERE cohort_need > 0
           )
@@ -209,6 +244,9 @@ def main() -> None:
                          "default: the corpus stands alone as the research population, and "
                          "subtracting makes the crawler skip the popular flx cells the pages "
                          "serve (see build_plan docstring).")
+    ap.add_argument("--pool-cohorts", action="store_true",
+                    help="cap target across all selected years for each L4 cohort instead of "
+                         "applying it separately to every cohort-year")
     ap.add_argument("--plan-only", action="store_true")
     ap.add_argument("--fold-into", default=None,
                     help="path to a central corpus snapshot; fold each league in as it lands "
@@ -222,10 +260,13 @@ def main() -> None:
     y0, y1 = (int(x) for x in args.years.split(","))
     parts = list(PARTITIONS) if args.all_partitions else ["single_season"]
 
-    plan = build_plan(args.target, (y0, y1), parts, subtract_baseline=args.subtract_baseline)
+    plan = build_plan(args.target, (y0, y1), parts,
+                      subtract_baseline=args.subtract_baseline,
+                      pool_cohorts=args.pool_cohorts)
     from collections import Counter
     by_part = Counter(r["partition"] for r in plan)
-    print(f"[plan] {len(plan):,} leagues selected (target {args.target}/cohort-year, "
+    scope = "cohort" if args.pool_cohorts else "cohort-year"
+    print(f"[plan] {len(plan):,} leagues selected (target {args.target}/{scope}, "
           f"baseline={'subtracted' if args.subtract_baseline else 'ignored'}) across {parts}", flush=True)
     for p, n in by_part.items():
         print(f"    {p}: {n:,}", flush=True)

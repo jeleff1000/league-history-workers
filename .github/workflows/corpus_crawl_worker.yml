@@ -57,6 +57,11 @@ on:
         required: false
         type: string
         default: '35'
+      pool_cohorts:
+        description: 'Cap the target across all selected years of each L4 cohort'
+        required: false
+        type: boolean
+        default: false
       prune:
         description: 'Delete each raw league dir after folding. ONE-WAY: a pruned league cannot be re-folded with new columns or re-simmed without re-crawling it from Sleeper. Off for pilots.'
         required: false
@@ -205,6 +210,8 @@ jobs:
           if [ "${{ github.event.inputs.partitions || 'single_season' }}" = "all" ]; then
             PARTS="--all-partitions"
           fi
+          POOL=""
+          if [ "${{ github.event.inputs.pool_cohorts }}" = "true" ]; then POOL="--pool-cohorts"; fi
           # --prune is opt-in and ONE-WAY: it deletes the raw league dir after folding, so a
           # pruned league can never be re-folded with a widened column contract or re-simmed
           # without re-crawling it from Sleeper. Today's re-fold (adding playoff_start_week /
@@ -215,6 +222,7 @@ jobs:
           python crawl/scripts/sleeper_corpus/batch_ingest_corpus.py \
             $PARTS \
             --target   "${{ github.event.inputs.target || '35' }}" \
+            $POOL \
             --workers  "${{ github.event.inputs.workers || '4' }}" \
             --offset   "$(( OFFSET * SIZE ))" \
             --limit    "$SIZE" \
