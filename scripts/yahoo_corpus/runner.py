@@ -54,6 +54,18 @@ SAFE_FAILURE_MARKERS = (
     ("failed to flatten league_settings", "SettingsCanonicalization"),
     ("fetched league settings but produced 0 canonical rows", "EmptyCanonicalSettings"),
     ("local duckdb failed pre-upload validation", "PreUploadValidation"),
+    ("no oauth credentials available in context", "OAuthMaterialization"),
+    ("request denied", "YahooRequestDenied"),
+    ("no leagues found for", "YahooLeagueLookup"),
+    ("failed to fetch league_ids for", "YahooLeagueLookup"),
+    ("failed to create league object", "YahooLeagueObject"),
+    ("no matchup data found", "YahooMatchupEmpty"),
+    ("conn is required - all pipeline work uses local duckdb files", "LocalDatabaseContract"),
+    ("get_pipeline_connection() requires data_dir", "LocalDatabaseContract"),
+    ("sql enrichments failed", "SqlEnrichmentFailure"),
+    ("fantasy aggregation failed after sql enrichments", "FantasyAggregationFailure"),
+    ("yahoo_fantasy_api not available", "YahooDependencyMissing"),
+    ("runlogger not available or not callable", "PipelineDependencyMissing"),
 )
 
 

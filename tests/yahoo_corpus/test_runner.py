@@ -205,6 +205,18 @@ def test_import_failure_classifier_extracts_exception_class_without_message() ->
         ("RuntimeError: Failed to flatten league_settings for year(s): private", "SettingsCanonicalization"),
         ("RuntimeError: Fetched league settings but produced 0 canonical rows", "EmptyCanonicalSettings"),
         ("RuntimeError: Local DuckDB failed pre-upload validation with 2 issue(s)", "PreUploadValidation"),
+        ("RuntimeError: No OAuth credentials available in context", "OAuthMaterialization"),
+        ("RuntimeError: Request denied", "YahooRequestDenied"),
+        ("RuntimeError: No leagues found for 2009", "YahooLeagueLookup"),
+        ("RuntimeError: Failed to fetch league_ids for 2009: private", "YahooLeagueLookup"),
+        ("RuntimeError: Failed to create league object for private after 3 attempts", "YahooLeagueObject"),
+        ("RuntimeError: No matchup data found", "YahooMatchupEmpty"),
+        ("RuntimeError: conn is required - all pipeline work uses local DuckDB files.", "LocalDatabaseContract"),
+        ("RuntimeError: get_pipeline_connection() requires data_dir.", "LocalDatabaseContract"),
+        ("RuntimeError: SQL enrichments failed: private", "SqlEnrichmentFailure"),
+        ("RuntimeError: Fantasy aggregation failed after SQL enrichments", "FantasyAggregationFailure"),
+        ("RuntimeError: yahoo_fantasy_api not available.", "YahooDependencyMissing"),
+        ("RuntimeError: RunLogger not available or not callable", "PipelineDependencyMissing"),
     ],
 )
 def test_import_failure_classifier_allowlists_safe_runtime_categories(
