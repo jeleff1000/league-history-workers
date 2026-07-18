@@ -200,5 +200,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: corpus-slice-${{ github.event.inputs.platform }}-${{ matrix.batch }}
-          path: ${{ github.workspace }}/corpus/corpus_slice_${{ github.event.inputs.platform }}_${{ matrix.batch }}.duckdb
+          # The driver log rides along: per-league failure reasons die with the runner
+          # otherwise (run 29626415574 required job-log archaeology to diagnose).
+          path: |
+            ${{ github.workspace }}/corpus/corpus_slice_${{ github.event.inputs.platform }}_${{ matrix.batch }}.duckdb
+            crawl_${{ matrix.batch }}.log
           if-no-files-found: ignore
