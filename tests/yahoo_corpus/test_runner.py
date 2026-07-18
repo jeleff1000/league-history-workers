@@ -197,6 +197,21 @@ def test_import_failure_classifier_extracts_exception_class_without_message() ->
     assert classify_import_failure(raw) == ("failure", "ModuleNotFoundError")
 
 
+def test_runtime_failure_classifier_reports_only_safe_final_call_site() -> None:
+    raw = """Traceback (most recent call last):
+  File "/home/runner/private/initial_import_v3.py", line 100, in main
+    private_details()
+  File "/home/runner/private/yahoo_matchups.py", line 740, in fetch
+    raise RuntimeError(private_manager)
+RuntimeError: secret league details
+"""
+
+    assert classify_import_failure(raw) == (
+        "failure",
+        "RuntimeSite-yahoo_matchups-L740",
+    )
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [

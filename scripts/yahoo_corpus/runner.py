@@ -47,6 +47,9 @@ TOKEN_VALUE = re.compile(r"(?i)\b(?:bearer\s+)?[a-z0-9_-]{32,}\b")
 EXCEPTION_CLASS = re.compile(
     r"(?m)^([A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception)):\s*",
 )
+TRACEBACK_SITE = re.compile(
+    r'(?m)^\s*File "[^"\r\n]*[\\/](?P<file>[A-Za-z0-9_]+)\.py", line (?P<line>\d+)',
+)
 SAFE_FAILURE_MARKERS = (
     ("flyreader is disabled in corpus mode", "CorpusFlyReadAttempt"),
     ("flytarget is disabled in corpus mode", "CorpusFlyWriteAttempt"),
@@ -162,7 +165,16 @@ def classify_import_failure(raw_text: str) -> tuple[str, str]:
             return "failure", category
     matches = EXCEPTION_CLASS.findall(raw_text)
     if matches:
-        return "failure", matches[-1].rsplit(".", 1)[-1]
+        exception_class = matches[-1].rsplit(".", 1)[-1]
+        if exception_class == "RuntimeError":
+            sites = list(TRACEBACK_SITE.finditer(raw_text))
+            if sites:
+                site = sites[-1]
+                return (
+                    "failure",
+                    f"RuntimeSite-{site.group('file')}-L{site.group('line')}",
+                )
+        return "failure", exception_class
     return "failure", "ImportSubprocessFailure"
 
 
