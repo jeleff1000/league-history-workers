@@ -71,8 +71,7 @@ jobs:
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             /fantasy_football_data_scripts/
-            /scripts/yahoo_corpus/
-            /scripts/sleeper_corpus/build_github_dependency_bundle.py
+            /scripts/
             /requirements.txt
             /pyproject.toml
 

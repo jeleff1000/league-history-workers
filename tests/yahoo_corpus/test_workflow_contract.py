@@ -38,6 +38,7 @@ def test_workflow_restores_dependencies_and_runs_controlled_resume() -> None:
     text = workflow_text()
 
     assert "corpus-dependencies-v1-Linux-20260717" in text
+    assert "            /scripts/\n" in text
     assert "--stop-after 4" in text
     assert "--resume" in text
     assert "if: always()" in text
