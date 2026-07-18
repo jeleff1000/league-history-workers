@@ -17,6 +17,12 @@ on:
         required: true
         type: choice
         options: ['mfl', 'fleaflicker']
+      mode:
+        description: 'direct = fetch-only + enrich-lite (fast, no transform/sim failure surface); full = whole importer + playoff sim'
+        required: false
+        type: choice
+        options: ['direct', 'full']
+        default: 'direct'
       batches:
         description: 'How many disjoint slices (each its own runner/IP). All run; max_parallel caps concurrency.'
         required: false
@@ -46,7 +52,9 @@ on:
         description: 'yahoo_oauth branch/ref to check out'
         required: false
         type: string
-        default: 'corpus-pilot-mfl-fleaflicker'
+        # 2026-07-18: the corpus-pilot branch was folded into the pre-main-merge
+        # preservation branch; flip this to 'main' once Joe merges.
+        default: 'wip/preserved-pre-main-merge-20260718'
 
 permissions:
   actions: write
@@ -155,6 +163,36 @@ jobs:
           SIZE: ${{ github.event.inputs.batch_size || '20' }}
         run: |
           set -o pipefail
+          LOG="crawl_${{ matrix.batch }}.log"
+          if [ "${{ github.event.inputs.mode || 'direct' }}" = "direct" ]; then
+            # DIRECT mode (2026-07-18): fetch-only + enrich-lite via direct_corpus_pilot.py.
+            # No transforms, no sims -- the stages every failed crawl died in. A/B-validated
+            # against the full pipeline (see the script docstring). A skip list of already-
+            # landed db_names rides in the seed dir when present.
+            SKIP=""
+            if [ -f "crawl/corpus_seed/landed_dbs.txt" ]; then SKIP="--skip-list crawl/corpus_seed/landed_dbs.txt"; fi
+            python code/scripts/extraplatform_corpus/direct_corpus_pilot.py \
+              --platform "${{ github.event.inputs.platform }}" \
+              --from-seed \
+              --offset   "$(( OFFSET * SIZE ))" \
+              --limit    "$SIZE" \
+              --fold-into "$CORPUS_DIR/corpus_slice_${{ github.event.inputs.platform }}_${{ matrix.batch }}.duckdb" \
+              $SKIP \
+              > "$LOG" 2>&1 || CRAWL_RC=$?
+            OK=$(grep -c '] PASS' "$LOG" || true)
+            FAILED=$(grep -cE '] (FAIL|GATE_FAIL|FOLD_FAIL)' "$LOG" || true)
+            SKIPPED=$(grep -cE '] SKIP' "$LOG" || true)
+            echo "[crawl-direct] rc=${CRAWL_RC:-0}  ok=$OK  failed=$FAILED  skipped=$SKIPPED"
+            if [ "$FAILED" -gt 0 ]; then
+              echo "::group::failures"; grep -E '] (FAIL|GATE_FAIL|FOLD_FAIL)' "$LOG" | head -20; echo "::endgroup::"
+            fi
+            # skipped leagues (no exposure / already landed) are not failures; only hard-fail
+            # when nothing worked AND something genuinely failed.
+            if [ "$OK" -eq 0 ] && [ "$FAILED" -gt 0 ]; then
+              echo "::error::0 ok vs $FAILED failed -- nothing worked."; exit 1
+            fi
+            exit 0
+          fi
           PRUNE=""
           if [ "${{ github.event.inputs.prune }}" = "true" ]; then PRUNE="--prune"; fi
           python code/scripts/extraplatform_corpus/batch_ingest_extraplatform.py \
@@ -164,8 +202,7 @@ jobs:
             --limit    "$SIZE" \
             --fold-into "$CORPUS_DIR/corpus_slice_${{ github.event.inputs.platform }}_${{ matrix.batch }}.duckdb" \
             $PRUNE \
-            > "crawl_${{ matrix.batch }}.log" 2>&1 || CRAWL_RC=$?
-          LOG="crawl_${{ matrix.batch }}.log"
+            > "$LOG" 2>&1 || CRAWL_RC=$?
           OK=$(grep -c ' -> OK' "$LOG" || true)
           FAILED=$(grep -cE ' -> (IMPORT_FAILED|SIM_FAILED)' "$LOG" || true)
           echo "[crawl] rc=${CRAWL_RC:-0}  ok=$OK  failed=$FAILED"
