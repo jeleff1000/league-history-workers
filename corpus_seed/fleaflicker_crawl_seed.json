@@ -1,0 +1,3049 @@
+{
+ "platform": "fleaflicker",
+ "generated_probes": 3681,
+ "leagues": [
+  {
+   "league_id": 44027,
+   "seasons": [
+    2013,
+    2014
+   ],
+   "size": 12,
+   "name": "Public League 218982"
+  },
+  {
+   "league_id": 46366,
+   "seasons": [
+    2013
+   ],
+   "size": 12,
+   "name": "Public League 7a5394"
+  },
+  {
+   "league_id": 48127,
+   "seasons": [
+    2011,
+    2012
+   ],
+   "size": 9,
+   "name": "WHO WANTS FUN?"
+  },
+  {
+   "league_id": 54147,
+   "seasons": [
+    2017
+   ],
+   "size": 12,
+   "name": "Public League 567016"
+  },
+  {
+   "league_id": 62307,
+   "seasons": [
+    2011,
+    2012
+   ],
+   "size": 12,
+   "name": "Public League 75f735"
+  },
+  {
+   "league_id": 63168,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 10,
+   "name": "The most 'Official' Official football league"
+  },
+  {
+   "league_id": 63806,
+   "seasons": [
+    2011
+   ],
+   "size": 12,
+   "name": "Public League 596951"
+  },
+  {
+   "league_id": 66765,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022
+   ],
+   "size": 10,
+   "name": "formerbny"
+  },
+  {
+   "league_id": 66956,
+   "seasons": [
+    2011,
+    2012
+   ],
+   "size": 8,
+   "name": "Defenders of America"
+  },
+  {
+   "league_id": 67716,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 10,
+   "name": "American Football Dynasty"
+  },
+  {
+   "league_id": 68662,
+   "seasons": [
+    2017
+   ],
+   "size": 8,
+   "name": "Mid-West Fanatics"
+  },
+  {
+   "league_id": 68990,
+   "seasons": [
+    2014
+   ],
+   "size": 12,
+   "name": "Public League 7a86ad"
+  },
+  {
+   "league_id": 70418,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 10,
+   "name": "The next level of fantasy"
+  },
+  {
+   "league_id": 70536,
+   "seasons": [
+    2011
+   ],
+   "size": 8,
+   "name": "go buckeyes2"
+  },
+  {
+   "league_id": 70719,
+   "seasons": [
+    2011,
+    2012,
+    2013
+   ],
+   "size": 8,
+   "name": "TAKObayashi"
+  },
+  {
+   "league_id": 71244,
+   "seasons": [
+    2011
+   ],
+   "size": 12,
+   "name": "Heads Will Roll"
+  },
+  {
+   "league_id": 71279,
+   "seasons": [
+    2011
+   ],
+   "size": 8,
+   "name": "Ya Tittle Ball"
+  },
+  {
+   "league_id": 73564,
+   "seasons": [
+    2014
+   ],
+   "size": 12,
+   "name": "Public League b3ca6e"
+  },
+  {
+   "league_id": 73717,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016
+   ],
+   "size": 10,
+   "name": "Gridiron Gang Three Three"
+  },
+  {
+   "league_id": 74502,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017
+   ],
+   "size": 8,
+   "name": "Payton's Place"
+  },
+  {
+   "league_id": 75173,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 8,
+   "name": "Football Night in America"
+  },
+  {
+   "league_id": 75361,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "PoolCorp Marketing"
+  },
+  {
+   "league_id": 76838,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "FleaFlicker2"
+  },
+  {
+   "league_id": 76877,
+   "seasons": [
+    2012,
+    2013
+   ],
+   "size": 12,
+   "name": "Public League b86960"
+  },
+  {
+   "league_id": 78592,
+   "seasons": [
+    2021
+   ],
+   "size": 12,
+   "name": "Public League 936daf"
+  },
+  {
+   "league_id": 79798,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "U MAD"
+  },
+  {
+   "league_id": 79964,
+   "seasons": [
+    2014
+   ],
+   "size": 12,
+   "name": "Public League 32ef5a"
+  },
+  {
+   "league_id": 80261,
+   "seasons": [
+    2011
+   ],
+   "size": 12,
+   "name": "Public League a78de7"
+  },
+  {
+   "league_id": 80615,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019
+   ],
+   "size": 12,
+   "name": "Public League 23fb19"
+  },
+  {
+   "league_id": 81434,
+   "seasons": [
+    2011
+   ],
+   "size": 12,
+   "name": "Public League 62caaa"
+  },
+  {
+   "league_id": 81700,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021
+   ],
+   "size": 12,
+   "name": "Public League d730ec"
+  },
+  {
+   "league_id": 82406,
+   "seasons": [
+    2011
+   ],
+   "size": 8,
+   "name": "payment book"
+  },
+  {
+   "league_id": 82564,
+   "seasons": [
+    2011,
+    2012
+   ],
+   "size": 12,
+   "name": "RPL"
+  },
+  {
+   "league_id": 83016,
+   "seasons": [
+    2011,
+    2012
+   ],
+   "size": 11,
+   "name": "Jags League"
+  },
+  {
+   "league_id": 83584,
+   "seasons": [
+    2013
+   ],
+   "size": 12,
+   "name": "Public League ea5e8f"
+  },
+  {
+   "league_id": 83601,
+   "seasons": [
+    2013
+   ],
+   "size": 10,
+   "name": "KRETZ"
+  },
+  {
+   "league_id": 83740,
+   "seasons": [
+    2011
+   ],
+   "size": 12,
+   "name": "Public League 6c4262"
+  },
+  {
+   "league_id": 83844,
+   "seasons": [
+    2016
+   ],
+   "size": 12,
+   "name": "Public League b47536"
+  },
+  {
+   "league_id": 84339,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015
+   ],
+   "size": 12,
+   "name": "football heads1"
+  },
+  {
+   "league_id": 84374,
+   "seasons": [
+    2018,
+    2019
+   ],
+   "size": 12,
+   "name": "Public League d23adb"
+  },
+  {
+   "league_id": 84816,
+   "seasons": [
+    2013
+   ],
+   "size": 12,
+   "name": "Public League 6a1ba5"
+  },
+  {
+   "league_id": 88750,
+   "seasons": [
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024
+   ],
+   "size": 12,
+   "name": "Public League cacb16"
+  },
+  {
+   "league_id": 89040,
+   "seasons": [
+    2024
+   ],
+   "size": 12,
+   "name": "Mafia Fantasy Football League"
+  },
+  {
+   "league_id": 89092,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "The Master Debators"
+  },
+  {
+   "league_id": 89131,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 8,
+   "name": "Barron 204"
+  },
+  {
+   "league_id": 89205,
+   "seasons": [
+    2014
+   ],
+   "size": 12,
+   "name": "Public League c57a8b"
+  },
+  {
+   "league_id": 89989,
+   "seasons": [
+    2013,
+    2014
+   ],
+   "size": 12,
+   "name": "Tennessee league"
+  },
+  {
+   "league_id": 91166,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015
+   ],
+   "size": 10,
+   "name": "The Commish is STILL an A-Hole"
+  },
+  {
+   "league_id": 91490,
+   "seasons": [
+    2011
+   ],
+   "size": 10,
+   "name": "American Slackjaw League"
+  },
+  {
+   "league_id": 93023,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "Heart Ons"
+  },
+  {
+   "league_id": 93711,
+   "seasons": [
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 10,
+   "name": "gamblers 304"
+  },
+  {
+   "league_id": 94789,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019
+   ],
+   "size": 10,
+   "name": "Dave's FF Crew"
+  },
+  {
+   "league_id": 95120,
+   "seasons": [
+    2011
+   ],
+   "size": 10,
+   "name": "Hempfield 09"
+  },
+  {
+   "league_id": 95822,
+   "seasons": [
+    2011
+   ],
+   "size": 8,
+   "name": "F-Dub Hustle"
+  },
+  {
+   "league_id": 95914,
+   "seasons": [
+    2014
+   ],
+   "size": 12,
+   "name": "Public League D8D684"
+  },
+  {
+   "league_id": 95952,
+   "seasons": [
+    2011
+   ],
+   "size": 10,
+   "name": "MU Classic 2"
+  },
+  {
+   "league_id": 96126,
+   "seasons": [
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 10,
+   "name": "EstablishDominance1"
+  },
+  {
+   "league_id": 97426,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019
+   ],
+   "size": 10,
+   "name": "Ballsonya"
+  },
+  {
+   "league_id": 97503,
+   "seasons": [
+    2011
+   ],
+   "size": 8,
+   "name": "League of the Murg"
+  },
+  {
+   "league_id": 97651,
+   "seasons": [
+    2011,
+    2012,
+    2013
+   ],
+   "size": 11,
+   "name": "Lost Internet Boys"
+  },
+  {
+   "league_id": 98280,
+   "seasons": [
+    2011
+   ],
+   "size": 12,
+   "name": "Beer Drinkers Unite!"
+  },
+  {
+   "league_id": 98498,
+   "seasons": [
+    2011
+   ],
+   "size": 12,
+   "name": "Public League E4AC5C"
+  },
+  {
+   "league_id": 98746,
+   "seasons": [
+    2011,
+    2012
+   ],
+   "size": 10,
+   "name": "Rupert Lake FF"
+  },
+  {
+   "league_id": 99707,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "Public League 963D3E"
+  },
+  {
+   "league_id": 100197,
+   "seasons": [
+    2011,
+    2012
+   ],
+   "size": 12,
+   "name": "Public League 73B130"
+  },
+  {
+   "league_id": 100365,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014
+   ],
+   "size": 10,
+   "name": "49ers dolphins super bowl"
+  },
+  {
+   "league_id": 100681,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019
+   ],
+   "size": 14,
+   "name": "Family Rumble in the Jungle"
+  },
+  {
+   "league_id": 100904,
+   "seasons": [
+    2012
+   ],
+   "size": 12,
+   "name": "Public League B243CD"
+  },
+  {
+   "league_id": 101524,
+   "seasons": [
+    2011
+   ],
+   "size": 12,
+   "name": "Public League 1A11C2"
+  },
+  {
+   "league_id": 101882,
+   "seasons": [
+    2017,
+    2018
+   ],
+   "size": 12,
+   "name": "Public League 9E703C"
+  },
+  {
+   "league_id": 102126,
+   "seasons": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "Public League 1E1F06"
+  },
+  {
+   "league_id": 102495,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017
+   ],
+   "size": 12,
+   "name": "Public League 32832B"
+  },
+  {
+   "league_id": 103685,
+   "seasons": [
+    2011,
+    2012
+   ],
+   "size": 12,
+   "name": "Public League 9CD17D"
+  },
+  {
+   "league_id": 104990,
+   "seasons": [
+    2011,
+    2012
+   ],
+   "size": 12,
+   "name": "NFL  TEAMS ONLY"
+  },
+  {
+   "league_id": 105788,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 10,
+   "name": "The Greatest Champions League"
+  },
+  {
+   "league_id": 105947,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 8,
+   "name": "Five Star Football League"
+  },
+  {
+   "league_id": 106244,
+   "seasons": [
+    2011
+   ],
+   "size": 8,
+   "name": "World Class FFL"
+  },
+  {
+   "league_id": 106729,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016
+   ],
+   "size": 8,
+   "name": "The Ultimate Fantasty Football League"
+  },
+  {
+   "league_id": 106930,
+   "seasons": [
+    2017,
+    2018
+   ],
+   "size": 12,
+   "name": "Public League EA68AE"
+  },
+  {
+   "league_id": 106941,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014
+   ],
+   "size": 12,
+   "name": "National Beer League"
+  },
+  {
+   "league_id": 106948,
+   "seasons": [
+    2011
+   ],
+   "size": 10,
+   "name": "i love tacos"
+  },
+  {
+   "league_id": 107261,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014
+   ],
+   "size": 12,
+   "name": "Public League EF5831"
+  },
+  {
+   "league_id": 107330,
+   "seasons": [
+    2011,
+    2012,
+    2013
+   ],
+   "size": 12,
+   "name": "Remember the Titan"
+  },
+  {
+   "league_id": 107893,
+   "seasons": [
+    2011,
+    2012
+   ],
+   "size": 10,
+   "name": "The League - 2011"
+  },
+  {
+   "league_id": 108154,
+   "seasons": [
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 16,
+   "name": "Fatboy League"
+  },
+  {
+   "league_id": 108312,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 10,
+   "name": "Fantasy Football League"
+  },
+  {
+   "league_id": 108374,
+   "seasons": [
+    2011,
+    2012,
+    2013
+   ],
+   "size": 8,
+   "name": "bonecrusher2000"
+  },
+  {
+   "league_id": 108386,
+   "seasons": [
+    2014
+   ],
+   "size": 12,
+   "name": "Public League 7A1466"
+  },
+  {
+   "league_id": 109295,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017
+   ],
+   "size": 12,
+   "name": "Public League 46B6C7"
+  },
+  {
+   "league_id": 109720,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 10,
+   "name": "DEEP Waters"
+  },
+  {
+   "league_id": 109932,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016
+   ],
+   "size": 8,
+   "name": "draft party"
+  },
+  {
+   "league_id": 110199,
+   "seasons": [
+    2011
+   ],
+   "size": 12,
+   "name": "delta porkers"
+  },
+  {
+   "league_id": 111713,
+   "seasons": [
+    2011
+   ],
+   "size": 8,
+   "name": "The Boogie Woogie Foundation"
+  },
+  {
+   "league_id": 112263,
+   "seasons": [
+    2011
+   ],
+   "size": 8,
+   "name": "Pink Posse"
+  },
+  {
+   "league_id": 112469,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 8,
+   "name": "Tim Tebow's Flag Football League"
+  },
+  {
+   "league_id": 112666,
+   "seasons": [
+    2011,
+    2012
+   ],
+   "size": 10,
+   "name": "Statboys FFL"
+  },
+  {
+   "league_id": 112737,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015
+   ],
+   "size": 10,
+   "name": "WLTDOL"
+  },
+  {
+   "league_id": 112742,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016
+   ],
+   "size": 12,
+   "name": "It Is What It Is - IIWII -"
+  },
+  {
+   "league_id": 112852,
+   "seasons": [
+    2011,
+    2012
+   ],
+   "size": 12,
+   "name": "IRONCITY"
+  },
+  {
+   "league_id": 112873,
+   "seasons": [
+    2011,
+    2012
+   ],
+   "size": 12,
+   "name": "TheJuggernauts"
+  },
+  {
+   "league_id": 112880,
+   "seasons": [
+    2011
+   ],
+   "size": 10,
+   "name": "No MaaM League"
+  },
+  {
+   "league_id": 113735,
+   "seasons": [
+    2018
+   ],
+   "size": 12,
+   "name": "Public League 4B9B6D"
+  },
+  {
+   "league_id": 114118,
+   "seasons": [
+    2011,
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 8,
+   "name": "Bob is Texting Marcquel's Mom"
+  },
+  {
+   "league_id": 114737,
+   "seasons": [
+    2011
+   ],
+   "size": 8,
+   "name": "Nokomis Fantasy League"
+  },
+  {
+   "league_id": 115040,
+   "seasons": [
+    2011,
+    2012
+   ],
+   "size": 14,
+   "name": "Randazzo19th II"
+  },
+  {
+   "league_id": 115564,
+   "seasons": [
+    2011
+   ],
+   "size": 10,
+   "name": "Let's Go!!!"
+  },
+  {
+   "league_id": 115713,
+   "seasons": [
+    2011
+   ],
+   "size": 12,
+   "name": "Da Real Draft"
+  },
+  {
+   "league_id": 115881,
+   "seasons": [
+    2011
+   ],
+   "size": 8,
+   "name": "ACH2011"
+  },
+  {
+   "league_id": 115918,
+   "seasons": [
+    2011
+   ],
+   "size": 8,
+   "name": "CHITOWN CLASSIC"
+  },
+  {
+   "league_id": 115946,
+   "seasons": [
+    2019
+   ],
+   "size": 12,
+   "name": "Public League 3F134F"
+  },
+  {
+   "league_id": 116137,
+   "seasons": [
+    2011,
+    2012
+   ],
+   "size": 12,
+   "name": "Public League 9B6BAB"
+  },
+  {
+   "league_id": 116279,
+   "seasons": [
+    2011
+   ],
+   "size": 8,
+   "name": "Late Bloomer"
+  },
+  {
+   "league_id": 116416,
+   "seasons": [
+    2012,
+    2013
+   ],
+   "size": 12,
+   "name": "Public League 73BD9A"
+  },
+  {
+   "league_id": 117169,
+   "seasons": [
+    2013,
+    2014
+   ],
+   "size": 12,
+   "name": "Public League DF3D76"
+  },
+  {
+   "league_id": 119336,
+   "seasons": [
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 14,
+   "name": "Gridiron Gurus"
+  },
+  {
+   "league_id": 122319,
+   "seasons": [
+    2012,
+    2013,
+    2014,
+    2015,
+    2016
+   ],
+   "size": 8,
+   "name": "Co-Owners League"
+  },
+  {
+   "league_id": 122514,
+   "seasons": [
+    2012,
+    2013,
+    2014
+   ],
+   "size": 14,
+   "name": "West Coast Football"
+  },
+  {
+   "league_id": 122690,
+   "seasons": [
+    2012,
+    2013
+   ],
+   "size": 12,
+   "name": "Public League 73F33E"
+  },
+  {
+   "league_id": 122704,
+   "seasons": [
+    2017
+   ],
+   "size": 12,
+   "name": "Public League FD9900"
+  },
+  {
+   "league_id": 124301,
+   "seasons": [
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022
+   ],
+   "size": 12,
+   "name": "Sports Nutz Football"
+  },
+  {
+   "league_id": 126003,
+   "seasons": [
+    2012
+   ],
+   "size": 8,
+   "name": "lionssssssa"
+  },
+  {
+   "league_id": 126713,
+   "seasons": [
+    2012,
+    2013,
+    2014
+   ],
+   "size": 10,
+   "name": "Legends League"
+  },
+  {
+   "league_id": 127183,
+   "seasons": [
+    2012,
+    2013,
+    2014,
+    2015
+   ],
+   "size": 10,
+   "name": "Blue Hair Crew"
+  },
+  {
+   "league_id": 127596,
+   "seasons": [
+    2012
+   ],
+   "size": 10,
+   "name": "Balaballers"
+  },
+  {
+   "league_id": 127850,
+   "seasons": [
+    2012,
+    2013
+   ],
+   "size": 10,
+   "name": "PT is the Place to Be"
+  },
+  {
+   "league_id": 128255,
+   "seasons": [
+    2012
+   ],
+   "size": 9,
+   "name": "DtownFantasy"
+  },
+  {
+   "league_id": 128467,
+   "seasons": [
+    2015
+   ],
+   "size": 9,
+   "name": "League of Legends"
+  },
+  {
+   "league_id": 128826,
+   "seasons": [
+    2012,
+    2013,
+    2014
+   ],
+   "size": 8,
+   "name": "season starts now!"
+  },
+  {
+   "league_id": 128870,
+   "seasons": [
+    2012
+   ],
+   "size": 10,
+   "name": "The League of Extraordinary Genitals"
+  },
+  {
+   "league_id": 128904,
+   "seasons": [
+    2012
+   ],
+   "size": 12,
+   "name": "2012 fatherson"
+  },
+  {
+   "league_id": 129235,
+   "seasons": [
+    2012
+   ],
+   "size": 14,
+   "name": "Quakes Fantasy Football League"
+  },
+  {
+   "league_id": 130136,
+   "seasons": [
+    2012
+   ],
+   "size": 10,
+   "name": "Boner Sunday"
+  },
+  {
+   "league_id": 130241,
+   "seasons": [
+    2012
+   ],
+   "size": 12,
+   "name": "The Invincibles"
+  },
+  {
+   "league_id": 130264,
+   "seasons": [
+    2012
+   ],
+   "size": 8,
+   "name": "Android App War"
+  },
+  {
+   "league_id": 130585,
+   "seasons": [
+    2015
+   ],
+   "size": 8,
+   "name": "League of Noobs"
+  },
+  {
+   "league_id": 130679,
+   "seasons": [
+    2012
+   ],
+   "size": 8,
+   "name": "ESD BOSTON ITs"
+  },
+  {
+   "league_id": 130841,
+   "seasons": [
+    2014
+   ],
+   "size": 12,
+   "name": "Public League 038481"
+  },
+  {
+   "league_id": 130947,
+   "seasons": [
+    2012,
+    2013,
+    2014
+   ],
+   "size": 10,
+   "name": "Charleston Gang"
+  },
+  {
+   "league_id": 131489,
+   "seasons": [
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 8,
+   "name": "Welcome to Fantasy Island"
+  },
+  {
+   "league_id": 131581,
+   "seasons": [
+    2019
+   ],
+   "size": 8,
+   "name": "BB4H"
+  },
+  {
+   "league_id": 131604,
+   "seasons": [
+    2012
+   ],
+   "size": 10,
+   "name": "MCK-Visibility"
+  },
+  {
+   "league_id": 131644,
+   "seasons": [
+    2012,
+    2013,
+    2014,
+    2015
+   ],
+   "size": 10,
+   "name": "City Slickers & Rednecks"
+  },
+  {
+   "league_id": 132204,
+   "seasons": [
+    2012,
+    2013
+   ],
+   "size": 10,
+   "name": "Pasta&Potato League"
+  },
+  {
+   "league_id": 133073,
+   "seasons": [
+    2012
+   ],
+   "size": 10,
+   "name": "dildos"
+  },
+  {
+   "league_id": 133157,
+   "seasons": [
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 8,
+   "name": "Last Call"
+  },
+  {
+   "league_id": 134422,
+   "seasons": [
+    2020,
+    2021,
+    2022
+   ],
+   "size": 12,
+   "name": "Public League 06B1A0"
+  },
+  {
+   "league_id": 134869,
+   "seasons": [
+    2012
+   ],
+   "size": 12,
+   "name": "London Silly Nannies"
+  },
+  {
+   "league_id": 136600,
+   "seasons": [
+    2013
+   ],
+   "size": 10,
+   "name": "The time is now 2013"
+  },
+  {
+   "league_id": 136686,
+   "seasons": [
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 8,
+   "name": "BISSON"
+  },
+  {
+   "league_id": 137113,
+   "seasons": [
+    2013
+   ],
+   "size": 12,
+   "name": "DTS league"
+  },
+  {
+   "league_id": 137166,
+   "seasons": [
+    2013,
+    2014
+   ],
+   "size": 8,
+   "name": "HGTH Fantasy Football League"
+  },
+  {
+   "league_id": 137431,
+   "seasons": [
+    2013,
+    2014
+   ],
+   "size": 12,
+   "name": "MONDAY NIGHT FOOTBALL"
+  },
+  {
+   "league_id": 138014,
+   "seasons": [
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019
+   ],
+   "size": 10,
+   "name": "The League"
+  },
+  {
+   "league_id": 138654,
+   "seasons": [
+    2013
+   ],
+   "size": 12,
+   "name": "Public League 032DF7"
+  },
+  {
+   "league_id": 141188,
+   "seasons": [
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 10,
+   "name": "Champions League"
+  },
+  {
+   "league_id": 141880,
+   "seasons": [
+    2013
+   ],
+   "size": 8,
+   "name": "Worst League Ever"
+  },
+  {
+   "league_id": 143163,
+   "seasons": [
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 10,
+   "name": "Rox Dynasty"
+  },
+  {
+   "league_id": 144348,
+   "seasons": [
+    2013,
+    2014
+   ],
+   "size": 10,
+   "name": "Made in the U.S.A."
+  },
+  {
+   "league_id": 146322,
+   "seasons": [
+    2013
+   ],
+   "size": 8,
+   "name": "Loyno CLC"
+  },
+  {
+   "league_id": 147103,
+   "seasons": [
+    2020
+   ],
+   "size": 10,
+   "name": "The Rejects"
+  },
+  {
+   "league_id": 147107,
+   "seasons": [
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 14,
+   "name": "Opafl"
+  },
+  {
+   "league_id": 147975,
+   "seasons": [
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "Public League A7DCF4"
+  },
+  {
+   "league_id": 148210,
+   "seasons": [
+    2013,
+    2014
+   ],
+   "size": 12,
+   "name": "Public League E6A7D6"
+  },
+  {
+   "league_id": 148619,
+   "seasons": [
+    2013,
+    2014,
+    2015
+   ],
+   "size": 12,
+   "name": "Public League 2016A6"
+  },
+  {
+   "league_id": 153315,
+   "seasons": [
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 10,
+   "name": "The \"Ironman suuucks!\" Football League"
+  },
+  {
+   "league_id": 153855,
+   "seasons": [
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 16,
+   "name": "Show Me Your TD's"
+  },
+  {
+   "league_id": 154536,
+   "seasons": [
+    2022
+   ],
+   "size": 12,
+   "name": "test league"
+  },
+  {
+   "league_id": 155204,
+   "seasons": [
+    2014
+   ],
+   "size": 12,
+   "name": "World Flicker Football League"
+  },
+  {
+   "league_id": 156399,
+   "seasons": [
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "NarFFL Farm - Brady Quinn West"
+  },
+  {
+   "league_id": 159822,
+   "seasons": [
+    2014,
+    2015,
+    2016,
+    2017,
+    2018,
+    2019
+   ],
+   "size": 12,
+   "name": "Public League 892D19"
+  },
+  {
+   "league_id": 160931,
+   "seasons": [
+    2014,
+    2015
+   ],
+   "size": 12,
+   "name": "Who Brought The Douche?"
+  },
+  {
+   "league_id": 160935,
+   "seasons": [
+    2014,
+    2015
+   ],
+   "size": 12,
+   "name": "Public League 96CAE3"
+  },
+  {
+   "league_id": 160956,
+   "seasons": [
+    2014,
+    2015
+   ],
+   "size": 12,
+   "name": "SCOTTS ARMY LEAGUE 2014 - 2015"
+  },
+  {
+   "league_id": 161236,
+   "seasons": [
+    2014
+   ],
+   "size": 12,
+   "name": "Public League BC3782"
+  },
+  {
+   "league_id": 161483,
+   "seasons": [
+    2014
+   ],
+   "size": 10,
+   "name": "Midwest vs East Coast Dynasty League"
+  },
+  {
+   "league_id": 161592,
+   "seasons": [
+    2014
+   ],
+   "size": 8,
+   "name": "Tipton League"
+  },
+  {
+   "league_id": 164549,
+   "seasons": [
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "Box Wine"
+  },
+  {
+   "league_id": 167684,
+   "seasons": [
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 8,
+   "name": "elimination chamber"
+  },
+  {
+   "league_id": 167942,
+   "seasons": [
+    2015
+   ],
+   "size": 10,
+   "name": "Royal Rumble Fantasy Keeper League"
+  },
+  {
+   "league_id": 168341,
+   "seasons": [
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "The Kosher Pigskins League"
+  },
+  {
+   "league_id": 170357,
+   "seasons": [
+    2018
+   ],
+   "size": 8,
+   "name": "Cheyenne"
+  },
+  {
+   "league_id": 171080,
+   "seasons": [
+    2015
+   ],
+   "size": 12,
+   "name": "Toilet \"Hobbies\" Bowl III"
+  },
+  {
+   "league_id": 171908,
+   "seasons": [
+    2018
+   ],
+   "size": 10,
+   "name": "Dy-Nasty"
+  },
+  {
+   "league_id": 172273,
+   "seasons": [
+    2017
+   ],
+   "size": 12,
+   "name": "Public League BA518D"
+  },
+  {
+   "league_id": 172559,
+   "seasons": [
+    2018
+   ],
+   "size": 10,
+   "name": "KC Redraft"
+  },
+  {
+   "league_id": 172587,
+   "seasons": [
+    2015
+   ],
+   "size": 8,
+   "name": "A Potpourri of Fantasy"
+  },
+  {
+   "league_id": 172877,
+   "seasons": [
+    2015
+   ],
+   "size": 10,
+   "name": "the league868"
+  },
+  {
+   "league_id": 172996,
+   "seasons": [
+    2015,
+    2016
+   ],
+   "size": 10,
+   "name": "Young bloods n that old guy"
+  },
+  {
+   "league_id": 173643,
+   "seasons": [
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 8,
+   "name": "Ball busting fans"
+  },
+  {
+   "league_id": 174374,
+   "seasons": [
+    2015,
+    2016
+   ],
+   "size": 8,
+   "name": "Gridiron Legends PPR"
+  },
+  {
+   "league_id": 175483,
+   "seasons": [
+    2015,
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "Public League 84E92E"
+  },
+  {
+   "league_id": 175994,
+   "seasons": [
+    2015
+   ],
+   "size": 8,
+   "name": "Catetastic"
+  },
+  {
+   "league_id": 176190,
+   "seasons": [
+    2015
+   ],
+   "size": 8,
+   "name": "Trinity"
+  },
+  {
+   "league_id": 176852,
+   "seasons": [
+    2019
+   ],
+   "size": 12,
+   "name": "Public League C437C1"
+  },
+  {
+   "league_id": 177412,
+   "seasons": [
+    2016,
+    2017,
+    2018
+   ],
+   "size": 12,
+   "name": "Public League A01842"
+  },
+  {
+   "league_id": 178712,
+   "seasons": [
+    2016
+   ],
+   "size": 12,
+   "name": "Public League 0D31E4"
+  },
+  {
+   "league_id": 179497,
+   "seasons": [
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 8,
+   "name": "Off Season"
+  },
+  {
+   "league_id": 179844,
+   "seasons": [
+    2016
+   ],
+   "size": 12,
+   "name": "Dynasty League"
+  },
+  {
+   "league_id": 180079,
+   "seasons": [
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 10,
+   "name": "The League of Heroes & Villains"
+  },
+  {
+   "league_id": 181113,
+   "seasons": [
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 16,
+   "name": "Deep Ball"
+  },
+  {
+   "league_id": 181288,
+   "seasons": [
+    2018
+   ],
+   "size": 12,
+   "name": "Public League 14126F"
+  },
+  {
+   "league_id": 183856,
+   "seasons": [
+    2016,
+    2017,
+    2018
+   ],
+   "size": 8,
+   "name": "Plastic Bowl League"
+  },
+  {
+   "league_id": 184114,
+   "seasons": [
+    2016
+   ],
+   "size": 11,
+   "name": "MGM"
+  },
+  {
+   "league_id": 184148,
+   "seasons": [
+    2017
+   ],
+   "size": 10,
+   "name": "Levi Dynasty"
+  },
+  {
+   "league_id": 184917,
+   "seasons": [
+    2016,
+    2017,
+    2018,
+    2019,
+    2020,
+    2021
+   ],
+   "size": 12,
+   "name": "Public League 7B5F57"
+  },
+  {
+   "league_id": 186246,
+   "seasons": [
+    2016
+   ],
+   "size": 10,
+   "name": "bwsc"
+  },
+  {
+   "league_id": 187746,
+   "seasons": [
+    2016,
+    2017
+   ],
+   "size": 10,
+   "name": "DFFL 16"
+  },
+  {
+   "league_id": 187843,
+   "seasons": [
+    2016
+   ],
+   "size": 14,
+   "name": "GOB Dynasty League of a Thousand Years"
+  },
+  {
+   "league_id": 188095,
+   "seasons": [
+    2016,
+    2017,
+    2018,
+    2019
+   ],
+   "size": 12,
+   "name": "Public League F54961"
+  },
+  {
+   "league_id": 188648,
+   "seasons": [
+    2016
+   ],
+   "size": 12,
+   "name": "VAFL"
+  },
+  {
+   "league_id": 192990,
+   "seasons": [
+    2017
+   ],
+   "size": 12,
+   "name": "Public League D75506"
+  },
+  {
+   "league_id": 194566,
+   "seasons": [
+    2017,
+    2018,
+    2019
+   ],
+   "size": 10,
+   "name": "Dubs"
+  },
+  {
+   "league_id": 194665,
+   "seasons": [
+    2017,
+    2018,
+    2019
+   ],
+   "size": 12,
+   "name": "Public League 37B23A"
+  },
+  {
+   "league_id": 194666,
+   "seasons": [
+    2017,
+    2018
+   ],
+   "size": 12,
+   "name": "Public League 7CAFB9"
+  },
+  {
+   "league_id": 196730,
+   "seasons": [
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 10,
+   "name": "Smashmouth Football"
+  },
+  {
+   "league_id": 197255,
+   "seasons": [
+    2017,
+    2018,
+    2019,
+    2020
+   ],
+   "size": 12,
+   "name": "Training Day"
+  },
+  {
+   "league_id": 197469,
+   "seasons": [
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 8,
+   "name": "Dynasty League"
+  },
+  {
+   "league_id": 197757,
+   "seasons": [
+    2017
+   ],
+   "size": 12,
+   "name": "If you a'int first, you're last"
+  },
+  {
+   "league_id": 198066,
+   "seasons": [
+    2017,
+    2018
+   ],
+   "size": 8,
+   "name": "Booty Eating Legend and friends"
+  },
+  {
+   "league_id": 198343,
+   "seasons": [
+    2017
+   ],
+   "size": 11,
+   "name": "Mixandmatch"
+  },
+  {
+   "league_id": 199056,
+   "seasons": [
+    2020
+   ],
+   "size": 12,
+   "name": "Big Mac's Right Eye"
+  },
+  {
+   "league_id": 199943,
+   "seasons": [
+    2017
+   ],
+   "size": 10,
+   "name": "LoCash Hodown"
+  },
+  {
+   "league_id": 200002,
+   "seasons": [
+    2017,
+    2018,
+    2019
+   ],
+   "size": 12,
+   "name": "Public League BB8660"
+  },
+  {
+   "league_id": 200415,
+   "seasons": [
+    2017,
+    2018,
+    2019
+   ],
+   "size": 12,
+   "name": "Public League 5E4A0A"
+  },
+  {
+   "league_id": 202400,
+   "seasons": [
+    2017
+   ],
+   "size": 12,
+   "name": "Toddsy's sencond try"
+  },
+  {
+   "league_id": 202864,
+   "seasons": [
+    2017,
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024
+   ],
+   "size": 12,
+   "name": "Public League 69B4B4"
+  },
+  {
+   "league_id": 205162,
+   "seasons": [
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "Public League BD09CF"
+  },
+  {
+   "league_id": 205360,
+   "seasons": [
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "Public League 03C858"
+  },
+  {
+   "league_id": 205940,
+   "seasons": [
+    2018,
+    2019
+   ],
+   "size": 10,
+   "name": "The Dynasty League"
+  },
+  {
+   "league_id": 207105,
+   "seasons": [
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023
+   ],
+   "size": 10,
+   "name": "Boom Time VI (Use Sleeper Mike)"
+  },
+  {
+   "league_id": 207223,
+   "seasons": [
+    2018,
+    2019,
+    2020
+   ],
+   "size": 12,
+   "name": "Dynasty"
+  },
+  {
+   "league_id": 207974,
+   "seasons": [
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024
+   ],
+   "size": 10,
+   "name": "The 'Check Your Settings' Dynasty"
+  },
+  {
+   "league_id": 208196,
+   "seasons": [
+    2022
+   ],
+   "size": 12,
+   "name": "Bebedores de Rum"
+  },
+  {
+   "league_id": 208424,
+   "seasons": [
+    2018,
+    2019,
+    2020,
+    2021,
+    2022
+   ],
+   "size": 16,
+   "name": "TBD"
+  },
+  {
+   "league_id": 209829,
+   "seasons": [
+    2019,
+    2020,
+    2021
+   ],
+   "size": 12,
+   "name": "Public League 5D4BAA"
+  },
+  {
+   "league_id": 216197,
+   "seasons": [
+    2018,
+    2019,
+    2020
+   ],
+   "size": 12,
+   "name": "Sex Maniacs"
+  },
+  {
+   "league_id": 222119,
+   "seasons": [
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018
+   ],
+   "size": 10,
+   "name": "Call to the Gridiron"
+  },
+  {
+   "league_id": 226979,
+   "seasons": [
+    2018
+   ],
+   "size": 14,
+   "name": "B.A.S. League"
+  },
+  {
+   "league_id": 231466,
+   "seasons": [
+    2016,
+    2017,
+    2018
+   ],
+   "size": 12,
+   "name": "The Sunshine State League"
+  },
+  {
+   "league_id": 234290,
+   "seasons": [
+    2020,
+    2021
+   ],
+   "size": 12,
+   "name": "BGwas Football Club"
+  },
+  {
+   "league_id": 267301,
+   "seasons": [
+    2019,
+    2020,
+    2021,
+    2022
+   ],
+   "size": 12,
+   "name": "LPD Dynasty League"
+  },
+  {
+   "league_id": 293450,
+   "seasons": [
+    2016,
+    2017,
+    2018
+   ],
+   "size": 12,
+   "name": "The Spartan League"
+  },
+  {
+   "league_id": 300211,
+   "seasons": [
+    2018,
+    2019,
+    2020
+   ],
+   "size": 10,
+   "name": "PaPa bob fantasy League"
+  },
+  {
+   "league_id": 302743,
+   "seasons": [
+    2018,
+    2019
+   ],
+   "size": 10,
+   "name": "The League"
+  },
+  {
+   "league_id": 305452,
+   "seasons": [
+    2019
+   ],
+   "size": 10,
+   "name": "WBL Dynasty"
+  },
+  {
+   "league_id": 306934,
+   "seasons": [
+    2019
+   ],
+   "size": 12,
+   "name": "MontaukJohn's"
+  },
+  {
+   "league_id": 307182,
+   "seasons": [
+    2019,
+    2020,
+    2021
+   ],
+   "size": 12,
+   "name": "Public League 4D86D0"
+  },
+  {
+   "league_id": 310776,
+   "seasons": [
+    2020,
+    2021
+   ],
+   "size": 10,
+   "name": "Dinastia Catadao"
+  },
+  {
+   "league_id": 310809,
+   "seasons": [
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "Fantasy Football Addicts"
+  },
+  {
+   "league_id": 314247,
+   "seasons": [
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 10,
+   "name": "Lets Get Tropical"
+  },
+  {
+   "league_id": 314341,
+   "seasons": [
+    2020
+   ],
+   "size": 12,
+   "name": "Night Shifters"
+  },
+  {
+   "league_id": 315628,
+   "seasons": [
+    2018,
+    2019,
+    2020
+   ],
+   "size": 16,
+   "name": "Premier Football League"
+  },
+  {
+   "league_id": 315634,
+   "seasons": [
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 10,
+   "name": "The Ex Athletes Dynasty"
+  },
+  {
+   "league_id": 316136,
+   "seasons": [
+    2020
+   ],
+   "size": 9,
+   "name": "The 2020 league"
+  },
+  {
+   "league_id": 318151,
+   "seasons": [
+    2020
+   ],
+   "size": 8,
+   "name": "Hoffman Family"
+  },
+  {
+   "league_id": 318307,
+   "seasons": [
+    2020
+   ],
+   "size": 10,
+   "name": "Dynasty League"
+  },
+  {
+   "league_id": 319357,
+   "seasons": [
+    2020,
+    2021,
+    2022
+   ],
+   "size": 12,
+   "name": "Spaghetti Sauce"
+  },
+  {
+   "league_id": 322047,
+   "seasons": [
+    2021
+   ],
+   "size": 12,
+   "name": "Public League 41642A"
+  },
+  {
+   "league_id": 322959,
+   "seasons": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "League of Losers"
+  },
+  {
+   "league_id": 322976,
+   "seasons": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 20,
+   "name": "\ud83d\udfe2 2\u00aa Liga HYPERMOTION"
+  },
+  {
+   "league_id": 323398,
+   "seasons": [
+    2021,
+    2022,
+    2023
+   ],
+   "size": 12,
+   "name": "The smart ones"
+  },
+  {
+   "league_id": 324071,
+   "seasons": [
+    2021,
+    2022
+   ],
+   "size": 12,
+   "name": "Show Me Your TDs"
+  },
+  {
+   "league_id": 325916,
+   "seasons": [
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 10,
+   "name": "The Zabava"
+  },
+  {
+   "league_id": 331199,
+   "seasons": [
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 10,
+   "name": "For Fun League"
+  },
+  {
+   "league_id": 331267,
+   "seasons": [
+    2022
+   ],
+   "size": 12,
+   "name": "Public League BBDE91"
+  },
+  {
+   "league_id": 334310,
+   "seasons": [
+    2022,
+    2023,
+    2024,
+    2025
+   ],
+   "size": 16,
+   "name": "New Dynasty"
+  },
+  {
+   "league_id": 338849,
+   "seasons": [
+    2023,
+    2024,
+    2025
+   ],
+   "size": 16,
+   "name": "420"
+  },
+  {
+   "league_id": 339625,
+   "seasons": [
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "Empire Osceola"
+  },
+  {
+   "league_id": 340183,
+   "seasons": [
+    2023,
+    2024,
+    2025
+   ],
+   "size": 12,
+   "name": "Pimps-R-Us"
+  },
+  {
+   "league_id": 343582,
+   "seasons": [
+    2018,
+    2019,
+    2020,
+    2021,
+    2022,
+    2023
+   ],
+   "size": 12,
+   "name": "Lake Town Misfits"
+  },
+  {
+   "league_id": 346094,
+   "seasons": [
+    2024,
+    2025
+   ],
+   "size": 8,
+   "name": "Dynasty Dogs"
+  },
+  {
+   "league_id": 346779,
+   "seasons": [
+    2024
+   ],
+   "size": 12,
+   "name": "Public League 341F7E"
+  },
+  {
+   "league_id": 347626,
+   "seasons": [
+    2024
+   ],
+   "size": 12,
+   "name": "KSD Students"
+  },
+  {
+   "league_id": 350550,
+   "seasons": [
+    2025
+   ],
+   "size": 12,
+   "name": "Public League 21415E"
+  },
+  {
+   "league_id": 352397,
+   "seasons": [
+    2025
+   ],
+   "size": 10,
+   "name": "Yahoo H2H-Pts 1392603"
+  }
+ ]
+}

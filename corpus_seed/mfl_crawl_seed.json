@@ -1,0 +1,1602 @@
+{
+ "platform": "mfl",
+ "generated_probes": 250,
+ "leagues": [
+  {
+   "seed": "2024:10267",
+   "year": 2024,
+   "id": "10267",
+   "name": "Pliability and Hydration League",
+   "size": 12
+  },
+  {
+   "seed": "2024:10301",
+   "year": 2024,
+   "id": "10301",
+   "name": "National Fantasy League",
+   "size": 14
+  },
+  {
+   "seed": "2024:10336",
+   "year": 2024,
+   "id": "10336",
+   "name": "2K Fantasy Playoffs",
+   "size": 7
+  },
+  {
+   "seed": "2024:10499",
+   "year": 2024,
+   "id": "10499",
+   "name": "Starkey Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2024:10802",
+   "year": 2024,
+   "id": "10802",
+   "name": "FOOTBALL GODS",
+   "size": 12
+  },
+  {
+   "seed": "2024:10964",
+   "year": 2024,
+   "id": "10964",
+   "name": "Apex Amateur Dynamic Superflex Best Ball Dynasty 423",
+   "size": 12
+  },
+  {
+   "seed": "2024:11176",
+   "year": 2024,
+   "id": "11176",
+   "name": "Canal Bar League",
+   "size": 10
+  },
+  {
+   "seed": "2024:11232",
+   "year": 2024,
+   "id": "11232",
+   "name": "Jim's Burgers Fantasy Football League",
+   "size": 10
+  },
+  {
+   "seed": "2024:11521",
+   "year": 2024,
+   "id": "11521",
+   "name": "Auction Extravaganza Dynasty Football League",
+   "size": 12
+  },
+  {
+   "seed": "2024:11690",
+   "year": 2024,
+   "id": "11690",
+   "name": "DDFL League #2",
+   "size": 12
+  },
+  {
+   "seed": "2024:11883",
+   "year": 2024,
+   "id": "11883",
+   "name": "Napa Valley Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2024:12009",
+   "year": 2024,
+   "id": "12009",
+   "name": "PREMIER Dynasty League / PDL",
+   "size": 16
+  },
+  {
+   "seed": "2024:12141",
+   "year": 2024,
+   "id": "12141",
+   "name": "Nardello League",
+   "size": 20
+  },
+  {
+   "seed": "2024:12319",
+   "year": 2024,
+   "id": "12319",
+   "name": "Wachtman Best Ball League",
+   "size": 11
+  },
+  {
+   "seed": "2024:12573",
+   "year": 2024,
+   "id": "12573",
+   "name": "NDNFL 2024 Fantasy Football League",
+   "size": 10
+  },
+  {
+   "seed": "2024:12727",
+   "year": 2024,
+   "id": "12727",
+   "name": "Las Vegas Fantasy Football",
+   "size": 10
+  },
+  {
+   "seed": "2024:12994",
+   "year": 2024,
+   "id": "12994",
+   "name": "Wild Bunch Football",
+   "size": 3
+  },
+  {
+   "seed": "2024:13212",
+   "year": 2024,
+   "id": "13212",
+   "name": "SafeLeagues Dynasty 670 - Deluxe (SF/TE)",
+   "size": 12
+  },
+  {
+   "seed": "2024:13579",
+   "year": 2024,
+   "id": "13579",
+   "name": "Longest Yard Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2024:13734",
+   "year": 2024,
+   "id": "13734",
+   "name": "Gridiron Goat Balls",
+   "size": 10
+  },
+  {
+   "seed": "2024:13785",
+   "year": 2024,
+   "id": "13785",
+   "name": "NBL Dynasty ",
+   "size": 12
+  },
+  {
+   "seed": "2024:14128",
+   "year": 2024,
+   "id": "14128",
+   "name": "Apex Amateur Superflex Dynasty 198",
+   "size": 12
+  },
+  {
+   "seed": "2024:14236",
+   "year": 2024,
+   "id": "14236",
+   "name": "Chosun Fantasy Football Keeper League Playoffs",
+   "size": 8
+  },
+  {
+   "seed": "2024:14273",
+   "year": 2024,
+   "id": "14273",
+   "name": "SuperFlex Playoffs",
+   "size": 100
+  },
+  {
+   "seed": "2024:14275",
+   "year": 2024,
+   "id": "14275",
+   "name": "Real Deal Fantasy Football League Playoffs",
+   "size": 99
+  },
+  {
+   "seed": "2024:14298",
+   "year": 2024,
+   "id": "14298",
+   "name": "Masters Bronze Dynasty 170514",
+   "size": 12
+  },
+  {
+   "seed": "2024:14432",
+   "year": 2024,
+   "id": "14432",
+   "name": "Legacy NFL",
+   "size": 32
+  },
+  {
+   "seed": "2024:15092",
+   "year": 2024,
+   "id": "15092",
+   "name": "Dynasty 4 Ever 3",
+   "size": 12
+  },
+  {
+   "seed": "2024:15432",
+   "year": 2024,
+   "id": "15432",
+   "name": "Mt. Mike's Fantasy League",
+   "size": 12
+  },
+  {
+   "seed": "2024:15620",
+   "year": 2024,
+   "id": "15620",
+   "name": "Apex Rookie Dynamic Superflex Dynasty 408",
+   "size": 12
+  },
+  {
+   "seed": "2024:15656",
+   "year": 2024,
+   "id": "15656",
+   "name": "Fantasy Football: More Than Meets The Eye",
+   "size": 12
+  },
+  {
+   "seed": "2024:15677",
+   "year": 2024,
+   "id": "15677",
+   "name": "L.A. Beer League '24",
+   "size": 12
+  },
+  {
+   "seed": "2024:16923",
+   "year": 2024,
+   "id": "16923",
+   "name": "Experts League 2024 Playoffs",
+   "size": 50
+  },
+  {
+   "seed": "2024:17013",
+   "year": 2024,
+   "id": "17013",
+   "name": "2024-2024 LEAGUE OF DOOM",
+   "size": 10
+  },
+  {
+   "seed": "2024:17116",
+   "year": 2024,
+   "id": "17116",
+   "name": "Reggie's League 2024",
+   "size": 10
+  },
+  {
+   "seed": "2024:17908",
+   "year": 2024,
+   "id": "17908",
+   "name": "Apex Amateur Dynamic Superflex Dynasty 407",
+   "size": 12
+  },
+  {
+   "seed": "2024:18131",
+   "year": 2024,
+   "id": "18131",
+   "name": "Finger Lakes Fantasy Football",
+   "size": 12
+  },
+  {
+   "seed": "2024:18762",
+   "year": 2024,
+   "id": "18762",
+   "name": "Bloated Egos Dynasty",
+   "size": 14
+  },
+  {
+   "seed": "2024:18942",
+   "year": 2024,
+   "id": "18942",
+   "name": "Apex Dynamic Superflex Email Draft Template",
+   "size": 12
+  },
+  {
+   "seed": "2024:18969",
+   "year": 2024,
+   "id": "18969",
+   "name": "Dynasty Theory Listener League #1",
+   "size": 14
+  },
+  {
+   "seed": "2024:19456",
+   "year": 2024,
+   "id": "19456",
+   "name": "GRIDIRONGODS",
+   "size": 10
+  },
+  {
+   "seed": "2024:20031",
+   "year": 2024,
+   "id": "20031",
+   "name": "zzz #FCEliminator 2024 Women of Fantasy Football",
+   "size": 18
+  },
+  {
+   "seed": "2024:20078",
+   "year": 2024,
+   "id": "20078",
+   "name": "Alcoholics Unanimous Fantasy Football League",
+   "size": 10
+  },
+  {
+   "seed": "2024:20602",
+   "year": 2024,
+   "id": "20602",
+   "name": "PNS Playoff League Playoffs",
+   "size": 30
+  },
+  {
+   "seed": "2024:20797",
+   "year": 2024,
+   "id": "20797",
+   "name": "2024 Ironman Guillotine League",
+   "size": 19
+  },
+  {
+   "seed": "2024:21062",
+   "year": 2024,
+   "id": "21062",
+   "name": "Platinum Fantasy League",
+   "size": 12
+  },
+  {
+   "seed": "2024:21551",
+   "year": 2024,
+   "id": "21551",
+   "name": "Kickbacks 2 Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2024:21651",
+   "year": 2024,
+   "id": "21651",
+   "name": "Trifecta League",
+   "size": 12
+  },
+  {
+   "seed": "2024:21988",
+   "year": 2024,
+   "id": "21988",
+   "name": "GULF  COAST  FANTASY  FOOTBALL  LEAGUE",
+   "size": 20
+  },
+  {
+   "seed": "2024:22543",
+   "year": 2024,
+   "id": "22543",
+   "name": "Boyz of Sunday Super Hero League",
+   "size": 12
+  },
+  {
+   "seed": "2024:23939",
+   "year": 2024,
+   "id": "23939",
+   "name": "Hyper-Ball Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2024:24269",
+   "year": 2024,
+   "id": "24269",
+   "name": "Trane Fantasy Football League",
+   "size": 12
+  },
+  {
+   "seed": "2024:24387",
+   "year": 2024,
+   "id": "24387",
+   "name": "Eagan/Notre Dame Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2024:24893",
+   "year": 2024,
+   "id": "24893",
+   "name": "Dynasty Superstars",
+   "size": 10
+  },
+  {
+   "seed": "2024:24922",
+   "year": 2024,
+   "id": "24922",
+   "name": "Vampire Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2024:24991",
+   "year": 2024,
+   "id": "24991",
+   "name": "Thursday Night Football Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2024:25018",
+   "year": 2024,
+   "id": "25018",
+   "name": "League Aphrodite 2024",
+   "size": 12
+  },
+  {
+   "seed": "2024:25246",
+   "year": 2024,
+   "id": "25246",
+   "name": "Franchise Fantasy Football",
+   "size": 14
+  },
+  {
+   "seed": "2024:25272",
+   "year": 2024,
+   "id": "25272",
+   "name": "South Jersey Gamblers Fantasy Football League Playoffs",
+   "size": 12
+  },
+  {
+   "seed": "2024:25647",
+   "year": 2024,
+   "id": "25647",
+   "name": "NFL Playoff Fantasy Championship ",
+   "size": 4
+  },
+  {
+   "seed": "2024:25674",
+   "year": 2024,
+   "id": "25674",
+   "name": "NADS Fantasy Football League",
+   "size": 10
+  },
+  {
+   "seed": "2024:25711",
+   "year": 2024,
+   "id": "25711",
+   "name": "The League of Unextraordinary Gentlemenz (L.U.G.z)",
+   "size": 12
+  },
+  {
+   "seed": "2024:25713",
+   "year": 2024,
+   "id": "25713",
+   "name": "Power Fantasy Football League",
+   "size": 10
+  },
+  {
+   "seed": "2024:25889",
+   "year": 2024,
+   "id": "25889",
+   "name": "Lions Den Playoffs League",
+   "size": 10
+  },
+  {
+   "seed": "2024:26215",
+   "year": 2024,
+   "id": "26215",
+   "name": "Edmonson Football League",
+   "size": 6
+  },
+  {
+   "seed": "2024:26498",
+   "year": 2024,
+   "id": "26498",
+   "name": "League Of Empires",
+   "size": 16
+  },
+  {
+   "seed": "2024:26607",
+   "year": 2024,
+   "id": "26607",
+   "name": "Hollywood Fantasy",
+   "size": 12
+  },
+  {
+   "seed": "2024:26631",
+   "year": 2024,
+   "id": "26631",
+   "name": "Outlaw Football Club",
+   "size": 14
+  },
+  {
+   "seed": "2024:26672",
+   "year": 2024,
+   "id": "26672",
+   "name": "Empire strikes 2024",
+   "size": 10
+  },
+  {
+   "seed": "2024:27269",
+   "year": 2024,
+   "id": "27269",
+   "name": "Fantasyville Playoffs Draft League",
+   "size": 7
+  },
+  {
+   "seed": "2024:27340",
+   "year": 2024,
+   "id": "27340",
+   "name": "National Fantasy Football League",
+   "size": 32
+  },
+  {
+   "seed": "2024:27416",
+   "year": 2024,
+   "id": "27416",
+   "name": "SafeLeagues Dynasty 377 - Basic (SF)",
+   "size": 12
+  },
+  {
+   "seed": "2024:27543",
+   "year": 2024,
+   "id": "27543",
+   "name": "Zealots Field PPR 14",
+   "size": 12
+  },
+  {
+   "seed": "2024:27576",
+   "year": 2024,
+   "id": "27576",
+   "name": "League of Extraordinary Gentlemen ",
+   "size": 12
+  },
+  {
+   "seed": "2024:28004",
+   "year": 2024,
+   "id": "28004",
+   "name": "Double Ds Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2024:28300",
+   "year": 2024,
+   "id": "28300",
+   "name": "Marvel Superflex Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2024:28401",
+   "year": 2024,
+   "id": "28401",
+   "name": "Jimmy Kolloff Memorial League",
+   "size": 10
+  },
+  {
+   "seed": "2024:28437",
+   "year": 2024,
+   "id": "28437",
+   "name": "National KageBall League",
+   "size": 10
+  },
+  {
+   "seed": "2024:29025",
+   "year": 2024,
+   "id": "29025",
+   "name": "Nationalfantasyfootballleague",
+   "size": 14
+  },
+  {
+   "seed": "2024:29434",
+   "year": 2024,
+   "id": "29434",
+   "name": "Masters Tin Dynasty 170060",
+   "size": 12
+  },
+  {
+   "seed": "2024:29558",
+   "year": 2024,
+   "id": "29558",
+   "name": "Masters Bronze Dynasty 170599",
+   "size": 12
+  },
+  {
+   "seed": "2024:29723",
+   "year": 2024,
+   "id": "29723",
+   "name": "National Football Pool League",
+   "size": 10
+  },
+  {
+   "seed": "2024:29804",
+   "year": 2024,
+   "id": "29804",
+   "name": "Empire State Dynasty ",
+   "size": 10
+  },
+  {
+   "seed": "2024:29973",
+   "year": 2024,
+   "id": "29973",
+   "name": "Chucks Dynasty League",
+   "size": 10
+  },
+  {
+   "seed": "2024:30274",
+   "year": 2024,
+   "id": "30274",
+   "name": "The League",
+   "size": 12
+  },
+  {
+   "seed": "2024:30336",
+   "year": 2024,
+   "id": "30336",
+   "name": "Wizard Redraft League (WRL)",
+   "size": 60
+  },
+  {
+   "seed": "2024:30846",
+   "year": 2024,
+   "id": "30846",
+   "name": "National Fantasy Football League",
+   "size": 32
+  },
+  {
+   "seed": "2024:30898",
+   "year": 2024,
+   "id": "30898",
+   "name": "GAYmer Boyz Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2024:31013",
+   "year": 2024,
+   "id": "31013",
+   "name": "Masters Tin Dynasty 170288 - Delta 1804",
+   "size": 12
+  },
+  {
+   "seed": "2024:31169",
+   "year": 2024,
+   "id": "31169",
+   "name": "No Cheatin' Coons Keepers 2024",
+   "size": 10
+  },
+  {
+   "seed": "2024:31218",
+   "year": 2024,
+   "id": "31218",
+   "name": "Fantasy Fam Jam 2024",
+   "size": 10
+  },
+  {
+   "seed": "2024:31475",
+   "year": 2024,
+   "id": "31475",
+   "name": "Best Ball Dynasty Extravaganza V",
+   "size": 12
+  },
+  {
+   "seed": "2024:31523",
+   "year": 2024,
+   "id": "31523",
+   "name": "Pro Football Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2024:31652",
+   "year": 2024,
+   "id": "31652",
+   "name": "Former Mosaix Football League (FMFL)",
+   "size": 12
+  },
+  {
+   "seed": "2024:31727",
+   "year": 2024,
+   "id": "31727",
+   "name": "Keep Calm and Fantasy On",
+   "size": 12
+  },
+  {
+   "seed": "2024:32004",
+   "year": 2024,
+   "id": "32004",
+   "name": "WORLD WIDE FANTASY LEAGUE",
+   "size": 8
+  },
+  {
+   "seed": "2024:32168",
+   "year": 2024,
+   "id": "32168",
+   "name": "Elect dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2024:32211",
+   "year": 2024,
+   "id": "32211",
+   "name": "Dynasty Wire Football League",
+   "size": 12
+  },
+  {
+   "seed": "2024:32538",
+   "year": 2024,
+   "id": "32538",
+   "name": "The Leftovers League",
+   "size": 8
+  },
+  {
+   "seed": "2024:32794",
+   "year": 2024,
+   "id": "32794",
+   "name": "Full of Baffone-y Playoff League",
+   "size": 7
+  },
+  {
+   "seed": "2024:33943",
+   "year": 2024,
+   "id": "33943",
+   "name": "INDY ARTCC Football",
+   "size": 12
+  },
+  {
+   "seed": "2024:34395",
+   "year": 2024,
+   "id": "34395",
+   "name": "Kent Allen Hrbek Football League",
+   "size": 10
+  },
+  {
+   "seed": "2024:34606",
+   "year": 2024,
+   "id": "34606",
+   "name": "Economic Dynasty League",
+   "size": 10
+  },
+  {
+   "seed": "2024:34939",
+   "year": 2024,
+   "id": "34939",
+   "name": "2025 Online Playoff League",
+   "size": 14
+  },
+  {
+   "seed": "2024:35116",
+   "year": 2024,
+   "id": "35116",
+   "name": "Thee Fantasy League",
+   "size": 12
+  },
+  {
+   "seed": "2024:35211",
+   "year": 2024,
+   "id": "35211",
+   "name": "Gridiron Gurus Dynasty League",
+   "size": 10
+  },
+  {
+   "seed": "2024:35419",
+   "year": 2024,
+   "id": "35419",
+   "name": "How Smart Are You FF League - 2024/2025",
+   "size": 12
+  },
+  {
+   "seed": "2024:35457",
+   "year": 2024,
+   "id": "35457",
+   "name": "Tri-State Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2024:35459",
+   "year": 2024,
+   "id": "35459",
+   "name": "Odorfer fantasy football league 2024",
+   "size": 14
+  },
+  {
+   "seed": "2024:35695",
+   "year": 2024,
+   "id": "35695",
+   "name": "Throwback Bronze Flex Dynasty 34",
+   "size": 12
+  },
+  {
+   "seed": "2024:35851",
+   "year": 2024,
+   "id": "35851",
+   "name": "Kakopolis Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2024:36075",
+   "year": 2024,
+   "id": "36075",
+   "name": "SafeLeagues Dynasty 052 - QB Option (SF)",
+   "size": 12
+  },
+  {
+   "seed": "2024:36079",
+   "year": 2024,
+   "id": "36079",
+   "name": "Hermits Football League",
+   "size": 12
+  },
+  {
+   "seed": "2024:36517",
+   "year": 2024,
+   "id": "36517",
+   "name": "2025 Fantasy Football Playoff League ",
+   "size": 20
+  },
+  {
+   "seed": "2024:36579",
+   "year": 2024,
+   "id": "36579",
+   "name": "Bomber Blitz League",
+   "size": 10
+  },
+  {
+   "seed": "2024:36833",
+   "year": 2024,
+   "id": "36833",
+   "name": "Rick Lewis League",
+   "size": 10
+  },
+  {
+   "seed": "2024:37176",
+   "year": 2024,
+   "id": "37176",
+   "name": "Masters Copper Dynasty 170295",
+   "size": 12
+  },
+  {
+   "seed": "2024:37287",
+   "year": 2024,
+   "id": "37287",
+   "name": "--Golden Gridiron--",
+   "size": 14
+  },
+  {
+   "seed": "2024:38656",
+   "year": 2024,
+   "id": "38656",
+   "name": "League of Misfits Fantasy Football League",
+   "size": 24
+  },
+  {
+   "seed": "2024:38813",
+   "year": 2024,
+   "id": "38813",
+   "name": "2024 DLF Dynasty Mock February #5",
+   "size": 12
+  },
+  {
+   "seed": "2024:38826",
+   "year": 2024,
+   "id": "38826",
+   "name": "Throwback Bronze Dynasty 058",
+   "size": 12
+  },
+  {
+   "seed": "2024:38852",
+   "year": 2024,
+   "id": "38852",
+   "name": "Die Hards Arizona Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2024:38965",
+   "year": 2024,
+   "id": "38965",
+   "name": "Valhalla Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2024:39472",
+   "year": 2024,
+   "id": "39472",
+   "name": "Island Fantasy League",
+   "size": 12
+  },
+  {
+   "seed": "2024:39954",
+   "year": 2024,
+   "id": "39954",
+   "name": "Legggggggggy Football",
+   "size": 12
+  },
+  {
+   "seed": "2024:39964",
+   "year": 2024,
+   "id": "39964",
+   "name": "100% Football Federation 2024",
+   "size": 12
+  },
+  {
+   "seed": "2024:40033",
+   "year": 2024,
+   "id": "40033",
+   "name": "Selinsgrove Area Fantasy Football LEague",
+   "size": 14
+  },
+  {
+   "seed": "2024:40266",
+   "year": 2024,
+   "id": "40266",
+   "name": "Masters Copper Dynasty 170302",
+   "size": 12
+  },
+  {
+   "seed": "2024:40323",
+   "year": 2024,
+   "id": "40323",
+   "name": "FUBAR Dynasty League NFL Playoffs",
+   "size": 12
+  },
+  {
+   "seed": "2024:40485",
+   "year": 2024,
+   "id": "40485",
+   "name": "SafeLeagues Dynasty 282 - Deluxe (SF/TE)",
+   "size": 12
+  },
+  {
+   "seed": "2024:40896",
+   "year": 2024,
+   "id": "40896",
+   "name": "Apex Rookie Dynasty 113",
+   "size": 12
+  },
+  {
+   "seed": "2024:41005",
+   "year": 2024,
+   "id": "41005",
+   "name": "BEAVER FEVER LEAGUE",
+   "size": 14
+  },
+  {
+   "seed": "2024:41121",
+   "year": 2024,
+   "id": "41121",
+   "name": "Guillotine Playoff League",
+   "size": 17
+  },
+  {
+   "seed": "2024:41735",
+   "year": 2024,
+   "id": "41735",
+   "name": "Dirty South Fantasy League",
+   "size": 10
+  },
+  {
+   "seed": "2024:41856",
+   "year": 2024,
+   "id": "41856",
+   "name": "2024 Playoff Survivor Fantasy League",
+   "size": 20
+  },
+  {
+   "seed": "2024:42288",
+   "year": 2024,
+   "id": "42288",
+   "name": "Peck Fantasy Football League",
+   "size": 12
+  },
+  {
+   "seed": "2024:43556",
+   "year": 2024,
+   "id": "43556",
+   "name": "Masters Gold Dynasty 170754",
+   "size": 12
+  },
+  {
+   "seed": "2024:43574",
+   "year": 2024,
+   "id": "43574",
+   "name": "League of Goats",
+   "size": 10
+  },
+  {
+   "seed": "2024:43814",
+   "year": 2024,
+   "id": "43814",
+   "name": "NFL Dynasty League",
+   "size": 32
+  },
+  {
+   "seed": "2024:43965",
+   "year": 2024,
+   "id": "43965",
+   "name": "The Draft Master All In One League",
+   "size": 12
+  },
+  {
+   "seed": "2024:44472",
+   "year": 2024,
+   "id": "44472",
+   "name": "2025 Fantasy Playoff",
+   "size": 12
+  },
+  {
+   "seed": "2024:44545",
+   "year": 2024,
+   "id": "44545",
+   "name": "everettfantasy",
+   "size": 10
+  },
+  {
+   "seed": "2024:44758",
+   "year": 2024,
+   "id": "44758",
+   "name": "Head Hunter Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2024:44772",
+   "year": 2024,
+   "id": "44772",
+   "name": "Masters Copper Dynasty 170360",
+   "size": 12
+  },
+  {
+   "seed": "2024:45345",
+   "year": 2024,
+   "id": "45345",
+   "name": "2024 Mean Gene's Fantasy Game Playoffs",
+   "size": 6
+  },
+  {
+   "seed": "2024:46186",
+   "year": 2024,
+   "id": "46186",
+   "name": "Gridiron Gurus Keeper League",
+   "size": 10
+  },
+  {
+   "seed": "2024:46742",
+   "year": 2024,
+   "id": "46742",
+   "name": "Show Me The Money Fantasy Football League",
+   "size": 12
+  },
+  {
+   "seed": "2024:46765",
+   "year": 2024,
+   "id": "46765",
+   "name": "Masters Copper Dynasty 170469 - Ghost of 10",
+   "size": 10
+  },
+  {
+   "seed": "2024:47112",
+   "year": 2024,
+   "id": "47112",
+   "name": "Super Dynasty League ",
+   "size": 10
+  },
+  {
+   "seed": "2024:47256",
+   "year": 2024,
+   "id": "47256",
+   "name": "2024 Fanatical Football League (FFL)",
+   "size": 12
+  },
+  {
+   "seed": "2024:47503",
+   "year": 2024,
+   "id": "47503",
+   "name": "SafeLeagues Best Ball Dynasty 066 - Basic (SF/TE)",
+   "size": 12
+  },
+  {
+   "seed": "2024:47742",
+   "year": 2024,
+   "id": "47742",
+   "name": "2024 Golden Football Playoff",
+   "size": 4
+  },
+  {
+   "seed": "2024:48035",
+   "year": 2024,
+   "id": "48035",
+   "name": "NFL playoff fantasy football league",
+   "size": 8
+  },
+  {
+   "seed": "2024:48103",
+   "year": 2024,
+   "id": "48103",
+   "name": "SOMD Guillotine League",
+   "size": 19
+  },
+  {
+   "seed": "2024:48347",
+   "year": 2024,
+   "id": "48347",
+   "name": "The Champions Football League",
+   "size": 10
+  },
+  {
+   "seed": "2024:48579",
+   "year": 2024,
+   "id": "48579",
+   "name": "PCD Dynasty Football League",
+   "size": 12
+  },
+  {
+   "seed": "2024:48867",
+   "year": 2024,
+   "id": "48867",
+   "name": "EASY MONEY FANTASY FOOTBALL LEAGUE",
+   "size": 12
+  },
+  {
+   "seed": "2024:49168",
+   "year": 2024,
+   "id": "49168",
+   "name": "FBG's Balt/Wash/PA Auction League",
+   "size": 13
+  },
+  {
+   "seed": "2024:49963",
+   "year": 2024,
+   "id": "49963",
+   "name": "Slacker League",
+   "size": 12
+  },
+  {
+   "seed": "2024:49984",
+   "year": 2024,
+   "id": "49984",
+   "name": "Patterson Fantasy Football",
+   "size": 10
+  },
+  {
+   "seed": "2024:50212",
+   "year": 2024,
+   "id": "50212",
+   "name": "Transformers: Battle Of Cybertron Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2024:50497",
+   "year": 2024,
+   "id": "50497",
+   "name": "Fantasy playoff 2025",
+   "size": 8
+  },
+  {
+   "seed": "2024:50700",
+   "year": 2024,
+   "id": "50700",
+   "name": "A & T Dynasty League",
+   "size": 10
+  },
+  {
+   "seed": "2024:50761",
+   "year": 2024,
+   "id": "50761",
+   "name": "Major League Football 2024",
+   "size": 16
+  },
+  {
+   "seed": "2024:51125",
+   "year": 2024,
+   "id": "51125",
+   "name": "Cameron Crossroads Football League",
+   "size": 24
+  },
+  {
+   "seed": "2024:51148",
+   "year": 2024,
+   "id": "51148",
+   "name": "League of Champions",
+   "size": 10
+  },
+  {
+   "seed": "2024:51284",
+   "year": 2024,
+   "id": "51284",
+   "name": "SB Playoff Fantasy 2024",
+   "size": 100
+  },
+  {
+   "seed": "2024:51625",
+   "year": 2024,
+   "id": "51625",
+   "name": "Scottdale Dynasty SuperFlex",
+   "size": 12
+  },
+  {
+   "seed": "2024:53358",
+   "year": 2024,
+   "id": "53358",
+   "name": "SafeLeagues Dynasty 780 - Premium (SF/TE)",
+   "size": 12
+  },
+  {
+   "seed": "2024:53803",
+   "year": 2024,
+   "id": "53803",
+   "name": "Franeys&Friends",
+   "size": 13
+  },
+  {
+   "seed": "2024:54264",
+   "year": 2024,
+   "id": "54264",
+   "name": "tight end PPR 1.5 per",
+   "size": 12
+  },
+  {
+   "seed": "2024:54637",
+   "year": 2024,
+   "id": "54637",
+   "name": "Masters Copper Dynasty 170421",
+   "size": 12
+  },
+  {
+   "seed": "2024:54658",
+   "year": 2024,
+   "id": "54658",
+   "name": "Head Hunters Guillotine League",
+   "size": 16
+  },
+  {
+   "seed": "2024:55132",
+   "year": 2024,
+   "id": "55132",
+   "name": "Larry's League Playoffs",
+   "size": 11
+  },
+  {
+   "seed": "2024:55347",
+   "year": 2024,
+   "id": "55347",
+   "name": "Masters Tin Dynasty 170272 - Centaurus 1603",
+   "size": 12
+  },
+  {
+   "seed": "2024:55416",
+   "year": 2024,
+   "id": "55416",
+   "name": "Bracket League 2",
+   "size": 14
+  },
+  {
+   "seed": "2024:55732",
+   "year": 2024,
+   "id": "55732",
+   "name": "Scott Fish's Playoff League #SFPL10 - Heels",
+   "size": 500
+  },
+  {
+   "seed": "2024:56193",
+   "year": 2024,
+   "id": "56193",
+   "name": "Die Nasty Football League",
+   "size": 12
+  },
+  {
+   "seed": "2024:57180",
+   "year": 2024,
+   "id": "57180",
+   "name": "Dynasty Beer Money",
+   "size": 12
+  },
+  {
+   "seed": "2024:57252",
+   "year": 2024,
+   "id": "57252",
+   "name": "First and Goal Fantasy Football League Playoffs",
+   "size": 8
+  },
+  {
+   "seed": "2024:57523",
+   "year": 2024,
+   "id": "57523",
+   "name": "Oswego County's Best Damn Fantasy Football  League 2024",
+   "size": 24
+  },
+  {
+   "seed": "2024:57728",
+   "year": 2024,
+   "id": "57728",
+   "name": "ShaDynasty FFL",
+   "size": 12
+  },
+  {
+   "seed": "2024:58147",
+   "year": 2024,
+   "id": "58147",
+   "name": "Rest In Peace Guillotine League",
+   "size": 18
+  },
+  {
+   "seed": "2024:59155",
+   "year": 2024,
+   "id": "59155",
+   "name": "Beer Camp Fantasy Football League  Playoffs",
+   "size": 8
+  },
+  {
+   "seed": "2024:59234",
+   "year": 2024,
+   "id": "59234",
+   "name": "Ocean State Pandemic SuperFlex ",
+   "size": 12
+  },
+  {
+   "seed": "2024:59468",
+   "year": 2024,
+   "id": "59468",
+   "name": "Spilly dynasty ",
+   "size": 12
+  },
+  {
+   "seed": "2024:59525",
+   "year": 2024,
+   "id": "59525",
+   "name": "SafeLeagues Best Ball Dynasty 062 - Basic (SF/TE)",
+   "size": 12
+  },
+  {
+   "seed": "2024:59630",
+   "year": 2024,
+   "id": "59630",
+   "name": "Legends Dynasty League",
+   "size": 8
+  },
+  {
+   "seed": "2024:59941",
+   "year": 2024,
+   "id": "59941",
+   "name": "SafeLeagues Best Ball Dynasty 031 - Deluxe (SF/TE)",
+   "size": 12
+  },
+  {
+   "seed": "2024:60381",
+   "year": 2024,
+   "id": "60381",
+   "name": "Masters Tin Dynasty 170161",
+   "size": 12
+  },
+  {
+   "seed": "2024:61255",
+   "year": 2024,
+   "id": "61255",
+   "name": "Side League",
+   "size": 15
+  },
+  {
+   "seed": "2024:61736",
+   "year": 2024,
+   "id": "61736",
+   "name": "Mountaintop Fantasy League",
+   "size": 12
+  },
+  {
+   "seed": "2024:61795",
+   "year": 2024,
+   "id": "61795",
+   "name": "I Work At JDF: Just Dominating Fantasy",
+   "size": 12
+  },
+  {
+   "seed": "2024:62015",
+   "year": 2024,
+   "id": "62015",
+   "name": "Triple Coverage Podcast League",
+   "size": 14
+  },
+  {
+   "seed": "2024:62464",
+   "year": 2024,
+   "id": "62464",
+   "name": "The Real Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2024:62614",
+   "year": 2024,
+   "id": "62614",
+   "name": "NORTH CENTRAL FANTASY FOOTBALL  Playoffs",
+   "size": 6
+  },
+  {
+   "seed": "2024:62663",
+   "year": 2024,
+   "id": "62663",
+   "name": "NO FRIENDS IN FANTASY FOOTBALL!!!",
+   "size": 8
+  },
+  {
+   "seed": "2024:62695",
+   "year": 2024,
+   "id": "62695",
+   "name": "Apex Amateur Dynamic Dynasty 277",
+   "size": 12
+  },
+  {
+   "seed": "2024:62796",
+   "year": 2024,
+   "id": "62796",
+   "name": "Riders of the Night Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2024:63288",
+   "year": 2024,
+   "id": "63288",
+   "name": "CHARBO'S EMPIRE 3.0",
+   "size": 12
+  },
+  {
+   "seed": "2024:64168",
+   "year": 2024,
+   "id": "64168",
+   "name": "Playoff League '24",
+   "size": 8
+  },
+  {
+   "seed": "2024:65034",
+   "year": 2024,
+   "id": "65034",
+   "name": "SignalFire Fantasy Football 2024",
+   "size": 16
+  },
+  {
+   "seed": "2024:65254",
+   "year": 2024,
+   "id": "65254",
+   "name": "SafeLeagues Dynasty 716 - Ultimate (SF/TE)",
+   "size": 12
+  },
+  {
+   "seed": "2024:65839",
+   "year": 2024,
+   "id": "65839",
+   "name": "Black and Blue League",
+   "size": 12
+  },
+  {
+   "seed": "2024:66311",
+   "year": 2024,
+   "id": "66311",
+   "name": "The Best League Ever (2)",
+   "size": 12
+  },
+  {
+   "seed": "2024:66709",
+   "year": 2024,
+   "id": "66709",
+   "name": "12 Freaks 2024 Playoff League",
+   "size": 88
+  },
+  {
+   "seed": "2024:66841",
+   "year": 2024,
+   "id": "66841",
+   "name": "Fantasy Football XXVII",
+   "size": 10
+  },
+  {
+   "seed": "2024:67272",
+   "year": 2024,
+   "id": "67272",
+   "name": "Sylvania Fantasy Football",
+   "size": 16
+  },
+  {
+   "seed": "2024:67680",
+   "year": 2024,
+   "id": "67680",
+   "name": "Rowdy Friends Fantasy Football Playoffs",
+   "size": 12
+  },
+  {
+   "seed": "2024:67751",
+   "year": 2024,
+   "id": "67751",
+   "name": "The Monadnock Fantasy Football League",
+   "size": 16
+  },
+  {
+   "seed": "2024:68362",
+   "year": 2024,
+   "id": "68362",
+   "name": "Steak League 2",
+   "size": 14
+  },
+  {
+   "seed": "2024:68602",
+   "year": 2024,
+   "id": "68602",
+   "name": "This Trophy Has A Family",
+   "size": 10
+  },
+  {
+   "seed": "2024:68701",
+   "year": 2024,
+   "id": "68701",
+   "name": "Legends Fantasy League Playoffs",
+   "size": 10
+  },
+  {
+   "seed": "2024:68806",
+   "year": 2024,
+   "id": "68806",
+   "name": "The Just Us League ",
+   "size": 16
+  },
+  {
+   "seed": "2024:68961",
+   "year": 2024,
+   "id": "68961",
+   "name": "Tri-Star Dynasty",
+   "size": 28
+  },
+  {
+   "seed": "2024:69127",
+   "year": 2024,
+   "id": "69127",
+   "name": "Hell On The Border League",
+   "size": 10
+  },
+  {
+   "seed": "2024:69198",
+   "year": 2024,
+   "id": "69198",
+   "name": "The Across The Board Fantasy Football League",
+   "size": 12
+  },
+  {
+   "seed": "2024:69512",
+   "year": 2024,
+   "id": "69512",
+   "name": "Oak League 2",
+   "size": 12
+  },
+  {
+   "seed": "2024:69654",
+   "year": 2024,
+   "id": "69654",
+   "name": "Primetime Football League",
+   "size": 10
+  },
+  {
+   "seed": "2024:70382",
+   "year": 2024,
+   "id": "70382",
+   "name": "Elite League",
+   "size": 12
+  },
+  {
+   "seed": "2024:71386",
+   "year": 2024,
+   "id": "71386",
+   "name": "The Fantasy Football League",
+   "size": 6
+  },
+  {
+   "seed": "2024:71862",
+   "year": 2024,
+   "id": "71862",
+   "name": "coco's fantasy football league",
+   "size": 8
+  },
+  {
+   "seed": "2024:72489",
+   "year": 2024,
+   "id": "72489",
+   "name": "HardCore FootBall Limited Playoffs",
+   "size": 12
+  },
+  {
+   "seed": "2024:72795",
+   "year": 2024,
+   "id": "72795",
+   "name": "The SuperDuperFlex League of Extraordinary Dutch Speakers",
+   "size": 10
+  },
+  {
+   "seed": "2024:72941",
+   "year": 2024,
+   "id": "72941",
+   "name": "Fantasy Bowl Championship Series (FBCS)",
+   "size": 12
+  },
+  {
+   "seed": "2024:73059",
+   "year": 2024,
+   "id": "73059",
+   "name": "EFL - Extreme Fantasy League",
+   "size": 6
+  },
+  {
+   "seed": "2024:73205",
+   "year": 2024,
+   "id": "73205",
+   "name": "Middle Earth Dynasty Football",
+   "size": 12
+  },
+  {
+   "seed": "2024:74203",
+   "year": 2024,
+   "id": "74203",
+   "name": "L AND L FANTASY FOOTBALL",
+   "size": 32
+  }
+ ]
+}
