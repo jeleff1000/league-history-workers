@@ -63,7 +63,8 @@ DRAFT_COLS = [
 ]
 TXN_COLS = [
     ("db_name", "VARCHAR"), ("year", "INTEGER"), ("week", "INTEGER"),
-    ("NFL_player_id", "VARCHAR"), ("transaction_type", "VARCHAR"), ("faab_bid", "DOUBLE"),
+    ("NFL_player_id", "VARCHAR"), ("franchise_id", "VARCHAR"),
+    ("transaction_type", "VARCHAR"), ("faab_bid", "DOUBLE"),
     ("transaction_score", "DOUBLE"), ("manager_lamar_ros_managed", "DOUBLE"),
     ("player_lamar_ros_total", "DOUBLE"),
 ]
@@ -142,12 +143,20 @@ def evict_league(con: duckdb.DuckDBPyConnection, db_name: str) -> None:
         raise
 
 
-def fold_league(con: duckdb.DuckDBPyConnection, league_dir: Path) -> tuple[bool, str]:
-    """Fold ONE smpl_* league into the open snapshot. Caller serializes (DuckDB single-writer).
+def fold_database(
+    con: duckdb.DuckDBPyConnection,
+    db_path: Path | str,
+    db_name: str,
+    *,
+    anonymize_identity: bool = False,
+) -> tuple[bool, str]:
+    """Fold one local league DB into a compact snapshot.
 
-    Returns (ok, message). Never raises; a locked/corrupt league is skipped for a later run.
+    Yahoo franchise IDs derive from private manager GUIDs. When
+    ``anonymize_identity`` is true they are replaced with a deterministic,
+    league-scoped digest before the transaction commits.
     """
-    db = league_dir / f"{league_dir.name}.duckdb"
+    db = Path(db_path)
     if not db.exists():
         return False, "no duckdb"
     try:
@@ -172,7 +181,15 @@ def fold_league(con: duckdb.DuckDBPyConnection, league_dir: Path) -> tuple[bool,
             # playoff_start_week INTEGER and skipped all 2,200 leagues).
             collist = ", ".join(f'"{n}"' for n, _ in cols)
             con.execute(f"INSERT INTO public.{t} ({collist}) {_select_sql(src_cols, cols, t, where)}")
-        con.execute("INSERT INTO _sources VALUES (?, now())", [league_dir.name])
+        if anonymize_identity and "transactions" in src_tables:
+            con.execute(
+                "UPDATE public.transactions "
+                "SET franchise_id = CASE WHEN franchise_id IS NULL THEN NULL "
+                "ELSE 'anon-' || substr(sha256(? || ':' || franchise_id), 1, 16) END "
+                "WHERE db_name = ?",
+                [db_name, db_name],
+            )
+        con.execute("INSERT INTO _sources VALUES (?, now())", [db_name])
         con.execute("COMMIT")
         return True, ""
     except Exception as e:
@@ -186,6 +203,12 @@ def fold_league(con: duckdb.DuckDBPyConnection, league_dir: Path) -> tuple[bool,
             con.execute("DETACH src")
         except Exception:
             pass
+
+
+def fold_league(con: duckdb.DuckDBPyConnection, league_dir: Path) -> tuple[bool, str]:
+    """Compatibility wrapper for the existing Sleeper corpus directory layout."""
+    db = league_dir / f"{league_dir.name}.duckdb"
+    return fold_database(con, db, league_dir.name)
 
 
 def main() -> None:

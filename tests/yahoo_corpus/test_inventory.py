@@ -102,6 +102,24 @@ def test_discovery_filters_incomplete_and_out_of_range_seasons() -> None:
     assert [row.season for row in rows] == [2024]
 
 
+def test_discovery_stops_after_round_when_pilot_is_satisfied() -> None:
+    grants = [
+        Grant("g1", "secret-1", ("1.l.1",), ("db1",)),
+        Grant("g2", "secret-2", ("2.l.2",), ("db2",)),
+    ]
+    trace: list[str] = []
+    years = {"g1": [2005, 2015], "g2": [2024, 2023]}
+
+    rows, _ = discover_candidates(
+        grants,
+        adapter_factory=lambda grant: FakeAdapter(grant, years[grant.grant_id], trace),
+        stop_when=lambda found: len(found) >= 2,
+    )
+
+    assert len(rows) == 2
+    assert trace == ["g1", "g2"]
+
+
 class FakeYahooClient:
     def __init__(self) -> None:
         self.refreshed = False

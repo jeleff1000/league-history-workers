@@ -162,6 +162,7 @@ def discover_candidates(
     adapter_factory: Callable[[Grant], InventoryAdapter],
     checkpoint: dict[str, Any] | None = None,
     max_operations: int | None = None,
+    stop_when: Callable[[list[Candidate]], bool] | None = None,
 ) -> tuple[list[Candidate], dict[str, Any]]:
     """Rotate one discovery operation per grant until every adapter is exhausted."""
     prior = checkpoint or {}
@@ -191,6 +192,8 @@ def discover_candidates(
                 candidates[row.task_id] = row
         for grant_id in exhausted:
             adapters.pop(grant_id, None)
+        if stop_when is not None and stop_when(list(candidates.values())):
+            break
     state = {
         "completed_grants": sorted(completed),
         "candidates": [
