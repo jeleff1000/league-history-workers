@@ -44,6 +44,9 @@ FORBIDDEN_KEYS = {
     "source_databases",
 }
 TOKEN_VALUE = re.compile(r"(?i)\b(?:bearer\s+)?[a-z0-9_-]{32,}\b")
+EXCEPTION_CLASS = re.compile(
+    r"(?m)^([A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception)):\s*",
+)
 
 
 class ForbiddenArtifactData(ValueError):
@@ -125,6 +128,19 @@ def sanitize_payload(value: Any) -> Any:
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     return str(value)
+
+
+def classify_import_failure(raw_text: str) -> tuple[str, str]:
+    """Classify a private import log while returning no provider/message content."""
+    lowered = raw_text.lower()
+    if any(marker in lowered for marker in ("rate limit", "rate_limited", "http 429", " 429")):
+        return "rate_limited", "YahooRateLimit"
+    if any(marker in lowered for marker in ("invalid_grant", "token expired", "http 401")):
+        return "failure", "YahooAuthentication"
+    matches = EXCEPTION_CLASS.findall(raw_text)
+    if matches:
+        return "failure", matches[-1].rsplit(".", 1)[-1]
+    return "failure", "ImportSubprocessFailure"
 
 
 def _atomic_json(path: Path, payload: Any) -> None:
@@ -267,13 +283,10 @@ def execute_import_task(
                 check=False,
             )
         if result.returncode != 0:
-            raw_text = private_log.read_text(encoding="utf-8", errors="replace").lower()
-            if any(marker in raw_text for marker in ("rate limit", "rate_limited", "http 429", " 429")):
-                outcome = TaskOutcome(task.task_id, "rate_limited", "acquisition", "YahooRateLimit")
-            elif any(marker in raw_text for marker in ("invalid_grant", "token expired", "http 401")):
-                outcome = TaskOutcome(task.task_id, "failure", "authentication", "YahooAuthentication")
-            else:
-                outcome = TaskOutcome(task.task_id, "failure", "import", "ImportSubprocessFailure")
+            raw_text = private_log.read_text(encoding="utf-8", errors="replace")
+            status, error_class = classify_import_failure(raw_text)
+            stage = "acquisition" if status == "rate_limited" else "authentication" if error_class == "YahooAuthentication" else "import"
+            outcome = TaskOutcome(task.task_id, status, stage, error_class)
             return outcome
         db_path = task_dir / f"{db_name}.duckdb"
         validate_source(db_path, task)

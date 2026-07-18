@@ -64,10 +64,12 @@ def pilot_ready(mode: str, candidates: Iterable[Candidate], limit: int) -> bool:
             label: base + (1 if index < remainder else 0)
             for index, (label, _, _) in enumerate(ERAS)
         }
-        counts = Counter(row.era for row in rows)
+        grants_by_era: dict[str, set[str]] = defaultdict(set)
+        for row in rows:
+            grants_by_era[row.era].add(row.grant_id)
         return (
             len({row.grant_id for row in rows}) >= limit
-            and all(counts[label] >= target for label, target in era_targets.items())
+            and all(len(grants_by_era[label]) >= target for label, target in era_targets.items())
         )
     if mode == "spacing-resume":
         per_grant: dict[str, set[int]] = defaultdict(set)

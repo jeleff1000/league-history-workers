@@ -12,6 +12,7 @@ from scripts.yahoo_corpus.runner import (
     TaskOutcome,
     build_context,
     build_subprocess_env,
+    classify_import_failure,
     execute_import_task,
     run_plan,
     sanitize_payload,
@@ -188,3 +189,9 @@ def test_execute_import_classifies_rate_limit_and_removes_private_task_dir(tmp_p
     log = (tmp_path / "driver.log").read_text(encoding="utf-8")
     assert "private manager" not in log
     assert "private-refresh" not in log
+
+
+def test_import_failure_classifier_extracts_exception_class_without_message() -> None:
+    raw = "Traceback (most recent call last):\n  private details\nModuleNotFoundError: No module named private_manager\n"
+
+    assert classify_import_failure(raw) == ("failure", "ModuleNotFoundError")

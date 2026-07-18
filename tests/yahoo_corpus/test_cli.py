@@ -54,3 +54,20 @@ def test_cross_era_readiness_requires_all_four_eras() -> None:
 
     assert pilot_ready("cross-era", recent, 12) is False
     assert pilot_ready("cross-era", balanced, 12) is True
+
+
+def test_cross_era_readiness_requires_distinct_grants_inside_each_era() -> None:
+    years = (2002, 2004, 2008, 2011, 2014, 2017, 2018, 2020, 2022, 2023, 2024, 2025)
+    candidates = [
+        Candidate(
+            f"t{i}",
+            "shared-early" if year <= 2009 else f"g{i}",
+            f"{year}.l.{i}",
+            year,
+            "10t_flx_half_4pt",
+            f"l{i}",
+        )
+        for i, year in enumerate(years)
+    ]
+
+    assert pilot_ready("cross-era", candidates, 12) is False
