@@ -195,3 +195,20 @@ def test_import_failure_classifier_extracts_exception_class_without_message() ->
     raw = "Traceback (most recent call last):\n  private details\nModuleNotFoundError: No module named private_manager\n"
 
     assert classify_import_failure(raw) == ("failure", "ModuleNotFoundError")
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("RuntimeError: FlyReader is disabled in corpus mode", "CorpusFlyReadAttempt"),
+        ("RuntimeError: FlyTarget is disabled in corpus mode", "CorpusFlyWriteAttempt"),
+        ("RuntimeError: Failed to flatten league_settings for year(s): private", "SettingsCanonicalization"),
+        ("RuntimeError: Fetched league settings but produced 0 canonical rows", "EmptyCanonicalSettings"),
+        ("RuntimeError: Local DuckDB failed pre-upload validation with 2 issue(s)", "PreUploadValidation"),
+    ],
+)
+def test_import_failure_classifier_allowlists_safe_runtime_categories(
+    raw: str,
+    expected: str,
+) -> None:
+    assert classify_import_failure(raw) == ("failure", expected)

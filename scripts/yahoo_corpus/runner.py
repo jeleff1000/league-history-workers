@@ -47,6 +47,14 @@ TOKEN_VALUE = re.compile(r"(?i)\b(?:bearer\s+)?[a-z0-9_-]{32,}\b")
 EXCEPTION_CLASS = re.compile(
     r"(?m)^([A-Za-z_][A-Za-z0-9_.]*(?:Error|Exception)):\s*",
 )
+SAFE_FAILURE_MARKERS = (
+    ("flyreader is disabled in corpus mode", "CorpusFlyReadAttempt"),
+    ("flytarget is disabled in corpus mode", "CorpusFlyWriteAttempt"),
+    ("flywriter is disabled in corpus mode", "CorpusFlyWriteAttempt"),
+    ("failed to flatten league_settings", "SettingsCanonicalization"),
+    ("fetched league settings but produced 0 canonical rows", "EmptyCanonicalSettings"),
+    ("local duckdb failed pre-upload validation", "PreUploadValidation"),
+)
 
 
 class ForbiddenArtifactData(ValueError):
@@ -137,6 +145,9 @@ def classify_import_failure(raw_text: str) -> tuple[str, str]:
         return "rate_limited", "YahooRateLimit"
     if any(marker in lowered for marker in ("invalid_grant", "token expired", "http 401")):
         return "failure", "YahooAuthentication"
+    for marker, category in SAFE_FAILURE_MARKERS:
+        if marker in lowered:
+            return "failure", category
     matches = EXCEPTION_CLASS.findall(raw_text)
     if matches:
         return "failure", matches[-1].rsplit(".", 1)[-1]
