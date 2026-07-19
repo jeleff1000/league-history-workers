@@ -1,0 +1,41 @@
+name: Witness Research Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      yahoo_oauth_ref:
+        description: "yahoo_oauth branch/ref to validate"
+        required: false
+        type: string
+        default: main
+
+permissions:
+  contents: read
+
+jobs:
+  contract-and-fixture-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout yahoo_oauth
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref || 'main' }}
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/
+            /fantasy_football_data_scripts/tests/unit/scripts/sota_recon/witness_gate/
+            /pyproject.toml
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install bounded gate dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 rapidfuzz pytest==8.3.3 ruff
+      - name: Run witness gate tests
+        run: python -m pytest fantasy_football_data_scripts/tests/unit/scripts/sota_recon/witness_gate -q
+      - name: Lint witness gate
+        run: python -m ruff check scripts/sota_recon/witness_gate fantasy_football_data_scripts/tests/unit/scripts/sota_recon/witness_gate
