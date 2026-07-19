@@ -52,9 +52,8 @@ on:
         description: 'yahoo_oauth branch/ref to check out'
         required: false
         type: string
-        # 2026-07-18: the corpus-pilot branch was folded into the pre-main-merge
-        # preservation branch; flip this to 'main' once Joe merges.
-        default: 'wip/preserved-pre-main-merge-20260718'
+        # 2026-07-19: consolidated onto main (Joe's main-only rule).
+        default: 'main'
 
 permissions:
   actions: write
@@ -113,7 +112,7 @@ jobs:
         with:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
-          ref: ${{ github.event.inputs.yahoo_oauth_ref || 'corpus-pilot-mfl-fleaflicker' }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || 'main' }}
           path: code
           filter: blob:none
           sparse-checkout-cone-mode: false
