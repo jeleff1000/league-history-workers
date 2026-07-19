@@ -1,7 +1,882 @@
 {
  "platform": "mfl",
- "generated_probes": 250,
+ "generated_probes": 618,
  "leagues": [
+  {
+   "seed": "2015:10030",
+   "id": "10030",
+   "year": 2015,
+   "name": "King of Kings Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:10062",
+   "id": "10062",
+   "year": 2015,
+   "name": "Quest Bronze Dynasty 42",
+   "size": 12
+  },
+  {
+   "seed": "2015:10192",
+   "id": "10192",
+   "year": 2015,
+   "name": "The Headhunters Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:10212",
+   "id": "10212",
+   "year": 2015,
+   "name": "Kansas State Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2015:10297",
+   "id": "10297",
+   "year": 2015,
+   "name": "HyperActive Dynasty League H $50",
+   "size": 12
+  },
+  {
+   "seed": "2015:10355",
+   "id": "10355",
+   "year": 2015,
+   "name": "SRV Dynasty League",
+   "size": 8
+  },
+  {
+   "seed": "2015:10363",
+   "id": "10363",
+   "year": 2015,
+   "name": "Dynasty in the Making",
+   "size": 12
+  },
+  {
+   "seed": "2015:10412",
+   "id": "10412",
+   "year": 2015,
+   "name": "FFLS Silver Dynasty 29",
+   "size": 12
+  },
+  {
+   "seed": "2015:10570",
+   "id": "10570",
+   "year": 2015,
+   "name": "Prince George Dynasty 2",
+   "size": 12
+  },
+  {
+   "seed": "2015:10619",
+   "id": "10619",
+   "year": 2015,
+   "name": "dyNASTY -- Where Fantasy Football Champions Come to Play",
+   "size": 12
+  },
+  {
+   "seed": "2015:10622",
+   "id": "10622",
+   "year": 2015,
+   "name": "Grand Forks Dynasty League",
+   "size": 10
+  },
+  {
+   "seed": "2015:10674",
+   "id": "10674",
+   "year": 2015,
+   "name": "FDSB Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:10684",
+   "id": "10684",
+   "year": 2015,
+   "name": "Regulators Dynasty Football",
+   "size": 16
+  },
+  {
+   "seed": "2015:10696",
+   "id": "10696",
+   "year": 2015,
+   "name": "Masters Copper Dynasty 800069",
+   "size": 12
+  },
+  {
+   "seed": "2015:10735",
+   "id": "10735",
+   "year": 2015,
+   "name": "Honolulu Blue Dynasty League",
+   "size": 10
+  },
+  {
+   "seed": "2015:10786",
+   "id": "10786",
+   "year": 2015,
+   "name": "Quest Silver Dynasty 12",
+   "size": 12
+  },
+  {
+   "seed": "2015:10828",
+   "id": "10828",
+   "year": 2015,
+   "name": "HyperActive Dynasty League F $50",
+   "size": 12
+  },
+  {
+   "seed": "2015:10973",
+   "id": "10973",
+   "year": 2015,
+   "name": "Bodenhamer/Hess Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:11001",
+   "id": "11001",
+   "year": 2015,
+   "name": "Masters Copper Dynasty 800093",
+   "size": 12
+  },
+  {
+   "seed": "2015:11091",
+   "id": "11091",
+   "year": 2015,
+   "name": "National Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:11119",
+   "id": "11119",
+   "year": 2015,
+   "name": "Genesis Hybrid Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:11174",
+   "id": "11174",
+   "year": 2015,
+   "name": "Money Talks Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:11279",
+   "id": "11279",
+   "year": 2015,
+   "name": "Masters Bronze Dynasty 800142",
+   "size": 12
+  },
+  {
+   "seed": "2015:11325",
+   "id": "11325",
+   "year": 2015,
+   "name": "CROWN TOWN DYNASTY",
+   "size": 12
+  },
+  {
+   "seed": "2015:11382",
+   "id": "11382",
+   "year": 2015,
+   "name": "Hall of Fame Fantasy - Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:11391",
+   "id": "11391",
+   "year": 2015,
+   "name": "Quest Bronze Dynasty 24",
+   "size": 12
+  },
+  {
+   "seed": "2015:11490",
+   "id": "11490",
+   "year": 2015,
+   "name": "Intensity 1 Fantasy Football Dynasty League 1",
+   "size": 12
+  },
+  {
+   "seed": "2015:11520",
+   "id": "11520",
+   "year": 2015,
+   "name": "In the Trenches Premier Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2015:11598",
+   "id": "11598",
+   "year": 2015,
+   "name": "TNL Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2015:11731",
+   "id": "11731",
+   "year": 2015,
+   "name": "Rochester Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:11785",
+   "id": "11785",
+   "year": 2015,
+   "name": "Masters Copper Dynasty Ghost of 18 - 800181",
+   "size": 12
+  },
+  {
+   "seed": "2015:11788",
+   "id": "11788",
+   "year": 2015,
+   "name": "True Dynasty Football",
+   "size": 10
+  },
+  {
+   "seed": "2015:11919",
+   "id": "11919",
+   "year": 2015,
+   "name": "Nuggets Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:12012",
+   "id": "12012",
+   "year": 2015,
+   "name": "Masters Tin Dynasty 800047",
+   "size": 12
+  },
+  {
+   "seed": "2015:12013",
+   "id": "12013",
+   "year": 2015,
+   "name": "Quest Bronze Dynasty 93",
+   "size": 12
+  },
+  {
+   "seed": "2015:12029",
+   "id": "12029",
+   "year": 2015,
+   "name": "Gridiron Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:12030",
+   "id": "12030",
+   "year": 2015,
+   "name": "Quest Silver Dynasty 18 SoCal League",
+   "size": 14
+  },
+  {
+   "seed": "2015:12144",
+   "id": "12144",
+   "year": 2015,
+   "name": "The Duck Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:12155",
+   "id": "12155",
+   "year": 2015,
+   "name": "Quest Bronze Dynasty 104",
+   "size": 12
+  },
+  {
+   "seed": "2015:12169",
+   "id": "12169",
+   "year": 2015,
+   "name": "Quest Bronze Dynasty 1",
+   "size": 12
+  },
+  {
+   "seed": "2015:12179",
+   "id": "12179",
+   "year": 2015,
+   "name": "Dynasty FFB",
+   "size": 16
+  },
+  {
+   "seed": "2015:12195",
+   "id": "12195",
+   "year": 2015,
+   "name": "FFLS Silver Dynasty 21",
+   "size": 12
+  },
+  {
+   "seed": "2015:12231",
+   "id": "12231",
+   "year": 2015,
+   "name": "East West Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:12251",
+   "id": "12251",
+   "year": 2015,
+   "name": "South Jersey Dynasty League",
+   "size": 10
+  },
+  {
+   "seed": "2015:12307",
+   "id": "12307",
+   "year": 2015,
+   "name": "Game of Thrones Dynasty Player Eliminator Playoffs",
+   "size": 8
+  },
+  {
+   "seed": "2015:12454",
+   "id": "12454",
+   "year": 2015,
+   "name": "Sheridan County Dynasty 2015",
+   "size": 10
+  },
+  {
+   "seed": "2015:12474",
+   "id": "12474",
+   "year": 2015,
+   "name": "XFL Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:12484",
+   "id": "12484",
+   "year": 2015,
+   "name": "The Empire Dynasty League",
+   "size": 10
+  },
+  {
+   "seed": "2015:12512",
+   "id": "12512",
+   "year": 2015,
+   "name": "Gridiron Legends Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:12532",
+   "id": "12532",
+   "year": 2015,
+   "name": "Quest Bronze Dynasty 106",
+   "size": 12
+  },
+  {
+   "seed": "2015:12629",
+   "id": "12629",
+   "year": 2015,
+   "name": "Life After Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2015:12701",
+   "id": "12701",
+   "year": 2015,
+   "name": "Masters Bronze Dynasty Refugees of 32 - 800235",
+   "size": 10
+  },
+  {
+   "seed": "2015:12730",
+   "id": "12730",
+   "year": 2015,
+   "name": "Quest Gold Dynasty 3",
+   "size": 12
+  },
+  {
+   "seed": "2015:12784",
+   "id": "12784",
+   "year": 2015,
+   "name": "Decatur Dynasty FFL",
+   "size": 10
+  },
+  {
+   "seed": "2015:12799",
+   "id": "12799",
+   "year": 2015,
+   "name": "Chesnut's Dynasty league",
+   "size": 8
+  },
+  {
+   "seed": "2015:12805",
+   "id": "12805",
+   "year": 2015,
+   "name": "Masters Copper Dynasty Michigan 8 - 800215",
+   "size": 12
+  },
+  {
+   "seed": "2015:12820",
+   "id": "12820",
+   "year": 2015,
+   "name": "Masters Tin Dynasty 800016",
+   "size": 12
+  },
+  {
+   "seed": "2015:12830",
+   "id": "12830",
+   "year": 2015,
+   "name": "WEST COAST DYNASTY LEAGUE",
+   "size": 12
+  },
+  {
+   "seed": "2015:12854",
+   "id": "12854",
+   "year": 2015,
+   "name": "Hail Mary Dynasty League",
+   "size": 10
+  },
+  {
+   "seed": "2015:12929",
+   "id": "12929",
+   "year": 2015,
+   "name": "Extreme IDP Dynasty Fantasy Football League",
+   "size": 10
+  },
+  {
+   "seed": "2015:12949",
+   "id": "12949",
+   "year": 2015,
+   "name": "Rocky Mountain Dynasty League (DFL)",
+   "size": 14
+  },
+  {
+   "seed": "2015:13047",
+   "id": "13047",
+   "year": 2015,
+   "name": "Lake Effect Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:13060",
+   "id": "13060",
+   "year": 2015,
+   "name": "The Supernatural Dynasty League",
+   "size": 10
+  },
+  {
+   "seed": "2015:13143",
+   "id": "13143",
+   "year": 2015,
+   "name": "SASS ELITE DYNASTY II 2015",
+   "size": 12
+  },
+  {
+   "seed": "2015:13164",
+   "id": "13164",
+   "year": 2015,
+   "name": "INTENSITY 9 Fantasy Football DYNASTY League 9 ",
+   "size": 12
+  },
+  {
+   "seed": "2015:13187",
+   "id": "13187",
+   "year": 2015,
+   "name": "16 to 1 Dynasty League",
+   "size": 16
+  },
+  {
+   "seed": "2015:13201",
+   "id": "13201",
+   "year": 2015,
+   "name": "Ultimate Dynasty Fantasy League",
+   "size": 10
+  },
+  {
+   "seed": "2015:13255",
+   "id": "13255",
+   "year": 2015,
+   "name": "DLF Dynasty Mock 5 April",
+   "size": 12
+  },
+  {
+   "seed": "2015:13298",
+   "id": "13298",
+   "year": 2015,
+   "name": "The Deztacular Dynasty ",
+   "size": 12
+  },
+  {
+   "seed": "2015:13328",
+   "id": "13328",
+   "year": 2015,
+   "name": "Quest Bronze Dynasty 58",
+   "size": 12
+  },
+  {
+   "seed": "2015:13399",
+   "id": "13399",
+   "year": 2015,
+   "name": "The American Dynasty Football League",
+   "size": 16
+  },
+  {
+   "seed": "2015:13401",
+   "id": "13401",
+   "year": 2015,
+   "name": "Tower Electric Dynasty League",
+   "size": 10
+  },
+  {
+   "seed": "2015:13460",
+   "id": "13460",
+   "year": 2015,
+   "name": "Siwek Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:13659",
+   "id": "13659",
+   "year": 2015,
+   "name": "Dirty Dozen Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2015:13693",
+   "id": "13693",
+   "year": 2015,
+   "name": "JP's DYNASTY II",
+   "size": 12
+  },
+  {
+   "seed": "2015:13729",
+   "id": "13729",
+   "year": 2015,
+   "name": "Snooze You Lose 3 Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2015:13777",
+   "id": "13777",
+   "year": 2015,
+   "name": "Masters Gold Dynasty 800175",
+   "size": 12
+  },
+  {
+   "seed": "2015:13832",
+   "id": "13832",
+   "year": 2015,
+   "name": "Masters Tin Dynasty 800026",
+   "size": 12
+  },
+  {
+   "seed": "2015:13882",
+   "id": "13882",
+   "year": 2015,
+   "name": "The Ultimate DyNasty Experience",
+   "size": 10
+  },
+  {
+   "seed": "2015:13988",
+   "id": "13988",
+   "year": 2015,
+   "name": "Dynasty Football League",
+   "size": 12
+  },
+  {
+   "seed": "2015:14011",
+   "id": "14011",
+   "year": 2015,
+   "name": "Valley Avenue Fantasy Football Dynasty League (VAFFDL)",
+   "size": 10
+  },
+  {
+   "seed": "2015:14251",
+   "id": "14251",
+   "year": 2015,
+   "name": "The War Room Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2015:14260",
+   "id": "14260",
+   "year": 2015,
+   "name": "Snooze You Lose 12 Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2015:14346",
+   "id": "14346",
+   "year": 2015,
+   "name": "Diamond in the Rough Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:14351",
+   "id": "14351",
+   "year": 2015,
+   "name": "STFU Dynasty FFL",
+   "size": 12
+  },
+  {
+   "seed": "2015:14373",
+   "id": "14373",
+   "year": 2015,
+   "name": "La Cosa Nostra Dynasty XIX",
+   "size": 12
+  },
+  {
+   "seed": "2015:14536",
+   "id": "14536",
+   "year": 2015,
+   "name": "BVR Dynasty V2",
+   "size": 12
+  },
+  {
+   "seed": "2015:14552",
+   "id": "14552",
+   "year": 2015,
+   "name": "Dynasty Sports Empire - D12 Football",
+   "size": 12
+  },
+  {
+   "seed": "2015:14609",
+   "id": "14609",
+   "year": 2015,
+   "name": "Masters Tin Dynasty 800053",
+   "size": 12
+  },
+  {
+   "seed": "2015:14681",
+   "id": "14681",
+   "year": 2015,
+   "name": "Prestige Worldwide - The Greatest Fantasy Football Dynasty League Ever!",
+   "size": 10
+  },
+  {
+   "seed": "2015:14698",
+   "id": "14698",
+   "year": 2015,
+   "name": "Redemption Dynasty Football",
+   "size": 16
+  },
+  {
+   "seed": "2015:14790",
+   "id": "14790",
+   "year": 2015,
+   "name": "Brett Favre Dynasty League",
+   "size": 10
+  },
+  {
+   "seed": "2015:14846",
+   "id": "14846",
+   "year": 2015,
+   "name": "Masters Bronze Dynasty Refugees of 51 - 800237",
+   "size": 12
+  },
+  {
+   "seed": "2015:14866",
+   "id": "14866",
+   "year": 2015,
+   "name": "UFFL VII - Ultimate Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:14887",
+   "id": "14887",
+   "year": 2015,
+   "name": "Rudy Dynasty League IV",
+   "size": 12
+  },
+  {
+   "seed": "2015:14960",
+   "id": "14960",
+   "year": 2015,
+   "name": "Hyper-Ball Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:14978",
+   "id": "14978",
+   "year": 2015,
+   "name": "Ultimate Football Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:14995",
+   "id": "14995",
+   "year": 2015,
+   "name": "Masters Copper Dynasty 800081",
+   "size": 12
+  },
+  {
+   "seed": "2015:15033",
+   "id": "15033",
+   "year": 2015,
+   "name": "That 80's Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:15082",
+   "id": "15082",
+   "year": 2015,
+   "name": "BONDED BY BLOOD DYNASTY LEAGUE",
+   "size": 10
+  },
+  {
+   "seed": "2015:15084",
+   "id": "15084",
+   "year": 2015,
+   "name": "MAGNIFICENT 12 DYNASTY",
+   "size": 12
+  },
+  {
+   "seed": "2015:15207",
+   "id": "15207",
+   "year": 2015,
+   "name": "Phantom Dynasty",
+   "size": 14
+  },
+  {
+   "seed": "2015:15227",
+   "id": "15227",
+   "year": 2015,
+   "name": "TNL Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2015:15243",
+   "id": "15243",
+   "year": 2015,
+   "name": "Dynasty FF 2015",
+   "size": 16
+  },
+  {
+   "seed": "2015:15246",
+   "id": "15246",
+   "year": 2015,
+   "name": "Worlds_Best_Dynasty_League",
+   "size": 10
+  },
+  {
+   "seed": "2015:15253",
+   "id": "15253",
+   "year": 2015,
+   "name": "Field of Play Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2015:15327",
+   "id": "15327",
+   "year": 2015,
+   "name": "Masters Copper Dynasty Classic 5 - 800198",
+   "size": 10
+  },
+  {
+   "seed": "2015:15345",
+   "id": "15345",
+   "year": 2015,
+   "name": "Dynasty Dojo",
+   "size": 12
+  },
+  {
+   "seed": "2015:15360",
+   "id": "15360",
+   "year": 2015,
+   "name": "Dynasty NFL GM",
+   "size": 32
+  },
+  {
+   "seed": "2015:15388",
+   "id": "15388",
+   "year": 2015,
+   "name": "Dynasty Wars III",
+   "size": 14
+  },
+  {
+   "seed": "2015:15442",
+   "id": "15442",
+   "year": 2015,
+   "name": "SASS DYNASTY II 2015",
+   "size": 12
+  },
+  {
+   "seed": "2015:15521",
+   "id": "15521",
+   "year": 2015,
+   "name": "The Dynasty Roc La Bryant",
+   "size": 8
+  },
+  {
+   "seed": "2015:15538",
+   "id": "15538",
+   "year": 2015,
+   "name": "Mid-America Dynasty Fantasy Football League",
+   "size": 10
+  },
+  {
+   "seed": "2015:15573",
+   "id": "15573",
+   "year": 2015,
+   "name": "The Dynasty League",
+   "size": 16
+  },
+  {
+   "seed": "2015:15599",
+   "id": "15599",
+   "year": 2015,
+   "name": "Fuad Reveiz Fan Club Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:15665",
+   "id": "15665",
+   "year": 2015,
+   "name": "Schnockered Dynasty",
+   "size": 12
+  },
+  {
+   "seed": "2015:15671",
+   "id": "15671",
+   "year": 2015,
+   "name": "All American Dynasty",
+   "size": 10
+  },
+  {
+   "seed": "2015:15734",
+   "id": "15734",
+   "year": 2015,
+   "name": "Kickbacks 3 Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:15826",
+   "id": "15826",
+   "year": 2015,
+   "name": "Quest Silver Dynasty 11",
+   "size": 12
+  },
+  {
+   "seed": "2015:15897",
+   "id": "15897",
+   "year": 2015,
+   "name": "HyperActive Dynasty League D $25",
+   "size": 12
+  },
+  {
+   "seed": "2015:15977",
+   "id": "15977",
+   "year": 2015,
+   "name": "Gordy LaChance Dynasty ",
+   "size": 10
+  },
+  {
+   "seed": "2015:16002",
+   "id": "16002",
+   "year": 2015,
+   "name": "Tate Diablo Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:16058",
+   "id": "16058",
+   "year": 2015,
+   "name": "Empire Dynasty FFL",
+   "size": 12
+  },
+  {
+   "seed": "2015:16085",
+   "id": "16085",
+   "year": 2015,
+   "name": "RRD Dynasty League",
+   "size": 12
+  },
+  {
+   "seed": "2015:16140",
+   "id": "16140",
+   "year": 2015,
+   "name": "Denny's Dynasty ",
+   "size": 12
+  },
   {
    "seed": "2024:10267",
    "year": 2024,
