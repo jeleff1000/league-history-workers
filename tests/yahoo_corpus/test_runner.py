@@ -167,6 +167,7 @@ def test_execute_import_classifies_rate_limit_and_removes_private_task_dir(tmp_p
     grant = Grant("grant-1234", "private-refresh", (), ())
 
     def fake_run(command, **kwargs):
+        assert "--skip-transformations" in command
         kwargs["stdout"].write("Yahoo API 429 rate limit for private manager\n")
         kwargs["stdout"].flush()
         return subprocess.CompletedProcess(command, 1)

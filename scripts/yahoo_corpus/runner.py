@@ -303,6 +303,7 @@ def execute_import_task(
         str(task_dir),
         "--skip-track-1",
         "--skip-track-2-upload",
+        "--skip-transformations",
     ]
     outcome = TaskOutcome(task.task_id, "failure", "import", "ImportFailure")
     try:
