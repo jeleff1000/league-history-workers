@@ -156,7 +156,6 @@ jobs:
           name: yahoo-corpus-${{ github.event.inputs.mode || 'cross-era' }}-${{ github.run_id }}
           path: |
             ${{ env.CORPUS_OUT }}/yahoo_corpus_slice.duckdb
-            ${{ env.CORPUS_OUT }}/plan.json
             ${{ env.CORPUS_OUT }}/ledger.json
             ${{ env.CORPUS_OUT }}/report.json
             ${{ env.CORPUS_OUT }}/driver.log

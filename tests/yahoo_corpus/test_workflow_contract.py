@@ -50,12 +50,12 @@ def test_artifact_allowlist_excludes_private_and_raw_paths() -> None:
 
     for allowed in (
         "yahoo_corpus_slice.duckdb",
-        "plan.json",
         "ledger.json",
         "report.json",
         "driver.log",
     ):
         assert allowed in upload
+    assert "plan.json" not in upload
     assert ".private" not in upload
     assert "league_context" not in upload
     assert "**" not in upload
