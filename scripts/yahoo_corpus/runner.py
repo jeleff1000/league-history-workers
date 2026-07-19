@@ -344,8 +344,8 @@ def execute_import_task(
     except subprocess.TimeoutExpired:
         outcome = TaskOutcome(task.task_id, "failure", "import", "ImportTimeout")
         return outcome
-    except SourceValidationError:
-        outcome = TaskOutcome(task.task_id, "failure", "validation", "SourceValidationError")
+    except SourceValidationError as exc:
+        outcome = TaskOutcome(task.task_id, "failure", "validation", exc.code)
         return outcome
     except Exception as exc:
         outcome = TaskOutcome(task.task_id, "failure", "runtime", type(exc).__name__)

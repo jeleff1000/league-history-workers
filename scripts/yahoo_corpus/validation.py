@@ -16,6 +16,10 @@ REQUIRED_TABLES = {"league_settings", "draft", "transactions", "player_fantasy",
 class SourceValidationError(RuntimeError):
     """A sanitized corpus source validation failure."""
 
+    def __init__(self, message: str, *, code: str) -> None:
+        super().__init__(message)
+        self.code = code
+
 
 def _cohort_slug(row: dict[str, Any]) -> str:
     teams = int(row.get("num_teams") or 0)
@@ -44,16 +48,23 @@ def validate_source(db_path: Path | str, task: Candidate) -> dict[str, Any]:
         }
         missing = sorted(REQUIRED_TABLES - tables)
         if missing:
-            raise SourceValidationError(f"missing required tables: {','.join(missing)}")
+            raise SourceValidationError(
+                f"missing required tables: {','.join(missing)}",
+                code="MissingTables",
+            )
         settings_rows = con.execute(
             "SELECT * FROM public.league_settings WHERE year = ?", [task.season]
         ).fetchdf()
         if len(settings_rows) != 1:
-            raise SourceValidationError("league_settings year row count is not one")
+            raise SourceValidationError(
+                "league_settings year row count is not one",
+                code="SettingsRowCount",
+            )
         actual_cohort = _cohort_slug(settings_rows.iloc[0].to_dict())
         if actual_cohort != task.cohort_slug:
             raise SourceValidationError(
-                f"cohort mismatch: expected {task.cohort_slug}, got {actual_cohort}"
+                f"cohort mismatch: expected {task.cohort_slug}, got {actual_cohort}",
+                code="CohortMismatch",
             )
         rostered_rows = int(
             con.execute(
@@ -63,7 +74,10 @@ def validate_source(db_path: Path | str, task: Candidate) -> dict[str, Any]:
             ).fetchone()[0]
         )
         if rostered_rows <= 0:
-            raise SourceValidationError("rostered player population is empty")
+            raise SourceValidationError(
+                "rostered player population is empty",
+                code="EmptyRosterPopulation",
+            )
         champions = int(
             con.execute(
                 "SELECT COUNT(DISTINCT franchise_id) FROM public.matchup "
@@ -72,7 +86,10 @@ def validate_source(db_path: Path | str, task: Candidate) -> dict[str, Any]:
             ).fetchone()[0]
         )
         if champions != 1:
-            raise SourceValidationError(f"champion franchise count is {champions}, expected one")
+            raise SourceValidationError(
+                f"champion franchise count is {champions}, expected one",
+                code="ChampionCount",
+            )
         return {
             "cohort_slug": actual_cohort,
             "rostered_rows": rostered_rows,

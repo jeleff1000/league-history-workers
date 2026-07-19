@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+import scripts.yahoo_corpus.runner as runner_module
 
 from scripts.yahoo_corpus.inventory import Grant
 from scripts.yahoo_corpus.runner import (
@@ -19,6 +20,7 @@ from scripts.yahoo_corpus.runner import (
 )
 from scripts.yahoo_corpus.planner import Plan
 from scripts.yahoo_corpus.scheduler import Candidate
+from scripts.yahoo_corpus.validation import SourceValidationError
 
 
 def task() -> Candidate:
@@ -190,6 +192,32 @@ def test_execute_import_classifies_rate_limit_and_removes_private_task_dir(tmp_p
     log = (tmp_path / "driver.log").read_text(encoding="utf-8")
     assert "private manager" not in log
     assert "private-refresh" not in log
+
+
+def test_execute_import_reports_safe_validation_code(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    grant = Grant("grant-1234", "private-refresh", (), ())
+
+    def reject_source(*_args, **_kwargs):
+        raise SourceValidationError("private details", code="ChampionCount")
+
+    monkeypatch.setattr(runner_module, "validate_source", reject_source)
+    outcome = execute_import_task(
+        task(),
+        grant,
+        pipeline_root=tmp_path / "code",
+        work_root=tmp_path / "private",
+        snapshot_path=tmp_path / "slice.duckdb",
+        sanitized_log=tmp_path / "driver.log",
+        client_id="id",
+        client_secret="secret",
+        run_command=lambda command, **kwargs: subprocess.CompletedProcess(command, 0),
+    )
+
+    assert outcome.stage == "validation"
+    assert outcome.error_class == "ChampionCount"
 
 
 def test_import_failure_classifier_extracts_exception_class_without_message() -> None:

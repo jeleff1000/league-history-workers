@@ -89,16 +89,18 @@ def test_validate_source_rejects_multiple_champions(tmp_path: Path) -> None:
     source = tmp_path / "source.duckdb"
     make_source(source, champions=("f1", "f2"))
 
-    with pytest.raises(SourceValidationError, match="champion"):
+    with pytest.raises(SourceValidationError, match="champion") as error:
         validate_source(source, task())
+    assert error.value.code == "ChampionCount"
 
 
 def test_validate_source_rejects_cohort_mismatch(tmp_path: Path) -> None:
     source = tmp_path / "source.duckdb"
     make_source(source)
 
-    with pytest.raises(SourceValidationError, match="cohort"):
+    with pytest.raises(SourceValidationError, match="cohort") as error:
         validate_source(source, task("12t_sflx_ppr_6pt"))
+    assert error.value.code == "CohortMismatch"
 
 
 def test_fold_database_strips_identity_columns(tmp_path: Path) -> None:
