@@ -232,6 +232,7 @@ def run_plan(
     clock: Callable[[], float] = time.monotonic,
     sleeper: Callable[[float], None] = time.sleep,
     max_rate_limit_retries: int = 4,
+    time_budget_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Execute a credential-aware plan and persist only redacted resumable state."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -243,14 +244,21 @@ def run_plan(
     outcomes = list(previous.get("outcomes", []))
     completed_this_run = 0
     rate_limit_counts: dict[str, int] = {}
+    started_at = clock()
     while True:
         now = clock()
+        if time_budget_seconds is not None and now - started_at >= time_budget_seconds:
+            # Stop dispatching so the job ends cleanly inside its CI timeout;
+            # pending tasks resume on the next run via the landed list/ledger.
+            break
         candidate = scheduler.next(now)
         if candidate is None:
             # Tasks blocked only by a grant cooldown are retryable: wait out
             # the earliest expiry instead of abandoning them mid-run.
             wake_at = scheduler.next_ready_time(now)
             if wake_at is None:
+                break
+            if time_budget_seconds is not None and wake_at - started_at >= time_budget_seconds:
                 break
             sleeper(max(0.0, wake_at - now) + 1.0)
             continue

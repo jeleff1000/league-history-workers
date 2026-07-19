@@ -46,6 +46,20 @@ def build_plan(mode: str, candidates: Iterable[Candidate], *, limit: int = 12) -
         years_per_grant = 3
         grants = max(1, limit // years_per_grant)
         selected = select_spacing(rows, grants=grants, years_per_grant=years_per_grant)[:limit]
+    elif mode == "inventory":
+        # The full corpus: every discovered league-year, deduped by task.
+        # The credential scheduler's grant-LRU rotation provides maximal
+        # spacing between any one grant's imports; limit <= 0 means all.
+        seen: set[str] = set()
+        selected = []
+        for row in rows:
+            if row.task_id in seen:
+                continue
+            seen.add(row.task_id)
+            selected.append(row)
+        if limit > 0:
+            selected = selected[:limit]
     else:
         raise ValueError(f"Unknown Yahoo corpus plan mode: {mode}")
-    return Plan(mode=mode, requested=limit, tasks=tuple(selected))
+    requested = limit if limit > 0 else len(selected)
+    return Plan(mode=mode, requested=requested, tasks=tuple(selected))

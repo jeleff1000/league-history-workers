@@ -53,6 +53,22 @@ def test_spacing_plan_selects_three_years_from_four_grants() -> None:
     assert len({task.grant_id for task in plan.tasks}) == 4
 
 
+def test_inventory_plan_keeps_every_unique_task() -> None:
+    rows = [
+        Candidate("yahoo-a", "grant-1", "423.l.1", 2023, "10t_flx_half_4pt", "a"),
+        Candidate("yahoo-b", "grant-1", "406.l.1", 2021, "10t_flx_half_4pt", "a"),
+        Candidate("yahoo-a", "grant-1", "423.l.1", 2023, "10t_flx_half_4pt", "a"),  # dupe
+        Candidate("yahoo-c", "grant-2", "399.l.2", 2015, "12t_flx_std_6pt", "b"),
+    ]
+    plan = build_plan("inventory", rows, limit=0)
+    assert [row.task_id for row in plan.tasks] == ["yahoo-a", "yahoo-b", "yahoo-c"]
+    assert plan.requested == 3
+    assert plan.shortfall == 0
+
+    capped = build_plan("inventory", rows, limit=2)
+    assert len(capped.tasks) == 2
+
+
 def test_plan_rejects_unknown_mode() -> None:
     try:
         build_plan("unknown", [], limit=12)

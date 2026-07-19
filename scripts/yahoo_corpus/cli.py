@@ -22,7 +22,7 @@ from scripts.yahoo_corpus.scheduler import Candidate, ERAS
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("cross-era", "spacing-resume"), default="cross-era")
+    parser.add_argument("--mode", choices=("cross-era", "spacing-resume", "inventory"), default="cross-era")
     parser.add_argument("--task-limit", type=int, default=12)
     parser.add_argument("--pipeline-root", type=Path, default=Path("code"))
     parser.add_argument("--output", type=Path, default=Path("corpus/yahoo-pilot"))
@@ -37,6 +37,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="File of already-landed corpus db_names; matching plan tasks are dropped",
+    )
+    parser.add_argument(
+        "--time-budget-min",
+        type=int,
+        default=None,
+        help="Stop dispatching new imports after this many minutes; remaining tasks stay pending",
     )
     return parser
 
@@ -177,10 +183,15 @@ def main(argv: list[str] | None = None) -> int:
                 renewal_keys=parser_module.extract_renewal_keys,
             )
 
+        stop_when = None
+        if args.mode != "inventory":
+            # Pilots stop discovery early; inventory mode exhausts every grant
+            # so the persisted plan covers the whole corpus.
+            stop_when = lambda rows: pilot_ready(args.mode, rows, args.task_limit)
         candidates, _ = discover_candidates(
             grants,
             adapter_factory=adapter_factory,
-            stop_when=lambda rows: pilot_ready(args.mode, rows, args.task_limit),
+            stop_when=stop_when,
         )
         plan = build_plan(args.mode, candidates, limit=args.task_limit)
         write_plan(plan_path, plan)
@@ -231,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         execute_task=executor,
         stop_after=args.stop_after,
         resume=args.resume,
+        time_budget_seconds=args.time_budget_min * 60 if args.time_budget_min else None,
     )
     shutil_target = private_root
     if shutil_target.exists():

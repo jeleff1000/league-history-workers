@@ -202,6 +202,40 @@ def test_unplayed_shell_classifies_as_skipped() -> None:
     assert classify_import_failure(raw) == ("skipped", "UnplayedSeason")
 
 
+def test_run_plan_stops_dispatching_at_time_budget(tmp_path: Path) -> None:
+    tasks = (
+        task(),
+        Candidate("yahoo-b", "grant-2", "399.l.2", 2015, "10t_flx_half_4pt", "b"),
+        Candidate("yahoo-c", "grant-3", "350.l.3", 2008, "10t_flx_half_4pt", "c"),
+    )
+    plan = Plan("inventory", 3, tasks)
+    grants = {row.grant_id: Grant(row.grant_id, f"secret-{row.grant_id}", (), ()) for row in tasks}
+    fake_now = {"t": 0.0}
+    executed: list[str] = []
+
+    def clock() -> float:
+        return fake_now["t"]
+
+    def execute(candidate: Candidate, _: Grant) -> TaskOutcome:
+        executed.append(candidate.task_id)
+        fake_now["t"] += 400.0  # each import takes ~6.7 minutes
+        return TaskOutcome(candidate.task_id, "success", "complete", None)
+
+    report = run_plan(
+        plan,
+        grants,
+        tmp_path,
+        execute_task=execute,
+        clock=clock,
+        time_budget_seconds=600,
+    )
+
+    # First import starts at t=0, second at t=400; t=800 exceeds the budget so
+    # the third task stays pending for the next run.
+    assert len(executed) == 2
+    assert report["successes"] == 2
+
+
 def test_run_plan_resumes_after_controlled_checkpoint(tmp_path: Path) -> None:
     tasks = (
         task(),

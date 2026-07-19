@@ -7,16 +7,26 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'cross-era uses distinct grants across four eras; spacing-resume uses four long histories'
+        description: 'cross-era/spacing-resume are pilots; inventory discovers EVERY grant league-year once (plan cached) and blasts through with grant-LRU spacing'
         required: true
         type: choice
-        options: ['cross-era', 'spacing-resume']
+        options: ['cross-era', 'spacing-resume', 'inventory']
         default: 'cross-era'
       task_limit:
-        description: 'League-years in the pilot'
+        description: 'League-years in the pilot (inventory mode: 0 = all)'
         required: false
         type: string
         default: '12'
+      time_budget_min:
+        description: 'Stop dispatching new imports after this many minutes (job timeout is 350)'
+        required: false
+        type: string
+        default: '300'
+      rebuild_inventory:
+        description: 'Ignore the cached inventory plan and re-discover from scratch'
+        required: false
+        type: boolean
+        default: false
       workers:
         description: 'Reserved for scale-up; pilots remain serial to prove dispatch ordering'
         required: false
@@ -102,6 +112,19 @@ jobs:
             --output "${{ github.workspace }}/corpus_dependencies" \
             --validate-only
 
+      # Inventory plan persistence: discovery is expensive and hammers Yahoo right
+      # before imports (the 999 storms), so the full-inventory plan is discovered
+      # once and cached. Cache, not artifact -- the plan stays private.
+      - name: Restore inventory plan
+        id: plan-cache
+        if: github.event.inputs.mode == 'inventory' && github.event.inputs.rebuild_inventory != 'true'
+        uses: actions/cache/restore@v5
+        with:
+          path: corpus/yahoo-pilot/plan.json
+          key: yahoo-corpus-inventory-v1-${{ github.run_id }}
+          restore-keys: |
+            yahoo-corpus-inventory-v1-
+
       - name: Run credential-spaced Yahoo pilot
         env:
           DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
@@ -113,6 +136,7 @@ jobs:
           MODE: ${{ github.event.inputs.mode || 'cross-era' }}
           TASK_LIMIT: ${{ github.event.inputs.task_limit || '12' }}
           PLAN_ONLY: ${{ github.event.inputs.plan_only || 'false' }}
+          TIME_BUDGET: ${{ github.event.inputs.time_budget_min || '300' }}
         run: |
           set -euo pipefail
           mkdir -p "$CORPUS_OUT"
@@ -121,12 +145,22 @@ jobs:
             --task-limit "$TASK_LIMIT"
             --pipeline-root "${{ github.workspace }}/code"
             --output "$CORPUS_OUT"
+            --time-budget-min "$TIME_BUDGET"
           )
           if [ -f "${{ github.workspace }}/worker/corpus_seed/yahoo_landed.txt" ]; then
             COMMON+=( --landed-list "${{ github.workspace }}/worker/corpus_seed/yahoo_landed.txt" )
           fi
           if [ "$PLAN_ONLY" = "true" ]; then
             python worker/scripts/yahoo_corpus/cli.py "${COMMON[@]}" --plan-only
+          elif [ "$MODE" = "inventory" ]; then
+            EXTRA=()
+            if [ -s "$CORPUS_OUT/plan.json" ]; then
+              echo "[pilot] resuming from cached inventory plan"
+              EXTRA+=( --resume )
+            else
+              echo "[pilot] no cached plan -- discovering the full inventory (one-time)"
+            fi
+            python worker/scripts/yahoo_corpus/cli.py "${COMMON[@]}" "${EXTRA[@]}"
           elif [ "$MODE" = "spacing-resume" ]; then
             echo "[pilot] controlled first pass: stop after four successful league-years"
             python worker/scripts/yahoo_corpus/cli.py "${COMMON[@]}" --stop-after 4
@@ -135,6 +169,13 @@ jobs:
           else
             python worker/scripts/yahoo_corpus/cli.py "${COMMON[@]}"
           fi
+
+      - name: Save inventory plan
+        if: always() && github.event.inputs.mode == 'inventory' && steps.plan-cache.outputs.cache-matched-key == ''
+        uses: actions/cache/save@v5
+        with:
+          path: corpus/yahoo-pilot/plan.json
+          key: yahoo-corpus-inventory-v1-${{ github.run_id }}
 
       - name: Report compact slice
         if: always()
