@@ -22,7 +22,13 @@ class SourceValidationError(RuntimeError):
 
 
 def _cohort_slug(row: dict[str, Any]) -> str:
-    teams = int(row.get("num_teams") or 0)
+    """Mirror the planner's production cohort buckets (settings_parser.classify_settings).
+
+    The plan's cohort_slug comes from that classifier, so validation must bucket
+    identically: team counts collapse to 10t/12t (an 8-team league IS the 10t
+    cohort), and any nonzero reception below 0.75 is half PPR.
+    """
+    teams = "10t" if int(row.get("num_teams") or 0) <= 11 else "12t"
     idp_columns = ("roster_IDP", "roster_DL", "roster_LB", "roster_DB", "roster_DB_LB", "roster_DL_LB")
     if sum(int(row.get(column) or 0) for column in idp_columns) > 0:
         roster = "idp"
@@ -31,9 +37,9 @@ def _cohort_slug(row: dict[str, Any]) -> str:
     else:
         roster = "flx"
     reception = float(row.get("scoring_rec") or 0)
-    ppr = "ppr" if reception >= 0.75 else "half" if reception >= 0.25 else "std"
+    ppr = "std" if reception == 0 else "half" if reception < 0.75 else "ppr"
     passing = "6pt" if float(row.get("scoring_pass_td") or 0) >= 5 else "4pt"
-    return f"{teams}t_{roster}_{ppr}_{passing}"
+    return f"{teams}_{roster}_{ppr}_{passing}"
 
 
 def validate_source(db_path: Path | str, task: Candidate) -> dict[str, Any]:
