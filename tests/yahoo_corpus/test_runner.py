@@ -193,6 +193,15 @@ def test_request_denied_classifies_as_rate_limited() -> None:
     assert classify_import_failure(raw) == ("rate_limited", "YahooRequestDenied")
 
 
+def test_unplayed_shell_classifies_as_skipped() -> None:
+    raw = (
+        "[YEAR 2023] Yahoo returned a schedule shell with no played matchups; "
+        "skipping remaining fetchers\n"
+        "RuntimeError: Local DuckDB failed pre-upload validation with 5 issue(s)"
+    )
+    assert classify_import_failure(raw) == ("skipped", "UnplayedSeason")
+
+
 def test_run_plan_resumes_after_controlled_checkpoint(tmp_path: Path) -> None:
     tasks = (
         task(),

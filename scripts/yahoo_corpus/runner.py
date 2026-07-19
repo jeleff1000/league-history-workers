@@ -166,6 +166,16 @@ def classify_import_failure(raw_text: str) -> tuple[str, str]:
         # Yahoo 999 "Request Denied" is throttling, not a permanent failure --
         # cool the grant down and retry rather than burning the task.
         return "rate_limited", "YahooRequestDenied"
+    if any(
+        marker in lowered
+        for marker in (
+            "schedule shell with no played matchups",
+            "no played yahoo matchups found",
+        )
+    ):
+        # Renewed shell whose season never happened: the import correctly
+        # produces an empty database. Not a failure and never retryable.
+        return "skipped", "UnplayedSeason"
     if any(marker in lowered for marker in ("invalid_grant", "token expired", "http 401")):
         return "failure", "YahooAuthentication"
     for marker, category in SAFE_FAILURE_MARKERS:
@@ -197,9 +207,11 @@ def _report(plan: Plan, outcomes: list[dict[str, Any]], scheduler: CredentialSch
     successes = sum(row.get("status") == "success" for row in outcomes)
     failures = sum(row.get("status") == "failure" for row in outcomes)
     rate_limits = sum(row.get("status") == "rate_limited" for row in outcomes)
+    skips = sum(row.get("status") == "skipped" for row in outcomes)
     return {
         "mode": plan.mode,
         "requested": plan.requested,
+        "skipped": skips,
         "planned": len(plan.tasks),
         "successes": successes,
         "failures": failures,
@@ -346,7 +358,14 @@ def execute_import_task(
         if result.returncode != 0:
             raw_text = private_log.read_text(encoding="utf-8", errors="replace")
             status, error_class = classify_import_failure(raw_text)
-            stage = "acquisition" if status == "rate_limited" else "authentication" if error_class == "YahooAuthentication" else "import"
+            if status == "rate_limited":
+                stage = "acquisition"
+            elif status == "skipped":
+                stage = "acquisition"
+            elif error_class == "YahooAuthentication":
+                stage = "authentication"
+            else:
+                stage = "import"
             outcome = TaskOutcome(task.task_id, status, stage, error_class)
             return outcome
         db_path = task_dir / f"{db_name}.duckdb"
