@@ -168,8 +168,12 @@ jobs:
             # No transforms, no sims -- the stages every failed crawl died in. A/B-validated
             # against the full pipeline (see the script docstring). A skip list of already-
             # landed db_names rides in the seed dir when present.
+            # Combined skip input: landed leagues + permanently dead IDs +
+            # QC-gate rejects (revisit gate_rejected.txt after enrich improvements).
+            SKIPFILE="$RUNNER_TEMP/skip_dbs.txt"
+            cat crawl/corpus_seed/landed_dbs.txt crawl/corpus_seed/dead_leagues.txt crawl/corpus_seed/gate_rejected.txt 2>/dev/null | sort -u > "$SKIPFILE" || true
             SKIP=""
-            if [ -f "crawl/corpus_seed/landed_dbs.txt" ]; then SKIP="--skip-list crawl/corpus_seed/landed_dbs.txt"; fi
+            if [ -s "$SKIPFILE" ]; then SKIP="--skip-list $SKIPFILE"; fi
             python code/scripts/extraplatform_corpus/direct_corpus_pilot.py \
               --platform "${{ github.event.inputs.platform }}" \
               --from-seed \
@@ -186,9 +190,11 @@ jobs:
               echo "::group::failures"; grep -E '] (FAIL|GATE_FAIL|FOLD_FAIL)' "$LOG" | head -20; echo "::endgroup::"
             fi
             # skipped leagues (no exposure / already landed) are not failures; only hard-fail
-            # when nothing worked AND something genuinely failed.
-            if [ "$OK" -eq 0 ] && [ "$FAILED" -gt 0 ]; then
-              echo "::error::0 ok vs $FAILED failed -- nothing worked."; exit 1
+            # on a total wipeout (nothing worked AND nothing was legitimately skipped) --
+            # an exhausted seed window with a tail of dead IDs is a finished slice, not a
+            # broken one.
+            if [ "$OK" -eq 0 ] && [ "$FAILED" -gt 0 ] && [ "$SKIPPED" -eq 0 ]; then
+              echo "::error::0 ok vs $FAILED failed with nothing skipped -- nothing worked."; exit 1
             fi
             exit 0
           fi
