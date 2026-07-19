@@ -16,7 +16,7 @@ from typing import Iterable
 
 from scripts.yahoo_corpus.inventory import Grant, YahooGrantAdapter, discover_candidates, load_grants
 from scripts.yahoo_corpus.planner import Plan, build_plan
-from scripts.yahoo_corpus.runner import _atomic_json, execute_import_task, run_plan
+from scripts.yahoo_corpus.runner import _atomic_json, _safe_db_name, execute_import_task, run_plan
 from scripts.yahoo_corpus.scheduler import Candidate, ERAS
 
 
@@ -32,7 +32,27 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--delay-ms", type=int, default=150)
     parser.add_argument("--global-delay-ms", type=int, default=1000)
     parser.add_argument("--request-budget", type=int, default=10_000)
+    parser.add_argument(
+        "--landed-list",
+        type=Path,
+        default=None,
+        help="File of already-landed corpus db_names; matching plan tasks are dropped",
+    )
     return parser
+
+
+def drop_landed_tasks(plan: Plan, landed_list: Path | None) -> Plan:
+    """Remove tasks whose folded db_name is already in the corpus lake."""
+    if landed_list is None or not landed_list.is_file():
+        return plan
+    landed = {line.strip() for line in landed_list.read_text(encoding="utf-8").splitlines() if line.strip()}
+    if not landed:
+        return plan
+    kept = tuple(row for row in plan.tasks if _safe_db_name(row.task_id) not in landed)
+    dropped = len(plan.tasks) - len(kept)
+    if dropped:
+        print(f"[landed] dropped {dropped} already-landed task(s); {len(kept)} remain")
+    return Plan(mode=plan.mode, requested=plan.requested, tasks=kept)
 
 
 def write_plan(path: Path, plan: Plan) -> None:
@@ -164,6 +184,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         plan = build_plan(args.mode, candidates, limit=args.task_limit)
         write_plan(plan_path, plan)
+
+    plan = drop_landed_tasks(plan, args.landed_list)
 
     print(
         json.dumps(

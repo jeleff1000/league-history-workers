@@ -122,6 +122,9 @@ jobs:
             --pipeline-root "${{ github.workspace }}/code"
             --output "$CORPUS_OUT"
           )
+          if [ -f "${{ github.workspace }}/worker/corpus_seed/yahoo_landed.txt" ]; then
+            COMMON+=( --landed-list "${{ github.workspace }}/worker/corpus_seed/yahoo_landed.txt" )
+          fi
           if [ "$PLAN_ONLY" = "true" ]; then
             python worker/scripts/yahoo_corpus/cli.py "${COMMON[@]}" --plan-only
           elif [ "$MODE" = "spacing-resume" ]; then
