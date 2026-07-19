@@ -56,6 +56,7 @@ SAFE_FAILURE_MARKERS = (
     ("flywriter is disabled in corpus mode", "CorpusFlyWriteAttempt"),
     ("failed to flatten league_settings", "SettingsCanonicalization"),
     ("fetched league settings but produced 0 canonical rows", "EmptyCanonicalSettings"),
+    ("league settings unavailable for every requested year", "SettingsUnavailable"),
     ("local duckdb failed pre-upload validation", "PreUploadValidation"),
     ("no oauth credentials available in context", "OAuthMaterialization"),
     ("request denied", "YahooRequestDenied"),
@@ -303,7 +304,6 @@ def execute_import_task(
         str(task_dir),
         "--skip-track-1",
         "--skip-track-2-upload",
-        "--skip-transformations",
     ]
     outcome = TaskOutcome(task.task_id, "failure", "import", "ImportFailure")
     try:
