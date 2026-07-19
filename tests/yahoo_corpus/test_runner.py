@@ -127,6 +127,72 @@ def test_run_plan_rotates_grants_and_writes_redacted_ledger(tmp_path: Path) -> N
     assert "customer" not in ledger_text
 
 
+def test_run_plan_waits_out_cooldown_and_retries_rate_limited(tmp_path: Path) -> None:
+    plan = Plan("cross-era", 1, (task(),))
+    grants = {"grant-1234": Grant("grant-1234", "private-refresh", (), ())}
+    fake_now = {"t": 0.0}
+    sleeps: list[float] = []
+    attempts: list[float] = []
+
+    def clock() -> float:
+        return fake_now["t"]
+
+    def sleeper(seconds: float) -> None:
+        sleeps.append(seconds)
+        fake_now["t"] += seconds
+
+    def execute(candidate: Candidate, _: Grant) -> TaskOutcome:
+        attempts.append(fake_now["t"])
+        if len(attempts) < 3:
+            return TaskOutcome(candidate.task_id, "rate_limited", "acquisition", "YahooRequestDenied")
+        return TaskOutcome(candidate.task_id, "success", "complete", None)
+
+    report = run_plan(plan, grants, tmp_path, execute_task=execute, clock=clock, sleeper=sleeper)
+
+    assert report["successes"] == 1
+    assert len(attempts) == 3
+    assert sleeps and sleeps[0] >= 120
+    # Second cooldown escalates beyond the first.
+    assert sleeps[1] > sleeps[0]
+
+
+def test_run_plan_fails_rate_limited_task_after_retry_budget(tmp_path: Path) -> None:
+    plan = Plan("cross-era", 1, (task(),))
+    grants = {"grant-1234": Grant("grant-1234", "private-refresh", (), ())}
+    fake_now = {"t": 0.0}
+    attempts: list[float] = []
+
+    def clock() -> float:
+        return fake_now["t"]
+
+    def sleeper(seconds: float) -> None:
+        fake_now["t"] += seconds
+
+    def execute(candidate: Candidate, _: Grant) -> TaskOutcome:
+        attempts.append(fake_now["t"])
+        return TaskOutcome(candidate.task_id, "rate_limited", "acquisition", "YahooRequestDenied")
+
+    report = run_plan(
+        plan,
+        grants,
+        tmp_path,
+        execute_task=execute,
+        clock=clock,
+        sleeper=sleeper,
+        max_rate_limit_retries=2,
+    )
+
+    assert report["successes"] == 0
+    assert len(attempts) == 3  # initial attempt + two retries, then failed
+    ledger = json.loads((tmp_path / "ledger.json").read_text(encoding="utf-8"))
+    assert ledger["scheduler"]["failed"] == {"yahoo-abcd": "YahooRequestDenied"}
+
+
+def test_request_denied_classifies_as_rate_limited() -> None:
+    raw = "requests.exceptions.HTTPError: 999 Server Error: Request Denied for url: https://fantasysports.yahooapis.com/..."
+    assert classify_import_failure(raw) == ("rate_limited", "YahooRequestDenied")
+
+
 def test_run_plan_resumes_after_controlled_checkpoint(tmp_path: Path) -> None:
     tasks = (
         task(),
@@ -252,7 +318,6 @@ RuntimeError: secret league details
         ("RuntimeError: Fetched league settings but produced 0 canonical rows", "EmptyCanonicalSettings"),
         ("RuntimeError: Local DuckDB failed pre-upload validation with 2 issue(s)", "PreUploadValidation"),
         ("RuntimeError: No OAuth credentials available in context", "OAuthMaterialization"),
-        ("RuntimeError: Request denied", "YahooRequestDenied"),
         ("RuntimeError: No leagues found for 2009", "YahooLeagueLookup"),
         ("RuntimeError: Failed to fetch league_ids for 2009: private", "YahooLeagueLookup"),
         ("RuntimeError: Failed to create league object for private after 3 attempts", "YahooLeagueObject"),

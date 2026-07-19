@@ -167,6 +167,18 @@ class CredentialScheduler:
             and self.cooldown_until.get(row.grant_id, 0) <= now
         ]
 
+    def next_ready_time(self, now: float) -> float | None:
+        """Earliest cooldown expiry among tasks blocked only by a grant cooldown."""
+        expiries = [
+            self.cooldown_until.get(row.grant_id, 0)
+            for row in self.candidates.values()
+            if row.task_id not in self.completed
+            and row.task_id not in self.failed
+            and row.task_id not in self.in_flight
+        ]
+        pending = [expiry for expiry in expiries if expiry > now]
+        return min(pending) if pending else None
+
     def next(self, now: float) -> Candidate | None:
         ready = self._pending(now)
         if not ready:

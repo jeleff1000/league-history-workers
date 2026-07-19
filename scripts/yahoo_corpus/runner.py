@@ -56,10 +56,10 @@ SAFE_FAILURE_MARKERS = (
     ("flywriter is disabled in corpus mode", "CorpusFlyWriteAttempt"),
     ("failed to flatten league_settings", "SettingsCanonicalization"),
     ("fetched league settings but produced 0 canonical rows", "EmptyCanonicalSettings"),
-    ("league settings unavailable for every requested year", "SettingsUnavailable"),
     ("local duckdb failed pre-upload validation", "PreUploadValidation"),
     ("no oauth credentials available in context", "OAuthMaterialization"),
-    ("request denied", "YahooRequestDenied"),
+    ("could not create shared oauth session", "SharedOAuthCreateFailed"),
+    ("error creating oauth from context", "OAuthContextMaterialization"),
     ("no leagues found for", "YahooLeagueLookup"),
     ("failed to fetch league_ids for", "YahooLeagueLookup"),
     ("failed to create league object", "YahooLeagueObject"),
@@ -70,6 +70,9 @@ SAFE_FAILURE_MARKERS = (
     ("fantasy aggregation failed after sql enrichments", "FantasyAggregationFailure"),
     ("yahoo_fantasy_api not available", "YahooDependencyMissing"),
     ("runlogger not available or not callable", "PipelineDependencyMissing"),
+    # Catch-all for the pipeline's zero-settings hard fail. Kept LAST so any
+    # more specific cause logged earlier (denied, auth, lookup) wins.
+    ("league settings unavailable for every requested year", "SettingsUnavailable"),
 )
 
 
@@ -159,6 +162,10 @@ def classify_import_failure(raw_text: str) -> tuple[str, str]:
     lowered = raw_text.lower()
     if any(marker in lowered for marker in ("rate limit", "rate_limited", "http 429", " 429")):
         return "rate_limited", "YahooRateLimit"
+    if "request denied" in lowered:
+        # Yahoo 999 "Request Denied" is throttling, not a permanent failure --
+        # cool the grant down and retry rather than burning the task.
+        return "rate_limited", "YahooRequestDenied"
     if any(marker in lowered for marker in ("invalid_grant", "token expired", "http 401")):
         return "failure", "YahooAuthentication"
     for marker, category in SAFE_FAILURE_MARKERS:
@@ -211,6 +218,8 @@ def run_plan(
     stop_after: int | None = None,
     resume: bool = False,
     clock: Callable[[], float] = time.monotonic,
+    sleeper: Callable[[float], None] = time.sleep,
+    max_rate_limit_retries: int = 4,
 ) -> dict[str, Any]:
     """Execute a credential-aware plan and persist only redacted resumable state."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -221,11 +230,18 @@ def run_plan(
     scheduler = CredentialScheduler(plan.tasks, state=previous.get("scheduler"))
     outcomes = list(previous.get("outcomes", []))
     completed_this_run = 0
+    rate_limit_counts: dict[str, int] = {}
     while True:
         now = clock()
         candidate = scheduler.next(now)
         if candidate is None:
-            break
+            # Tasks blocked only by a grant cooldown are retryable: wait out
+            # the earliest expiry instead of abandoning them mid-run.
+            wake_at = scheduler.next_ready_time(now)
+            if wake_at is None:
+                break
+            sleeper(max(0.0, wake_at - now) + 1.0)
+            continue
         grant = grants.get(candidate.grant_id)
         if grant is None:
             outcome = TaskOutcome(candidate.task_id, "failure", "credential", "MissingGrant")
@@ -243,7 +259,16 @@ def run_plan(
             scheduler.complete(candidate.task_id)
             completed_this_run += 1
         elif outcome.status == "rate_limited":
-            scheduler.rate_limit(candidate.task_id, now=now, cooldown_seconds=120)
+            retries = rate_limit_counts.get(candidate.task_id, 0) + 1
+            rate_limit_counts[candidate.task_id] = retries
+            if retries > max_rate_limit_retries:
+                scheduler.fail(candidate.task_id, outcome.error_class or "RateLimitExhausted")
+            else:
+                # Escalate: 120s, 240s, 480s, 960s -- Yahoo throttling windows
+                # outlast a flat two-minute wait after a heavy discovery phase.
+                scheduler.rate_limit(
+                    candidate.task_id, now=now, cooldown_seconds=120 * (2 ** (retries - 1))
+                )
         else:
             scheduler.fail(candidate.task_id, outcome.error_class or "TaskFailure")
         ledger = {"scheduler": scheduler.to_dict(), "outcomes": outcomes}
