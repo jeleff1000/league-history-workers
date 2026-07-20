@@ -102,9 +102,9 @@ class SeasonEnumerationAdapter:
                 # settings; planning does not need to pre-classify.
                 cohort_slug="",
                 lineage_id=league_key,
-                # Already hashed by the client; one person holding several
-                # grants shares one spacing key.
-                identity_id=str(getattr(self.client, "user_identity", "") or ""),
+                # identity_id is assigned once the whole plan is known (a
+                # grant's league SET is the account fingerprint) -- see
+                # cli.assign_identities.
             )
         return None
 

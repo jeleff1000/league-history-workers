@@ -4,12 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
 import sys
 import time
 from collections import Counter, defaultdict
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
 from typing import Iterable
@@ -51,6 +53,40 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stop dispatching new imports after this many minutes; remaining tasks stay pending",
     )
     return parser
+
+
+def assign_identities(plan: Plan) -> Plan:
+    """Derive each task's account identity from its grant's league set.
+
+    Yahoo's users endpoint returns a CONSTANT 10-character 'guid' for our app
+    (verified across grants with different league counts), so it cannot
+    identify a person. The league set can: one person who authorized twice --
+    once per league they imported -- sees the same leagues through both
+    grants, so both grants hash to one identity and dispatch spaces them
+    apart. Distinct people have distinct league sets.
+
+    Two people whose ONLY league is the same league also collapse to one
+    identity. That over-spaces them slightly (costing a little throughput)
+    rather than under-spacing, which is the safe direction for a rate limit.
+
+    Computed here rather than during discovery so an already-cached plan gets
+    correct identities without paying for a rediscovery.
+    """
+    leagues_by_grant: dict[str, set[str]] = defaultdict(set)
+    for row in plan.tasks:
+        leagues_by_grant[row.grant_id].add(row.league_key)
+    identity_by_grant = {
+        grant_id: "user-"
+        + hashlib.sha256(",".join(sorted(leagues)).encode("utf-8")).hexdigest()[:16]
+        for grant_id, leagues in leagues_by_grant.items()
+    }
+    tasks = tuple(
+        replace(row, identity_id=identity_by_grant.get(row.grant_id, ""))
+        for row in plan.tasks
+    )
+    distinct = len(set(identity_by_grant.values()))
+    print(f"[identity] {len(identity_by_grant)} grants -> {distinct} distinct account(s)")
+    return Plan(mode=plan.mode, requested=plan.requested, tasks=tasks)
 
 
 def drop_landed_tasks(plan: Plan, landed_list: Path | None) -> Plan:
@@ -208,6 +244,7 @@ def main(argv: list[str] | None = None) -> int:
         plan = build_plan(args.mode, candidates, limit=args.task_limit)
         write_plan(plan_path, plan)
 
+    plan = assign_identities(plan)
     plan = drop_landed_tasks(plan, args.landed_list)
 
     print(

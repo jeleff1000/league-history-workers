@@ -71,3 +71,26 @@ def test_cross_era_readiness_requires_distinct_grants_inside_each_era() -> None:
     ]
 
     assert pilot_ready("cross-era", candidates, 12) is False
+
+
+def test_assign_identities_groups_grants_by_league_set() -> None:
+    """One person, two grants, same leagues -> one identity."""
+    from scripts.yahoo_corpus.cli import assign_identities
+    from scripts.yahoo_corpus.planner import Plan
+    from scripts.yahoo_corpus.scheduler import Candidate
+
+    tasks = (
+        # Mike authorized twice; both grants see leagues A and B.
+        Candidate("t1", "grant-mike-1", "449.l.A", 2021, "", "449.l.A"),
+        Candidate("t2", "grant-mike-1", "449.l.B", 2021, "", "449.l.B"),
+        Candidate("t3", "grant-mike-2", "449.l.A", 2020, "", "449.l.A"),
+        Candidate("t4", "grant-mike-2", "449.l.B", 2020, "", "449.l.B"),
+        # Ann sees a different league set.
+        Candidate("t5", "grant-ann", "449.l.C", 2021, "", "449.l.C"),
+    )
+    plan = assign_identities(Plan("inventory", 5, tasks))
+    by_task = {row.task_id: row.identity_id for row in plan.tasks}
+
+    assert by_task["t1"] == by_task["t3"], "same league set must share one identity"
+    assert by_task["t1"] != by_task["t5"], "different people must differ"
+    assert all(value for value in by_task.values())
