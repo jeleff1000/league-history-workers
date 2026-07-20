@@ -47,6 +47,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="File of already-landed corpus db_names; matching plan tasks are dropped",
     )
     parser.add_argument(
+        "--shard-index",
+        type=int,
+        default=0,
+        help="This runner's shard of the plan (0-based)",
+    )
+    parser.add_argument(
+        "--shard-count",
+        type=int,
+        default=1,
+        help="Total shards; the plan is partitioned by ACCOUNT so no two runners share a Yahoo account",
+    )
+    parser.add_argument(
         "--time-budget-min",
         type=int,
         default=None,
@@ -87,6 +99,26 @@ def assign_identities(plan: Plan) -> Plan:
     distinct = len(set(identity_by_grant.values()))
     print(f"[identity] {len(identity_by_grant)} grants -> {distinct} distinct account(s)")
     return Plan(mode=plan.mode, requested=plan.requested, tasks=tasks)
+
+
+def select_shard(plan: Plan, index: int, count: int) -> Plan:
+    """Partition the plan across runners BY ACCOUNT.
+
+    Sharding on the account (not the task) is what makes parallel Yahoo runners
+    safe: every league-year of one account lands in exactly one shard, so no
+    two runners ever hit the same Yahoo rate-limit bucket, and each shard keeps
+    its own person-level spacing and cooldowns. Runners also have distinct IPs.
+    """
+    if count <= 1:
+        return plan
+    kept = tuple(
+        row
+        for row in plan.tasks
+        if int(hashlib.sha256(row.spacing_key.encode("utf-8")).hexdigest(), 16) % count == index
+    )
+    accounts = len({row.spacing_key for row in kept})
+    print(f"[shard] {index + 1}/{count}: {len(kept)} task(s) across {accounts} account(s)")
+    return Plan(mode=plan.mode, requested=plan.requested, tasks=kept)
 
 
 def drop_landed_tasks(plan: Plan, landed_list: Path | None) -> Plan:
@@ -245,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
         write_plan(plan_path, plan)
 
     plan = assign_identities(plan)
+    plan = select_shard(plan, args.shard_index, args.shard_count)
     plan = drop_landed_tasks(plan, args.landed_list)
 
     print(

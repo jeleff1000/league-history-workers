@@ -94,3 +94,28 @@ def test_assign_identities_groups_grants_by_league_set() -> None:
     assert by_task["t1"] == by_task["t3"], "same league set must share one identity"
     assert by_task["t1"] != by_task["t5"], "different people must differ"
     assert all(value for value in by_task.values())
+
+
+def test_select_shard_keeps_each_account_whole() -> None:
+    """No account may span two runners -- that would race one rate-limit bucket."""
+    from scripts.yahoo_corpus.cli import assign_identities, select_shard
+    from scripts.yahoo_corpus.planner import Plan
+    from scripts.yahoo_corpus.scheduler import Candidate
+
+    tasks = tuple(
+        Candidate(f"t{i}", f"grant-{i % 7}", f"449.l.{i % 7}", 2000 + i, "", f"449.l.{i % 7}")
+        for i in range(40)
+    )
+    plan = assign_identities(Plan("inventory", 40, tasks))
+
+    shard_count = 5
+    seen: dict[str, int] = {}
+    total = 0
+    for index in range(shard_count):
+        shard = select_shard(plan, index, shard_count)
+        total += len(shard.tasks)
+        for row in shard.tasks:
+            assert seen.setdefault(row.spacing_key, index) == index, "account split across shards"
+
+    # Every task is covered exactly once.
+    assert total == len(plan.tasks)

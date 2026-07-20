@@ -22,6 +22,11 @@ on:
         required: false
         type: string
         default: '300'
+      shards:
+        description: 'Parallel runners (inventory mode). The plan is split BY ACCOUNT so no two runners share a Yahoo rate-limit bucket.'
+        required: false
+        type: string
+        default: '5'
       rebuild_inventory:
         description: 'Ignore the cached inventory plan and re-discover from scratch'
         required: false
@@ -51,10 +56,37 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare:
+    if: github.repository == 'jeleff1000/league-history-workers'
+    runs-on: ubuntu-latest
+    outputs:
+      shard_list: ${{ steps.mk.outputs.shard_list }}
+      shard_count: ${{ steps.mk.outputs.shard_count }}
+    steps:
+      - name: Build shard list
+        id: mk
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          mode = "${{ github.event.inputs.mode || 'cross-era' }}"
+          rebuild = "${{ github.event.inputs.rebuild_inventory || 'false' }}" == "true"
+          # Pilot modes stay serial (they discover their own small plan), and so
+          # does a rebuild -- five shards discovering at once is a 5x API storm.
+          n = int("${{ github.event.inputs.shards || '5' }}") if mode == "inventory" and not rebuild else 1
+          print("shard_list=" + json.dumps(list(range(n))))
+          print("shard_count=" + str(n))
+          PY
+
   pilot:
+    needs: prepare
     if: github.repository == 'jeleff1000/league-history-workers'
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(needs.prepare.outputs.shard_count) }}
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.shard_list) }}
     env:
       CORPUS_OUT: ${{ github.workspace }}/corpus/yahoo-pilot
       YAHOO_OAUTH_ROOT: ${{ github.workspace }}/code
@@ -146,6 +178,8 @@ jobs:
             --pipeline-root "${{ github.workspace }}/code"
             --output "$CORPUS_OUT"
             --time-budget-min "$TIME_BUDGET"
+            --shard-index "${{ matrix.shard }}"
+            --shard-count "${{ needs.prepare.outputs.shard_count }}"
           )
           if [ -f "${{ github.workspace }}/worker/corpus_seed/yahoo_landed.txt" ]; then
             COMMON+=( --landed-list "${{ github.workspace }}/worker/corpus_seed/yahoo_landed.txt" )
@@ -157,6 +191,9 @@ jobs:
             if [ -s "$CORPUS_OUT/plan.json" ]; then
               echo "[pilot] resuming from cached inventory plan"
               EXTRA+=( --resume )
+            elif [ "${{ matrix.shard }}" != "0" ]; then
+              echo "[pilot] no cached plan and this is not shard 0 -- skipping so only one runner discovers"
+              exit 0
             else
               echo "[pilot] no cached plan -- discovering the full inventory (one-time)"
             fi
@@ -171,7 +208,7 @@ jobs:
           fi
 
       - name: Save inventory plan
-        if: always() && github.event.inputs.mode == 'inventory' && steps.plan-cache.outputs.cache-matched-key == ''
+        if: always() && github.event.inputs.mode == 'inventory' && matrix.shard == 0 && steps.plan-cache.outputs.cache-matched-key == ''
         uses: actions/cache/save@v5
         with:
           path: corpus/yahoo-pilot/plan.json
@@ -197,7 +234,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: yahoo-corpus-${{ github.event.inputs.mode || 'cross-era' }}-${{ github.run_id }}
+          name: yahoo-corpus-${{ github.event.inputs.mode || 'cross-era' }}-${{ github.run_id }}-s${{ matrix.shard }}
           path: |
             ${{ env.CORPUS_OUT }}/yahoo_corpus_slice.duckdb
             ${{ env.CORPUS_OUT }}/ledger.json
