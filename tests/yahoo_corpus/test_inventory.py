@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from scripts.yahoo_corpus.inventory import (
     Grant,
+    SeasonEnumerationAdapter,
     YahooGrantAdapter,
     discover_candidates,
     load_grants,
@@ -231,3 +232,76 @@ def test_grant_with_pending_retries_is_not_marked_completed() -> None:
     # Retired only once nothing is pending, so no work is checkpointed away.
     assert adapter.steps == 3
     assert state["completed_grants"] == ["grant-1234"]
+
+
+def test_season_enumeration_yields_one_task_per_league_year() -> None:
+    """Every season is independent: no chaining, no settings fetch."""
+
+    class EnumClient:
+        def __init__(self) -> None:
+            self.settings_calls = 0
+
+        def refresh(self) -> None:
+            return None
+
+        def discover_games(self):
+            return [
+                {"game_key": "371", "season": "2013"},
+                {"game_key": "449", "season": "2021"},
+            ]
+
+        def discover_leagues(self, game):
+            return [
+                {"league_key": f"{game['game_key']}.l.100", "season": game["season"]},
+                {"league_key": f"{game['game_key']}.l.200", "season": game["season"]},
+            ]
+
+        def fetch_settings_xml(self, league_key: str) -> str:  # pragma: no cover
+            self.settings_calls += 1
+            raise AssertionError("season enumeration must not fetch settings")
+
+    grant = Grant("grant-1234", "private-refresh", (), ())
+    client = EnumClient()
+    adapter = SeasonEnumerationAdapter(grant, client)
+
+    rows = []
+    while True:
+        row = adapter.step()
+        if row is None:
+            break
+        rows.append(row)
+
+    assert len(rows) == 4
+    assert sorted(r.season for r in rows) == [2013, 2013, 2021, 2021]
+    # Each league-year stands alone -- lineage is itself, cohort is unclassified.
+    assert {r.lineage_id for r in rows} == {r.league_key for r in rows}
+    assert all(r.cohort_slug == "" for r in rows)
+    assert client.settings_calls == 0
+
+
+def test_season_enumeration_survives_one_unreadable_season() -> None:
+    class PartialClient:
+        def refresh(self) -> None:
+            return None
+
+        def discover_games(self):
+            return [
+                {"game_key": "371", "season": "2013"},
+                {"game_key": "449", "season": "2021"},
+            ]
+
+        def discover_leagues(self, game):
+            if game["game_key"] == "371":
+                raise RuntimeError("999 Request Denied")
+            return [{"league_key": "449.l.1", "season": "2021"}]
+
+    adapter = SeasonEnumerationAdapter(Grant("grant-1", "tok", (), ()), PartialClient())
+    rows = []
+    while True:
+        row = adapter.step()
+        if row is None:
+            break
+        rows.append(row)
+
+    assert [r.season for r in rows] == [2021]
+    assert any(f["stage"] == "discover_leagues" for f in adapter.failures)

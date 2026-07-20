@@ -32,6 +32,80 @@ class InventoryAdapter(Protocol):
         """Perform at most one grant-scoped discovery unit, or return None when exhausted."""
 
 
+class SeasonEnumerationAdapter:
+    """Enumerate a grant's league-YEARS directly, treating each season as independent.
+
+    Yahoo's ``/users;use_login=1/games;game_codes=nfl`` returns EVERY season the
+    user played, and each game's ``leagues`` collection returns that season's
+    leagues with their season and team count. That is the whole corpus for this
+    grant -- no renewal-chain walking, and no per-league settings fetch.
+
+    Both of those cost only throttle: the chain rediscovers league keys the
+    games enumeration already returned (plus league-years the grant cannot
+    read), and settings are re-read by the import anyway. Cohort classification
+    moves to validation, which derives it from imported data.
+    """
+
+    def __init__(self, grant: Grant, client: Any) -> None:
+        self.grant = grant
+        self.client = client
+        self.failures: list[dict[str, str]] = []
+        self._initialized = False
+        self._queue: deque[tuple[str, int]] = deque()
+        self._seen: set[str] = set()
+
+    @property
+    def pending(self) -> bool:
+        return bool(self._queue)
+
+    def _initialize(self) -> None:
+        if self._initialized:
+            return
+        self._initialized = True
+        self.client.refresh()
+        for game in self.client.discover_games():
+            try:
+                leagues = self.client.discover_leagues(game)
+            except Exception as exc:
+                # One unreadable season must not cost the grant's other seasons.
+                self.failures.append(
+                    {"stage": "discover_leagues", "error_class": type(exc).__name__}
+                )
+                continue
+            for league in leagues:
+                league_key = str(league.get("league_key") or "")
+                if not league_key or league_key in self._seen:
+                    continue
+                try:
+                    season = int(str(league.get("season") or game.get("season") or 0))
+                except ValueError:
+                    continue
+                self._seen.add(league_key)
+                self._queue.append((league_key, season))
+
+    def step(self) -> Candidate | None:
+        try:
+            self._initialize()
+        except Exception as exc:
+            self.failures.append({"stage": "authentication", "error_class": type(exc).__name__})
+            self._queue.clear()
+            return None
+        while self._queue:
+            league_key, season = self._queue.popleft()
+            task_digest = hashlib.sha256(league_key.encode("utf-8")).hexdigest()[:16]
+            return Candidate(
+                task_id=f"yahoo-{task_digest}",
+                grant_id=self.grant.grant_id,
+                league_key=league_key,
+                season=season,
+                # Cohort is derived at validation time from the imported
+                # settings; planning does not need to pre-classify.
+                cohort_slug="",
+                lineage_id=league_key,
+            )
+        return None
+
+
 class YahooGrantAdapter:
     """Lazily enumerate every league-year reachable by one Yahoo grant."""
 

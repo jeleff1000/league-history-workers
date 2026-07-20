@@ -14,7 +14,13 @@ from pathlib import Path
 from types import ModuleType
 from typing import Iterable
 
-from scripts.yahoo_corpus.inventory import Grant, YahooGrantAdapter, discover_candidates, load_grants
+from scripts.yahoo_corpus.inventory import (
+    Grant,
+    SeasonEnumerationAdapter,
+    YahooGrantAdapter,
+    discover_candidates,
+    load_grants,
+)
 from scripts.yahoo_corpus.planner import Plan, build_plan
 from scripts.yahoo_corpus.runner import _atomic_json, _safe_db_name, execute_import_task, run_plan
 from scripts.yahoo_corpus.scheduler import Candidate, ERAS
@@ -167,7 +173,7 @@ def main(argv: list[str] | None = None) -> int:
             "worker_private_yahoo_settings_parser",
         )
 
-        def adapter_factory(grant: Grant) -> YahooGrantAdapter:
+        def adapter_factory(grant: Grant):
             client = client_module.YahooCensusClient(
                 client_id,
                 client_secret,
@@ -175,6 +181,11 @@ def main(argv: list[str] | None = None) -> int:
                 request_budget=args.request_budget,
                 delay_ms=args.delay_ms,
             )
+            if args.mode == "inventory":
+                # Seasons are independent: enumerate games x leagues directly.
+                # No renewal chain, no per-league settings fetch -- both are
+                # pure throttle cost, and throttle is the binding constraint.
+                return SeasonEnumerationAdapter(grant, client)
             return YahooGrantAdapter(
                 grant,
                 client,

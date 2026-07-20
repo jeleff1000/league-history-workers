@@ -70,7 +70,10 @@ def validate_source(db_path: Path | str, task: Candidate) -> dict[str, Any]:
                 code="SettingsRowCount",
             )
         actual_cohort = _cohort_slug(settings_rows.iloc[0].to_dict())
-        if actual_cohort != task.cohort_slug:
+        # Season-enumeration plans carry no pre-classified cohort (each season is
+        # discovered independently, without a settings fetch), so the cohort is
+        # simply recorded. Pilot plans that DO carry one still get the gate.
+        if task.cohort_slug and actual_cohort != task.cohort_slug:
             raise SourceValidationError(
                 f"cohort mismatch: expected {task.cohort_slug}, got {actual_cohort}",
                 code="CohortMismatch",
