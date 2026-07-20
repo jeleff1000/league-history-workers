@@ -82,6 +82,7 @@ def load_plan(path: Path) -> Plan:
             season=int(row["season"]),
             cohort_slug=row["cohort_slug"],
             lineage_id=row["lineage_id"],
+            identity_id=str(row.get("identity_id") or ""),
         )
         for row in payload.get("tasks", [])
     )

@@ -102,6 +102,9 @@ class SeasonEnumerationAdapter:
                 # settings; planning does not need to pre-classify.
                 cohort_slug="",
                 lineage_id=league_key,
+                # Already hashed by the client; one person holding several
+                # grants shares one spacing key.
+                identity_id=str(getattr(self.client, "user_identity", "") or ""),
             )
         return None
 
@@ -305,6 +308,7 @@ def discover_candidates(
                 "season": row.season,
                 "cohort_slug": row.cohort_slug,
                 "lineage_id": row.lineage_id,
+                "identity_id": row.identity_id,
             }
             for row in sorted(candidates.values(), key=lambda item: item.task_id)
         ],

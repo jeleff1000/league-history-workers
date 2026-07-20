@@ -23,6 +23,15 @@ class Candidate:
     season: int
     cohort_slug: str
     lineage_id: str
+    # Hashed Yahoo user identity. One PERSON can authorize more than once (one
+    # token per league they imported), and Yahoo rate-limits the ACCOUNT, not
+    # the token -- so spacing must be measured between people, not grants.
+    identity_id: str = ""
+
+    @property
+    def spacing_key(self) -> str:
+        """The unit dispatch spaces on: the person, falling back to the token."""
+        return self.identity_id or self.grant_id
 
     @property
     def era(self) -> str:
@@ -164,13 +173,13 @@ class CredentialScheduler:
             if row.task_id not in self.completed
             and row.task_id not in self.failed
             and row.task_id not in self.in_flight
-            and self.cooldown_until.get(row.grant_id, 0) <= now
+            and self.cooldown_until.get(row.spacing_key, 0) <= now
         ]
 
     def next_ready_time(self, now: float) -> float | None:
-        """Earliest cooldown expiry among tasks blocked only by a grant cooldown."""
+        """Earliest cooldown expiry among tasks blocked only by an identity cooldown."""
         expiries = [
-            self.cooldown_until.get(row.grant_id, 0)
+            self.cooldown_until.get(row.spacing_key, 0)
             for row in self.candidates.values()
             if row.task_id not in self.completed
             and row.task_id not in self.failed
@@ -180,18 +189,20 @@ class CredentialScheduler:
         return min(pending) if pending else None
 
     def next(self, now: float) -> Candidate | None:
+        # Scheduling state is keyed by spacing_key (the person), so a user who
+        # authorized twice cannot be dispatched back-to-back via two tokens.
         ready = self._pending(now)
         if not ready:
             return None
-        grants = {row.grant_id for row in ready}
-        if self.last_grant_id in grants and len(grants) > 1:
-            grants.remove(self.last_grant_id)
-        grant_id = min(
-            grants,
-            key=lambda grant: (self.last_used_by_grant.get(grant, -1), grant),
+        keys = {row.spacing_key for row in ready}
+        if self.last_grant_id in keys and len(keys) > 1:
+            keys.remove(self.last_grant_id)
+        spacing_key = min(
+            keys,
+            key=lambda key: (self.last_used_by_grant.get(key, -1), key),
         )
-        grant_rows = [row for row in ready if row.grant_id == grant_id]
-        last_year = self.last_year_by_grant.get(grant_id)
+        grant_rows = [row for row in ready if row.spacing_key == spacing_key]
+        last_year = self.last_year_by_grant.get(spacing_key)
         if last_year is None:
             chosen = min(grant_rows, key=lambda row: (row.season, row.task_id))
         else:
@@ -200,9 +211,9 @@ class CredentialScheduler:
                 key=lambda row: (-abs(row.season - last_year), row.season, row.task_id),
             )
         self.in_flight.add(chosen.task_id)
-        self.last_grant_id = chosen.grant_id
-        self.last_year_by_grant[chosen.grant_id] = chosen.season
-        self.last_used_by_grant[chosen.grant_id] = self._tick
+        self.last_grant_id = chosen.spacing_key
+        self.last_year_by_grant[chosen.spacing_key] = chosen.season
+        self.last_used_by_grant[chosen.spacing_key] = self._tick
         self._tick += 1
         self.dispatch_trace.append(chosen.task_id)
         return chosen
@@ -217,9 +228,11 @@ class CredentialScheduler:
 
     def rate_limit(self, task_id: str, *, now: float, cooldown_seconds: float) -> None:
         self.in_flight.discard(task_id)
-        grant_id = self.candidates[task_id].grant_id
-        self.cooldown_until[grant_id] = max(
-            self.cooldown_until.get(grant_id, 0), now + cooldown_seconds
+        # Yahoo throttles the account, so cool down the PERSON: a second token
+        # belonging to the same user is equally throttled.
+        spacing_key = self.candidates[task_id].spacing_key
+        self.cooldown_until[spacing_key] = max(
+            self.cooldown_until.get(spacing_key, 0), now + cooldown_seconds
         )
 
     def to_dict(self) -> dict[str, Any]:

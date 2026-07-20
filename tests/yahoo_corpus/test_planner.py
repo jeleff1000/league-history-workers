@@ -36,6 +36,7 @@ def test_cross_era_plan_is_redacted_and_reports_shortfall() -> None:
         "season",
         "cohort_slug",
         "lineage_id",
+        "identity_id",
         "era",
     }
 

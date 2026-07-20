@@ -31,6 +31,7 @@ class Plan:
                     "season": row.season,
                     "cohort_slug": row.cohort_slug,
                     "lineage_id": row.lineage_id,
+                    "identity_id": row.identity_id,
                     "era": row.era,
                 }
                 for row in self.tasks

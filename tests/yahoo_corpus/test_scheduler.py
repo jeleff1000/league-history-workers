@@ -135,3 +135,59 @@ def test_resume_preserves_last_grant_and_dispatch_trace() -> None:
     assert second is not None
     assert second.grant_id != first.grant_id
     assert resumed.to_dict()["dispatch_trace"][:2] == [first.task_id, second.task_id]
+
+
+def test_dispatch_spaces_on_person_not_token() -> None:
+    """One user with TWO grants (League A and League B) must never run back-to-back.
+
+    Yahoo throttles the account, so 'Mike, League A' followed immediately by
+    'Mike, League B' is the same account twice in a row even though the tokens
+    differ. While other people still have work, every Mike task must have a
+    different person's league-year on either side of it.
+    """
+    mike = "user-mike"
+    tasks = (
+        # Mike: three league-years spread across TWO grants.
+        Candidate("t-mike-a1", "grant-mike-a", "449.l.1", 2021, "", "449.l.1", mike),
+        Candidate("t-mike-a2", "grant-mike-a", "423.l.1", 2019, "", "423.l.1", mike),
+        Candidate("t-mike-b1", "grant-mike-b", "449.l.2", 2017, "", "449.l.2", mike),
+        Candidate("t-ann1", "grant-ann", "449.l.3", 2020, "", "449.l.3", "user-ann"),
+        Candidate("t-ann2", "grant-ann", "423.l.3", 2018, "", "423.l.3", "user-ann"),
+        Candidate("t-ann3", "grant-ann", "414.l.3", 2016, "", "414.l.3", "user-ann"),
+        Candidate("t-bo1", "grant-bo", "449.l.4", 2021, "", "449.l.4", "user-bo"),
+        Candidate("t-bo2", "grant-bo", "423.l.4", 2019, "", "423.l.4", "user-bo"),
+        Candidate("t-bo3", "grant-bo", "414.l.4", 2015, "", "414.l.4", "user-bo"),
+    )
+    scheduler = CredentialScheduler(tasks)
+
+    order = []
+    while True:
+        row = scheduler.next(0.0)
+        if row is None:
+            break
+        order.append(row)
+        scheduler.complete(row.task_id)
+
+    assert len(order) == 9
+    identities = [row.identity_id for row in order]
+    # No person runs twice in a row -- Mike's two tokens do not sneak past this.
+    assert all(a != b for a, b in zip(identities, identities[1:])), identities
+    # Mike's league-years are maximally spread: one per full rotation.
+    mike_positions = [i for i, ident in enumerate(identities) if ident == mike]
+    assert all(b - a >= 3 for a, b in zip(mike_positions, mike_positions[1:])), mike_positions
+
+
+def test_rate_limit_cools_down_the_person_not_just_the_token() -> None:
+    mike = "user-mike"
+    tasks = (
+        Candidate("t-mike-a", "grant-mike-a", "449.l.1", 2021, "", "449.l.1", mike),
+        Candidate("t-mike-b", "grant-mike-b", "449.l.2", 2020, "", "449.l.2", mike),
+    )
+    scheduler = CredentialScheduler(tasks)
+    first = scheduler.next(0.0)
+    assert first is not None
+    scheduler.rate_limit(first.task_id, now=0.0, cooldown_seconds=120)
+
+    # Mike's OTHER token is throttled too -- nothing dispatchable during cooldown.
+    assert scheduler.next(1.0) is None
+    assert scheduler.next(121.0) is not None
