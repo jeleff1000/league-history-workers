@@ -56,6 +56,14 @@ class YahooGrantAdapter:
         )
         self._queued = set(grant.anchor_keys)
         self._seen: set[str] = set()
+        self._attempts: dict[str, int] = {}
+
+    MAX_LEAGUE_ATTEMPTS = 4
+
+    @property
+    def pending(self) -> bool:
+        """True while league keys remain to try -- including requeued retries."""
+        return bool(self._queue)
 
     def _initialize(self) -> None:
         if self._initialized:
@@ -87,9 +95,9 @@ class YahooGrantAdapter:
             league_key, lineage_id = self._queue.popleft()
             if league_key in self._seen:
                 continue
-            self._seen.add(league_key)
             try:
                 xml = self.client.fetch_settings_xml(league_key)
+                self._seen.add(league_key)
                 settings = self.parse_xml(xml, league_key)
                 classification = self.classify(settings)
                 for linked_key in self.renewal_keys(xml):
@@ -114,6 +122,19 @@ class YahooGrantAdapter:
                     lineage_id=lineage_id,
                 )
             except Exception as exc:
+                # A throttled/transient settings fetch must NOT cost us the
+                # league-year: requeue it and yield control so the rotation
+                # spaces the retry behind every other grant. Only give up
+                # after MAX_LEAGUE_ATTEMPTS.
+                attempts = self._attempts.get(league_key, 0) + 1
+                self._attempts[league_key] = attempts
+                if attempts < self.MAX_LEAGUE_ATTEMPTS:
+                    self._queue.append((league_key, lineage_id))
+                    self.failures.append(
+                        {"stage": "settings-retry", "error_class": type(exc).__name__}
+                    )
+                    return None
+                self._seen.add(league_key)
                 self.failures.append(
                     {"stage": "settings", "error_class": type(exc).__name__}
                 )
@@ -182,11 +203,17 @@ def discover_candidates(
         for grant_id in sorted(adapters):
             if max_operations is not None and operations >= max_operations:
                 break
-            row = adapters[grant_id].step()
+            adapter = adapters[grant_id]
+            row = adapter.step()
             operations += 1
             if row is None:
-                exhausted.append(grant_id)
-                completed.add(grant_id)
+                # None means "no candidate this operation" -- only retire the
+                # grant when nothing is left to try. A grant with requeued
+                # (throttled) leagues stays in the rotation, and is never
+                # checkpointed as completed with work outstanding.
+                if not getattr(adapter, "pending", False):
+                    exhausted.append(grant_id)
+                    completed.add(grant_id)
                 continue
             if 2001 <= row.season <= 2025:
                 candidates[row.task_id] = row

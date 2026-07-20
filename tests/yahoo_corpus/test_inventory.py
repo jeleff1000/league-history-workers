@@ -170,3 +170,64 @@ def test_yahoo_adapter_discovers_visible_leagues_and_follows_renewal_links() -> 
     assert {row.league_key for row in rows} == {"423.l.100", "449.l.200", "399.l.90"}
     assert next(row for row in rows if row.league_key == "399.l.90").lineage_id == "423.l.100"
     assert adapter.failures == []
+
+
+def test_throttled_league_is_retried_not_dropped() -> None:
+    """A failed settings fetch must requeue -- never silently lose a league-year."""
+
+    class FlakyClient:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def refresh(self) -> None:
+            return None
+
+        def discover_games(self):
+            return []
+
+        def fetch_settings_xml(self, league_key: str) -> str:
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("999 Request Denied")
+            return "<xml/>"
+
+    grant = Grant("grant-1234", "private-refresh", ("449.l.1",), ())
+    client = FlakyClient()
+    adapter = YahooGrantAdapter(
+        grant,
+        client,
+        parse_xml=lambda xml, key: {"metadata": {"season": "2016"}},
+        classify=lambda settings: {"classification_status": "classified", "cohort_slug": "10t_flx_std_4pt"},
+        renewal_keys=lambda xml: [],
+    )
+
+    # First op is throttled: no candidate, but the league stays pending.
+    assert adapter.step() is None
+    assert adapter.pending is True
+
+    # Retry succeeds -- the league-year survives the throttle.
+    row = adapter.step()
+    assert row is not None
+    assert row.season == 2016
+    assert adapter.pending is False
+
+
+def test_grant_with_pending_retries_is_not_marked_completed() -> None:
+    class AlwaysThrottledAdapter:
+        def __init__(self) -> None:
+            self.pending = True
+            self.steps = 0
+
+        def step(self):
+            self.steps += 1
+            if self.steps >= 3:
+                self.pending = False
+            return None
+
+    adapter = AlwaysThrottledAdapter()
+    grant = Grant("grant-1234", "private-refresh", ("449.l.1",), ())
+    _, state = discover_candidates([grant], adapter_factory=lambda _: adapter)
+
+    # Retired only once nothing is pending, so no work is checkpointed away.
+    assert adapter.steps == 3
+    assert state["completed_grants"] == ["grant-1234"]
