@@ -216,9 +216,14 @@ jobs:
           # roster_K / is_keeper) was only possible BECAUSE the raw dirs still existed.
           PRUNE=""
           if [ "${{ github.event.inputs.prune }}" = "true" ]; then PRUNE="--prune"; fi
-          echo "[cfg] partitions=${{ github.event.inputs.partitions || 'single_season' }} workers=${{ github.event.inputs.workers || '4' }} prune=${{ github.event.inputs.prune || 'false' }}"
+          COHORT_TARGETS=""
+          if [ "${{ github.event.inputs.cohort_targets }}" = "true" ] && [ -f crawl/corpus_seed/cohort_targets.json ]; then
+            COHORT_TARGETS="--cohort-targets-file crawl/corpus_seed/cohort_targets.json"
+          fi
+          echo "[cfg] partitions=${{ github.event.inputs.partitions || 'single_season' }} workers=${{ github.event.inputs.workers || '4' }} prune=${{ github.event.inputs.prune || 'false' }} cohort_targets=${{ github.event.inputs.cohort_targets || 'false' }}"
           python crawl/scripts/sleeper_corpus/batch_ingest_corpus.py \
             $PARTS \
+            $COHORT_TARGETS \
             --target   "${{ github.event.inputs.target || '35' }}" \
             --workers  "${{ github.event.inputs.workers || '4' }}" \
             --offset   "$(( OFFSET * SIZE ))" \
