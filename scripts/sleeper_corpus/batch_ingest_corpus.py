@@ -155,6 +155,45 @@ def build_plan(target: int, years: tuple[int, int], partitions: list[str],
     return dedup
 
 
+def prioritize_thin_cohorts(plan: list[dict], targets_file: Path) -> list[dict]:
+    """Reorder the plan thin-cohort-first and drop cohorts already past r75.
+
+    The gap (r75 target minus current corpus count) comes from
+    build_cohort_targets.py. Sorting is fully deterministic -- (gap desc, cohort,
+    season, league_id) -- so --offset/--limit still carve disjoint, identical
+    slices across matrix jobs. Only ONE season of a cohort's gap should be pulled
+    per season slot; the gap is a whole-cohort figure, so we cap how many of each
+    cohort we keep at its gap to avoid over-crawling a nearly-full cohort.
+    """
+    payload = json.loads(targets_file.read_text(encoding="utf-8"))
+    gaps = {c: v.get("gap", 0) for c, v in payload.get("cohorts", {}).items()}
+    default_gap = payload.get("r75_target", 0)
+
+    def cohort_of(r: dict) -> str:
+        return f'{r["teams"]}_{r["roster"]}_{r["ppr"]}_{r["td"]}'
+
+    tagged = []
+    for r in plan:
+        cohort = cohort_of(r)
+        gap = gaps.get(cohort, default_gap)
+        if gap <= 0:
+            continue  # cohort already past r75 -- don't spend the crawl on it
+        tagged.append((gap, cohort, r))
+
+    # Thin cohorts first; within a cohort, keep at most `gap` leagues.
+    tagged.sort(key=lambda t: (-t[0], t[1], t[2]["season"], t[2]["league_id"]))
+    kept, per_cohort = [], {}
+    for gap, cohort, r in tagged:
+        n = per_cohort.get(cohort, 0)
+        if n >= gap:
+            continue
+        per_cohort[cohort] = n + 1
+        kept.append(r)
+    print(f"[targets] prioritized {len(kept):,} leagues across "
+          f"{len(per_cohort)} below-r75 cohorts (dropped satisfied cohorts)", flush=True)
+    return kept
+
+
 def _err(p) -> str:
     """Exception line FIRST, then traceback tail.
 
@@ -209,6 +248,11 @@ def main() -> None:
                          "default: the corpus stands alone as the research population, and "
                          "subtracting makes the crawler skip the popular flx cells the pages "
                          "serve (see build_plan docstring).")
+    ap.add_argument("--cohort-targets-file", default=None,
+                    help="JSON of per-cohort r75 gaps (from build_cohort_targets.py). When set, "
+                         "the plan is reordered thin-cohort-first and cohorts already past r75 "
+                         "are dropped, so the crawl chases the below-r75 tail. Pair with a high "
+                         "--target so build_plan doesn't pre-cap the thin cohorts.")
     ap.add_argument("--plan-only", action="store_true")
     ap.add_argument("--fold-into", default=None,
                     help="path to a central corpus snapshot; fold each league in as it lands "
@@ -223,6 +267,8 @@ def main() -> None:
     parts = list(PARTITIONS) if args.all_partitions else ["single_season"]
 
     plan = build_plan(args.target, (y0, y1), parts, subtract_baseline=args.subtract_baseline)
+    if args.cohort_targets_file:
+        plan = prioritize_thin_cohorts(plan, Path(args.cohort_targets_file))
     from collections import Counter
     by_part = Counter(r["partition"] for r in plan)
     print(f"[plan] {len(plan):,} leagues selected (target {args.target}/cohort-year, "
@@ -233,6 +279,19 @@ def main() -> None:
     SMPL_DIR.mkdir(parents=True, exist_ok=True)
     with _lock:
         done = json.loads(DONE.read_text()) if DONE.exists() else {}
+    # The ingest_ledger (DONE) is per-run/ephemeral on a fresh runner, so also treat
+    # anything already folded into the corpus lake as done. landed_dbs.txt is the
+    # committed skip list the harvest keeps current (db_name = smpl_<league_id>);
+    # without this, consecutive crawl runs re-ingest the identical first leagues and
+    # make zero net progress across refires.
+    landed_file = CORPUS / "landed_dbs.txt"
+    if not landed_file.exists():
+        landed_file = Path(__file__).resolve().parents[2] / "league-history-workers" / "corpus_seed" / "landed_dbs.txt"
+    if landed_file.exists():
+        for line in landed_file.read_text().splitlines():
+            name = line.strip()
+            if name.startswith("smpl_"):
+                done.setdefault(name[len("smpl_"):], "done")
     # Slice AFTER the done-filter so every job carves from the same remaining list.
     todo = [r for r in plan if done.get(r["league_id"]) != "done"]
     if args.offset:
