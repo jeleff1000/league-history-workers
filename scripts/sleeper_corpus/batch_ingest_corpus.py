@@ -225,7 +225,14 @@ def ingest_one(r: dict, env: dict) -> tuple[str, str]:
             [sys.executable, str(SIM_PY), "--db", db, "--data-dir", str(ddir)],
             env=env, capture_output=True, text=True, timeout=3000)
         if p2.returncode != 0:
-            return "sim_failed", _err(p2)
+            err = _err(p2)
+            # Structurally-impossible leagues (num_playoff_teams > num_teams -- common in
+            # 4-team best-ball/test leagues) crash the playoff sim and can NEVER succeed on
+            # retry. Skip them permanently: not a failure (won't fail the slice) and not
+            # re-attempted every run (they never leave the plan otherwise).
+            if "exceeds total teams" in err or "Invalid playoff settings" in err:
+                return "skip_invalid", err
+            return "sim_failed", err
     return "done", ""
 
 
@@ -293,7 +300,7 @@ def main() -> None:
             if name.startswith("smpl_"):
                 done.setdefault(name[len("smpl_"):], "done")
     # Slice AFTER the done-filter so every job carves from the same remaining list.
-    todo = [r for r in plan if done.get(r["league_id"]) != "done"]
+    todo = [r for r in plan if done.get(r["league_id"]) not in ("done", "skip_invalid")]
     if args.offset:
         todo = todo[args.offset:]
     if args.limit:
@@ -312,7 +319,7 @@ def main() -> None:
           f"= {int(env['SLEEPER_RATE_LIMIT_PER_MIN']) * args.workers}/min for this IP "
           f"(Sleeper budget {SLEEPER_IP_BUDGET}/min)", flush=True)
     snap = open_snapshot(args.fold_into) if args.fold_into else None
-    counts = {"done": 0, "fail": 0, "folded": 0}
+    counts = {"done": 0, "fail": 0, "folded": 0, "skip_invalid": 0}
     t_start = time.time()
 
     def run(r):
@@ -323,7 +330,7 @@ def main() -> None:
         with _lock:
             done[r["league_id"]] = status
             DONE.write_text(json.dumps(done))
-            counts["done" if status == "done" else "fail"] += 1
+            counts[status if status in ("done", "skip_invalid") else "fail"] += 1
             if snap is not None and status == "done":
                 ddir = SMPL_DIR / f"smpl_{r['league_id']}"
                 ok, fmsg = fold_league(snap, ddir)
@@ -353,11 +360,13 @@ def main() -> None:
     if snap is not None:
         snap.close()
     print(f"\n[done] {counts['done']} ok, {counts['fail']} failed, "
-          f"{counts['folded']} folded in {(time.time()-t_start)/60:.0f} min -> {SMPL_DIR}", flush=True)
+          f"{counts['skip_invalid']} skipped(invalid), {counts['folded']} folded in "
+          f"{(time.time()-t_start)/60:.0f} min -> {SMPL_DIR}", flush=True)
     # Exit non-zero when nothing worked. Counting failures but returning 0 let a CI job go
     # green on a 100% failure rate (the first GH pilot did exactly that: ok=0, failed=15,
     # every step green). A caller cannot distinguish "crawled nothing" from "nothing to do".
-    if todo and not counts["done"]:
+    # A slice that only hit permanently-skipped junk leagues did its job -- not fatal.
+    if todo and not counts["done"] and counts["fail"]:
         raise SystemExit(f"[fatal] 0 of {len(todo)} leagues ingested -- see failures above")
 
 
