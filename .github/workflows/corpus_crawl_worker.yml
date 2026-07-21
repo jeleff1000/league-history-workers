@@ -52,6 +52,11 @@ on:
         type: choice
         options: ['single_season', 'all']
         default: 'single_season'
+      cohort_targets:
+        description: 'Chase the below-r75 cohort tail: reorder plan thin-cohort-first, drop satisfied cohorts (uses corpus_seed/cohort_targets.json). Set target high (e.g. 500) when on.'
+        required: false
+        type: boolean
+        default: false
       target:
         description: 'Leagues wanted per cohort-year'
         required: false
