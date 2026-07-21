@@ -198,6 +198,10 @@ jobs:
           mkdir -p "$CORPUS_DIR/discovery" "$CORPUS_DIR/leagues"
           cp crawl/corpus_seed/drain_leagues.parquet "$CORPUS_DIR/discovery/"
           cp crawl/corpus_seed/ingest_ledger.json    "$CORPUS_DIR/"
+          # landed_dbs.txt = the committed skip list the harvest keeps current; the crawl
+          # treats everything in it as done so refires make net progress instead of
+          # re-ingesting the same leagues every run.
+          cp crawl/corpus_seed/landed_dbs.txt        "$CORPUS_DIR/" 2>/dev/null || true
           python3 -c "import json;print('[seed] ledger entries:', len(json.load(open('$CORPUS_DIR/ingest_ledger.json'))))"
 
       - name: Crawl slice ${{ matrix.batch }}
