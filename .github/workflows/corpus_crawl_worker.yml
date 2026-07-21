@@ -247,9 +247,21 @@ jobs:
             tail -60 "$LOG"
             echo "::endgroup::"
           fi
-          if [ "$OK" -eq 0 ]; then
+          # An EMPTY plan (nothing selected/left to do for this slice) is not a failure --
+          # it means this slice's cohorts are exhausted or all already done. Only a slice
+          # that ATTEMPTED leagues and landed none is a real failure.
+          PLANNED=$(grep -c ' -> \(OK\|IMPORT_FAILED\|SIM_FAILED\)' "$LOG" || true)
+          if grep -q 'in this slice' "$LOG" && grep -qE '\[plan\] 0 in this slice' "$LOG"; then
+            echo "[crawl] empty plan for this slice -- nothing to do (exhausted/all-done), success."
+            exit 0
+          fi
+          if [ "$OK" -eq 0 ] && [ "$FAILED" -gt 0 ]; then
             echo "::error::0 of $((OK+FAILED)) leagues ingested. Not a partial failure -- nothing worked."
             exit 1
+          fi
+          if [ "$OK" -eq 0 ] && [ "$FAILED" -eq 0 ]; then
+            echo "[crawl] no leagues attempted (empty slice) -- success."
+            exit 0
           fi
           # a high failure rate means the slice is junk even if some leagues landed
           if [ "$FAILED" -gt "$OK" ]; then
