@@ -47,6 +47,9 @@ jobs:
       RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
       RESEARCH_REF_DIR: ${{ github.workspace }}/research_public_lake
       RESEARCH_NO_CACHE: "1"
+      # Newer draft years need more than the conservative 3 GB local reader cap. Each
+      # table/year shard owns its runner, so this remains isolated per job.
+      RESEARCH_READER_MEMORY_MB: ${{ matrix.table == 'draft' && '5500' || '3000' }}
 
     steps:
       - uses: actions/checkout@v5
