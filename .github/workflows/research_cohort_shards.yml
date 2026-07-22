@@ -8,10 +8,10 @@ on:
         required: true
         default: research-public-lake-v2-Linux-20260722
       tables:
-        description: all, matchup, transactions, or draft
+        description: all, matchup, transactions, transactions_weekly, or draft
         required: true
         type: choice
-        options: [all, matchup, transactions, draft]
+        options: [all, matchup, transactions, transactions_weekly, draft]
         default: all
 
 permissions:
@@ -24,7 +24,7 @@ jobs:
       # Dispatch one run per table: each run gets five independent year shards.
       max-parallel: 5
       matrix:
-        table: ${{ fromJSON(inputs.tables == 'all' && '["matchup","transactions","draft"]' || format('["{0}"]', inputs.tables)) }}
+        table: ${{ fromJSON(inputs.tables == 'all' && '["matchup","transactions","transactions_weekly","draft"]' || format('["{0}"]', inputs.tables)) }}
         range:
           - { label: "1997-2006", start: 1997, end: 2006 }
           - { label: "2007-2011", start: 2007, end: 2011 }
@@ -89,6 +89,7 @@ jobs:
           case "${{ matrix.table }}" in
             matchup) python code/scripts/research_cohorts/build_research_matchup_cohort.py ;;
             transactions) python code/scripts/research_cohorts/build_research_txn_cohort.py ;;
+            transactions_weekly) python code/scripts/research_cohorts/build_weekly_txn.py ;;
             draft) python code/scripts/research_cohorts/build_research_draft_cohort.py ;;
           esac
 
