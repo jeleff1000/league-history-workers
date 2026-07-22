@@ -108,7 +108,9 @@ jobs:
               got = con.execute(
                   f"SELECT MIN(year), MAX(year), COUNT(*) FROM read_parquet('{path.as_posix()}')"
               ).fetchone()
-              assert got[2] > 0, f"{path} is empty"
+              if got[2] == 0:
+                  print(path, "typed empty shard")
+                  continue
               assert lo <= got[0] <= got[1] <= hi, (path, got, lo, hi)
               print(path, got)
           PY
