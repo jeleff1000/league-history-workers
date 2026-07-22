@@ -35,7 +35,6 @@ jobs:
           - { label: "2023", start: 2023, end: 2023 }
           - { label: "2024", start: 2024, end: 2024 }
           - { label: "2025", start: 2025, end: 2025 }
-    if: ${{ inputs.tables == 'all' || inputs.tables == matrix.table }}
     runs-on: ubuntu-latest
     timeout-minutes: 355
     env:
@@ -81,6 +80,7 @@ jobs:
           mkdir -p out
 
       - name: Build shard
+        if: ${{ inputs.tables == 'all' || inputs.tables == matrix.table }}
         shell: bash
         run: |
           case "${{ matrix.table }}" in
@@ -90,6 +90,7 @@ jobs:
           esac
 
       - name: Verify artifact year bounds
+        if: ${{ inputs.tables == 'all' || inputs.tables == matrix.table }}
         shell: bash
         run: |
           python - <<'PY'
@@ -114,6 +115,7 @@ jobs:
           PY
 
       - name: Upload additive shard
+        if: ${{ inputs.tables == 'all' || inputs.tables == matrix.table }}
         uses: actions/upload-artifact@v4
         with:
           name: research-${{ matrix.table }}-${{ matrix.range.label }}-${{ github.sha }}
