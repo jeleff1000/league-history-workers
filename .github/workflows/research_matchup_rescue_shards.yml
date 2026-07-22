@@ -17,7 +17,9 @@ jobs:
       fail-fast: false
       max-parallel: 10
       matrix:
-        year: [2021, 2022, 2023, 2024, 2025]
+        # 2021 already has a successful whole-year artifact. Only the still-running
+        # 2022-2025 years need exhaustive rescue buckets.
+        year: [2022, 2023, 2024, 2025]
         bucket: [0, 1, 2, 3]
     runs-on: ubuntu-latest
     timeout-minutes: 355
