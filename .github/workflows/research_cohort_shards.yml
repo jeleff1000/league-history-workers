@@ -21,9 +21,10 @@ jobs:
   shard:
     strategy:
       fail-fast: false
-      max-parallel: 4
+      # Dispatch one run per table: each run gets five independent year shards.
+      max-parallel: 5
       matrix:
-        table: [matchup, transactions, draft]
+        table: ${{ fromJSON(inputs.tables == 'all' && '["matchup","transactions","draft"]' || format('["{0}"]', inputs.tables)) }}
         range:
           - { label: "1997-2006", start: 1997, end: 2006 }
           - { label: "2007-2011", start: 2007, end: 2011 }
@@ -80,7 +81,6 @@ jobs:
           mkdir -p out
 
       - name: Build shard
-        if: ${{ inputs.tables == 'all' || inputs.tables == matrix.table }}
         shell: bash
         run: |
           case "${{ matrix.table }}" in
@@ -90,7 +90,6 @@ jobs:
           esac
 
       - name: Verify artifact year bounds
-        if: ${{ inputs.tables == 'all' || inputs.tables == matrix.table }}
         shell: bash
         run: |
           python - <<'PY'
@@ -115,7 +114,6 @@ jobs:
           PY
 
       - name: Upload additive shard
-        if: ${{ inputs.tables == 'all' || inputs.tables == matrix.table }}
         uses: actions/upload-artifact@v4
         with:
           name: research-${{ matrix.table }}-${{ matrix.range.label }}-${{ github.sha }}
