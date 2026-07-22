@@ -6,7 +6,7 @@ on:
       cache_key:
         description: Immutable public-only corpus + ops cache key
         required: true
-        default: research-public-lake-v1-Linux-20260722
+        default: research-public-lake-v2-Linux-20260722
       tables:
         description: all, matchup, transactions, or draft
         required: true

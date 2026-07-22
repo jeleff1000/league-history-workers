@@ -10,7 +10,7 @@ on:
       cache_key:
         description: Immutable cache key consumed by research shard jobs
         required: true
-        default: research-public-lake-v1-Linux-20260722
+        default: research-public-lake-v2-Linux-20260722
 
 permissions:
   actions: write
@@ -37,9 +37,12 @@ jobs:
         run: |
           gh release download "${{ inputs.release_tag }}" --repo jeleff1000/yahoo_oauth \
             --pattern 'research-public-lake.tar.part-*'
+          gh release download "${{ inputs.release_tag }}" --repo jeleff1000/yahoo_oauth \
+            --pattern 'ops_cache.duckdb'
           mkdir -p research_public_lake
           cat research-public-lake.tar.part-* | \
             tar -xf - -C research_public_lake --strip-components=1
+          mv ops_cache.duckdb research_public_lake/ops_cache.duckdb
       - name: Fail-closed privacy and schema validation
         run: |
           python -m pip install duckdb==1.5.1
