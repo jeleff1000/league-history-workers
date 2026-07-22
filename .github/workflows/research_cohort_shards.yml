@@ -1,0 +1,123 @@
+name: Research Cohort Shards
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        description: Immutable public-only corpus + ops cache key
+        required: true
+        default: research-public-lake-v1-Linux-20260722
+      tables:
+        description: all, matchup, transactions, or draft
+        required: true
+        type: choice
+        options: [all, matchup, transactions, draft]
+        default: all
+
+permissions:
+  contents: read
+
+jobs:
+  shard:
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        table: [matchup, transactions, draft]
+        range:
+          - { label: "1997-2006", start: 1997, end: 2006 }
+          - { label: "2007-2011", start: 2007, end: 2011 }
+          - { label: "2012-2016", start: 2012, end: 2016 }
+          - { label: "2017-2019", start: 2017, end: 2019 }
+          - { label: "2020", start: 2020, end: 2020 }
+          - { label: "2021", start: 2021, end: 2021 }
+          - { label: "2022", start: 2022, end: 2022 }
+          - { label: "2023", start: 2023, end: 2023 }
+          - { label: "2024", start: 2024, end: 2024 }
+          - { label: "2025", start: 2025, end: 2025 }
+    if: ${{ inputs.tables == 'all' || inputs.tables == matrix.table }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      RESEARCH_YEAR_START: ${{ matrix.range.start }}
+      RESEARCH_YEAR_END: ${{ matrix.range.end }}
+      RESEARCH_OUT_DIR: ${{ github.workspace }}/out
+      RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
+      RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
+      RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
+      RESEARCH_REF_DIR: ${{ github.workspace }}/research_public_lake
+      RESEARCH_NO_CACHE: "1"
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Restore immutable public research lake
+        uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==2.1.3 scipy==1.14.1
+
+      - name: Verify public-only inputs
+        shell: bash
+        run: |
+          test -s research_public_lake/corpus_snapshot.duckdb
+          test -s research_public_lake/ops_cache.duckdb
+          test ! -e research_public_lake/leagues_snapshot.duckdb
+          mkdir -p out
+
+      - name: Build shard
+        shell: bash
+        run: |
+          case "${{ matrix.table }}" in
+            matchup) python code/scripts/research_cohorts/build_research_matchup_cohort.py ;;
+            transactions) python code/scripts/research_cohorts/build_research_txn_cohort.py ;;
+            draft) python code/scripts/research_cohorts/build_research_draft_cohort.py ;;
+          esac
+
+      - name: Verify artifact year bounds
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import duckdb
+          lo, hi = int(os.environ["RESEARCH_YEAR_START"]), int(os.environ["RESEARCH_YEAR_END"])
+          files = list(Path("out").glob("*.parquet"))
+          assert files, "builder emitted no parquet"
+          con = duckdb.connect()
+          for path in files:
+              cols = {r[0] for r in con.execute(
+                  f"DESCRIBE SELECT * FROM read_parquet('{path.as_posix()}')").fetchall()}
+              if "year" not in cols:
+                  continue
+              got = con.execute(
+                  f"SELECT MIN(year), MAX(year), COUNT(*) FROM read_parquet('{path.as_posix()}')"
+              ).fetchone()
+              assert got[2] > 0, f"{path} is empty"
+              assert lo <= got[0] <= got[1] <= hi, (path, got, lo, hi)
+              print(path, got)
+          PY
+
+      - name: Upload additive shard
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-${{ matrix.table }}-${{ matrix.range.label }}-${{ github.sha }}
+          path: out/*.parquet
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 6
