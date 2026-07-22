@@ -7,6 +7,16 @@ on:
         description: Immutable public-only corpus + ops cache key
         required: true
         default: research-public-lake-v2-Linux-20260722
+      year:
+        description: Single season to rescue (dispatch newest years first)
+        required: true
+        type: choice
+        options:
+          - "2025"
+          - "2024"
+          - "2023"
+          - "2022"
+        default: "2025"
 
 permissions:
   contents: read
@@ -15,17 +25,14 @@ jobs:
   matchup:
     strategy:
       fail-fast: false
-      max-parallel: 10
+      max-parallel: 4
       matrix:
-        # 2021 already has a successful whole-year artifact. Only the still-running
-        # 2022-2025 years need exhaustive rescue buckets.
-        year: [2022, 2023, 2024, 2025]
         bucket: [0, 1, 2, 3]
     runs-on: ubuntu-latest
     timeout-minutes: 355
     env:
-      RESEARCH_YEAR_START: ${{ matrix.year }}
-      RESEARCH_YEAR_END: ${{ matrix.year }}
+      RESEARCH_YEAR_START: ${{ inputs.year }}
+      RESEARCH_YEAR_END: ${{ inputs.year }}
       RESEARCH_LEAGUE_BUCKETS: "4"
       RESEARCH_LEAGUE_BUCKET: ${{ matrix.bucket }}
       RESEARCH_OUT_DIR: ${{ github.workspace }}/out
@@ -100,7 +107,7 @@ jobs:
       - name: Upload additive population shard
         uses: actions/upload-artifact@v4
         with:
-          name: research-matchup-${{ matrix.year }}-b${{ matrix.bucket }}-of4-${{ github.sha }}
+          name: research-matchup-${{ inputs.year }}-b${{ matrix.bucket }}-of4-${{ github.sha }}
           path: out/*.parquet
           if-no-files-found: error
           retention-days: 14
