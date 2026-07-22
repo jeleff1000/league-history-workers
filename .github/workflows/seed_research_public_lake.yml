@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: Private release containing public-only research-public-lake.tar.gz
+        description: Private release containing public-only numbered tar parts
         required: true
         default: research-public-lake-v1-20260722
       cache_key:
@@ -36,9 +36,10 @@ jobs:
       - name: Download public-only lake bundle
         run: |
           gh release download "${{ inputs.release_tag }}" --repo jeleff1000/yahoo_oauth \
-            --pattern research-public-lake.tar.gz
+            --pattern 'research-public-lake.tar.part-*'
           mkdir -p research_public_lake
-          tar -xzf research-public-lake.tar.gz -C research_public_lake --strip-components=1
+          cat research-public-lake.tar.part-* | \
+            tar -xf - -C research_public_lake --strip-components=1
       - name: Fail-closed privacy and schema validation
         run: |
           python -m pip install duckdb==1.5.1
@@ -48,4 +49,3 @@ jobs:
         with:
           path: research_public_lake
           key: ${{ inputs.cache_key }}
-
