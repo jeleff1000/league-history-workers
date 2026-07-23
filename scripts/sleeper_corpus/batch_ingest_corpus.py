@@ -216,7 +216,7 @@ def ingest_one(r: dict, env: dict) -> tuple[str, str]:
     db = f"smpl_{lid}"
     p1 = subprocess.run(
         [sys.executable, str(IMPORT_PY), "--league-id", lid, "--data-dir", str(ddir),
-         "--database-name", db, "--skip-track-1", "--stop-after", "3"],
+         "--database-name", db, "--skip-track-1", "--stop-after", "3", "--optional-enrichments"],
         env=env, capture_output=True, text=True, timeout=3000)
     if p1.returncode != 0:
         return "import_failed", _err(p1)
