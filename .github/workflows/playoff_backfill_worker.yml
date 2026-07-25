@@ -85,8 +85,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install minimal deps
-        run: pip install duckdb==1.5.1 pyarrow==15.0.2 requests==2.32.3
+      - name: Install deps
+        # The sleeper fetchers' package __init__ eagerly imports sibling modules (rosters,
+        # transactions, ...) that pull pandas/numpy, so the full pinned set is required.
+        run: pip install -r code/requirements.txt
 
       - name: Backfill shard ${{ matrix.shard }}
         shell: bash
