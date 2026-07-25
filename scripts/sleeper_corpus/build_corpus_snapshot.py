@@ -73,6 +73,13 @@ PF_COLS = [
     ("NFL_player_id", "VARCHAR"), ("is_started", "INTEGER"), ("is_rostered", "INTEGER"),
     ("fantasy_points", "DOUBLE"), ("win", "INTEGER"), ("champion", "INTEGER"),
     ("clutch_equity", "DOUBLE"), ("manager_lamar", "DOUBLE"),
+    # row-level playoff flags (2026-07-24): matchup_to_player stamps these on player rows in
+    # every league db (same block as `champion`), so they survive attribution loss. The
+    # research builder derives made_po at build time as
+    # final_playoff_seed <= league_settings.playoff_teams (is_playoffs-appearance fallback) --
+    # no manager/matchup join needed, so playoff-rate exposure jumps from the ~1k attributed
+    # leagues/yr to the full ~10-15k folded. Pilot-verified 2026-07-24.
+    ("final_playoff_seed", "INTEGER"), ("is_playoffs", "INTEGER"),
 ]
 TABLES = {
     "league_settings": (LS_COLS, ""),
