@@ -1,0 +1,113 @@
+name: Playoff Backfill Worker
+
+# Narrow Sleeper playoff-outcome backfill (no full ingest). Re-derives made_po/is_playoffs
+# per player-week for slice-delivered leagues that lost final_playoff_seed at fold time, from
+# winners_bracket + per-week matchups. Read-only against Sleeper; SIDESTEPS the broken ingest
+# enrichment phase entirely. Each shard emits a sidecar parquet; merge locally onto the lake.
+
+on:
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: 'Number of shards (each ~targets/shards leagues; keep under the 6h job cap).'
+        required: false
+        default: '30'
+      max_parallel:
+        description: 'Concurrent shards. Account-wide cap is 20 across ALL repos; keep headroom.'
+        required: false
+        default: '15'
+      max_leagues:
+        description: 'SMOKE: cap the target list to the first N leagues (blank = full run).'
+        required: false
+        default: ''
+      rate_per_min:
+        description: 'Sleeper calls/min PER runner (each runner is one IP; ceiling ~1000).'
+        required: false
+        default: '800'
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      shard_list: ${{ steps.mk.outputs.shard_list }}
+      max_parallel: ${{ steps.mk.outputs.max_parallel }}
+      shards: ${{ steps.mk.outputs.shards }}
+    steps:
+      - name: Build shard index list
+        id: mk
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, sys
+          # A smoke (max_leagues set) runs a single shard over the truncated list.
+          smoke = "${{ github.event.inputs.max_leagues }}".strip()
+          n  = 1 if smoke else int("${{ github.event.inputs.shards || '30' }}")
+          mp = min(int("${{ github.event.inputs.max_parallel || '15' }}"), n)
+          print("shard_list=" + json.dumps(list(range(n))))
+          print("max_parallel=" + str(mp))
+          print("shards=" + str(n))
+          print(f"[prepare] {n} shards, max {mp} concurrent (smoke={bool(smoke)})", file=sys.stderr)
+          PY
+
+  backfill:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(needs.prepare.outputs.max_parallel) }}
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.shard_list) }}
+    env:
+      SLEEPER_RATE_LIMIT_PER_MIN: ${{ github.event.inputs.rate_per_min || '800' }}
+      SLEEPER_NFL_MAP: ${{ github.workspace }}/wk/corpus_seed/sleeper_nfl_player_map.parquet
+      YAHOO_OAUTH_ROOT: ${{ github.workspace }}/code
+    steps:
+      # This repo carries the backfill driver + seed (target list + crosswalk). Billing follows
+      # the repo the workflow runs in, so this is free.
+      - name: Checkout backfill driver + seed (this repo)
+        uses: actions/checkout@v5
+        with:
+          path: wk
+
+      # The Sleeper fetchers (SleeperAPIClient, playoff_utils) are private; token-authed clone.
+      - name: Checkout fetcher code (private)
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install minimal deps
+        run: pip install duckdb==1.5.1 pyarrow==15.0.2 requests==2.32.3
+
+      - name: Backfill shard ${{ matrix.shard }}
+        shell: bash
+        run: |
+          LIST=wk/corpus_seed/po_backfill_targets.txt
+          MAX="${{ github.event.inputs.max_leagues }}"
+          if [ -n "$MAX" ]; then
+            head -n "$MAX" "$LIST" > wk/eff_targets.txt
+            LIST=wk/eff_targets.txt
+            echo "[smoke] truncated target list to $MAX leagues"
+          fi
+          mkdir -p out
+          python wk/scripts/sleeper_corpus/playoff_backfill.py \
+            --db-list "$LIST" \
+            --out out \
+            --shard ${{ matrix.shard }}/${{ needs.prepare.outputs.shards }}
+
+      - name: Upload sidecar
+        uses: actions/upload-artifact@v4
+        with:
+          name: playoff-backfill-shard${{ matrix.shard }}-of${{ needs.prepare.outputs.shards }}
+          path: out/*.parquet
+          if-no-files-found: warn
+          retention-days: 14
