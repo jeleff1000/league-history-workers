@@ -25,15 +25,15 @@ jobs:
   matchup:
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 5
       matrix:
-        bucket: [0, 1, 2, 3]
+        bucket: [0, 1, 2, 3, 4]
     runs-on: ubuntu-latest
     timeout-minutes: 355
     env:
       RESEARCH_YEAR_START: ${{ inputs.year }}
       RESEARCH_YEAR_END: ${{ inputs.year }}
-      RESEARCH_LEAGUE_BUCKETS: "4"
+      RESEARCH_LEAGUE_BUCKETS: "5"
       RESEARCH_LEAGUE_BUCKET: ${{ matrix.bucket }}
       RESEARCH_OUT_DIR: ${{ github.workspace }}/out
       RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
