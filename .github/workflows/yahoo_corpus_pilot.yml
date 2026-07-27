@@ -157,6 +157,18 @@ jobs:
           restore-keys: |
             yahoo-corpus-inventory-v1-
 
+      # Keep the resumable scheduler and compact slice between automatic waves.
+      # The cache is scoped to the account shard, so a later wave continues the
+      # same shard without re-importing already folded league-years.
+      - name: Restore shard state
+        if: github.event.inputs.mode == 'inventory' && github.event.inputs.rebuild_inventory != 'true'
+        uses: actions/cache/restore@v5
+        with:
+          path: corpus/yahoo-pilot
+          key: yahoo-corpus-state-v1-${{ matrix.shard }}-${{ github.run_id }}
+          restore-keys: |
+            yahoo-corpus-state-v1-${{ matrix.shard }}-
+
       - name: Run credential-spaced Yahoo pilot
         env:
           DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
@@ -214,6 +226,13 @@ jobs:
           path: corpus/yahoo-pilot/plan.json
           key: yahoo-corpus-inventory-v1-${{ github.run_id }}
 
+      - name: Save shard state for the next wave
+        if: always() && github.event.inputs.mode == 'inventory'
+        uses: actions/cache/save@v5
+        with:
+          path: corpus/yahoo-pilot
+          key: yahoo-corpus-state-v1-${{ matrix.shard }}-${{ github.run_id }}
+
       - name: Report compact slice
         if: always()
         run: |
@@ -242,3 +261,66 @@ jobs:
             ${{ env.CORPUS_OUT }}/driver.log
           retention-days: 14
           if-no-files-found: warn
+
+  continue-inventory:
+    needs: [prepare, pilot]
+    if: always() && github.repository == 'jeleff1000/league-history-workers' && github.event.inputs.mode == 'inventory'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Download this wave's reports
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p wave-artifacts
+          gh run download "$GITHUB_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir wave-artifacts \
+            --pattern "yahoo-corpus-inventory-${GITHUB_RUN_ID}-s*" || true
+
+      - name: Dispatch the next five-runner wave only when progress remains
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          OAUTH_REF: ${{ github.event.inputs.yahoo_oauth_ref || 'main' }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          reports = list(Path("wave-artifacts").rglob("report.json"))
+          rows = []
+          for path in reports:
+              try:
+                  rows.append(json.loads(path.read_text(encoding="utf-8")))
+              except (OSError, json.JSONDecodeError):
+                  pass
+          pending = sum(int(row.get("pending", 0) or 0) for row in rows)
+          progressed = sum(int(row.get("completed_this_run", 0) or 0) for row in rows)
+          print(json.dumps({"reports": len(rows), "pending": pending, "completed_this_run": progressed}))
+          if pending <= 0 or progressed <= 0:
+              print("[queue] no pending work with positive progress; stopping")
+              raise SystemExit(0)
+          Path("dispatch.env").write_text("DISPATCH=1\n", encoding="utf-8")
+          PY
+          if [ ! -f dispatch.env ]; then
+            exit 0
+          fi
+          gh workflow run yahoo_corpus_pilot.yml \
+            --repo "$REPO" \
+            --ref main \
+            -f mode=inventory \
+            -f task_limit=0 \
+            -f time_budget_min=300 \
+            -f shards=5 \
+            -f rebuild_inventory=false \
+            -f workers=1 \
+            -f plan_only=false \
+            -f yahoo_oauth_ref="$OAUTH_REF"
+          echo "[queue] dispatched next five-runner wave"

@@ -240,11 +240,21 @@ def _atomic_json(path: Path, payload: Any) -> None:
     temp.replace(path)
 
 
-def _report(plan: Plan, outcomes: list[dict[str, Any]], scheduler: CredentialScheduler) -> dict[str, Any]:
+def _report(
+    plan: Plan,
+    outcomes: list[dict[str, Any]],
+    scheduler: CredentialScheduler,
+    *,
+    completed_this_run: int = 0,
+) -> dict[str, Any]:
     successes = sum(row.get("status") == "success" for row in outcomes)
     failures = sum(row.get("status") == "failure" for row in outcomes)
     rate_limits = sum(row.get("status") == "rate_limited" for row in outcomes)
     skips = sum(row.get("status") == "skipped" for row in outcomes)
+    pending = sum(
+        row.task_id not in scheduler.completed and row.task_id not in scheduler.failed
+        for row in scheduler.candidates.values()
+    )
     return {
         "mode": plan.mode,
         "requested": plan.requested,
@@ -253,6 +263,8 @@ def _report(plan: Plan, outcomes: list[dict[str, Any]], scheduler: CredentialSch
         "successes": successes,
         "failures": failures,
         "rate_limits": rate_limits,
+        "pending": pending,
+        "completed_this_run": completed_this_run,
         "dispatch_trace": list(scheduler.dispatch_trace),
         "outcomes": outcomes,
     }
@@ -330,10 +342,13 @@ def run_plan(
             scheduler.fail(candidate.task_id, outcome.error_class or "TaskFailure")
         ledger = {"scheduler": scheduler.to_dict(), "outcomes": outcomes}
         _atomic_json(ledger_path, ledger)
-        _atomic_json(output_dir / "report.json", _report(plan, outcomes, scheduler))
+        _atomic_json(
+            output_dir / "report.json",
+            _report(plan, outcomes, scheduler, completed_this_run=completed_this_run),
+        )
         if stop_after is not None and completed_this_run >= stop_after:
             break
-    report = _report(plan, outcomes, scheduler)
+    report = _report(plan, outcomes, scheduler, completed_this_run=completed_this_run)
     _atomic_json(output_dir / "report.json", report)
     return report
 
