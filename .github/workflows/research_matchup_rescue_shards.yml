@@ -16,6 +16,7 @@ on:
           - "2024"
           - "2023"
           - "2022"
+          - "2021"
         default: "2025"
 
 permissions:
@@ -107,7 +108,9 @@ jobs:
       - name: Upload additive population shard
         uses: actions/upload-artifact@v4
         with:
-          name: research-matchup-${{ inputs.year }}-b${{ matrix.bucket }}-of4-${{ github.sha }}
+          # bucket count comes from the env that actually partitions the leagues, so the
+          # artifact name cannot go stale the way a hardcoded "of4" did when it became 5
+          name: research-matchup-${{ inputs.year }}-b${{ matrix.bucket }}-of${{ env.RESEARCH_LEAGUE_BUCKETS }}-${{ github.sha }}
           path: out/*.parquet
           if-no-files-found: error
           retention-days: 14
