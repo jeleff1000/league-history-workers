@@ -214,6 +214,17 @@ class YahooGrantAdapter:
                 # league-year: requeue it and yield control so the rotation
                 # spaces the retry behind every other grant. Only give up
                 # after MAX_LEAGUE_ATTEMPTS.
+                # Authentication/authorization/not-found responses are
+                # deterministic for this grant and should not be retried four
+                # times.  YahooRequestFailure exposes the HTTP status without
+                # leaking provider response bodies.
+                status = getattr(exc, "status", None)
+                if status in {401, 403, 404}:
+                    self._seen.add(league_key)
+                    self.failures.append(
+                        {"stage": "settings", "error_class": type(exc).__name__}
+                    )
+                    continue
                 attempts = self._attempts.get(league_key, 0) + 1
                 self._attempts[league_key] = attempts
                 if attempts < self.MAX_LEAGUE_ATTEMPTS:
