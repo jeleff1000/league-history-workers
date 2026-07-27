@@ -27,7 +27,13 @@ import pyarrow.parquet as pq
 ROOT = Path(os.environ.get("YAHOO_OAUTH_ROOT", "d:/yahoo_oauth"))
 sys.path.insert(0, str(ROOT / "fantasy_football_data_scripts"))
 from multi_league.data_fetchers.sleeper.sleeper_api_client import SleeperAPIClient
-from multi_league.data_fetchers.sleeper.playoff_utils import bracket_team_ids
+from multi_league.data_fetchers.sleeper.playoff_utils import (
+    bracket_team_ids,
+    championship_contenders_for_round,
+    normalize_bracket_placement,
+    playoff_round_for_week,
+    resolve_playoff_structure,
+)
 
 XW_PATH = Path(os.environ.get(
     "SLEEPER_NFL_MAP",
@@ -65,6 +71,35 @@ def lineage_seasons(cli: SleeperAPIClient, head_id: str) -> dict[int, tuple[str,
     return seasons
 
 
+def championship_game_rosters_for_week(
+    bracket: list[dict], settings: dict, week: int
+) -> set[int]:
+    """Return rosters actually playing a championship-bracket game in ``week``."""
+    structure = resolve_playoff_structure(settings)
+    target_round = playoff_round_for_week(
+        week,
+        structure["playoff_week_start"],
+        structure["playoff_round_type"],
+        structure["playoff_rounds"],
+    )
+    if target_round < 1:
+        return set()
+    contenders = championship_contenders_for_round(bracket, target_round)
+    if not contenders:
+        return set()
+    result: set[int] = set()
+    for matchup in bracket:
+        if matchup.get("r") != target_round:
+            continue
+        placement = normalize_bracket_placement(matchup.get("p"))
+        if placement not in (None, 1):
+            continue
+        for roster_id in bracket_team_ids(matchup):
+            if roster_id is not None and roster_id in contenders:
+                result.add(roster_id)
+    return result
+
+
 def backfill_league_season(cli: SleeperAPIClient, xw: dict[str, str],
                            db_name: str, year: int, lid: str, lg: dict) -> list[tuple]:
     st = lg.get("settings", {}) or {}
@@ -87,7 +122,8 @@ def backfill_league_season(cli: SleeperAPIClient, xw: dict[str, str],
             if rid is None:
                 continue
             made = 1 if int(rid) in po_rosters else 0
-            in_po_wk = 1 if wk >= int(pw_start) and made == 1 else 0
+            championship_rosters = championship_game_rosters_for_week(bracket, st, wk)
+            in_po_wk = 1 if int(rid) in championship_rosters else 0
             for spid in (mu.get("players") or []):
                 nfl = xw.get(str(spid))
                 if nfl:
