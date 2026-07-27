@@ -380,6 +380,32 @@ def execute_import_task(
                 stage = "import"
             outcome = TaskOutcome(task.task_id, status, stage, error_class)
             return outcome
+        # A Yahoo import does not run the playoff odds worker as part of the
+        # normal import track.  The corpus contract requires the same ordering
+        # used by the Sleeper/extra-platform crawlers: playoff odds first,
+        # aggregation second, and clutch materialization last.  Keep all three
+        # operations against the local league DuckDB; no Fly access is allowed
+        # in corpus mode.
+        engine_scripts = (
+            ("playoff_sim", pipeline_root / "fantasy_football_data_scripts" / "multi_league" / "transformations" / "matchup" / "playoff_odds_import.py"),
+            ("aggregate", pipeline_root / "fantasy_football_data_scripts" / "multi_league" / "transformations" / "aggregation" / "aggregate_fantasy_context.py"),
+            ("clutch", pipeline_root / "fantasy_football_data_scripts" / "multi_league" / "transformations" / "player" / "clutch_to_player.py"),
+        )
+        for stage_name, script in engine_scripts:
+            engine = run_command(
+                [sys.executable, str(script), "--db", db_name, "--data-dir", str(task_dir)],
+                cwd=str(pipeline_root),
+                env=build_subprocess_env(base_env),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=3_600,
+                check=False,
+            )
+            if engine.returncode != 0:
+                status, error_class = classify_import_failure(engine.stdout or "")
+                outcome = TaskOutcome(task.task_id, "failure", stage_name, error_class)
+                return outcome
         db_path = task_dir / f"{db_name}.duckdb"
         validate_source(db_path, task)
         snapshot = open_snapshot(snapshot_path)
