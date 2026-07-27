@@ -172,39 +172,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$CORPUS_OUT"
-          python - <<'PY'
-          import os, requests
-          url = os.environ.get('DATABASE_SERVER_URL', '').rstrip('/')
-          token = os.environ.get('DATABASE_READ_TOKEN', '')
-          try:
-              resp = requests.post(
-                  f"{url}/query",
-                  json={"sql": "SELECT count(*) AS n FROM main.league_credentials", "database": "___ops"},
-                  headers={"Authorization": f"Bearer {token}"},
-                  timeout=30,
-              )
-              print(f"[identity-debug] status={resp.status_code} token_len={len(token)} body={resp.text[:200]}")
-              token_rows = requests.post(
-                  f"{url}/query",
-                  json={"sql": "SELECT encrypted_refresh_token FROM main.league_credentials WHERE encrypted_refresh_token IS NOT NULL LIMIT 25", "database": "___ops"},
-                  headers={"Authorization": f"Bearer {token}"}, timeout=30,
-              ).json()
-              import sys
-              sys.path.insert(0, "${{ github.workspace }}/code/fantasy_football_data_scripts")
-              from multi_league.utils.credential_store import decrypt_token_with_key_rotation
-              keys = [x for x in (os.environ.get("CREDENTIAL_ENCRYPTION_KEY"), os.environ.get("CREDENTIAL_ENCRYPTION_KEY_NEW")) if x]
-              ok = 0
-              errors = {}
-              for row in token_rows:
-                  try:
-                      decrypt_token_with_key_rotation(str(row["encrypted_refresh_token"]), keys)
-                      ok += 1
-                  except Exception as exc:
-                      errors[type(exc).__name__] = errors.get(type(exc).__name__, 0) + 1
-              print(f"[identity-debug] decrypt_ok={ok} decrypt_errors={errors} key_lengths={[len(x) for x in keys]}")
-          except Exception as exc:
-              print(f"[identity-debug] error={type(exc).__name__}: {exc}")
-          PY
           COMMON=(
             --mode "$MODE"
             --task-limit "$TASK_LIMIT"
