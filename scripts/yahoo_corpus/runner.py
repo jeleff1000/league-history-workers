@@ -20,6 +20,35 @@ from scripts.yahoo_corpus.validation import SourceValidationError, validate_sour
 from scripts.sleeper_corpus.build_corpus_snapshot import fold_database, open_snapshot
 
 
+def validate_playoff_clutch_materialization(db_path: Path, season: int) -> None:
+    """Require the corpus contract's playoff and clutch outputs before folding."""
+    import duckdb
+
+    con = duckdb.connect(str(db_path), read_only=True)
+    try:
+        playoff_rows = int(
+            con.execute(
+                "SELECT COUNT(*) FROM public.matchup WHERE year = ? "
+                "AND (COALESCE(CAST(is_playoffs AS INTEGER), 0) = 1 "
+                "OR COALESCE(CAST(champion AS INTEGER), 0) = 1)",
+                [season],
+            ).fetchone()[0]
+        )
+        if playoff_rows <= 0:
+            raise SourceValidationError("playoff rows were not materialized", code="PlayoffEmpty")
+        clutch_rows = int(
+            con.execute(
+                "SELECT COUNT(*) FROM public.player_fantasy WHERE year = ? "
+                "AND clutch_equity IS NOT NULL",
+                [season],
+            ).fetchone()[0]
+        )
+        if clutch_rows <= 0:
+            raise SourceValidationError("clutch equity was not materialized", code="ClutchEmpty")
+    finally:
+        con.close()
+
+
 FLY_SECRET_KEYS = {
     "DATABASE_SERVER_URL",
     "DATABASE_READ_TOKEN",
@@ -408,6 +437,7 @@ def execute_import_task(
                 return outcome
         db_path = task_dir / f"{db_name}.duckdb"
         validate_source(db_path, task)
+        validate_playoff_clutch_materialization(db_path, task.season)
         snapshot = open_snapshot(snapshot_path)
         try:
             ok, message = fold_database(
