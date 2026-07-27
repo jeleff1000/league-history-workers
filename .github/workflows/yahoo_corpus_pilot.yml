@@ -172,6 +172,21 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$CORPUS_OUT"
+          python - <<'PY'
+          import os, requests
+          url = os.environ.get('DATABASE_SERVER_URL', '').rstrip('/')
+          token = os.environ.get('DATABASE_READ_TOKEN', '')
+          try:
+              resp = requests.post(
+                  f"{url}/query",
+                  json={"sql": "SELECT count(*) AS n FROM main.league_credentials", "database": "___ops"},
+                  headers={"Authorization": f"Bearer {token}"},
+                  timeout=30,
+              )
+              print(f"[identity-debug] status={resp.status_code} token_len={len(token)} body={resp.text[:200]}")
+          except Exception as exc:
+              print(f"[identity-debug] error={type(exc).__name__}: {exc}")
+          PY
           COMMON=(
             --mode "$MODE"
             --task-limit "$TASK_LIMIT"
