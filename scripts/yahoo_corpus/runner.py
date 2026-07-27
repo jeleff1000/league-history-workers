@@ -414,12 +414,11 @@ def execute_import_task(
                 stage = "import"
             outcome = TaskOutcome(task.task_id, status, stage, error_class)
             return outcome
-        # A Yahoo import does not run the playoff odds worker as part of the
-        # normal import track.  The corpus contract requires the same ordering
-        # used by the Sleeper/extra-platform crawlers: playoff odds first,
-        # aggregation second, and clutch materialization last.  Keep all three
-        # operations against the local league DuckDB; no Fly access is allowed
-        # in corpus mode.
+        # Keep the same canonical post-import sequence as the production quick
+        # worker, locally and idempotently: playoff odds first, aggregation
+        # second, and clutch materialization last.  The quick importer may
+        # already have produced some of these outputs; rerunning the shared
+        # steps makes the lake contract deterministic without touching Fly.
         engine_scripts = (
             ("playoff_sim", pipeline_root / "fantasy_football_data_scripts" / "multi_league" / "transformations" / "matchup" / "playoff_odds_import.py"),
             ("aggregate", pipeline_root / "fantasy_football_data_scripts" / "multi_league" / "transformations" / "aggregation" / "aggregate_fantasy_context.py"),
