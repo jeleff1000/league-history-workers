@@ -176,8 +176,12 @@ def classify_import_failure(raw_text: str) -> tuple[str, str]:
         # Renewed shell whose season never happened: the import correctly
         # produces an empty database. Not a failure and never retryable.
         return "skipped", "UnplayedSeason"
-    if any(marker in lowered for marker in ("invalid_grant", "token expired", "http 401")):
+    if any(marker in lowered for marker in ("invalid_grant", "token expired", "http 401", "401 client", "unauthorized", "access denied")):
         return "failure", "YahooAuthentication"
+    if any(marker in lowered for marker in ("http 403", "403 client", "forbidden")):
+        return "failure", "YahooAuthorization"
+    if any(marker in lowered for marker in ("http 404", "404 client", "not found")):
+        return "failure", "YahooNotFound"
     for marker, category in SAFE_FAILURE_MARKERS:
         if marker in lowered:
             return "failure", category
