@@ -18,11 +18,11 @@ on:
         type: choice
         options: ['mfl', 'fleaflicker']
       mode:
-        description: 'direct = fetch-only + enrich-lite (fast, no transform/sim failure surface); full = whole importer + playoff sim'
+        description: 'full = importer + playoff runner + clutch (required for playoff-quality lake rows); direct = fetch-only + enrich-lite'
         required: false
         type: choice
         options: ['direct', 'full']
-        default: 'direct'
+        default: 'full'
       batches:
         description: 'How many disjoint slices (each its own runner/IP). All run; max_parallel caps concurrency.'
         required: false
