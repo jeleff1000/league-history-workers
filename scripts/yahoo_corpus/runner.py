@@ -131,7 +131,7 @@ def build_context(
     client_id: str,
     client_secret: str,
 ) -> dict[str, Any]:
-    """Build an ephemeral one-year full-import LeagueContext payload."""
+    """Build an ephemeral one-year quick-import LeagueContext payload."""
     resolved = data_dir.resolve()
     return {
         "league_id": task.league_key,
@@ -151,7 +151,11 @@ def build_context(
         "league_ids": {str(task.season): task.league_key},
         "data_directory": str(resolved),
         "database_name": _safe_db_name(task.task_id),
-        "import_mode": "full",
+        # Match the production Yahoo quick-import contract: one season, only
+        # the league's rostered data, and the same playoff/clutch follow-up
+        # materialization.  This keeps the fleet runner fast while preserving
+        # the complete season-level record we fold into the local lake.
+        "import_mode": "quick",
         "require_oauth": True,
         "rate_limit_per_sec": 1.0,
         "max_workers": 1,
@@ -376,6 +380,7 @@ def execute_import_task(
     command = [
         sys.executable,
         str(pipeline_root / "fantasy_football_data_scripts" / "initial_import_v3.py"),
+        "--quick",
         "--context",
         str(context_path),
         "--data-dir",

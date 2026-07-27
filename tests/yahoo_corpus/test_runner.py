@@ -34,7 +34,7 @@ def task() -> Candidate:
     )
 
 
-def test_build_context_targets_exactly_one_full_import_year(tmp_path: Path) -> None:
+def test_build_context_targets_exactly_one_quick_import_year(tmp_path: Path) -> None:
     grant = Grant("grant-1234", "private-refresh", ("423.l.999",), ("customer",))
 
     context = build_context(
@@ -48,7 +48,7 @@ def test_build_context_targets_exactly_one_full_import_year(tmp_path: Path) -> N
     assert context["league_id"] == "423.l.999"
     assert context["league_ids"] == {"2023": "423.l.999"}
     assert context["start_year"] == context["end_year"] == 2023
-    assert context["import_mode"] == "full"
+    assert context["import_mode"] == "quick"
     assert context["database_name"] == "smpl_yahoo_abcd"
     assert context["oauth_credentials"]["refresh_token"] == "private-refresh"
     assert context["data_directory"] == str(tmp_path.resolve())
