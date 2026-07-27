@@ -63,7 +63,18 @@ class SeasonEnumerationAdapter:
             return
         self._initialized = True
         self.client.refresh()
-        for game in self.client.discover_games():
+        # Yahoo may allow settings access for an OAuth grant while denying the
+        # account-wide games endpoint (403: application not authorized).  The
+        # grant still carries anchor league keys from our credential inventory,
+        # so keep those and continue instead of discarding the whole account.
+        try:
+            games = self.client.discover_games()
+        except Exception as exc:
+            self.failures.append(
+                {"stage": "discover_games", "error_class": type(exc).__name__}
+            )
+            games = []
+        for game in games:
             try:
                 leagues = self.client.discover_leagues(game)
             except Exception as exc:
