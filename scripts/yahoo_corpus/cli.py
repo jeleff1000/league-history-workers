@@ -252,9 +252,17 @@ def main(argv: list[str] | None = None) -> int:
             )
             if args.mode == "inventory":
                 # Seasons are independent: enumerate games x leagues directly.
-                # No renewal chain, no per-league settings fetch -- both are
-                # pure throttle cost, and throttle is the binding constraint.
-                return SeasonEnumerationAdapter(grant, client)
+                # No renewal chain; only use a settings fetch for a known
+                # anchor when Yahoo denies account-wide games discovery.
+                def anchor_season(league_key: str) -> int:
+                    settings = parser_module.parse_settings_xml(
+                        client.fetch_settings_xml(league_key), league_key
+                    )
+                    return int((settings.get("metadata") or {}).get("season") or 0)
+
+                return SeasonEnumerationAdapter(
+                    grant, client, anchor_season=anchor_season
+                )
             return YahooGrantAdapter(
                 grant,
                 client,

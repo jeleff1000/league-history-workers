@@ -46,9 +46,16 @@ class SeasonEnumerationAdapter:
     moves to validation, which derives it from imported data.
     """
 
-    def __init__(self, grant: Grant, client: Any) -> None:
+    def __init__(
+        self,
+        grant: Grant,
+        client: Any,
+        *,
+        anchor_season: Callable[[str], int] | None = None,
+    ) -> None:
         self.grant = grant
         self.client = client
+        self.anchor_season = anchor_season
         self.failures: list[dict[str, str]] = []
         self._initialized = False
         self._queue: deque[tuple[str, int]] = deque()
@@ -70,10 +77,29 @@ class SeasonEnumerationAdapter:
         try:
             games = self.client.discover_games()
         except Exception as exc:
+            # The account-wide games collection is not authorized for every
+            # Yahoo grant.  Existing league keys in the credential bank remain
+            # valid anchors, so continue with those instead of dropping the
+            # entire manager from discovery.
             self.failures.append(
                 {"stage": "discover_games", "error_class": type(exc).__name__}
             )
             games = []
+            if self.anchor_season is not None:
+                for league_key in self.grant.anchor_keys:
+                    try:
+                        season = int(self.anchor_season(league_key))
+                    except Exception as anchor_exc:
+                        self.failures.append(
+                            {
+                                "stage": "anchor_settings",
+                                "error_class": type(anchor_exc).__name__,
+                            }
+                        )
+                        continue
+                    if 2001 <= season <= 2025:
+                        self._queue.append((league_key, season))
+                        self._seen.add(league_key)
         for game in games:
             try:
                 leagues = self.client.discover_leagues(game)
@@ -158,7 +184,17 @@ class YahooGrantAdapter:
             return
         self._initialized = True
         self.client.refresh()
-        for game in self.client.discover_games():
+        try:
+            games = self.client.discover_games()
+        except Exception as exc:
+            # Preserve the credential bank's anchor league-years when Yahoo
+            # denies account-wide games discovery.  The per-league settings
+            # request below is the same route used by quick imports.
+            self.failures.append(
+                {"stage": "discover_games", "error_class": type(exc).__name__}
+            )
+            games = []
+        for game in games:
             try:
                 leagues = self.client.discover_leagues(game)
             except Exception as exc:

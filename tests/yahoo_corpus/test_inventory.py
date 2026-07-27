@@ -213,6 +213,54 @@ def test_throttled_league_is_retried_not_dropped() -> None:
     assert adapter.pending is False
 
 
+def test_settings_discovery_keeps_anchor_when_games_endpoint_is_denied() -> None:
+    class DeniedGamesClient:
+        def refresh(self) -> None:
+            return None
+
+        def discover_games(self):
+            raise RuntimeError("HTTP 403 application not authorized")
+
+        def fetch_settings_xml(self, league_key: str) -> str:
+            assert league_key == "449.l.1"
+            return "<xml/>"
+
+    adapter = YahooGrantAdapter(
+        Grant("grant-1234", "private-refresh", ("449.l.1",), ()),
+        DeniedGamesClient(),
+        parse_xml=lambda xml, key: {"metadata": {"season": "2021"}},
+        classify=lambda settings: {"classification_status": "classified", "cohort_slug": "10t_flx_std_4pt"},
+        renewal_keys=lambda xml: [],
+    )
+
+    row = adapter.step()
+    assert row is not None
+    assert row.league_key == "449.l.1"
+    assert any(f["stage"] == "discover_games" for f in adapter.failures)
+
+
+def test_season_enumeration_keeps_anchor_when_games_endpoint_is_denied() -> None:
+    class DeniedGamesClient:
+        def refresh(self) -> None:
+            return None
+
+        def discover_games(self):
+            raise RuntimeError("HTTP 403 application not authorized")
+
+        def discover_leagues(self, game):  # pragma: no cover
+            raise AssertionError("no games should be expanded")
+
+    adapter = SeasonEnumerationAdapter(
+        Grant("grant-1", "tok", ("449.l.1",), ()),
+        DeniedGamesClient(),
+        anchor_season=lambda league_key: 2021,
+    )
+    row = adapter.step()
+    assert row is not None
+    assert row.league_key == "449.l.1"
+    assert row.season == 2021
+
+
 def test_grant_with_pending_retries_is_not_marked_completed() -> None:
     class AlwaysThrottledAdapter:
         def __init__(self) -> None:
