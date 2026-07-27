@@ -28,6 +28,11 @@ on:
         required: false
         type: string
         default: '10'
+      batch_start:
+        description: 'First deterministic batch index (for continuation waves)'
+        required: false
+        type: string
+        default: '0'
       max_parallel:
         description: 'Concurrent slices. Account cap is 20 across ALL repos -- leave slack for customer imports.'
         required: false
@@ -75,9 +80,10 @@ jobs:
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json, sys
+          start = int("${{ github.event.inputs.batch_start || '0' }}")
           n  = int("${{ github.event.inputs.batches || '10' }}")
           mp = min(int("${{ github.event.inputs.max_parallel || '10' }}"), n)
-          print("batch_list=" + json.dumps(list(range(n))))
+          print("batch_list=" + json.dumps(list(range(start, start + n))))
           print("max_parallel=" + str(mp))
           print(f"[prepare] {n} batches, max {mp} concurrent", file=sys.stderr)
           PY
