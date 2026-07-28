@@ -226,6 +226,11 @@ class CredentialScheduler:
         self.in_flight.discard(task_id)
         self.failed[task_id] = error_class
 
+    def retry(self, task_id: str) -> None:
+        """Return a dispatched task to pending without recording a terminal failure."""
+        self.in_flight.discard(task_id)
+        self.failed.pop(task_id, None)
+
     def rate_limit(self, task_id: str, *, now: float, cooldown_seconds: float) -> None:
         self.in_flight.discard(task_id)
         # Yahoo throttles the account, so cool down the PERSON: a second token

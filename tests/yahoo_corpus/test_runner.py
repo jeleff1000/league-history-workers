@@ -188,6 +188,39 @@ def test_run_plan_fails_rate_limited_task_after_retry_budget(tmp_path: Path) -> 
     assert ledger["scheduler"]["failed"] == {"yahoo-abcd": "YahooRequestDenied"}
 
 
+def test_run_plan_opens_circuit_after_three_systemic_failures(tmp_path: Path) -> None:
+    tasks = tuple(
+        Candidate(
+            f"yahoo-{index}",
+            f"grant-{index}",
+            f"449.l.{index}",
+            2025,
+            "10t_flx_half_4pt",
+            f"lineage-{index}",
+        )
+        for index in range(5)
+    )
+    plan = Plan("inventory", 5, tasks)
+    grants = {
+        row.grant_id: Grant(row.grant_id, f"secret-{row.grant_id}", (), ())
+        for row in tasks
+    }
+    executed: list[str] = []
+
+    def execute(candidate: Candidate, _: Grant) -> TaskOutcome:
+        executed.append(candidate.task_id)
+        return TaskOutcome(candidate.task_id, "failure", "import", "SettingsUnavailable")
+
+    report = run_plan(plan, grants, tmp_path, execute_task=execute)
+
+    assert len(executed) == 3
+    assert report["circuit_open"] is True
+    assert report["circuit_error_class"] == "SettingsUnavailable"
+    assert report["pending"] == 5
+    ledger = json.loads((tmp_path / "ledger.json").read_text(encoding="utf-8"))
+    assert ledger["scheduler"]["failed"] == {}
+
+
 def test_request_denied_classifies_as_rate_limited() -> None:
     raw = "requests.exceptions.HTTPError: 999 Server Error: Request Denied for url: https://fantasysports.yahooapis.com/..."
     assert classify_import_failure(raw) == ("rate_limited", "YahooRequestDenied")

@@ -103,6 +103,16 @@ SAFE_FAILURE_MARKERS = (
     # more specific cause logged earlier (denied, auth, lookup) wins.
     ("league settings unavailable for every requested year", "SettingsUnavailable"),
 )
+SYSTEMIC_FAILURE_CLASSES = frozenset(
+    {
+        "OAuthMaterialization",
+        "OAuthContextMaterialization",
+        "SettingsUnavailable",
+        "SharedOAuthCreateFailed",
+        "YahooAuthentication",
+        "YahooAuthorization",
+    }
+)
 
 
 class ForbiddenArtifactData(ValueError):
@@ -246,6 +256,7 @@ def _report(
     scheduler: CredentialScheduler,
     *,
     completed_this_run: int = 0,
+    circuit_error_class: str | None = None,
 ) -> dict[str, Any]:
     successes = sum(row.get("status") == "success" for row in outcomes)
     failures = sum(row.get("status") == "failure" for row in outcomes)
@@ -265,6 +276,8 @@ def _report(
         "rate_limits": rate_limits,
         "pending": pending,
         "completed_this_run": completed_this_run,
+        "circuit_open": circuit_error_class is not None,
+        "circuit_error_class": circuit_error_class,
         "dispatch_trace": list(scheduler.dispatch_trace),
         "outcomes": outcomes,
     }
@@ -281,6 +294,7 @@ def run_plan(
     clock: Callable[[], float] = time.monotonic,
     sleeper: Callable[[float], None] = time.sleep,
     max_rate_limit_retries: int = 4,
+    systemic_failure_threshold: int = 3,
     time_budget_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Execute a credential-aware plan and persist only redacted resumable state."""
@@ -293,6 +307,9 @@ def run_plan(
     outcomes = list(previous.get("outcomes", []))
     completed_this_run = 0
     rate_limit_counts: dict[str, int] = {}
+    systemic_failure_streak: list[str] = []
+    systemic_error_class: str | None = None
+    circuit_error_class: str | None = None
     started_at = clock()
     while True:
         now = clock()
@@ -327,7 +344,11 @@ def run_plan(
         if outcome.status == "success":
             scheduler.complete(candidate.task_id)
             completed_this_run += 1
+            systemic_failure_streak = []
+            systemic_error_class = None
         elif outcome.status == "rate_limited":
+            systemic_failure_streak = []
+            systemic_error_class = None
             retries = rate_limit_counts.get(candidate.task_id, 0) + 1
             rate_limit_counts[candidate.task_id] = retries
             if retries > max_rate_limit_retries:
@@ -340,15 +361,41 @@ def run_plan(
                 )
         else:
             scheduler.fail(candidate.task_id, outcome.error_class or "TaskFailure")
+            if outcome.error_class in SYSTEMIC_FAILURE_CLASSES:
+                if outcome.error_class != systemic_error_class:
+                    systemic_failure_streak = []
+                systemic_error_class = outcome.error_class
+                systemic_failure_streak.append(candidate.task_id)
+                if len(systemic_failure_streak) >= systemic_failure_threshold:
+                    circuit_error_class = outcome.error_class
+                    for task_id in systemic_failure_streak:
+                        scheduler.retry(task_id)
+            else:
+                systemic_failure_streak = []
+                systemic_error_class = None
         ledger = {"scheduler": scheduler.to_dict(), "outcomes": outcomes}
         _atomic_json(ledger_path, ledger)
         _atomic_json(
             output_dir / "report.json",
-            _report(plan, outcomes, scheduler, completed_this_run=completed_this_run),
+            _report(
+                plan,
+                outcomes,
+                scheduler,
+                completed_this_run=completed_this_run,
+                circuit_error_class=circuit_error_class,
+            ),
         )
+        if circuit_error_class is not None:
+            break
         if stop_after is not None and completed_this_run >= stop_after:
             break
-    report = _report(plan, outcomes, scheduler, completed_this_run=completed_this_run)
+    report = _report(
+        plan,
+        outcomes,
+        scheduler,
+        completed_this_run=completed_this_run,
+        circuit_error_class=circuit_error_class,
+    )
     _atomic_json(output_dir / "report.json", report)
     return report
 
