@@ -183,23 +183,6 @@ jobs:
           TIME_BUDGET: ${{ github.event.inputs.time_budget_min || '300' }}
         run: |
           set -euo pipefail
-          python - <<'PY'
-          import os
-          from multi_league.core.readers.fly_reader import FlyReader
-          from multi_league.utils.credential_store import decrypt_token_with_key_rotation
-          sql = "SELECT COUNT(*) AS n FROM main.league_credentials WHERE encrypted_refresh_token IS NOT NULL AND length(encrypted_refresh_token) > 0"
-          reader = FlyReader()
-          rows = reader.query("SELECT database_name, league_id, encrypted_refresh_token FROM main.league_credentials WHERE encrypted_refresh_token IS NOT NULL AND length(encrypted_refresh_token) > 0", "___ops")
-          keys = [os.environ.get("CREDENTIAL_ENCRYPTION_KEY_NEW", ""), os.environ.get("CREDENTIAL_ENCRYPTION_KEY", "")]
-          decryptable = 0
-          for row in rows:
-              try:
-                  decrypt_token_with_key_rotation(str(row["encrypted_refresh_token"]), keys)
-                  decryptable += 1
-              except Exception:
-                  pass
-          print(f"[preflight] yahoo_grant_rows={len(rows)} decryptable={decryptable}")
-          PY
           mkdir -p "$CORPUS_OUT"
           COMMON=(
             --mode "$MODE"
