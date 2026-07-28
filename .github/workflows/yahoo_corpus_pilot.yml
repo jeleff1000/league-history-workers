@@ -183,6 +183,12 @@ jobs:
           TIME_BUDGET: ${{ github.event.inputs.time_budget_min || '300' }}
         run: |
           set -euo pipefail
+          python - <<'PY'
+          from multi_league.core.readers.fly_reader import FlyReader
+          sql = "SELECT COUNT(*) AS n FROM main.league_credentials WHERE encrypted_refresh_token IS NOT NULL AND length(encrypted_refresh_token) > 0"
+          rows = FlyReader().query(sql, "___ops")
+          print(f"[preflight] yahoo_grant_rows={rows[0]['n'] if rows else 0}")
+          PY
           mkdir -p "$CORPUS_OUT"
           COMMON=(
             --mode "$MODE"
