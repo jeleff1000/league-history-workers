@@ -221,6 +221,14 @@ jobs:
             echo "::group::failure reasons (first 20)"; grep -E ' -> (IMPORT_FAILED|SIM_FAILED)' "$LOG" | head -20; echo "::endgroup::"
             echo "::group::driver tail (last 60)"; tail -60 "$LOG"; echo "::endgroup::"
           fi
+          # An exhausted seed window is a finished slice, not a broken one: when the matrix
+          # is sized above the remaining seed the tail jobs plan 0 leagues and must exit
+          # green (run 30307350629 burned two red shards on this).  Defaults to 1 so a
+          # parse miss keeps the old fail-closed behaviour.
+          PLANNED=$(sed -n 's/^\[plan\] [a-z]*: [0-9]* in seed, \([0-9]*\) in this slice.*/\1/p' "$LOG" | head -1)
+          if [ "${PLANNED:-1}" -eq 0 ]; then
+            echo "[crawl] empty slice (seed window exhausted) -- nothing to do."; exit 0
+          fi
           if [ "$OK" -eq 0 ]; then
             echo "::error::0 of $((OK+FAILED)) leagues ingested -- nothing worked."; exit 1
           fi
@@ -250,7 +258,13 @@ jobs:
           name: corpus-slice-${{ github.event.inputs.platform }}-${{ matrix.batch }}
           # The driver log rides along: per-league failure reasons die with the runner
           # otherwise (run 29626415574 required job-log archaeology to diagnose).
+          # The .wal rides along too: the fold connection is long-lived and its close()
+          # never runs when the runner is SIGKILLed at timeout-minutes, so un-checkpointed
+          # leagues live only in the WAL.  Run 30307350629 lost 96 of 579 crawled leagues
+          # because the .wal stayed on the dead runner.  The driver now CHECKPOINTs after
+          # every fold; this is the second line of defence.
           path: |
             ${{ github.workspace }}/corpus/corpus_slice_${{ github.event.inputs.platform }}_${{ matrix.batch }}.duckdb
+            ${{ github.workspace }}/corpus/corpus_slice_${{ github.event.inputs.platform }}_${{ matrix.batch }}.duckdb.wal
             crawl_${{ matrix.batch }}.log
           if-no-files-found: ignore
