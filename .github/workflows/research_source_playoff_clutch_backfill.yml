@@ -60,7 +60,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install bounded dependencies
-        run: python -m pip install duckdb==1.5.1 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1
+        run: python -m pip install duckdb==1.5.1 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 polars==1.35.2
       - name: Download and unpack source shard
         shell: bash
         run: |
@@ -80,6 +80,20 @@ jobs:
             --manifest "$CORPUS_DIR/source_manifest_${PART}.json" \
             --results "$CORPUS_DIR/source_playoff_clutch_backfill_results.jsonl" \
             --log-dir "$CORPUS_DIR/logs"
+      - name: Fail closed on incomplete source results
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path("${{ env.CORPUS_DIR }}") / "source_playoff_clutch_backfill_results.jsonl"
+          rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+          bad = [row for row in rows if row.get("status") != "done"]
+          print({"total": len(rows), "done": len(rows) - len(bad), "not_done": len(bad)})
+          if bad:
+              print("first non-done:", bad[:10])
+              raise SystemExit(1)
+          PY
       - name: Package processed shard
         if: always()
         shell: bash
