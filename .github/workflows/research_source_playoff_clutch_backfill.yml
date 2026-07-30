@@ -1,0 +1,98 @@
+name: Research Source Playoff + Clutch Backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Private release containing numbered source DuckDB tar parts
+        required: true
+        default: research-source-backfill-v1
+      buckets:
+        description: Number of source shards (must match the package)
+        required: true
+        default: "15"
+      n_sims:
+        description: Monte Carlo simulations per league-season
+        required: true
+        default: "1000"
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      bucket_list: ${{ steps.matrix.outputs.bucket_list }}
+    steps:
+      - id: matrix
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          print("bucket_list=" + json.dumps(list(range(int(os.environ["BUCKETS"])))) )
+          PY
+        env:
+          BUCKETS: ${{ inputs.buckets }}
+
+  backfill:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        bucket: ${{ fromJSON(needs.prepare.outputs.bucket_list) }}
+    env:
+      GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+      CORPUS_DIR: ${{ github.workspace }}/source_corpus
+
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1
+      - name: Download and unpack source shard
+        shell: bash
+        run: |
+          mkdir -p "$CORPUS_DIR"
+          PART=$(printf '%02d' '${{ matrix.bucket }}')
+          gh release download "${{ inputs.release_tag }}" --repo jeleff1000/yahoo_oauth \
+            --pattern "research-source-backfill-v1.tar.part-${PART}"
+          tar -xf "research-source-backfill-v1.tar.part-${PART}" -C "$CORPUS_DIR"
+      - name: Run playoff odds and clutch for shard
+        shell: bash
+        env:
+          RESEARCH_CORPUS_DIR: ${{ env.CORPUS_DIR }}
+        run: |
+          PART=$(printf '%02d' '${{ matrix.bucket }}')
+          python code/scripts/research_cohorts/run_source_playoff_clutch_backfill.py \
+            --workers 1 --n-sims '${{ inputs.n_sims }}' \
+            --manifest "$CORPUS_DIR/source_manifest_${PART}.json" \
+            --results "$CORPUS_DIR/source_playoff_clutch_backfill_results.jsonl" \
+            --log-dir "$CORPUS_DIR/logs"
+      - name: Package processed shard
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p out
+          tar -cf "out/research-source-backfill-result-${{ matrix.bucket }}.tar" \
+            -C "$CORPUS_DIR" leagues logs source_playoff_clutch_backfill_results.jsonl 2>/dev/null || true
+      - name: Upload processed shard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-source-backfill-result-${{ matrix.bucket }}-${{ github.run_id }}
+          path: out/*.tar
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 0
