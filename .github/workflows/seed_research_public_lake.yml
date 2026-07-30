@@ -6,11 +6,11 @@ on:
       release_tag:
         description: Private release containing public-only numbered tar parts
         required: true
-        default: research-public-lake-v1-20260722
+        default: research-public-lake-v2-20260730
       cache_key:
         description: Immutable cache key consumed by research shard jobs
         required: true
-        default: research-public-lake-v2-Linux-20260722
+        default: research-public-lake-v3-Linux-20260730
 
 permissions:
   actions: write
