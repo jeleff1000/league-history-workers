@@ -38,8 +38,9 @@ jobs:
       RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
       RESEARCH_REF_DIR: ${{ github.workspace }}/research_public_lake
       RESEARCH_NO_CACHE: "1"
-      RESEARCH_READER_MEMORY_MB: "5500"
-      RESEARCH_MATCHUP_MEMORY_MB: "5500"
+      RESEARCH_READER_MEMORY_MB: "10000"
+      RESEARCH_MATCHUP_MEMORY_MB: "10000"
+      RESEARCH_MATCHUP_THREADS: "1"
 
     steps:
       - uses: actions/checkout@v5
