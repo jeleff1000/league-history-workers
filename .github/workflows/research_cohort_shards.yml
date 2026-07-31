@@ -31,7 +31,7 @@ jobs:
       max-parallel: 15
       matrix:
         table: ${{ fromJSON(inputs.tables == 'all' && '["matchup","transactions","transactions_weekly","draft"]' || format('["{0}"]', inputs.tables)) }}
-        range: ${{ fromJSON(inputs.year_ranges != '' && inputs.year_ranges || '[{"label":"1997-1998","start":1997,"end":1998},{"label":"2003-2010","start":2003,"end":2010},{"label":"2011-2015","start":2011,"end":2015},{"label":"2016-2017","start":2016,"end":2017}]') }}
+        range: ${{ fromJSON(inputs.year_ranges != '' && inputs.year_ranges || '[{"label":"1997-1998","start":1997,"end":1998},{"label":"2003-2006","start":2003,"end":2006},{"label":"2007-2010","start":2007,"end":2010},{"label":"2011-2013","start":2011,"end":2013},{"label":"2014-2015","start":2014,"end":2015},{"label":"2016-2017","start":2016,"end":2017}]') }}
     runs-on: ubuntu-latest
     timeout-minutes: 355
     env:
