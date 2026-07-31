@@ -19,6 +19,10 @@ on:
         description: Bootstrap replicates per estimate
         required: true
         default: '400'
+      positions:
+        description: JSON array of positions to run
+        required: true
+        default: '["QB","RB","WR","TE","K","DEF"]'
 
 permissions:
   contents: read
@@ -29,7 +33,7 @@ jobs:
       fail-fast: false
       max-parallel: 15
       matrix:
-        position: [QB, RB, WR, TE, K, DEF]
+        position: ${{ fromJSON(inputs.positions) }}
     runs-on: ubuntu-latest
     timeout-minutes: 355
     steps:
