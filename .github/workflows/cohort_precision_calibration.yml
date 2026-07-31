@@ -58,13 +58,14 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/code/scripts/research_cohorts
         run: |
-          python code/scripts/research_cohorts/build_cohort_precision_calibration.py \
-            --snapshot research_public_lake/corpus_snapshot.duckdb \
-            --ops research_public_lake/ops_cache.duckdb \
-            --year '${{ matrix.year }}' \
-            --position '${{ matrix.position }}' \
-            --confidence '${{ inputs.confidence }}' \
-            --out 'out/precision_${{ matrix.year }}_${{ matrix.position }}.parquet'
+          for year in $(python -c "import json; print(*json.loads('${{ inputs.years }}'))"); do
+            python code/scripts/research_cohorts/build_cohort_precision_calibration.py \
+              --snapshot research_public_lake/corpus_snapshot.duckdb \
+              --ops research_public_lake/ops_cache.duckdb \
+              --year "$year" --position '${{ matrix.position }}' \
+              --confidence '${{ inputs.confidence }}' \
+              --out "out/precision_${year}_${{ matrix.position }}.parquet"
+          done
       - name: Upload calibration shard
         uses: actions/upload-artifact@v4
         with:
@@ -76,11 +77,12 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/code/scripts/research_cohorts
         run: |
-          python code/scripts/research_cohorts/build_cohort_top10_lock.py \
-            --snapshot research_public_lake/corpus_snapshot.duckdb \
-            --year '${{ matrix.year }}' \
-            --position '${{ matrix.position }}' \
-            --out 'out/top10_${{ matrix.year }}_${{ matrix.position }}.parquet'
+          for year in $(python -c "import json; print(*json.loads('${{ inputs.years }}'))"); do
+            python code/scripts/research_cohorts/build_cohort_top10_lock.py \
+              --snapshot research_public_lake/corpus_snapshot.duckdb \
+              --year "$year" --position '${{ matrix.position }}' \
+              --out "out/top10_${year}_${{ matrix.position }}.parquet"
+          done
       - name: Upload top-10 shard
         uses: actions/upload-artifact@v4
         with:
