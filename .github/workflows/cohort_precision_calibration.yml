@@ -15,6 +15,10 @@ on:
         description: Two-sided confidence level
         required: true
         default: '0.85'
+      positions:
+        description: JSON array of position scopes to run
+        required: true
+        default: '["QB","RB","WR","TE","K","DEF","ALL"]'
 
 permissions:
   contents: read
@@ -25,7 +29,7 @@ jobs:
       fail-fast: false
       max-parallel: 15
       matrix:
-        position: [QB, RB, WR, TE, K, DEF, ALL]
+        position: ${{ fromJSON(inputs.positions) }}
     runs-on: ubuntu-latest
     timeout-minutes: 355
     steps:
