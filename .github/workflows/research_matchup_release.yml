@@ -1,0 +1,169 @@
+name: Research Matchup Release to Fly
+
+on:
+  workflow_dispatch:
+    inputs:
+      old_shard_run:
+        description: Successful 10-bucket old-season shard run ID
+        required: true
+        default: '30635335012'
+      modern_shard_run:
+        description: Successful 5-bucket modern-season shard run ID
+        required: true
+        default: '30635338778'
+      cache_key:
+        description: Public research cache key used for the ops super-table lookup
+        required: true
+        default: research-public-lake-v3-Linux-20260730
+      publish:
+        description: Apply the verified bundle to Fly production
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      RESEARCH_OUT_DIR: ${{ github.workspace }}/out
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Restore immutable public research lake
+        uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+
+      - name: Download old-season matchup shards
+        uses: actions/download-artifact@v5
+        with:
+          path: shards/old
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.old_shard_run }}
+
+      - name: Download modern matchup shards
+        uses: actions/download-artifact@v5
+        with:
+          path: shards/modern
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.modern_shard_run }}
+
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 requests
+
+      - name: Verify shard manifest before merge
+        shell: bash
+        run: |
+          test -s research_public_lake/ops_cache.duckdb
+          test ! -e research_public_lake/leagues_snapshot.duckdb
+          python - <<'PY'
+          from pathlib import Path
+          import duckdb
+
+          roots = [Path('shards/old'), Path('shards/modern')]
+          manifests = [p for root in roots for p in root.rglob('shard_manifest.parquet')]
+          seasons = [p for root in roots for p in root.rglob('research_matchup_player_season.parquet')]
+          weekly = [p for root in roots for p in root.rglob('research_matchup_weekly.parquet')]
+          assert len(manifests) == 175, f'expected 175 manifests, found {len(manifests)}'
+          assert len(seasons) == len(weekly) == 175, (len(seasons), len(weekly))
+          con = duckdb.connect()
+          rows = con.execute(
+              "SELECT DISTINCT year FROM read_parquet(?) ORDER BY year",
+              [[str(p) for p in manifests]],
+          ).fetchall()
+          years = [r[0] for r in rows]
+          assert years == [1997, 1998, 2003, 2004, 2005, 2006, 2007, 2008,
+                           2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016,
+                           2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025], years
+          print(f'validated {len(manifests)} disjoint shard manifests across {len(years)} seasons')
+          PY
+
+      - name: Assemble season and weekly matchup grains
+        run: |
+          mkdir -p out
+          python code/scripts/research_cohorts/assemble_research_shards.py \
+            --table matchup \
+            --input "${{ github.workspace }}/shards/old" \
+            --input "${{ github.workspace }}/shards/modern" \
+            --output "${{ github.workspace }}/out"
+
+      - name: Create matchup research database
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import duckdb
+
+          out = Path('out')
+          db = out / 'research_cohorts.duckdb'
+          if db.exists():
+              db.unlink()
+          con = duckdb.connect(str(db))
+          con.execute("CREATE TABLE matchup AS SELECT * FROM read_parquet(?)",
+                      [str(out / 'research_matchup_player_season.parquet')])
+          con.execute("CREATE TABLE matchup_weekly AS SELECT * FROM read_parquet(?)",
+                      [str(out / 'research_matchup_weekly.parquet')])
+          for table in ('matchup', 'matchup_weekly'):
+              print(table, con.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0])
+          con.close()
+          PY
+
+      - name: Build matchup career rollup
+        run: |
+          python code/scripts/research_cohorts/build_research_career_rollup.py \
+            --only matchup \
+            --matchup-source "${{ github.workspace }}/out/research_matchup_player_season.parquet" \
+            --out-dir "${{ github.workspace }}/out"
+
+      - name: Build matchup-only wide bundle
+        env:
+          RESEARCH_WIDE_DATASETS: matchup
+        run: python code/scripts/research_cohorts/build_wide_bundle.py
+
+      - name: Read-only Fly preflight
+        run: |
+          python code/scripts/research_cohorts/publish_research_matchup_to_fly.py \
+            --bundle "${{ github.workspace }}/out/research_merge_bundle.duckdb"
+
+      - name: Publish verified bundle to Fly
+        if: ${{ inputs.publish }}
+        run: |
+          python code/scripts/research_cohorts/publish_research_matchup_to_fly.py \
+            --bundle "${{ github.workspace }}/out/research_merge_bundle.duckdb" \
+            --apply --i-understand-this-writes-prod
+
+      - name: Upload release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-release-${{ github.run_id }}
+          path: |
+            out/research_matchup_player_season.parquet
+            out/research_matchup_weekly.parquet
+            out/matchup_career.parquet
+            out/research_merge_bundle.duckdb
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
