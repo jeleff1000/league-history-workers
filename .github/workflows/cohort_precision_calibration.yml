@@ -79,6 +79,7 @@ jobs:
           for year in $(python -c "import json; print(*json.loads('${{ inputs.years }}'))"); do
             python code/scripts/research_cohorts/build_cohort_top10_lock.py \
               --snapshot research_public_lake/corpus_snapshot.duckdb \
+              --ops research_public_lake/ops_cache.duckdb \
               --year "$year" --position '${{ matrix.position }}' \
               --out "out/top10_${year}_${{ matrix.position }}.parquet"
           done
