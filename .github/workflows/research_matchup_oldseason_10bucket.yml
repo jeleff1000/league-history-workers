@@ -1,0 +1,100 @@
+name: Research Matchup Old-Season 10-Bucket Rescue
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        description: Immutable public-only corpus + ops cache key
+        required: true
+        default: research-public-lake-v3-Linux-20260730
+      years:
+        description: JSON list of old seasons to split into ten smaller internal buckets
+        required: true
+        default: '["2010","2009","2008","2007","2006","2005"]'
+
+permissions:
+  contents: read
+
+jobs:
+  matchup:
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        year: ${{ fromJSON(inputs.years) }}
+        bucket: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      RESEARCH_YEAR_START: ${{ matrix.year }}
+      RESEARCH_YEAR_END: ${{ matrix.year }}
+      RESEARCH_LEAGUE_BUCKETS: "10"
+      RESEARCH_LEAGUE_BUCKET: ${{ matrix.bucket }}
+      RESEARCH_OUT_DIR: ${{ github.workspace }}/out
+      RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
+      RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
+      RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
+      RESEARCH_REF_DIR: ${{ github.workspace }}/research_public_lake
+      RESEARCH_NO_CACHE: "1"
+      RESEARCH_READER_MEMORY_MB: "10000"
+      RESEARCH_MATCHUP_MEMORY_MB: "10000"
+      RESEARCH_MATCHUP_THREADS: "1"
+
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Restore immutable public research lake
+        uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1
+      - name: Verify public-only inputs
+        shell: bash
+        run: |
+          test -s research_public_lake/corpus_snapshot.duckdb
+          test -s research_public_lake/ops_cache.duckdb
+          test ! -e research_public_lake/leagues_snapshot.duckdb
+          mkdir -p out
+      - name: Build matchup population shard
+        run: python code/scripts/research_cohorts/build_research_matchup_cohort.py
+      - name: Verify artifact year bounds
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import duckdb
+          year = int(os.environ["RESEARCH_YEAR_START"])
+          files = list(Path("out").glob("*.parquet"))
+          assert files, "builder emitted no parquet"
+          con = duckdb.connect()
+          for path in files:
+              cols = {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{path.as_posix()}')").fetchall()}
+              if "year" not in cols:
+                  continue
+              got = con.execute(f"SELECT MIN(year), MAX(year), COUNT(*) FROM read_parquet('{path.as_posix()}')").fetchone()
+              if got[2] == 0:
+                  print(path, "typed empty shard")
+                  continue
+              assert got[0] == got[1] == year, (path, got, year)
+              print(path, got)
+          PY
+      - name: Upload additive population shard
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-${{ matrix.year }}-b${{ matrix.bucket }}-of${{ env.RESEARCH_LEAGUE_BUCKETS }}-${{ github.sha }}
+          path: out/*.parquet
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 6
