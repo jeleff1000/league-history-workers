@@ -31,6 +31,9 @@ jobs:
     timeout-minutes: 355
     env:
       RESEARCH_OUT_DIR: ${{ github.workspace }}/out
+      RESEARCH_ASSEMBLE_MEMORY_MB: '12000'
+      RESEARCH_ASSEMBLE_THREADS: '2'
+      RESEARCH_WIDE_MEMORY_MB: '10000'
       DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
       DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
       DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
