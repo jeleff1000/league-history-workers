@@ -41,7 +41,7 @@ jobs:
             --pattern 'ops_cache.duckdb'
           mkdir -p research_public_lake
           cat research-public-lake.tar.part-* | \
-            tar -xf - -C research_public_lake --strip-components=1
+            tar -xf - -C research_public_lake
           mv ops_cache.duckdb research_public_lake/ops_cache.duckdb
       - name: Fail-closed privacy and schema validation
         run: |
