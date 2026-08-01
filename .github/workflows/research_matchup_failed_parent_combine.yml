@@ -1,0 +1,87 @@
+name: Combine Research Matchup Failed Parent Rescue
+
+on:
+  workflow_dispatch:
+    inputs:
+      subshard_run:
+        description: Completed failed-parent rescue subshard run ID
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  combine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Download failed-parent subshards
+        uses: actions/download-artifact@v5
+        with:
+          path: shards/raw
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.subshard_run }}
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Combine five subshards per failed parent
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import duckdb
+
+          raw = Path('shards/raw')
+          out = Path('out')
+          out.mkdir(parents=True, exist_ok=True)
+          groups = {}
+          pat = re.compile(r'research-matchup-(\d+)-parent(\d+)-sub(\d+)-of5-')
+          for d in raw.iterdir():
+              m = pat.search(d.name)
+              if m:
+                  key = (int(m.group(1)), int(m.group(2)))
+                  groups.setdefault(key, {})[int(m.group(3))] = d
+          assert groups, list(raw.iterdir())
+          con = duckdb.connect()
+          for (year, parent), parts in sorted(groups.items()):
+              assert sorted(parts) == [0, 1, 2, 3, 4], ((year, parent), sorted(parts))
+              target = out / f'{year}_parent{parent}'
+              target.mkdir(parents=True, exist_ok=True)
+              for name in ('research_matchup_player_season.parquet', 'research_matchup_weekly.parquet'):
+                  paths = [str((parts[i] / name).resolve()).replace("'", "''") for i in sorted(parts)]
+                  quoted = '[' + ','.join("'" + p + "'" for p in paths) + ']'
+                  dest = str((target / name).resolve()).replace("'", "''")
+                  con.execute(f"COPY (SELECT * FROM read_parquet({quoted}, union_by_name=true)) TO '{dest}' (FORMAT PARQUET, COMPRESSION ZSTD)")
+              manifest = target / 'shard_manifest.parquet'
+              con.execute(
+                  "COPY (SELECT 'matchup' AS \"table\", ? AS year_start, ? AS year_end, ? AS bucket, 5 AS buckets, NULL::VARCHAR AS fingerprint) "
+                  f"TO '{str(manifest.resolve()).replace(chr(39), chr(39)*2)}' (FORMAT PARQUET)",
+                  [year, year, parent])
+          con.close()
+          print('combined', sorted(groups))
+          PY
+      - name: Verify combined rescue cover
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import duckdb
+          manifests = list(Path('out').rglob('shard_manifest.parquet'))
+          assert len(manifests) == 7, manifests
+          rows = duckdb.connect().execute("SELECT year_start, bucket, buckets FROM read_parquet(?) ORDER BY year_start, bucket", [[str(p) for p in manifests]]).fetchall()
+          expected = [(2023,1,5),(2023,3,5),(2024,0,5),(2024,1,5),(2024,2,5),(2024,3,5),(2025,1,5)]
+          assert rows == expected, (rows, expected)
+          print(rows)
+          PY
+      - name: Upload normalized rescue parents
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-failed-parent-rescue-${{ github.run_id }}
+          path: out/**
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 6
