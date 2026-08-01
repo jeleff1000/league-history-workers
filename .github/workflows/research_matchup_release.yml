@@ -11,6 +11,10 @@ on:
         description: Successful 5-bucket modern-season shard run ID
         required: true
         default: '30635338778'
+      rescue_run:
+        description: Optional normalized rescue artifacts run ID for missing modern buckets
+        required: false
+        default: ''
       cache_key:
         description: Public research cache key used for the ops super-table lookup
         required: true
@@ -76,6 +80,15 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: jeleff1000/league-history-workers
           run-id: ${{ inputs.modern_shard_run }}
+
+      - name: Download normalized rescue matchup shards
+        if: ${{ inputs.rescue_run != '' }}
+        uses: actions/download-artifact@v5
+        with:
+          path: shards/modern
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.rescue_run }}
 
       - name: Install bounded dependencies
         run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 requests
