@@ -39,6 +39,8 @@ jobs:
       RESEARCH_ASSEMBLE_THREADS: '2'
       RESEARCH_WIDE_MEMORY_MB: '10000'
       RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
+      RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
+      RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
       RESEARCH_PUBLISH_MEMORY_MB: '10000'
       RESEARCH_PUBLISH_THREADS: '2'
       DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
@@ -108,6 +110,13 @@ jobs:
           weekly = [p for root in roots for p in root.rglob('research_matchup_weekly.parquet')]
           assert len(manifests) == 175, f'expected 175 manifests, found {len(manifests)}'
           assert len(seasons) == len(weekly) == 175, (len(seasons), len(weekly))
+
+      - name: Build population denominator lattices
+        shell: bash
+        run: |
+          python code/scripts/research_cohorts/build_population_denominators.py \
+            --output "${{ github.workspace }}/out/denominators" \
+            --ops-cache "${{ github.workspace }}/research_public_lake/ops_cache.duckdb"
           con = duckdb.connect()
           rows = con.execute(
               "SELECT DISTINCT year_start, year_end FROM read_parquet(?) ORDER BY year_start",
@@ -135,6 +144,9 @@ jobs:
             echo "[release] assembling ${year} from $(( ${#roots[@]} / 2 )) shard roots"
             python code/scripts/research_cohorts/assemble_research_shards.py \
               --table matchup "${roots[@]}" \
+              --denom-season "${{ github.workspace }}/out/denominators/research_matchup_denom_season.parquet" \
+              --denom-week "${{ github.workspace }}/out/denominators/research_matchup_denom_week.parquet" \
+              --pos-grp "${{ github.workspace }}/out/denominators/research_matchup_pos_grp.parquet" \
               --output "${{ github.workspace }}/out/by_year/${year}"
           done
 
