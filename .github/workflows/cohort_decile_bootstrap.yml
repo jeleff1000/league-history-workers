@@ -19,12 +19,17 @@ on:
         description: Bootstrap replicates per estimate
         required: true
         default: '400'
+      only_group:
+        description: Optional single matrix group to run (QB, RB, WR, TE, or K_DEF)
+        required: false
+        default: ''
 
 permissions:
   contents: read
 
 jobs:
   bootstrap:
+    if: ${{ inputs.only_group == '' || matrix.group == inputs.only_group }}
     strategy:
       fail-fast: false
       max-parallel: 5
