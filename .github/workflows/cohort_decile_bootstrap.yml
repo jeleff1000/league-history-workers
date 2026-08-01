@@ -68,6 +68,7 @@ jobs:
             --position '${{ matrix.position }}' \
             --confidence '${{ inputs.confidence }}' \
             --reps '${{ inputs.reps }}' \
+            --memory-mb 10000 \
             --out "out/bootstrap_pooled_${{ matrix.position }}.parquet"
       - name: Upload decile bootstrap shard
         uses: actions/upload-artifact@v4
