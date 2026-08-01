@@ -111,12 +111,6 @@ jobs:
           assert len(manifests) == 175, f'expected 175 manifests, found {len(manifests)}'
           assert len(seasons) == len(weekly) == 175, (len(seasons), len(weekly))
 
-      - name: Build population denominator lattices
-        shell: bash
-        run: |
-          python code/scripts/research_cohorts/build_population_denominators.py \
-            --output "${{ github.workspace }}/out/denominators" \
-            --ops-cache "${{ github.workspace }}/research_public_lake/ops_cache.duckdb"
           con = duckdb.connect()
           rows = con.execute(
               "SELECT DISTINCT year_start, year_end FROM read_parquet(?) ORDER BY year_start",
@@ -128,6 +122,13 @@ jobs:
                            2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025], years
           print(f'validated {len(manifests)} disjoint shard manifests across {len(years)} seasons')
           PY
+
+      - name: Build population denominator lattices
+        shell: bash
+        run: |
+          python code/scripts/research_cohorts/build_population_denominators.py \
+            --output "${{ github.workspace }}/out/denominators" \
+            --ops-cache "${{ github.workspace }}/research_public_lake/ops_cache.duckdb"
 
       - name: Assemble each season separately
         run: |
