@@ -29,7 +29,6 @@ permissions:
 
 jobs:
   bootstrap:
-    if: ${{ inputs.only_group == '' || matrix.group == inputs.only_group }}
     strategy:
       fail-fast: false
       max-parallel: 5
@@ -63,6 +62,7 @@ jobs:
           test ! -e research_public_lake/leagues_snapshot.duckdb
           mkdir -p out
       - name: Build decile bootstrap shards
+        if: ${{ inputs.only_group == '' || matrix.group == inputs.only_group }}
         env:
           PYTHONPATH: ${{ github.workspace }}/code/scripts/research_cohorts
         run: |
@@ -80,6 +80,7 @@ jobs:
               --out "out/bootstrap_pooled_${position}.parquet"
           done
       - name: Upload decile bootstrap shard
+        if: ${{ inputs.only_group == '' || matrix.group == inputs.only_group }}
         uses: actions/upload-artifact@v4
         with:
           name: decile-bootstrap-${{ matrix.group }}-${{ github.run_id }}

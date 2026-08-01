@@ -21,7 +21,6 @@ permissions:
 
 jobs:
   top10:
-    if: ${{ inputs.only_group == '' || matrix.group == inputs.only_group }}
     strategy:
       fail-fast: false
       max-parallel: 5
@@ -55,6 +54,7 @@ jobs:
           test ! -e research_public_lake/leagues_snapshot.duckdb
           mkdir -p out
       - name: Build pooled top10 stability shard
+        if: ${{ inputs.only_group == '' || matrix.group == inputs.only_group }}
         env:
           PYTHONPATH: ${{ github.workspace }}/code/scripts/research_cohorts
         run: |
@@ -69,7 +69,8 @@ jobs:
               --memory-mb 10000 \
               --out "out/top10_pooled_${position}.parquet"
           done
-      - uses: actions/upload-artifact@v4
+      - if: ${{ inputs.only_group == '' || matrix.group == inputs.only_group }}
+        uses: actions/upload-artifact@v4
         with:
           name: cohort-top10-${{ matrix.group }}-${{ github.run_id }}
           path: out/*.parquet
