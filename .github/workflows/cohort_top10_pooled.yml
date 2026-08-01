@@ -26,7 +26,7 @@ jobs:
       max-parallel: 5
       matrix:
         group: ${{ fromJSON(inputs.only_group == '' && '["QB","RB","WR","TE","K_DEF"]' || format('["{0}"]', inputs.only_group)) }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 355
     steps:
       - uses: actions/checkout@v5
