@@ -85,3 +85,53 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 6
+
+      - name: Upload 2023 parent 1 rescue artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-2023-b1-of5-rescue-${{ github.run_id }}
+          path: out/2023_parent1/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload 2023 parent 3 rescue artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-2023-b3-of5-rescue-${{ github.run_id }}
+          path: out/2023_parent3/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload 2024 parent 0 rescue artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-2024-b0-of5-rescue-${{ github.run_id }}
+          path: out/2024_parent0/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload 2024 parent 1 rescue artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-2024-b1-of5-rescue-${{ github.run_id }}
+          path: out/2024_parent1/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload 2024 parent 2 rescue artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-2024-b2-of5-rescue-${{ github.run_id }}
+          path: out/2024_parent2/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload 2024 parent 3 rescue artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-2024-b3-of5-rescue-${{ github.run_id }}
+          path: out/2024_parent3/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload 2025 parent 1 rescue artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-2025-b1-of5-rescue-${{ github.run_id }}
+          path: out/2025_parent1/*
+          if-no-files-found: error
+          retention-days: 14
