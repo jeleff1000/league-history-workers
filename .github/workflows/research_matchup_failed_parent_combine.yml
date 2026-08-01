@@ -77,15 +77,6 @@ jobs:
           assert rows == expected, (rows, expected)
           print(rows)
           PY
-      - name: Upload normalized rescue parents
-        uses: actions/upload-artifact@v4
-        with:
-          name: research-matchup-failed-parent-rescue-${{ github.run_id }}
-          path: out/**
-          if-no-files-found: error
-          retention-days: 14
-          compression-level: 6
-
       - name: Upload 2023 parent 1 rescue artifact
         uses: actions/upload-artifact@v4
         with:
