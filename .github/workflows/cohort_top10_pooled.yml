@@ -19,7 +19,7 @@ jobs:
   top10:
     strategy:
       fail-fast: false
-      max-parallel: 6
+      max-parallel: 3
       matrix:
         position: [QB, RB, WR, TE, K, DEF, ALL]
     runs-on: ubuntu-latest

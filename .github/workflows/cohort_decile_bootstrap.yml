@@ -27,7 +27,7 @@ jobs:
   bootstrap:
     strategy:
       fail-fast: false
-      max-parallel: 15
+      max-parallel: 3
       matrix:
         position: [QB, RB, WR, TE, K, DEF, ALL]
     runs-on: ubuntu-latest
