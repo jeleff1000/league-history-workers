@@ -27,9 +27,9 @@ jobs:
   bootstrap:
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 5
       matrix:
-        position: [QB, RB, WR, TE, K, DEF]
+        group: [QB, RB, WR, TE, K_DEF]
     runs-on: ubuntu-latest
     timeout-minutes: 355
     steps:
@@ -61,19 +61,23 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/code/scripts/research_cohorts
         run: |
-          python code/scripts/research_cohorts/build_cohort_decile_bootstrap.py \
-            --snapshot research_public_lake/corpus_snapshot.duckdb \
-            --ops research_public_lake/ops_cache.duckdb \
-            --years '${{ inputs.years }}' \
-            --position '${{ matrix.position }}' \
-            --confidence '${{ inputs.confidence }}' \
-            --reps '${{ inputs.reps }}' \
-            --memory-mb 10000 \
-            --out "out/bootstrap_pooled_${{ matrix.position }}.parquet"
+          positions='${{ matrix.group }}'
+          if [ "$positions" = "K_DEF" ]; then positions='K DEF'; fi
+          for position in $positions; do
+            python code/scripts/research_cohorts/build_cohort_decile_bootstrap.py \
+              --snapshot research_public_lake/corpus_snapshot.duckdb \
+              --ops research_public_lake/ops_cache.duckdb \
+              --years '${{ inputs.years }}' \
+              --position "$position" \
+              --confidence '${{ inputs.confidence }}' \
+              --reps '${{ inputs.reps }}' \
+              --memory-mb 10000 \
+              --out "out/bootstrap_pooled_${position}.parquet"
+          done
       - name: Upload decile bootstrap shard
         uses: actions/upload-artifact@v4
         with:
-          name: decile-bootstrap-${{ matrix.position }}-${{ github.run_id }}
+          name: decile-bootstrap-${{ matrix.group }}-${{ github.run_id }}
           path: out/*.parquet
           if-no-files-found: error
           retention-days: 30

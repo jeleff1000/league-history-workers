@@ -19,9 +19,9 @@ jobs:
   top10:
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 5
       matrix:
-        position: [QB, RB, WR, TE, K, DEF]
+        group: [QB, RB, WR, TE, K_DEF]
     runs-on: ubuntu-latest
     timeout-minutes: 355
     steps:
@@ -53,16 +53,20 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/code/scripts/research_cohorts
         run: |
-          python code/scripts/research_cohorts/build_cohort_top10_pooled.py \
-            --snapshot research_public_lake/corpus_snapshot.duckdb \
-            --ops research_public_lake/ops_cache.duckdb \
-            --years '${{ inputs.years }}' \
-            --position '${{ matrix.position }}' \
-            --memory-mb 10000 \
-            --out "out/top10_pooled_${{ matrix.position }}.parquet"
+          positions='${{ matrix.group }}'
+          if [ "$positions" = "K_DEF" ]; then positions='K DEF'; fi
+          for position in $positions; do
+            python code/scripts/research_cohorts/build_cohort_top10_pooled.py \
+              --snapshot research_public_lake/corpus_snapshot.duckdb \
+              --ops research_public_lake/ops_cache.duckdb \
+              --years '${{ inputs.years }}' \
+              --position "$position" \
+              --memory-mb 10000 \
+              --out "out/top10_pooled_${position}.parquet"
+          done
       - uses: actions/upload-artifact@v4
         with:
-          name: cohort-top10-${{ matrix.position }}-${{ github.run_id }}
+          name: cohort-top10-${{ matrix.group }}-${{ github.run_id }}
           path: out/*.parquet
           if-no-files-found: error
           retention-days: 30
