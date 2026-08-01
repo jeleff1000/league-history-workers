@@ -66,7 +66,7 @@ jobs:
               --ops research_public_lake/ops_cache.duckdb \
               --years '${{ inputs.years }}' \
               --position "$position" \
-              --memory-mb 6000 \
+              --memory-mb 3000 \
               --out "out/top10_pooled_${position}.parquet"
           done
       - if: ${{ inputs.only_group == '' || matrix.group == inputs.only_group }}
