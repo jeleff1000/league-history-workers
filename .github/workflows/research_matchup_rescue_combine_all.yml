@@ -49,7 +49,7 @@ jobs:
           api = 'https://api.github.com/repos/jeleff1000/league-history-workers/actions/runs'
           headers = {'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json'}
           class NoAuthRedirect(urllib.request.HTTPRedirectHandler):
-              def redirect_request(self, req, newurl, code, msg, headers, origin_req_host, unverifiable):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
                   clean = {k: v for k, v in req.headers.items() if k.lower() != 'authorization'}
                   return urllib.request.Request(newurl, req.data, clean, method=req.get_method())
           opener = urllib.request.build_opener(NoAuthRedirect)
