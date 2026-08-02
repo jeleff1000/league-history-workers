@@ -103,6 +103,13 @@ jobs:
               print(path, got)
           PY
 
+      - name: Fail-fast matchup semantic gate
+        run: |
+          python code/scripts/research_cohorts/validate_research_matchup_shard.py \
+            --out out \
+            --year-start "${{ matrix.year }}" \
+            --year-end "${{ matrix.year }}"
+
       - name: Upload additive population shard
         uses: actions/upload-artifact@v4
         with:

@@ -115,6 +115,14 @@ jobs:
               print(path, got)
           PY
 
+      - name: Fail-fast matchup semantic gate
+        if: ${{ matrix.table == 'matchup' }}
+        run: |
+          python code/scripts/research_cohorts/validate_research_matchup_shard.py \
+            --out out \
+            --year-start "${{ matrix.range.start }}" \
+            --year-end "${{ matrix.range.end }}"
+
       - name: Upload additive shard
         uses: actions/upload-artifact@v4
         with:
