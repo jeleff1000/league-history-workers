@@ -87,7 +87,16 @@ jobs:
           mkdir -p public_parts
           python code/scripts/research_cohorts/split_release_archive.py \
             research-public-lake.tar public_parts --part-size 1800000000
-      - name: Publish private public-lake release
+      # Cache is the authoritative Actions handoff.  Keep it before the optional
+      # private-release upload so a PAT lacking release scope cannot discard a
+      # validated rebuild.
+      - name: Save immutable rebuilt cache
+        uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.output_cache_key }}
+      - name: Publish private public-lake release (optional)
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -97,8 +106,3 @@ jobs:
           gh release upload "${{ inputs.release_tag }}" --repo jeleff1000/yahoo_oauth \
             public_parts/research-public-lake.tar.part-* \
             research_public_lake/ops_cache.duckdb --clobber
-      - name: Save immutable rebuilt cache
-        uses: actions/cache/save@v5
-        with:
-          path: research_public_lake
-          key: ${{ inputs.output_cache_key }}
