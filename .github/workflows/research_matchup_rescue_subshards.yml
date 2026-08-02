@@ -103,6 +103,13 @@ jobs:
               assert got[0] == got[1] == year, (path, got, year)
           PY
 
+      - name: Fail-fast validate matchup shard
+        run: |
+          python code/scripts/research_cohorts/validate_research_matchup_shard.py \
+            --out out \
+            --year-start "${RESEARCH_YEAR_START}" \
+            --year-end "${RESEARCH_YEAR_END}"
+
       - name: Upload additive modulo-10 subshard
         uses: actions/upload-artifact@v4
         with:
