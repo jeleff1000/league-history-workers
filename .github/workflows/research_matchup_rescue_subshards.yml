@@ -23,7 +23,7 @@ jobs:
   matchup:
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 15
       matrix:
         year: ${{ fromJSON(inputs.years) }}
         bucket: ${{ fromJSON(inputs.buckets) }}

@@ -1,0 +1,100 @@
+name: Research Matchup Rescue Combine All
+
+on:
+  workflow_dispatch:
+    inputs:
+      subshard_run:
+        description: Completed modulo-10 rescue subshard run ID
+        required: true
+      years:
+        description: JSON list of seasons to combine
+        required: true
+        default: '[2011,2012,2013,2014,2015,2016,2017,2018,2019,2020,2021,2022,2023,2024,2025]'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  combine:
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        year: ${{ fromJSON(inputs.years) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Download modulo-10 subshards
+        uses: actions/download-artifact@v5
+        with:
+          path: shards/raw
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.subshard_run }}
+
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+
+      - name: Combine modulo-10 subshards into five parent buckets
+        env:
+          RESCUE_YEAR: ${{ matrix.year }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          import duckdb
+
+          year = int(os.environ['RESCUE_YEAR'])
+          raw = Path('shards/raw')
+          out = Path('out')
+          pairs = {0:(0,5), 1:(1,6), 2:(2,7), 3:(3,8), 4:(4,9)}
+          con = duckdb.connect()
+          for parent, residues in pairs.items():
+              target = out / f'research-matchup-{year}-b{parent}'
+              target.mkdir(parents=True, exist_ok=True)
+              for name in ('research_matchup_player_season.parquet',
+                           'research_matchup_weekly.parquet'):
+                  paths = []
+                  for residue in residues:
+                      matches = [p for p in raw.rglob(name)
+                                 if f'{year}-subb{residue}-of10-' in str(p)]
+                      assert len(matches) == 1, (year, residue, matches)
+                      paths.append(str(matches[0]).replace("'", "''"))
+                  quoted = '[' + ','.join("'" + p + "'" for p in paths) + ']'
+                  dest = (target / name).resolve().as_posix().replace("'", "''")
+                  con.execute(
+                      f"COPY (SELECT * FROM read_parquet({quoted}, union_by_name=true)) "
+                      f"TO '{dest}' (FORMAT PARQUET, COMPRESSION ZSTD)"
+                  )
+              manifest = (target / 'shard_manifest.parquet').resolve().as_posix().replace("'", "''")
+              con.execute(
+                  f"COPY (SELECT 'matchup' AS \"table\", {year} AS year_start, "
+                  f"{year} AS year_end, {parent} AS bucket, 5 AS buckets, "
+                  "NULL::VARCHAR AS fingerprint) "
+                  f"TO '{manifest}' (FORMAT PARQUET)"
+              )
+          con.close()
+          print(f'combined year {year} into five parent buckets')
+          PY
+
+      - name: Verify normalized cover
+        run: test "$(find out -name shard_manifest.parquet | wc -l)" -eq 5
+
+      - name: Upload normalized five-way artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-${{ matrix.year }}-normalized-5way-${{ github.sha }}
+          path: out/research-matchup-${{ matrix.year }}-b*/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 6
