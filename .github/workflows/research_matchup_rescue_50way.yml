@@ -23,7 +23,9 @@ jobs:
   matchup:
     strategy:
       fail-fast: false
-      max-parallel: 50
+      # Keep capacity available for combine/validation workflows. The repository
+      # currently provisions about 20 concurrent runners, so 15 avoids starvation.
+      max-parallel: 15
       matrix:
         year: ${{ fromJSON(inputs.years) }}
         bucket: ${{ fromJSON(inputs.buckets) }}
@@ -115,4 +117,3 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 6
-
