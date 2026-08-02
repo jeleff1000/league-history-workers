@@ -123,6 +123,32 @@ jobs:
           print(f'validated {len(manifests)} disjoint shard manifests across {len(years)} seasons')
           PY
 
+      - name: Fail-fast validate every shard before assembly
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          import duckdb
+
+          con = duckdb.connect()
+          manifests = sorted(Path('shards').rglob('shard_manifest.parquet'))
+          for manifest in manifests:
+              year_start, year_end = con.execute(
+                  "SELECT year_start, year_end FROM read_parquet(?) LIMIT 1",
+                  [str(manifest)],
+              ).fetchone()
+              root = manifest.parent
+              print(f"[preflight] {root} {year_start}-{year_end}", flush=True)
+              subprocess.run([
+                  'python', 'code/scripts/research_cohorts/validate_research_matchup_shard.py',
+                  '--out', str(root),
+                  '--year-start', str(year_start),
+                  '--year-end', str(year_end),
+              ], check=True)
+          print(f"[preflight] PASS ({len(manifests)} shards)")
+          PY
+
       - name: Build population denominator lattices
         shell: bash
         run: |
