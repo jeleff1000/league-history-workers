@@ -48,12 +48,17 @@ jobs:
           year = int(os.environ['RESCUE_YEAR'])
           api = 'https://api.github.com/repos/jeleff1000/league-history-workers/actions/runs'
           headers = {'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json'}
+          class NoAuthRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, newurl, code, msg, headers, origin_req_host, unverifiable):
+                  clean = {k: v for k, v in req.headers.items() if k.lower() != 'authorization'}
+                  return urllib.request.Request(newurl, req.data, clean, method=req.get_method())
+          opener = urllib.request.build_opener(NoAuthRedirect)
           out = Path('shards/raw'); out.mkdir(parents=True, exist_ok=True)
           found = []
           page = 1
           while True:
               req = urllib.request.Request(f'{api}/{run_id}/artifacts?per_page=100&page={page}', headers=headers)
-              with urllib.request.urlopen(req) as resp:
+              with opener.open(req) as resp:
                   payload = json.load(resp)
               batch = payload.get('artifacts', [])
               if not batch:
@@ -67,7 +72,7 @@ jobs:
               raise SystemExit(f'expected 10 artifacts for {year}, found {len(found)}: {[a["name"] for a in found]}')
           for artifact in found:
               req = urllib.request.Request(artifact['archive_download_url'], headers=headers)
-              with urllib.request.urlopen(req) as resp:
+              with opener.open(req) as resp:
                   data = resp.read()
               target = out / artifact['name']; target.mkdir(parents=True, exist_ok=True)
               with zipfile.ZipFile(__import__('io').BytesIO(data)) as zf:
