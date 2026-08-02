@@ -1,0 +1,104 @@
+name: Rebuild Research Public Lake After Backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      backfill_run:
+        description: Source playoff/clutch backfill workflow run ID
+        required: true
+      base_cache_key:
+        description: Existing public lake cache containing ops and auxiliary files
+        required: true
+        default: research-public-lake-v3-Linux-20260730
+      output_cache_key:
+        description: New immutable cache key
+        required: true
+      release_tag:
+        description: Private release tag for the rebuilt public lake archive
+        required: true
+      private_repo_ref:
+        description: yahoo_oauth ref containing the snapshot builder and validator
+        required: false
+        default: main
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+      CORPUS_DIR: ${{ github.workspace }}/source_corpus
+
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.private_repo_ref }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Restore base public lake
+        uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.base_cache_key }}
+          fail-on-cache-miss: true
+      - name: Download processed source shards
+        uses: actions/download-artifact@v5
+        with:
+          path: source_results
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.backfill_run }}
+          pattern: research-source-backfill-result-*
+          merge-multiple: true
+      - name: Unpack processed source shards
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$CORPUS_DIR"
+          shopt -s nullglob
+          parts=(source_results/research-source-backfill-result-*.tar)
+          test "${#parts[@]}" -eq 15
+          for part in "${parts[@]}"; do tar -xf "$part" -C "$CORPUS_DIR"; done
+          test -d "$CORPUS_DIR/leagues"
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1
+      - name: Rebuild corpus snapshot with outcome columns
+        run: python code/scripts/sleeper_corpus/build_corpus_snapshot.py
+      - name: Replace corpus in public lake and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mv "$CORPUS_DIR/corpus_snapshot.duckdb" research_public_lake/corpus_snapshot.duckdb
+          python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
+      - name: Archive rebuilt public lake
+        run: |
+          python code/scripts/research_cohorts/archive_research_public_lake.py \
+            research_public_lake research-public-lake.tar
+          mkdir -p public_parts
+          python code/scripts/research_cohorts/split_release_archive.py \
+            research-public-lake.tar public_parts --part-size 1800000000
+      - name: Publish private public-lake release
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "${{ inputs.release_tag }}" --repo jeleff1000/yahoo_oauth >/dev/null 2>&1 || \
+            gh release create "${{ inputs.release_tag }}" --repo jeleff1000/yahoo_oauth \
+              --title "${{ inputs.release_tag }}" --notes "Rebuilt public research lake"
+          gh release upload "${{ inputs.release_tag }}" --repo jeleff1000/yahoo_oauth \
+            public_parts/research-public-lake.tar.part-* \
+            research_public_lake/ops_cache.duckdb --clobber
+      - name: Save immutable rebuilt cache
+        uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.output_cache_key }}
