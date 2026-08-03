@@ -186,7 +186,7 @@ jobs:
               raise SystemExit(f'expected {batches} manifests, found {len(manifests)}')
           con = duckdb.connect()
           rows = con.execute(
-              "SELECT DISTINCT year_start, year_end, bucket, buckets, source_fingerprint "
+              "SELECT DISTINCT year_start, year_end, bucket, buckets, fingerprint "
               "FROM read_parquet(?) ORDER BY bucket",
               [[str(p) for p in manifests]],
           ).fetchall()
