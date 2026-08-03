@@ -85,6 +85,7 @@ jobs:
           import json
           import os
           import time
+          import urllib.parse
           import urllib.request
           import zipfile
           from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -102,9 +103,22 @@ jobs:
               'User-Agent': 'league-history-weighted-assembly',
           }
 
+          class GitHubRedirectHandler(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, fp, code, msg, headers, newurl):
+                  next_headers = dict(request.headers)
+                  if urllib.parse.urlparse(newurl).netloc != urllib.parse.urlparse(request.full_url).netloc:
+                      next_headers.pop('Authorization', None)
+                  return urllib.request.Request(
+                      newurl,
+                      headers=next_headers,
+                      method=request.get_method(),
+                  )
+
+          opener = urllib.request.build_opener(GitHubRedirectHandler)
+
           def get_json(url):
               request = urllib.request.Request(url, headers=headers)
-              with urllib.request.urlopen(request, timeout=120) as response:
+              with opener.open(request, timeout=120) as response:
                   return json.load(response)
 
           artifacts = []
@@ -130,7 +144,7 @@ jobs:
               for attempt in range(4):
                   try:
                       request = urllib.request.Request(item['archive_download_url'], headers=headers)
-                      with urllib.request.urlopen(request, timeout=300) as response:
+                      with opener.open(request, timeout=300) as response:
                           data = response.read()
                       with zipfile.ZipFile(io.BytesIO(data)) as archive:
                           for member in archive.infolist():
