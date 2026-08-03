@@ -55,11 +55,15 @@
            test -s research_public_lake/ops_cache.duckdb
            test ! -e research_public_lake/leagues_snapshot.duckdb
  
-       - name: Build balanced league-season plan
-         env:
-           YEARS: ${{ inputs.years }}
-           BATCHES: ${{ inputs.batches }}
-         run: |
+      - name: Build balanced league-season plan
+        env:
+          YEARS: ${{ inputs.years }}
+          BATCHES: ${{ inputs.batches }}
+          RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
+          RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
+          RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
+          RESEARCH_REF_DIR: ${{ github.workspace }}/research_public_lake
+        run: |
            mapfile -t year_args < <(python -c 'import json,os; print("\n".join(str(x) for x in json.loads(os.environ["YEARS"])))')
            python code/scripts/research_cohorts/build_league_batch_plan.py \
              --years "${year_args[@]}" \
