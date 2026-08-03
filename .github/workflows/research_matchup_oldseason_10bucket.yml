@@ -11,6 +11,10 @@ on:
         description: JSON list of old seasons to split into ten smaller internal buckets
         required: true
         default: '["2010","2009","2008","2007","2006","2005"]'
+      buckets:
+        description: JSON list of modulo-10 bucket IDs to rebuild; defaults to all ten
+        required: true
+        default: '[0,1,2,3,4,5,6,7,8,9]'
 
 permissions:
   contents: read
@@ -22,7 +26,7 @@ jobs:
       max-parallel: 15
       matrix:
         year: ${{ fromJSON(inputs.years) }}
-        bucket: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        bucket: ${{ fromJSON(inputs.buckets) }}
     runs-on: ubuntu-latest
     timeout-minutes: 355
     env:
