@@ -57,6 +57,7 @@ jobs:
         id: artifact_ids
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           EXPECTED_YEAR: ${{ inputs.year }}
           EXPECTED_BATCHES: ${{ inputs.batches }}
         run: |
