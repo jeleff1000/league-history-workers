@@ -89,6 +89,47 @@ jobs:
             draft) python code/scripts/research_cohorts/build_research_draft_cohort.py ;;
           esac
 
+      # WR ROSTER% POOLING. The cohort tables carry the per-position team tier, but a tier is
+      # not an answer -- a cohort with too few leagues has to be served from a pool. These two
+      # steps derive which pool serves each cohort and precompute the value, so the serving
+      # layer is an indexed lookup instead of an aggregate over 15,000 leagues at request time.
+      #
+      # Without them a rebuild produces correct tiers and NO pooling, which is the state this
+      # workflow was in: the scripts existed on main and nothing invoked them.
+      - name: Derive WR roster% pools
+        if: matrix.table == 'matchup'
+        shell: bash
+        run: |
+          python code/scripts/research_cohorts/wr_roster_weekly_pools.py             --snapshot research_public_lake/corpus_snapshot.duckdb             --ops research_public_lake/ops_cache.duckdb             --first-year "${RESEARCH_YEAR_START:-2009}"             --out out/wr_roster_weekly_pools.parquet
+
+      - name: Precompute WR roster% pooled values
+        if: matrix.table == 'matchup'
+        shell: bash
+        run: |
+          python code/scripts/research_cohorts/build_wr_roster_pooled.py             --snapshot research_public_lake/corpus_snapshot.duckdb             --ops research_public_lake/ops_cache.duckdb             --pools out/wr_roster_weekly_pools.parquet             --first-year "${RESEARCH_YEAR_START:-2009}"             --out-dir out
+
+      - name: Gate -- every cohort must resolve to a pool
+        if: matrix.table == 'matchup'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import sys
+          import pandas as pd
+          m = pd.read_parquet("out/wr_roster_pool_map.parquet")
+          v = pd.read_parquet("out/wr_roster_pooled.parquet")
+          unresolved = int(m.pool_key.isna().sum())
+          orphan = len(set(m.pool_key) - set(v.pool_key))
+          print(f"cohort-years {len(m):,} | pools {m.pool_key.nunique()} | "
+                f"values {len(v):,} | years {m.year.min()}-{m.year.max()}")
+          # FAIL LOUDLY. A cohort with no pool renders nothing, and a pool with no values
+          # renders nothing -- both are silent blanks in the UI if this gate is absent.
+          if unresolved:
+              sys.exit(f"FAIL: {unresolved} cohort-years resolve to no pool")
+          if orphan:
+              sys.exit(f"FAIL: {orphan} pools have no precomputed values")
+          print("OK: every cohort resolves to a pool that has values")
+          PY
+
       - name: Verify artifact year bounds
         shell: bash
         run: |
