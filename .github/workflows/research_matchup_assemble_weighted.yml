@@ -1,0 +1,144 @@
+name: Assemble weighted research matchup run
+
+on:
+  workflow_dispatch:
+    inputs:
+      shard_run:
+        description: Successful weighted matchup shard run ID
+        required: true
+      year:
+        description: Season represented by the run
+        required: true
+      batches:
+        description: Expected number of weighted batches
+        required: true
+        default: '256'
+      cache_key:
+        description: Immutable public research cache key
+        required: true
+        default: research-public-lake-v3-Linux-20260730
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      RESEARCH_ASSEMBLE_MEMORY_MB: '12000'
+      RESEARCH_ASSEMBLE_THREADS: '2'
+      RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
+      RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
+      RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Restore immutable public research lake
+        uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+
+      - name: Download weighted shard artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: shards
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.shard_run }}
+
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 requests
+
+      - name: Verify complete weighted coverage
+        shell: bash
+        env:
+          EXPECTED_YEAR: ${{ inputs.year }}
+          EXPECTED_BATCHES: ${{ inputs.batches }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import duckdb
+
+          year = int(os.environ['EXPECTED_YEAR'])
+          batches = int(os.environ['EXPECTED_BATCHES'])
+          manifests = sorted(Path('shards').rglob('shard_manifest.parquet'))
+          if len(manifests) != batches:
+              raise SystemExit(f'expected {batches} manifests, found {len(manifests)}')
+          con = duckdb.connect()
+          rows = con.execute(
+              "SELECT DISTINCT year_start, year_end, bucket, buckets, source_fingerprint "
+              "FROM read_parquet(?) ORDER BY bucket",
+              [[str(p) for p in manifests]],
+          ).fetchall()
+          if len(rows) != batches:
+              raise SystemExit(f'expected {batches} distinct manifest rows, found {len(rows)}')
+          if any(y0 != year or y1 != year for y0, y1, *_ in rows):
+              raise SystemExit(f'manifests do not all represent {year}: {rows[:3]}')
+          if any(width != batches for *_, width, _ in rows):
+              raise SystemExit('manifest batch width mismatch')
+          bucket_ids = [bucket for *_, bucket, width, fingerprint in rows]
+          expected = list(range(batches))
+          if bucket_ids != expected:
+              raise SystemExit(f'missing or duplicate batch IDs: expected 0..{batches-1}, got {bucket_ids}')
+          fingerprints = {fingerprint for *_, fingerprint in rows}
+          if len(fingerprints) != 1:
+              raise SystemExit(f'mixed source fingerprints: {fingerprints}')
+          for name in ('research_matchup_weekly.parquet', 'research_matchup_player_season.parquet'):
+              files = sorted(Path('shards').rglob(name))
+              if len(files) != batches:
+                  raise SystemExit(f'{name}: expected {batches}, found {len(files)}')
+          print(f'PASS: {year} has {batches} disjoint weighted batches, fingerprint={next(iter(fingerprints))}')
+          PY
+
+      - name: Build population denominator lattices
+        run: |
+          mkdir -p out/denominators
+          python code/scripts/research_cohorts/build_population_denominators.py \
+            --output "${{ github.workspace }}/out/denominators" \
+            --ops-cache "${{ github.workspace }}/research_public_lake/ops_cache.duckdb"
+
+      - name: Assemble season
+        shell: bash
+        env:
+          EXPECTED_YEAR: ${{ inputs.year }}
+        run: |
+          set -euo pipefail
+          roots=()
+          while IFS= read -r root; do roots+=(--input "$root"); done < <(
+            find shards -mindepth 1 -maxdepth 2 -type d -name "research-matchup-${EXPECTED_YEAR}-*" -print
+          )
+          test "${#roots[@]}" -gt 0
+          python code/scripts/research_cohorts/assemble_research_shards.py \
+            --table matchup "${roots[@]}" \
+            --denom-season "${{ github.workspace }}/out/denominators/research_matchup_denom_season.parquet" \
+            --denom-week "${{ github.workspace }}/out/denominators/research_matchup_denom_week.parquet" \
+            --pos-grp "${{ github.workspace }}/out/denominators/research_matchup_pos_grp.parquet" \
+            --output "${{ github.workspace }}/out/assembled"
+
+      - name: Upload assembled cache artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-assembled-${{ inputs.year }}-run-${{ inputs.shard_run }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            out/assembled/research_matchup_weekly.parquet
+            out/assembled/research_matchup_player_season.parquet
+            out/assembled/research_matchup_player_career.parquet
+            out/assembled/research_matchup_manifest.parquet
