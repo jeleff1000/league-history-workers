@@ -17,6 +17,8 @@ jobs:
     timeout-minutes: 90
     env:
       RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
+      RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
+      RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
     steps:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5
