@@ -125,6 +125,9 @@ jobs:
         run: |
           python code/scripts/research_cohorts/release_gate.py --matchup-only --replacement-year 2024
           python code/scripts/research_cohorts/release_gate.py --matchup-only --replacement-year 2025
+          # The replacement-year checks protect the newly assembled lanes; this full
+          # population check prevents stale base years from reaching production.
+          python code/scripts/research_cohorts/release_gate.py --matchup-only
       - name: Read-only Fly preflight
         run: python code/scripts/research_cohorts/publish_research_matchup_to_fly.py --bundle "${{ github.workspace }}/out/research_merge_bundle.duckdb"
       - name: Publish verified bundle to Fly
