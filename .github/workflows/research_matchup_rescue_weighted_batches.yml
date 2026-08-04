@@ -15,6 +15,10 @@ on:
        description: Number of balanced league-season batches per year
        required: true
        default: '100'
+     only_batch:
+       description: Optional single batch number for a targeted retry/debug run
+       required: false
+       default: ''
 
 permissions:
  contents: read
@@ -59,6 +63,7 @@ jobs:
        env:
          YEARS: ${{ inputs.years }}
          BATCHES: ${{ inputs.batches }}
+         ONLY_BATCH: ${{ inputs.only_batch }}
          RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
          RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
          RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
@@ -71,8 +76,16 @@ jobs:
            --out plan/league_batch_plan.parquet
          python - <<'PY'
          import json
+         import os
          import pathlib
          matrix = json.loads(pathlib.Path("plan/matrix.json").read_text())
+         only = os.environ.get("ONLY_BATCH", "").strip()
+         if only:
+             n = int(only)
+             matrix = [x for x in matrix if int(x["batch"]) == n]
+             if not matrix:
+                 raise SystemExit(f"batch {n} not present in plan")
+             pathlib.Path("plan/matrix.json").write_text(json.dumps(matrix))
          if not matrix:
              raise SystemExit("empty rescue matrix")
          print(f"planned {len(matrix)} build jobs")
@@ -204,4 +217,3 @@ jobs:
          if-no-files-found: error
          retention-days: 14
          compression-level: 6
-
