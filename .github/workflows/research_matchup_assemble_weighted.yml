@@ -6,6 +6,10 @@ on:
       shard_run:
         description: Successful weighted matchup shard run ID
         required: true
+      supplemental_run:
+        description: Optional rescue run containing replacement shard artifacts
+        required: false
+        default: ''
       year:
         description: Season represented by the run
         required: true
@@ -60,13 +64,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_YEAR: ${{ inputs.year }}
           EXPECTED_BATCHES: ${{ inputs.batches }}
+          SUPPLEMENTAL_RUN: ${{ inputs.supplemental_run }}
         run: |
           set -euo pipefail
           prefix="research-matchup-${EXPECTED_YEAR}-batch"
-          ids="$(gh api --paginate \
-            "/repos/jeleff1000/league-history-workers/actions/runs/${{ inputs.shard_run }}/artifacts?per_page=100" \
-            --jq ".artifacts[] | select(.name | startswith(\"${prefix}\")) | .id" \
-            | paste -sd, -)"
+          runs="${{ inputs.shard_run }}"
+          if [ -n "${SUPPLEMENTAL_RUN}" ]; then runs="${runs},${SUPPLEMENTAL_RUN}"; fi
+          ids="$(for run in ${runs//,/ }; do
+            gh api --paginate \
+              "/repos/jeleff1000/league-history-workers/actions/runs/${run}/artifacts?per_page=100" \
+              --jq ".artifacts[] | select(.name | startswith(\"${prefix}\")) | .id"
+          done | sort -u | paste -sd, -)"
           count="$(tr ',' '\n' <<<"${ids}" | grep -c .)"
           test "${count}" -eq "${EXPECTED_BATCHES}"
           echo "ids=${ids}" >> "${GITHUB_OUTPUT}"
@@ -77,6 +85,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           SHARD_RUN: ${{ inputs.shard_run }}
+          SUPPLEMENTAL_RUN: ${{ inputs.supplemental_run }}
           EXPECTED_YEAR: ${{ inputs.year }}
           EXPECTED_BATCHES: ${{ inputs.batches }}
         run: |
@@ -95,7 +104,6 @@ jobs:
           run_id = os.environ['SHARD_RUN']
           prefix = f"research-matchup-{os.environ['EXPECTED_YEAR']}-batch"
           expected = int(os.environ['EXPECTED_BATCHES'])
-          api = f"https://api.github.com/repos/jeleff1000/league-history-workers/actions/runs/{run_id}/artifacts"
           headers = {
               'Authorization': f'Bearer {token}',
               'Accept': 'application/vnd.github+json',
@@ -121,15 +129,22 @@ jobs:
               with opener.open(request, timeout=120) as response:
                   return json.load(response)
 
-          artifacts = []
-          page = 1
-          while True:
-              payload = get_json(f'{api}?per_page=100&page={page}')
-              page_items = [x for x in payload.get('artifacts', []) if x['name'].startswith(prefix)]
-              artifacts.extend(page_items)
-              if len(payload.get('artifacts', [])) < 100:
-                  break
-              page += 1
+          artifacts_by_name = {}
+          runs = [run_id]
+          if os.environ.get('SUPPLEMENTAL_RUN', '').strip():
+              runs.append(os.environ['SUPPLEMENTAL_RUN'].strip())
+          for source_run in runs:
+              api = f"https://api.github.com/repos/jeleff1000/league-history-workers/actions/runs/{source_run}/artifacts"
+              page = 1
+              while True:
+                  payload = get_json(f'{api}?per_page=100&page={page}')
+                  for item in payload.get('artifacts', []):
+                      if item['name'].startswith(prefix):
+                          artifacts_by_name[item['name']] = item
+                  if len(payload.get('artifacts', [])) < 100:
+                      break
+                  page += 1
+          artifacts = list(artifacts_by_name.values())
           if len(artifacts) != expected:
               raise SystemExit(f'expected {expected} source artifacts, found {len(artifacts)}')
           print(f'found {len(artifacts)} source artifacts; downloading in parallel', flush=True)
