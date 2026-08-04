@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       base_release_run:
-        description: Prior verified release containing 1997-2024 and superseded 2025
+        description: Prior verified release containing the historical base and superseded 2025
         required: true
         default: '30724060099'
       assembled_2025_run:
