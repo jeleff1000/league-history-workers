@@ -1,0 +1,47 @@
+name: Audit research team schedule grain
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        description: Immutable public research lake cache key
+        required: true
+        default: research-public-lake-v3-Linux-20260730
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - run: |
+          test -s research_public_lake/corpus_snapshot.duckdb
+          mkdir -p out
+          python code/scripts/research_cohorts/audit_team_schedule_grain.py \
+            --snapshot research_public_lake/corpus_snapshot.duckdb \
+            --out out/team_schedule_grain.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: team-schedule-grain-${{ github.run_id }}
+          path: out/team_schedule_grain.csv
+          if-no-files-found: error
+          retention-days: 14
