@@ -44,6 +44,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: team-schedule-grain-${{ github.run_id }}
-          path: out/team_schedule_grain.csv
+          path: out/team_schedule_*.csv
           if-no-files-found: error
           retention-days: 14
