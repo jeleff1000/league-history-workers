@@ -4,8 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       shard_run:
-        description: Completed old-season 10-bucket matchup run
+        description: Comma-separated completed old-season 10-bucket matchup runs
         required: true
+      assembled_runs:
+        description: Optional comma-separated runs containing complete weighted year assemblies
+        required: false
+        default: ''
       years:
         description: JSON list of rebuilt seasons
         required: true
@@ -50,7 +54,8 @@ jobs:
       - name: Download all requested historical shards
         env:
           GH_TOKEN: ${{ github.token }}
-          SHARD_RUN: ${{ inputs.shard_run }}
+          SHARD_RUNS: ${{ inputs.shard_run }}
+          ASSEMBLED_RUNS: ${{ inputs.assembled_runs }}
           YEARS: ${{ inputs.years }}
         shell: bash
         run: |
@@ -60,7 +65,9 @@ jobs:
           from concurrent.futures import ThreadPoolExecutor, as_completed
           from pathlib import Path
           years = set(json.loads(os.environ['YEARS']))
-          token, run_id = os.environ['GH_TOKEN'], os.environ['SHARD_RUN']
+          token = os.environ['GH_TOKEN']
+          shard_runs = [x.strip() for x in os.environ['SHARD_RUNS'].split(',') if x.strip()]
+          assembled_runs = [x.strip() for x in os.environ['ASSEMBLED_RUNS'].split(',') if x.strip()]
           headers = {'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'}
           class Redirect(urllib.request.HTTPRedirectHandler):
               def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -68,19 +75,25 @@ jobs:
                   if urllib.parse.urlparse(newurl).netloc != urllib.parse.urlparse(req.full_url).netloc: h.pop('Authorization', None)
                   return urllib.request.Request(newurl, req.data, h, method=req.get_method())
           opener = urllib.request.build_opener(Redirect)
-          api = f'https://api.github.com/repos/jeleff1000/league-history-workers/actions/runs/{run_id}/artifacts'
-          artifacts, page = [], 1
-          while True:
-              req = urllib.request.Request(f'{api}?per_page=100&page={page}', headers=headers)
-              with opener.open(req, timeout=120) as resp: payload = json.load(resp)
-              batch = payload.get('artifacts', [])
-              for item in batch:
+          artifacts = []
+          def run_artifacts(run_id):
+              found, page = [], 1
+              api = f'https://api.github.com/repos/jeleff1000/league-history-workers/actions/runs/{run_id}/artifacts'
+              while True:
+                  req = urllib.request.Request(f'{api}?per_page=100&page={page}', headers=headers)
+                  with opener.open(req, timeout=120) as resp: payload = json.load(resp)
+                  batch = payload.get('artifacts', [])
+                  found.extend(batch)
+                  if len(batch) < 100: return found
+                  page += 1
+          for run_id in shard_runs:
+              for item in run_artifacts(run_id):
                   m = re.fullmatch(r'research-matchup-(\d{4})-b\d+-of10-[0-9a-f]+', item['name'])
                   if m and int(m.group(1)) in years: artifacts.append(item)
-              if len(batch) < 100: break
-              page += 1
-          expected = 10 * len(years)
-          if len(artifacts) != expected: raise SystemExit(f'expected {expected} shard artifacts, found {len(artifacts)}')
+          for run_id in assembled_runs:
+              for item in run_artifacts(run_id):
+                  if re.fullmatch(r'research-matchup-assembled-\d{4}-run-\d+', item['name']): artifacts.append(item)
+          if not artifacts: raise SystemExit('no shard or assembled artifacts found')
           out = Path('shards'); out.mkdir(parents=True, exist_ok=True)
           def download(item):
               target = out / item['name']; target.mkdir(parents=True, exist_ok=True)
