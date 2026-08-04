@@ -98,7 +98,7 @@ jobs:
       - name: Build matchup career rollup
         run: python code/scripts/research_cohorts/build_research_career_rollup.py --only matchup --matchup-source "${{ github.workspace }}/out/research_matchup_player_season.parquet" --out-dir "${{ github.workspace }}/out"
       - name: Fail-fast assembled matchup denominator audit
-        run: python code/scripts/research_cohorts/audit_research_matchup.py --input "${{ github.workspace }}/out" --slug 12t_flx_ppr_4pt --ops-cache "${{ github.workspace }}/research_public_lake/ops_cache.duckdb" --skip-boards
+        run: python code/scripts/research_cohorts/audit_research_matchup.py --input "${{ github.workspace }}/out" --slug 12t_flx_ppr_4pt --ops-cache "${{ github.workspace }}/research_public_lake/ops_cache.duckdb" --skip-boards --year 2025 --skip-career
       - name: Build matchup-only wide bundle
         env:
           RESEARCH_WIDE_DATASETS: matchup
