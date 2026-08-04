@@ -1,0 +1,202 @@
+name: Assemble Shared Weighted Research Matchup Rescue
+
+on:
+  workflow_dispatch:
+    inputs:
+      shared_run:
+        description: Completed shared weighted rescue run ID
+        required: true
+      source_runs:
+        description: Comma-separated prior weighted runs containing retained batches
+        required: false
+        default: '30958076526,30958077932'
+      years:
+        description: JSON list of shared seasons
+        required: true
+        default: '[2022,2023]'
+      batches:
+        description: Shared matrix width
+        required: true
+        default: '256'
+      cache_key:
+        description: Immutable public research cache key
+        required: true
+        default: research-public-lake-v3-Linux-20260730
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SHARED_RUN: ${{ inputs.shared_run }}
+      SOURCE_RUNS: ${{ inputs.source_runs }}
+      YEARS: ${{ inputs.years }}
+      BATCHES: ${{ inputs.batches }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - name: Download shared and retained source artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import io, json, os, re, urllib.request, zipfile
+          from pathlib import Path
+
+          token = os.environ['GH_TOKEN']
+          repo = 'jeleff1000/league-history-workers'
+          years = {int(x) for x in json.loads(os.environ['YEARS'])}
+          batches = int(os.environ['BATCHES'])
+          run_ids = [os.environ['SHARED_RUN']] + [x.strip() for x in os.environ.get('SOURCE_RUNS','').split(',') if x.strip()]
+          headers = {'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json', 'User-Agent': 'shared-rescue-assembly'}
+
+          def get(url):
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req, timeout=120) as response: return json.load(response)
+          def download(item, target):
+              req = urllib.request.Request(item['archive_download_url'], headers=headers)
+              with urllib.request.urlopen(req, timeout=300) as response: data = response.read()
+              target.mkdir(parents=True, exist_ok=True)
+              with zipfile.ZipFile(io.BytesIO(data)) as archive: archive.extractall(target)
+
+          found = {}
+          for run in run_ids:
+              page = 1
+              while True:
+                  payload = get(f'https://api.github.com/repos/{repo}/actions/runs/{run}/artifacts?per_page=100&page={page}')
+                  items = payload.get('artifacts', [])
+                  for item in items:
+                      name = item['name']
+                      if run == os.environ['SHARED_RUN'] and name == f'research-shared-league-batch-plan-{run}':
+                          found[('plan', 0)] = item
+                      elif run == os.environ['SHARED_RUN']:
+                          m = re.fullmatch(r'research-matchup-shared-batch(\d+)-of(\d+)-[0-9a-f]+', name)
+                          if m and int(m.group(2)) == batches: found[('shared', int(m.group(1)))] = item
+                      else:
+                          m = re.fullmatch(r'research-matchup-(\d+)-batch(\d+)-of(\d+)-[0-9a-f]+', name)
+                          if m and int(m.group(1)) in years and int(m.group(3)) == batches:
+                              found[(int(m.group(1)), int(m.group(2)))] = item
+                  if len(items) < 100: break
+                  page += 1
+          shared = [k for k in found if k[0] == 'shared']
+          if len(shared) != batches:
+              raise SystemExit(f'expected {batches} shared artifacts, found {len(shared)}')
+          for key, item in found.items():
+              target = Path('plan_artifact') if key[0] == 'plan' else Path('shards') / ('shared' if key[0] == 'shared' else f'{key[0]}-batch{key[1]}')
+              download(item, target)
+          print(f'downloaded {len(found)} artifacts ({len(shared)} shared plus retained source batches)')
+          PY
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 requests
+      - name: Verify shared plan and source disjointness
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          import duckdb
+          years = {int(x) for x in json.loads(os.environ['YEARS'])}
+          con = duckdb.connect()
+          plan = next(Path('plan_artifact').rglob('league_batch_plan.parquet'))
+          covered = list(Path('plan_artifact').rglob('covered_plan.parquet'))
+          plan_rows = con.execute(
+              "SELECT db_name, year, COUNT(*) AS n FROM read_parquet(?) GROUP BY 1,2",
+              [[str(p) for p in [plan, *covered]]],
+          ).fetchall()
+          if any(row[2] != 1 for row in plan_rows):
+              raise SystemExit(f'duplicate plan keys: {[r for r in plan_rows if r[2] != 1][:5]}')
+          os.environ['RESEARCH_SNAPSHOT_PATH'] = str(Path('research_public_lake/corpus_snapshot.duckdb').resolve())
+          os.environ['RESEARCH_CORPUS_PATH'] = str(Path('research_public_lake/no-second-source.duckdb').resolve())
+          os.environ['RESEARCH_OPS_CACHE_PATH'] = str(Path('research_public_lake/ops_cache.duckdb').resolve())
+          os.environ['RESEARCH_REF_DIR'] = str(Path('research_public_lake').resolve())
+          os.environ['RESEARCH_YEAR_START'] = str(min(years)); os.environ['RESEARCH_YEAR_END'] = str(max(years))
+          sys.path.insert(0, str(Path('code/scripts/sleeper_corpus').resolve()))
+          from local_reader import LocalReader
+          reader = LocalReader()
+          expected = set(reader.con.execute(
+              "SELECT DISTINCT ls.db_name, ls.year FROM public.league_settings ls "
+              "JOIN _lg_has_data d USING (db_name, year) WHERE ls.year IN (SELECT UNNEST(?))",
+              [sorted(years)],
+          ).fetchall())
+          planned = {(str(db), int(year)) for db, year, _ in plan_rows}
+          if planned != expected:
+              raise SystemExit(f'plan population mismatch: planned={len(planned)} expected={len(expected)} missing={len(expected-planned)} extra={len(planned-expected)}')
+          print(f'plan population PASS: {len(planned):,} disjoint eligible league-seasons')
+          # Each source artifact is a completed old plan bucket. The new shared plan
+          # was constructed after subtracting those exact keys; the explicit manifest
+          # check below ensures every new shard spans only the requested years.
+          for path in Path('shards').rglob('*.parquet'):
+              cols = {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{path.as_posix()}')").fetchall()}
+              if 'year' not in cols: continue
+              lo, hi, n = con.execute(f"SELECT MIN(year), MAX(year), COUNT(*) FROM read_parquet('{path.as_posix()}')").fetchone()
+              if n and not (lo in years and hi in years): raise SystemExit((path, lo, hi))
+          print(f'shard year validation PASS for {sorted(years)}')
+          PY
+      - name: Build population denominator lattices
+        run: |
+          mkdir -p out/denominators
+          python code/scripts/research_cohorts/build_population_denominators.py --output "$GITHUB_WORKSPACE/out/denominators" --ops-cache "$GITHUB_WORKSPACE/research_public_lake/ops_cache.duckdb"
+      - name: Assemble additive matchup population
+        shell: bash
+        run: |
+          set -euo pipefail
+          find shards -name shard_manifest.parquet -delete
+          roots=()
+          while IFS= read -r root; do roots+=(--input "$root"); done < <(find shards -mindepth 1 -maxdepth 2 -type d -print)
+          test "${#roots[@]}" -gt 0
+          python code/scripts/research_cohorts/assemble_research_shards.py --table matchup --allow-unmanifested "${roots[@]}" \
+            --denom-season "$GITHUB_WORKSPACE/out/denominators/research_matchup_denom_season.parquet" \
+            --denom-week "$GITHUB_WORKSPACE/out/denominators/research_matchup_denom_week.parquet" \
+            --pos-grp "$GITHUB_WORKSPACE/out/denominators/research_matchup_pos_grp.parquet" \
+            --output "$GITHUB_WORKSPACE/out/assembled"
+      - name: Split verified assembly into year artifacts
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          import duckdb
+          years = [int(x) for x in json.loads(os.environ['YEARS'])]
+          con = duckdb.connect()
+          src = Path('out/assembled')
+          for year in years:
+              dest = Path('out') / str(year); dest.mkdir(parents=True, exist_ok=True)
+              for name in ('research_matchup_player_season.parquet','research_matchup_weekly.parquet'):
+                  source = src / name
+                  target = dest / name
+                  con.execute(f"COPY (SELECT * FROM read_parquet(?) WHERE CAST(year AS INTEGER)=?) TO ? (FORMAT PARQUET, COMPRESSION ZSTD)", [str(source), year, str(target)])
+                  n = con.execute("SELECT COUNT(*) FROM read_parquet(?)", [str(target)]).fetchone()[0]
+                  if not n: raise SystemExit(f'{target} is empty')
+              print(f'{year}: split PASS')
+          PY
+      - name: Upload assembled 2022 slice
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-assembled-2022-run-${{ inputs.shared_run }}
+          path: out/2022/*
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload assembled 2023 slice
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-assembled-2023-run-${{ inputs.shared_run }}
+          path: out/2023/*
+          if-no-files-found: error
+          retention-days: 30

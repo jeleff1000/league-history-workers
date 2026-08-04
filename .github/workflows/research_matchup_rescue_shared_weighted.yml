@@ -1,0 +1,234 @@
+name: Research Matchup Shared Weighted Rescue
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        description: Immutable public-only corpus + ops cache key
+        required: true
+        default: research-public-lake-v3-Linux-20260730
+      years:
+        description: JSON list of seasons sharing the one matrix
+        required: true
+        default: '[2022,2023]'
+      batches:
+        description: Total matrix width across all requested seasons
+        required: true
+        default: '256'
+      source_runs:
+        description: Comma-separated prior weighted runs whose completed batches are retained
+        required: false
+        default: '30958076526,30958077932'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.emit.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1
+      - name: Verify public-only inputs
+        run: |
+          test -s research_public_lake/corpus_snapshot.duckdb
+          test -s research_public_lake/ops_cache.duckdb
+          test ! -e research_public_lake/leagues_snapshot.duckdb
+      - name: Download completed source plans and identify covered batches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUNS: ${{ inputs.source_runs }}
+          YEARS: ${{ inputs.years }}
+          BATCHES: ${{ inputs.batches }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import io, json, os, re, urllib.request, zipfile
+          from pathlib import Path
+          import pyarrow as pa
+          import pyarrow.parquet as pq
+
+          token = os.environ['GH_TOKEN']
+          repo = 'jeleff1000/league-history-workers'
+          years = {int(x) for x in json.loads(os.environ['YEARS'])}
+          batches = int(os.environ['BATCHES'])
+          runs = [x.strip() for x in os.environ.get('SOURCE_RUNS', '').split(',') if x.strip()]
+          headers = {'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json', 'User-Agent': 'shared-rescue-plan'}
+
+          def get(url):
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req, timeout=120) as response:
+                  return json.load(response)
+
+          def download(item, target):
+              req = urllib.request.Request(item['archive_download_url'], headers=headers)
+              with urllib.request.urlopen(req, timeout=300) as response:
+                  data = response.read()
+              target.mkdir(parents=True, exist_ok=True)
+              with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                  archive.extractall(target)
+
+          covered = []
+          source_dir = Path('source_plans')
+          for run in runs:
+              artifacts = get(f'https://api.github.com/repos/{repo}/actions/runs/{run}/artifacts?per_page=100')['artifacts']
+              plan = next((a for a in artifacts if a['name'] == f'research-league-batch-plan-{run}'), None)
+              if plan is None:
+                  print(f'no plan artifact for source run {run}; skipping', flush=True)
+                  continue
+              root = source_dir / run
+              download(plan, root)
+              plan_path = next(root.rglob('league_batch_plan.parquet'))
+              done = set()
+              for item in artifacts:
+                  m = re.fullmatch(r'research-matchup-(\d+)-batch(\d+)-of(\d+)-[0-9a-f]+', item['name'])
+                  if m and int(m.group(1)) in years and int(m.group(3)) == batches:
+                      done.add((int(m.group(1)), int(m.group(2))))
+              table = pq.read_table(plan_path)
+              keep = [i for i, (year, batch) in enumerate(zip(table['year'].to_pylist(), table['batch'].to_pylist())) if (int(year), int(batch)) in done]
+              if keep:
+                  filtered = root / 'covered_plan.parquet'
+                  pq.write_table(table.take(pa.array(keep)), filtered, compression='zstd')
+                  covered.append(str(filtered.resolve()))
+                  print(f'run {run}: retaining {len(keep)} completed source batches', flush=True)
+          Path('covered_plans.txt').write_text('\n'.join(covered) + ('\n' if covered else ''))
+          PY
+      - name: Build one shared unresolved 256-batch plan
+        env:
+          YEARS: ${{ inputs.years }}
+          BATCHES: ${{ inputs.batches }}
+          RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
+          RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
+          RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
+          RESEARCH_REF_DIR: ${{ github.workspace }}/research_public_lake
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t year_args < <(python -c 'import json,os; print("\n".join(str(x) for x in json.loads(os.environ["YEARS"])))')
+          excludes=()
+          if test -s covered_plans.txt; then
+            while IFS= read -r p; do excludes+=(--exclude-plan "$p"); done < covered_plans.txt
+          fi
+          python code/scripts/research_cohorts/build_league_batch_plan.py \
+            --years "${year_args[@]}" --batches "${BATCHES}" \
+            --out plan/league_batch_plan.parquet "${excludes[@]}"
+          python - <<'PY'
+          import json, os, pathlib
+          batches = int(os.environ['BATCHES'])
+          matrix = [{'batch': i} for i in range(batches)]
+          pathlib.Path('matrix-output.json').write_text(json.dumps(matrix, separators=(',', ':')))
+          print(f'planned one shared matrix with {len(matrix)} build jobs')
+          PY
+      - name: Upload shared plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-shared-league-batch-plan-${{ github.run_id }}
+          path: |
+            plan/league_batch_plan.parquet
+            plan/summary.json
+            covered_plans.txt
+            source_plans
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
+      - id: emit
+        shell: bash
+        run: echo "matrix=$(cat matrix-output.json)" >> "$GITHUB_OUTPUT"
+
+  matchup:
+    needs: plan
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      RESEARCH_YEAR_START: 2022
+      RESEARCH_YEAR_END: 2023
+      RESEARCH_LEAGUE_BATCHES: ${{ inputs.batches }}
+      RESEARCH_LEAGUE_BATCH: ${{ matrix.batch }}
+      RESEARCH_LEAGUE_BATCH_PLAN: ${{ github.workspace }}/plan/league_batch_plan.parquet
+      RESEARCH_OUT_DIR: ${{ github.workspace }}/out
+      RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
+      RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
+      RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
+      RESEARCH_REF_DIR: ${{ github.workspace }}/research_public_lake
+      RESEARCH_NO_CACHE: '1'
+      RESEARCH_READER_MEMORY_MB: '10000'
+      RESEARCH_MATCHUP_MEMORY_MB: '10000'
+      RESEARCH_MATCHUP_THREADS: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-shared-league-batch-plan-${{ github.run_id }}
+          path: plan
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1
+      - name: Verify inputs
+        run: |
+          test -s research_public_lake/corpus_snapshot.duckdb
+          test -s research_public_lake/ops_cache.duckdb
+          test -s plan/league_batch_plan.parquet
+          mkdir -p out
+      - name: Build shared weighted batch
+        run: python code/scripts/research_cohorts/build_research_matchup_cohort.py
+      - name: Validate shard year range
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import duckdb
+          con = duckdb.connect()
+          for path in Path('out').glob('*.parquet'):
+              cols = {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{path.as_posix()}')").fetchall()}
+              if 'year' not in cols: continue
+              lo, hi, n = con.execute(f"SELECT MIN(year), MAX(year), COUNT(*) FROM read_parquet('{path.as_posix()}')").fetchone()
+              if n: assert 2022 <= lo <= hi <= 2023, (path, lo, hi)
+          print('shared shard year bounds PASS')
+          PY
+      - name: Fail-fast validate matchup shard
+        run: python code/scripts/research_cohorts/validate_research_matchup_shard.py --out out --year-start 2022 --year-end 2023
+      - name: Upload shared weighted batch
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-shared-batch${{ matrix.batch }}-of${{ inputs.batches }}-${{ github.sha }}
+          path: out/*.parquet
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
+
