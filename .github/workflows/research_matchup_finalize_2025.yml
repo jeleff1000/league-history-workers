@@ -104,7 +104,7 @@ jobs:
           RESEARCH_WIDE_DATASETS: matchup
         run: python code/scripts/research_cohorts/build_wide_bundle.py
       - name: Fail-fast assembled semantic release gate
-        run: python code/scripts/research_cohorts/release_gate.py --matchup-only
+        run: python code/scripts/research_cohorts/release_gate.py --matchup-only --replacement-year 2025
       - name: Read-only Fly preflight
         run: python code/scripts/research_cohorts/publish_research_matchup_to_fly.py --bundle "${{ github.workspace }}/out/research_merge_bundle.duckdb"
       - name: Publish verified bundle to Fly
