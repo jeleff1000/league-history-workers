@@ -1,0 +1,120 @@
+name: Finalize research matchup with complete 2025
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_release_run:
+        description: Prior verified release containing 1997-2024 and superseded 2025
+        required: true
+        default: '30724060099'
+      assembled_2025_run:
+        description: Complete assembled 2025 artifact run
+        required: true
+        default: '30875541902'
+      cache_key:
+        description: Immutable public research cache key
+        required: true
+        default: research-public-lake-v3-Linux-20260730
+      publish:
+        description: Apply the verified bundle to Fly production
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      RESEARCH_OUT_DIR: ${{ github.workspace }}/out
+      RESEARCH_ASSEMBLE_MEMORY_MB: '12000'
+      RESEARCH_ASSEMBLE_THREADS: '2'
+      RESEARCH_WIDE_MEMORY_MB: '10000'
+      RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
+      RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
+      RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
+      RESEARCH_PUBLISH_MEMORY_MB: '10000'
+      RESEARCH_PUBLISH_THREADS: '2'
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Restore immutable public research lake
+        uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - name: Download prior verified release
+        uses: actions/download-artifact@v5
+        with:
+          path: base_release
+          github-token: ${{ github.token }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.base_release_run }}
+          name: research-matchup-release-${{ inputs.base_release_run }}
+      - name: Download complete 2025 assembly
+        uses: actions/download-artifact@v5
+        with:
+          path: replacement_2025
+          github-token: ${{ github.token }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.assembled_2025_run }}
+          name: research-matchup-assembled-2025-run-${{ inputs.assembled_2025_run }}
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 requests
+      - name: Replace only 2025 and validate source grains
+        run: |
+          mkdir -p out
+          python code/scripts/research_cohorts/finalize_matchup_2025.py --base base_release --replacement replacement_2025 --out out
+      - name: Create matchup research database
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import duckdb
+          out=Path('out'); con=duckdb.connect(str(out/'research_cohorts.duckdb'))
+          con.execute("CREATE TABLE matchup AS SELECT * FROM read_parquet(?)", [str(out/'research_matchup_player_season.parquet')])
+          con.execute("CREATE TABLE matchup_weekly AS SELECT * FROM read_parquet(?)", [str(out/'research_matchup_weekly.parquet')])
+          con.close()
+          PY
+      - name: Build matchup career rollup
+        run: python code/scripts/research_cohorts/build_research_career_rollup.py --only matchup --matchup-source "${{ github.workspace }}/out/research_matchup_player_season.parquet" --out-dir "${{ github.workspace }}/out"
+      - name: Fail-fast assembled matchup denominator audit
+        run: python code/scripts/research_cohorts/audit_research_matchup.py --input "${{ github.workspace }}/out" --slug 12t_flx_ppr_4pt --ops-cache "${{ github.workspace }}/research_public_lake/ops_cache.duckdb" --skip-boards
+      - name: Build matchup-only wide bundle
+        env:
+          RESEARCH_WIDE_DATASETS: matchup
+        run: python code/scripts/research_cohorts/build_wide_bundle.py
+      - name: Fail-fast assembled semantic release gate
+        run: python code/scripts/research_cohorts/release_gate.py
+      - name: Read-only Fly preflight
+        run: python code/scripts/research_cohorts/publish_research_matchup_to_fly.py --bundle "${{ github.workspace }}/out/research_merge_bundle.duckdb"
+      - name: Publish verified bundle to Fly
+        if: ${{ inputs.publish }}
+        run: python code/scripts/research_cohorts/publish_research_matchup_to_fly.py --bundle "${{ github.workspace }}/out/research_merge_bundle.duckdb" --apply --i-understand-this-writes-prod
+      - name: Upload final release evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-final-2025-${{ github.run_id }}
+          path: |
+            out/research_matchup_player_season.parquet
+            out/research_matchup_weekly.parquet
+            out/matchup_career.parquet
+            out/research_merge_bundle.duckdb
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
