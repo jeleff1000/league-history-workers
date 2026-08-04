@@ -200,7 +200,7 @@ jobs:
       - uses: actions/download-artifact@v5
         with:
           name: research-shared-league-batch-plan-${{ github.run_id }}
-          path: plan
+          path: .
       - uses: actions/cache/restore@v5
         with:
           path: research_public_lake
