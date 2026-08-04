@@ -62,7 +62,7 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-          import io, json, os, re, urllib.request, zipfile
+          import io, json, os, re, urllib.parse, urllib.request, zipfile
           from pathlib import Path
           import pyarrow as pa
           import pyarrow.parquet as pq
@@ -79,9 +79,18 @@ jobs:
               with urllib.request.urlopen(req, timeout=120) as response:
                   return json.load(response)
 
+          class NoAuthRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, fp, code, msg, headers, newurl):
+                  next_headers = dict(request.headers)
+                  if urllib.parse.urlparse(newurl).netloc != urllib.parse.urlparse(request.full_url).netloc:
+                      next_headers.pop('Authorization', None)
+                  return urllib.request.Request(newurl, headers=next_headers, method=request.get_method())
+
+          opener = urllib.request.build_opener(NoAuthRedirect)
+
           def download(item, target):
               req = urllib.request.Request(item['archive_download_url'], headers=headers)
-              with urllib.request.urlopen(req, timeout=300) as response:
+              with opener.open(req, timeout=300) as response:
                   data = response.read()
               target.mkdir(parents=True, exist_ok=True)
               with zipfile.ZipFile(io.BytesIO(data)) as archive:
@@ -231,4 +240,3 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           compression-level: 6
-
