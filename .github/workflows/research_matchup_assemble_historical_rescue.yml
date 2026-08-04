@@ -1,0 +1,132 @@
+name: Assemble historical matchup rescue
+
+on:
+  workflow_dispatch:
+    inputs:
+      shard_run:
+        description: Completed old-season 10-bucket matchup run
+        required: true
+      years:
+        description: JSON list of rebuilt seasons
+        required: true
+        default: '[2003,2004,2005,2006,2007,2008,2009,2010,2018,2019,2020,2021,2022,2023]'
+      cache_key:
+        description: Immutable public research cache key
+        required: true
+        default: research-public-lake-v3-Linux-20260730
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      RESEARCH_OUT_DIR: ${{ github.workspace }}/out
+      RESEARCH_ASSEMBLE_MEMORY_MB: '12000'
+      RESEARCH_ASSEMBLE_THREADS: '2'
+      RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
+      RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
+      RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Restore immutable public research lake
+        uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - name: Download all requested historical shards
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHARD_RUN: ${{ inputs.shard_run }}
+          YEARS: ${{ inputs.years }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import io, json, os, re, urllib.parse, urllib.request, zipfile
+          from concurrent.futures import ThreadPoolExecutor, as_completed
+          from pathlib import Path
+          years = set(json.loads(os.environ['YEARS']))
+          token, run_id = os.environ['GH_TOKEN'], os.environ['SHARD_RUN']
+          headers = {'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'}
+          class Redirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  h = dict(req.headers)
+                  if urllib.parse.urlparse(newurl).netloc != urllib.parse.urlparse(req.full_url).netloc: h.pop('Authorization', None)
+                  return urllib.request.Request(newurl, req.data, h, method=req.get_method())
+          opener = urllib.request.build_opener(Redirect)
+          api = f'https://api.github.com/repos/jeleff1000/league-history-workers/actions/runs/{run_id}/artifacts'
+          artifacts, page = [], 1
+          while True:
+              req = urllib.request.Request(f'{api}?per_page=100&page={page}', headers=headers)
+              with opener.open(req, timeout=120) as resp: payload = json.load(resp)
+              batch = payload.get('artifacts', [])
+              for item in batch:
+                  m = re.fullmatch(r'research-matchup-(\d{4})-b\d+-of10-[0-9a-f]+', item['name'])
+                  if m and int(m.group(1)) in years: artifacts.append(item)
+              if len(batch) < 100: break
+              page += 1
+          expected = 10 * len(years)
+          if len(artifacts) != expected: raise SystemExit(f'expected {expected} shard artifacts, found {len(artifacts)}')
+          out = Path('shards'); out.mkdir(parents=True, exist_ok=True)
+          def download(item):
+              target = out / item['name']; target.mkdir(parents=True, exist_ok=True)
+              req = urllib.request.Request(item['archive_download_url'], headers=headers)
+              with opener.open(req, timeout=300) as resp: data = resp.read()
+              with zipfile.ZipFile(io.BytesIO(data)) as zf: zf.extractall(target)
+              return item['name']
+          with ThreadPoolExecutor(max_workers=8) as pool:
+              for i, future in enumerate(as_completed([pool.submit(download, a) for a in artifacts]), 1): print(f'downloaded {i}/{len(artifacts)}: {future.result()}', flush=True)
+          PY
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1
+      - name: Build population denominator lattices
+        run: |
+          mkdir -p out/denominators
+          python code/scripts/research_cohorts/build_population_denominators.py --output out/denominators --ops-cache research_public_lake/ops_cache.duckdb
+      - name: Assemble historical replacement
+        run: |
+          roots=()
+          while IFS= read -r root; do roots+=(--input "$root"); done < <(find shards -mindepth 1 -maxdepth 2 -type d -name 'research-matchup-*')
+          python code/scripts/research_cohorts/assemble_research_shards.py --table matchup "${roots[@]}" --allow-unmanifested --denom-season out/denominators/research_matchup_denom_season.parquet --denom-week out/denominators/research_matchup_denom_week.parquet --pos-grp out/denominators/research_matchup_pos_grp.parquet --output out/assembled
+          mkdir -p out/replacement
+          cp out/assembled/research_matchup_player_season.parquet out/replacement/
+          cp out/assembled/research_matchup_weekly.parquet out/replacement/
+      - name: Verify replacement years and expected-record identity
+        env:
+          YEARS: ${{ inputs.years }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          import duckdb
+          years = sorted(json.loads(os.environ['YEARS'])); con = duckdb.connect()
+          for name in ('research_matchup_player_season.parquet','research_matchup_weekly.parquet'):
+              path = Path('out/replacement') / name
+              got = [r[0] for r in con.execute('SELECT DISTINCT CAST(year AS INTEGER) FROM read_parquet(?) ORDER BY 1', [str(path)]).fetchall()]
+              if got != years: raise SystemExit(f'{name}: years {got} != {years}')
+              bad = con.execute('SELECT COUNT(*) FROM read_parquet(?) WHERE expected_wins IS NOT NULL AND expected_losses IS NOT NULL AND expected_starts IS NOT NULL AND ABS(expected_wins + expected_losses - expected_starts) > 0.0002', [str(path)]).fetchone()[0]
+              if bad: raise SystemExit(f'{name}: {bad} expected-record failures')
+              print(f'PASS {name}: {got}, identity failures={bad}')
+          PY
+      - name: Upload historical replacement artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-assembled-historical-run-${{ github.run_id }}
+          path: out/replacement/*.parquet
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
