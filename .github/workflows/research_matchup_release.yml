@@ -99,6 +99,17 @@ jobs:
       - name: Install bounded dependencies
         run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 requests
 
+      - name: Retire superseded 2025 shard set
+        if: ${{ inputs.rescue_run != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p shards/superseded_2025
+          find shards/modern -mindepth 1 -maxdepth 1 -type d \
+            -name 'research-matchup-2025-b*-of5-*' -print \
+            -exec mv -t shards/superseded_2025 -- {} +
+          test "$(find shards/superseded_2025 -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 5
+
       - name: Verify shard manifest before merge
         shell: bash
         run: |
@@ -112,8 +123,11 @@ jobs:
           manifests = [p for root in roots for p in root.rglob('shard_manifest.parquet')]
           seasons = [p for root in roots for p in root.rglob('research_matchup_player_season.parquet')]
           weekly = [p for root in roots for p in root.rglob('research_matchup_weekly.parquet')]
-          assert len(manifests) == 175, f'expected 175 manifests, found {len(manifests)}'
-          assert len(seasons) == len(weekly) == 175, (len(seasons), len(weekly))
+          expected_manifests = 426 if '${{ inputs.rescue_run }}' else 175
+          assert len(manifests) == expected_manifests, (
+              expected_manifests, len(manifests))
+          assert len(seasons) == len(weekly) == expected_manifests, (
+              len(seasons), len(weekly))
 
           con = duckdb.connect()
           rows = con.execute(
