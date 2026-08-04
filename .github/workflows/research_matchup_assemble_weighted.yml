@@ -131,8 +131,9 @@ jobs:
 
           artifacts_by_name = {}
           runs = [run_id]
-          if os.environ.get('SUPPLEMENTAL_RUN', '').strip():
-              runs.append(os.environ['SUPPLEMENTAL_RUN'].strip())
+          supplemental = os.environ.get('SUPPLEMENTAL_RUN', '').strip()
+          if supplemental:
+              runs.extend(part.strip() for part in supplemental.split(',') if part.strip())
           for source_run in runs:
               api = f"https://api.github.com/repos/jeleff1000/league-history-workers/actions/runs/{source_run}/artifacts"
               page = 1
