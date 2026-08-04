@@ -23,6 +23,10 @@ on:
         description: Source shard run ID embedded in the assembled 2024 artifact name
         required: true
         default: '0'
+      assembled_historical_run:
+        description: Optional assembled replacement for rebuilt pre-2024 seasons
+        required: false
+        default: '0'
       cache_key:
         description: Immutable public research cache key
         required: true
@@ -95,12 +99,23 @@ jobs:
           repository: jeleff1000/league-history-workers
           run-id: ${{ inputs.assembled_2024_run }}
           name: research-matchup-assembled-2024-run-${{ inputs.assembled_2024_source_run }}
+      - name: Download complete historical assembly
+        if: ${{ inputs.assembled_historical_run != '0' }}
+        uses: actions/download-artifact@v5
+        with:
+          path: replacement_historical
+          github-token: ${{ github.token }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.assembled_historical_run }}
+          name: research-matchup-assembled-historical-run-${{ inputs.assembled_historical_run }}
       - name: Install bounded dependencies
         run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 requests
       - name: Replace only 2025 and validate source grains
         run: |
           mkdir -p out
-          python code/scripts/research_cohorts/finalize_matchup_2025.py --base base_release --replacement replacement_2025 --replacement-2024 replacement_2024 --out out
+          args=(--base base_release --replacement replacement_2025 --replacement-2024 replacement_2024 --out out)
+          if [[ -d replacement_historical ]]; then args+=(--replacement-historical replacement_historical); fi
+          python code/scripts/research_cohorts/finalize_matchup_2025.py "${args[@]}"
       - name: Create matchup research database
         run: |
           python - <<'PY'
@@ -115,6 +130,7 @@ jobs:
         run: python code/scripts/research_cohorts/build_research_career_rollup.py --only matchup --matchup-source "${{ github.workspace }}/out/research_matchup_player_season.parquet" --out-dir "${{ github.workspace }}/out"
       - name: Fail-fast assembled matchup denominator audit
         run: |
+          python code/scripts/research_cohorts/audit_research_matchup.py --input "${{ github.workspace }}/out" --slug 12t_flx_ppr_4pt --ops-cache "${{ github.workspace }}/research_public_lake/ops_cache.duckdb" --skip-boards --skip-career
           python code/scripts/research_cohorts/audit_research_matchup.py --input "${{ github.workspace }}/out" --slug 12t_flx_ppr_4pt --ops-cache "${{ github.workspace }}/research_public_lake/ops_cache.duckdb" --skip-boards --year 2024 --skip-career
           python code/scripts/research_cohorts/audit_research_matchup.py --input "${{ github.workspace }}/out" --slug 12t_flx_ppr_4pt --ops-cache "${{ github.workspace }}/research_public_lake/ops_cache.duckdb" --skip-boards --year 2025 --skip-career
       - name: Build matchup-only wide bundle
