@@ -8,9 +8,13 @@ on:
         required: true
         default: '30724060099'
       assembled_2025_run:
-        description: Complete assembled 2025 artifact run
+        description: Run that uploaded the complete assembled 2025 artifact
         required: true
         default: '30875541902'
+      assembled_2025_source_run:
+        description: Source shard run ID embedded in the assembled artifact name
+        required: true
+        default: '30869488653'
       cache_key:
         description: Immutable public research cache key
         required: true
@@ -74,7 +78,7 @@ jobs:
           github-token: ${{ github.token }}
           repository: jeleff1000/league-history-workers
           run-id: ${{ inputs.assembled_2025_run }}
-          name: research-matchup-assembled-2025-run-${{ inputs.assembled_2025_run }}
+          name: research-matchup-assembled-2025-run-${{ inputs.assembled_2025_source_run }}
       - name: Install bounded dependencies
         run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 requests
       - name: Replace only 2025 and validate source grains
