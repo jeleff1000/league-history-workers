@@ -56,6 +56,7 @@ jobs:
             --corpus research_public_lake/no-second-source.duckdb \
             --db-names '${{ inputs.db_names }}' \
             --crosswalk research_public_lake/native_id_crosswalk.parquet \
+            --espn-map code/ops_data/public/espn_nfl_player_map.parquet \
             --out out/native_identity_audit.json
       - uses: actions/upload-artifact@v4
         with:
