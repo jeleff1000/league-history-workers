@@ -1,0 +1,69 @@
+name: Research player row audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260805-identity-repair-final5-cdfd7934d
+      player:
+        required: true
+        default: Jeff Wilkins
+      year:
+        required: true
+        default: "2003"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pandas==2.2.3
+      - name: Query research lake
+        env:
+          PLAYER: ${{ inputs.player }}
+          YEAR: ${{ inputs.year }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          import duckdb
+          con = duckdb.connect()
+          con.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          rows = con.execute("""
+            SELECT db_name, year, week, player, NFL_player_id, platform, manager,
+                   franchise_id, is_started, is_rostered, win, loss, tie,
+                   is_playoffs, is_championship, championship, champion,
+                   playoff_round, playoff_seed, final_playoff_seed,
+                   team_made_playoffs
+            FROM lake.public.player_fantasy
+            WHERE year = ? AND lower(player) = lower(?)
+            ORDER BY db_name, week, manager
+          """, [int(os.environ['YEAR']), os.environ['PLAYER']]).fetchdf().to_dict('records')
+          started = [r for r in rows if int(r.get('is_started') or 0) == 1]
+          result = {'player': os.environ['PLAYER'], 'year': int(os.environ['YEAR']), 'rows': rows,
+                    'row_count': len(rows), 'started_row_count': len(started),
+                    'started_leagues': len({r.get('db_name') for r in started}),
+                    'playoff_starts': sum(bool(r.get('is_playoffs')) for r in started),
+                    'championship_starts': sum(int(r.get('is_championship') or 0) == 1 for r in started),
+                    'championship_signal_leagues': len({r.get('db_name') for r in rows if r.get('is_championship') is not None})}
+          Path('research_player_audit.json').write_text(json.dumps(result, indent=2, default=str))
+          print(json.dumps({k:v for k,v in result.items() if k != 'rows'}, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-player-audit-${{ github.run_id }}
+          path: research_player_audit.json
+          if-no-files-found: error
