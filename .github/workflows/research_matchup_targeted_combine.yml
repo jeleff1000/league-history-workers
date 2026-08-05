@@ -1,0 +1,50 @@
+name: Combine targeted matchup shards
+
+on:
+  workflow_dispatch:
+    inputs:
+      targeted_run:
+        description: Successful targeted matchup rebuild run ID
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  combine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v5
+        with:
+          path: targeted_shards
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.targeted_run }}
+          pattern: research-matchup-targeted-*
+          merge-multiple: false
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1
+      - name: Assemble focused additive matchup result
+        run: |
+          mkdir -p out
+          python code/scripts/research_cohorts/assemble_research_shards.py \
+            --input targeted_shards --output out --table matchup
+      - name: Upload focused combined artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-targeted-combined-${{ github.run_id }}
+          path: out/research_matchup_*.parquet
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 6
