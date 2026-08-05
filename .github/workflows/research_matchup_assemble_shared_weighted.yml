@@ -37,6 +37,12 @@ jobs:
       SOURCE_RUNS: ${{ inputs.source_runs }}
       YEARS: ${{ inputs.years }}
       BATCHES: ${{ inputs.batches }}
+      RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
+      RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
+      RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
+      RESEARCH_REF_DIR: ${{ github.workspace }}/research_public_lake
+      RESEARCH_YEAR_START: '2022'
+      RESEARCH_YEAR_END: '2023'
     steps:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5
