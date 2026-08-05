@@ -72,7 +72,9 @@ jobs:
           python fantasy_football_data_scripts/build_ops_cache.py \
             --output ops_cache/ops_cache.duckdb \
             --update-existing \
-            --max-workers 4
+            # Two concurrent 1,086-column responses keeps Fly responsive;
+            # four workers caused sustained 503/504 retry storms.
+            --max-workers 2
 
       - name: Validate ops cache
         run: |
