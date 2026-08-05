@@ -13,7 +13,7 @@ on:
       years:
         description: JSON list of rebuilt seasons
         required: true
-        default: '[2003,2004,2005,2006,2007,2008,2009,2010,2018,2019,2020,2021,2022,2023]'
+        default: '[2003,2004,2005,2006,2007,2008,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018,2019,2020,2021,2022,2023,2024,2025]'
       cache_key:
         description: Immutable public research cache key
         required: true
@@ -92,12 +92,29 @@ jobs:
                   if m and int(m.group(1)) in years: artifacts.append(item)
           for run_id in assembled_runs:
               for item in run_artifacts(run_id):
-                  if re.fullmatch(r'research-matchup-assembled-\d{4}-run-\d+', item['name']): artifacts.append(item)
+                  name = item['name']
+                  # Older rescue outputs used normalized five-way names. They
+                  # are raw shard parents and must go through the denominator
+                  # assembler, not the final-format merge below.
+                  normalized = re.fullmatch(r'research-matchup-(\d{4})-normalized-5way-[0-9a-f]+', name)
+                  if normalized and int(normalized.group(1)) in years:
+                      artifacts.append(item)
+                      continue
+                  # Some completed multi-year assemblies predate the
+                  # assembled-YYYY naming convention. Their contents are
+                  # final-format parquet and belong in assembled_sources.
+                  legacy_final = re.fullmatch(
+                      r'research-matchup-(?:2011-2013|2014-2015|2016-2017)-[0-9a-f]+', name)
+                  if re.fullmatch(r'research-matchup-assembled-\d{4}-run-\d+', name) or legacy_final:
+                      artifacts.append(item)
           if not artifacts: raise SystemExit('no shard or assembled artifacts found')
           out = Path('shards'); out.mkdir(parents=True, exist_ok=True)
           assembled_out = Path('assembled_sources'); assembled_out.mkdir(parents=True, exist_ok=True)
           def download(item):
-              root = assembled_out if item['name'].startswith('research-matchup-assembled-') else out
+              name = item['name']
+              legacy_final = re.fullmatch(
+                  r'research-matchup-(?:2011-2013|2014-2015|2016-2017)-[0-9a-f]+', name)
+              root = assembled_out if (name.startswith('research-matchup-assembled-') or legacy_final) else out
               target = root / item['name']; target.mkdir(parents=True, exist_ok=True)
               req = urllib.request.Request(item['archive_download_url'], headers=headers)
               with opener.open(req, timeout=300) as resp: data = resp.read()
