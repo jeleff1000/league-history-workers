@@ -11,6 +11,14 @@ on:
         description: JSON list of seasons sharing the one matrix
         required: true
         default: '[2022,2023]'
+      year_start:
+        description: First season in the requested years
+        required: true
+        default: '2022'
+      year_end:
+        description: Last season in the requested years
+        required: true
+        default: '2023'
       batches:
         description: Total matrix width across all requested seasons
         required: true
@@ -173,8 +181,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 355
     env:
-      RESEARCH_YEAR_START: 2022
-      RESEARCH_YEAR_END: 2023
+      RESEARCH_YEAR_START: ${{ inputs.year_start }}
+      RESEARCH_YEAR_END: ${{ inputs.year_end }}
       RESEARCH_LEAGUE_BATCHES: ${{ inputs.batches }}
       RESEARCH_LEAGUE_BATCH: ${{ matrix.batch }}
       RESEARCH_LEAGUE_BATCH_PLAN: ${{ github.workspace }}/plan/league_batch_plan.parquet
@@ -221,17 +229,18 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
+          import os
           import duckdb
           con = duckdb.connect()
           for path in Path('out').glob('*.parquet'):
               cols = {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{path.as_posix()}')").fetchall()}
               if 'year' not in cols: continue
               lo, hi, n = con.execute(f"SELECT MIN(year), MAX(year), COUNT(*) FROM read_parquet('{path.as_posix()}')").fetchone()
-              if n: assert 2022 <= lo <= hi <= 2023, (path, lo, hi)
+              if n: assert int(os.environ['RESEARCH_YEAR_START']) <= lo <= hi <= int(os.environ['RESEARCH_YEAR_END']), (path, lo, hi)
           print('shared shard year bounds PASS')
           PY
       - name: Fail-fast validate matchup shard
-        run: python code/scripts/research_cohorts/validate_research_matchup_shard.py --out out --year-start 2022 --year-end 2023
+        run: python code/scripts/research_cohorts/validate_research_matchup_shard.py --out out --year-start ${{ inputs.year_start }} --year-end ${{ inputs.year_end }}
       - name: Upload shared weighted batch
         uses: actions/upload-artifact@v4
         with:

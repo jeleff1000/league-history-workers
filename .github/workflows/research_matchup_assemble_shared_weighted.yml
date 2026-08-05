@@ -14,6 +14,14 @@ on:
         description: JSON list of shared seasons
         required: true
         default: '[2022,2023]'
+      year_start:
+        description: First season in the requested years
+        required: true
+        default: '2022'
+      year_end:
+        description: Last season in the requested years
+        required: true
+        default: '2023'
       batches:
         description: Shared matrix width
         required: true
@@ -41,8 +49,8 @@ jobs:
       RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
       RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
       RESEARCH_REF_DIR: ${{ github.workspace }}/research_public_lake
-      RESEARCH_YEAR_START: '2022'
-      RESEARCH_YEAR_END: '2023'
+      RESEARCH_YEAR_START: ${{ inputs.year_start }}
+      RESEARCH_YEAR_END: ${{ inputs.year_end }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5
@@ -201,7 +209,16 @@ jobs:
                   if not n: raise SystemExit(f'{target} is empty')
               print(f'{year}: split PASS')
           PY
+      - name: Upload assembled 2021 slice
+        if: contains(inputs.years, '2021')
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-assembled-2021-run-${{ inputs.shared_run }}
+          path: out/2021/*
+          if-no-files-found: error
+          retention-days: 30
       - name: Upload assembled 2022 slice
+        if: contains(inputs.years, '2022')
         uses: actions/upload-artifact@v4
         with:
           name: research-matchup-assembled-2022-run-${{ inputs.shared_run }}
@@ -209,6 +226,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Upload assembled 2023 slice
+        if: contains(inputs.years, '2023')
         uses: actions/upload-artifact@v4
         with:
           name: research-matchup-assembled-2023-run-${{ inputs.shared_run }}
