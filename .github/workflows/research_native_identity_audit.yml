@@ -46,6 +46,7 @@ jobs:
           gh release download research-native-id-crosswalk-v4 \
             --repo jeleff1000/yahoo_oauth \
             --pattern native_id_crosswalk.parquet \
+            --clobber \
             --dir research_public_lake
       - run: python -m pip install duckdb==1.5.1
       - name: Audit native identity repairability
