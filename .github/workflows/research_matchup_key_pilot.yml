@@ -1,0 +1,44 @@
+name: Pilot matchup key coverage
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+      db_name:
+        required: true
+      year:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - run: >-
+          python code/scripts/research_cohorts/diagnose_matchup_key_pilot.py
+          --root research_public_lake
+          --db-name '${{ inputs.db_name }}'
+          --year '${{ inputs.year }}'
+          --out pilot.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: matchup-key-pilot-${{ github.run_id }}
+          path: pilot.json
