@@ -1,7 +1,8 @@
 name: Seed Ops Cache
 
-# Standalone/manual publisher for the two-table ___ops DuckDB cache.
-# Import workflows only restore this GitHub Actions cache and read it.
+# Resumable publisher for the two-table ___ops DuckDB cache.
+# Checkpoint caches survive failed runs; import workflows consume the newest
+# validated immutable generation cache.
 
 on:
   workflow_dispatch:
@@ -16,16 +17,31 @@ permissions:
   actions: write
   contents: read
 
-jobs:
-  seed:
-    runs-on: ubuntu-latest
-    # A cold/schema-changing rebuild transfers ~1.2M rows across ~1,000
-    # columns. The updater overlaps year downloads, but still needs headroom
-    # for a full cache rebuild and GitHub cache upload.
-    timeout-minutes: 180
+env:
+  CHECKPOINT_CACHE_PREFIX: ops-cache-checkpoint-v1-Linux-
 
-    env:
-      OPS_CACHE_KEY: ops-cache-v4-Linux-manual-v1
+jobs:
+  checkpoint:
+    name: Checkpoint ${{ matrix.batch_id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - batch_id: nfl_player_stats_all-batch-00
+          - batch_id: nfl_player_stats_all-batch-01
+          - batch_id: nfl_player_stats_all-batch-02
+          - batch_id: nfl_player_stats_all-batch-03
+          - batch_id: nfl_player_stats_all-batch-04
+          - batch_id: nfl_player_stats_all-batch-05
+          - batch_id: nfl_player_stats_all-batch-06
+          - batch_id: nfl_player_stats_all-batch-07
+          - batch_id: nfl_player_stats_all-batch-08
+          - batch_id: nfl_player_stats_all-batch-09
+          - batch_id: nfl_player_stats_all-batch-10
+          - batch_id: player_bio-all
 
     steps:
       - name: Checkout code
@@ -40,29 +56,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Restore current ops cache
-        id: ops-cache
+      - name: Restore checkpoint
         uses: actions/cache/restore@v5
         with:
-          path: ops_cache
-          key: ${{ env.OPS_CACHE_KEY }}
+          path: ops_cache/checkpoints
+          key: ${{ env.CHECKPOINT_CACHE_PREFIX }}${{ matrix.batch_id }}
 
-      - name: Log seed context
-        run: |
-          echo "[ops-cache] key=${OPS_CACHE_KEY}"
-          echo "[ops-cache] restore-hit=${{ steps.ops-cache.outputs.cache-hit }}"
-          echo "[ops-cache] github-run-id=${{ github.run_id }}"
-          echo "[ops-cache] yahoo_oauth_ref=${{ github.event.inputs.yahoo_oauth_ref || 'main' }}"
-          echo "[ops-cache] yahoo_oauth_sha=$(git rev-parse HEAD)"
-          if [ -s ops_cache/ops_cache.duckdb ]; then
-            echo "[ops-cache] existing-size-bytes=$(stat -c%s ops_cache/ops_cache.duckdb)"
-            echo "[ops-cache] existing-size-human=$(du -h ops_cache/ops_cache.duckdb | cut -f1)"
-            python -c 'import duckdb; conn = duckdb.connect("ops_cache/ops_cache.duckdb", read_only=True); print("[ops-cache] existing-cache-readable=true"); conn.close()'
-          else
-            echo "[ops-cache] existing-cache-file=missing"
-          fi
-
-      - name: Upsert ops cache from Fly
+      - name: Download or reuse checkpoint
+        id: download
         env:
           DATABASE_BACKEND: fly
           DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
@@ -70,75 +71,156 @@ jobs:
         run: |
           pip install duckdb==1.5.1 pandas
           python fantasy_football_data_scripts/build_ops_cache.py \
-            --output ops_cache/ops_cache.duckdb \
-            --update-existing \
-            # The proven path is one large response at a time. Parallel
-            # 1,086-column requests cause Fly 503/504 retry storms.
-            --max-workers 1
+            --output ops_cache/unused.duckdb \
+            --checkpoint-dir ops_cache/checkpoints \
+            --batch-id '${{ matrix.batch_id }}' \
+            --status-file ops_cache/checkpoints/${{ matrix.batch_id }}.status.json
+          reused=$(python -c "import json; print(str(json.load(open('ops_cache/checkpoints/${{ matrix.batch_id }}.status.json'))['reused']).lower())")
+          echo "reused=$reused" >> "$GITHUB_OUTPUT"
 
-      - name: Validate ops cache
+      - name: Replace invalid checkpoint cache
+        if: steps.download.outputs.reused != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_PROMPT_DISABLED: 1
+        run: |
+          key="${CHECKPOINT_CACHE_PREFIX}${{ matrix.batch_id }}"
+          gh cache list --repo jeleff1000/league-history-workers --key "$key" --json id |
+            jq -r '.[].id' |
+            while read -r id; do
+              [ -z "$id" ] || gh api --method DELETE "/repos/jeleff1000/league-history-workers/actions/caches/$id"
+            done
+
+      - name: Save checkpoint
+        if: steps.download.outputs.reused != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ${{ env.CHECKPOINT_CACHE_PREFIX }}${{ matrix.batch_id }}
+
+  assemble:
+    name: Assemble and publish ops cache
+    needs: checkpoint
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      OPS_CACHE_PREFIX: ops-cache-v5-Linux-manual-
+      OPS_CACHE_KEY: ops-cache-v5-Linux-manual-${{ github.run_id }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ github.event.inputs.yahoo_oauth_ref || 'main' }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Restore stats checkpoint 00
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v1-Linux-nfl_player_stats_all-batch-00
+      - name: Restore stats checkpoint 01
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v1-Linux-nfl_player_stats_all-batch-01
+      - name: Restore stats checkpoint 02
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v1-Linux-nfl_player_stats_all-batch-02
+      - name: Restore stats checkpoint 03
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v1-Linux-nfl_player_stats_all-batch-03
+      - name: Restore stats checkpoint 04
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v1-Linux-nfl_player_stats_all-batch-04
+      - name: Restore stats checkpoint 05
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v1-Linux-nfl_player_stats_all-batch-05
+      - name: Restore stats checkpoint 06
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v1-Linux-nfl_player_stats_all-batch-06
+      - name: Restore stats checkpoint 07
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v1-Linux-nfl_player_stats_all-batch-07
+      - name: Restore stats checkpoint 08
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v1-Linux-nfl_player_stats_all-batch-08
+      - name: Restore stats checkpoint 09
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v1-Linux-nfl_player_stats_all-batch-09
+      - name: Restore stats checkpoint 10
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v1-Linux-nfl_player_stats_all-batch-10
+      - name: Restore player bio checkpoint
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v1-Linux-player_bio-all
+
+      - name: Assemble checkpoints
+        run: |
+          pip install duckdb==1.5.1 pandas
+          python fantasy_football_data_scripts/build_ops_cache.py \
+            --output ops_cache/ops_cache.duckdb \
+            --checkpoint-dir ops_cache/checkpoints \
+            --assemble
+
+      - name: Validate assembled cache
         run: |
           test -s ops_cache/ops_cache.duckdb
           python - <<'PYEOF'
           import duckdb
-
-          required = [
-              ("nfl_historical", "nfl_player_stats_all"),
-              ("nfl_historical", "player_bio"),
-          ]
           conn = duckdb.connect("ops_cache/ops_cache.duckdb", read_only=True)
           try:
-              for schema, table in required:
+              for schema, table in (("nfl_historical", "nfl_player_stats_all"), ("nfl_historical", "player_bio")):
                   count = conn.execute(f"SELECT COUNT(*) FROM {schema}.{table}").fetchone()[0]
                   if count <= 0:
                       raise SystemExit(f"{schema}.{table} is empty")
                   print(f"{schema}.{table}: {count:,} rows")
-              data_tables = {
-                  (schema, table)
-                  for schema, table in conn.execute("""
-                      SELECT table_schema, table_name
-                      FROM information_schema.tables
-                      WHERE table_type = 'BASE TABLE'
-                        AND table_schema != 'main'
-                      ORDER BY table_schema, table_name
-                  """).fetchall()
-              }
-              extra = data_tables - set(required)
-              if extra:
-                  raise SystemExit(f"Unexpected data tables in ops cache: {sorted(extra)}")
           finally:
               conn.close()
           PYEOF
-          echo "[ops-cache] final-size-bytes=$(stat -c%s ops_cache/ops_cache.duckdb)"
-          echo "[ops-cache] final-size-human=$(du -h ops_cache/ops_cache.duckdb | cut -f1)"
+          echo "[ops-cache] final-size=$(du -h ops_cache/ops_cache.duckdb | cut -f1)"
           echo "[ops-cache] final-sha256=$(sha256sum ops_cache/ops_cache.duckdb | awk '{print $1}')"
-          ls -lh ops_cache/ops_cache.duckdb
 
-      - name: Delete previous ops cache key
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          ids="$(gh cache list \
-            --repo jeleff1000/league-history-workers \
-            --key "$OPS_CACHE_KEY" \
-            --json id \
-            --jq '.[].id')"
-          if [ -z "$ids" ]; then
-            echo "[ops-cache] previous-cache-ids=none"
-          fi
-          for id in $ids; do
-            echo "[ops-cache] deleting-previous-cache-id=${id}"
-            gh cache delete "$id" \
-              --repo jeleff1000/league-history-workers \
-              --confirm
-          done
-
-      - name: Save ops cache
+      - name: Save immutable canonical generation
         uses: actions/cache/save@v5
         with:
-          path: ops_cache
+          path: ops_cache/ops_cache.duckdb
           key: ${{ env.OPS_CACHE_KEY }}
 
-      - name: Log saved ops cache key
+      - name: Remove superseded canonical generations
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_PROMPT_DISABLED: 1
         run: |
-          echo "[ops-cache] saved-key=${OPS_CACHE_KEY}"
+          gh cache list --repo jeleff1000/league-history-workers --key "$OPS_CACHE_PREFIX" --json id,key |
+            jq -r --arg keep "$OPS_CACHE_KEY" '.[] | select(.key != $keep) | .id' |
+            while read -r id; do
+              [ -z "$id" ] || gh api --method DELETE "/repos/jeleff1000/league-history-workers/actions/caches/$id"
+            done
+          echo "[ops-cache] published=$OPS_CACHE_KEY"

@@ -85,12 +85,14 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ops_cache
-          key: ops-cache-v4-${{ runner.os }}-manual-v1
+          key: ops-cache-v5-${{ runner.os }}-manual-request-${{ github.run_id }}
+          restore-keys: |
+            ops-cache-v5-${{ runner.os }}-manual-
           fail-on-cache-miss: true
 
       - name: Log cached ops cache
         run: |
-          echo "[ops-cache] key=ops-cache-v4-${{ runner.os }}-manual-v1"
+          echo "[ops-cache] key-prefix=ops-cache-v5-${{ runner.os }}-manual-"
           echo "[ops-cache] restore-hit=${{ steps.ops-cache.outputs.cache-hit }}"
           echo "[ops-cache] OPS_CACHE_PATH=${OPS_CACHE_PATH}"
           test -s "${OPS_CACHE_PATH}" || {

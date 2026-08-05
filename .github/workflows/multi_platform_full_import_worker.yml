@@ -88,7 +88,9 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ops_cache
-          key: ops-cache-v4-${{ runner.os }}-manual-v1
+          key: ops-cache-v5-${{ runner.os }}-manual-request-${{ github.run_id }}
+          restore-keys: |
+            ops-cache-v5-${{ runner.os }}-manual-
           fail-on-cache-miss: true
 
       - name: Log cached ops cache
