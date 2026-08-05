@@ -94,7 +94,44 @@ jobs:
                       checks['playoff_starts_gt_playoff_eligible'] = con.execute('SELECT COUNT(*) FROM read_parquet(?) WHERE n_started_po > playoff_eligible_leagues + 0.0001',[str(path)]).fetchone()[0]
                   if {'inactive_weeks','inactive_week_mask'} <= set(cols):
                       checks['inactive_mask_mismatch'] = con.execute('SELECT COUNT(*) FROM read_parquet(?) WHERE inactive_weeks <> bit_count(COALESCE(inactive_week_mask,0))',[str(path)]).fetchone()[0]
-                  rows.append({'run_id':run_id,'artifact_id':item['id'],'artifact':item['name'],'file':path.name,'years':distinct_years,'rows':con.execute('SELECT COUNT(*) FROM read_parquet(?)',[str(path)]).fetchone()[0],'schema_columns':len(cols),'missing_required':sorted(required-set(cols)),'denominator_check_failures':checks,'expected_identity_failures':bad,'kind':'final' if has_expected and 'rostered_weeks' not in cols else 'raw_or_normalized','columns':cols})
+                  diagnostics = {}
+                  # Grain-aware diagnostics.  Season-only exposure fields must not be
+                  # required on weekly rows, but when they exist we validate their actual
+                  # values rather than treating schema presence as proof of correctness.
+                  if has_expected:
+                      diagnostics['expected_wl_balance_bad'] = con.execute(
+                          'SELECT COUNT(*) FROM read_parquet(?) '
+                          'WHERE expected_wins IS NOT NULL AND expected_losses IS NOT NULL '
+                          'AND expected_starts IS NOT NULL '
+                          'AND ABS(expected_wins + expected_losses - expected_starts) > 0.0002',
+                          [str(path)]).fetchone()[0]
+                  if {'wins_started','losses_started','started_weeks'} <= set(cols):
+                      diagnostics['raw_wl_gt_started_weeks'] = con.execute(
+                          'SELECT COUNT(*) FROM read_parquet(?) '
+                          'WHERE wins_started IS NOT NULL AND losses_started IS NOT NULL '
+                          'AND started_weeks IS NOT NULL '
+                          'AND wins_started + losses_started > started_weeks + 0.0001',
+                          [str(path)]).fetchone()[0]
+                  if {'wins_started','losses_started','started_team_game_weeks'} <= set(cols):
+                      diagnostics['raw_wl_gt_team_game_weeks'] = con.execute(
+                          'SELECT COUNT(*) FROM read_parquet(?) '
+                          'WHERE wins_started IS NOT NULL AND losses_started IS NOT NULL '
+                          'AND started_team_game_weeks IS NOT NULL '
+                          'AND wins_started + losses_started > started_team_game_weeks + 0.0001',
+                          [str(path)]).fetchone()[0]
+                  denominator_fields = [
+                      'roster_eligible_leagues','team_game_eligible_leagues',
+                      'healthy_eligible_leagues','roster_eligible_league_weeks',
+                      'team_game_eligible_league_weeks','healthy_eligible_league_weeks',
+                      'champ_elig_leagues','playoff_eligible_leagues',
+                      'active_weeks','inactive_weeks',
+                  ]
+                  for field in denominator_fields:
+                      if field in cols:
+                          diagnostics[f'{field}_null_rows'] = con.execute(
+                              f'SELECT COUNT(*) FROM read_parquet(?) WHERE "{field}" IS NULL',
+                              [str(path)]).fetchone()[0]
+                  rows.append({'run_id':run_id,'artifact_id':item['id'],'artifact':item['name'],'file':path.name,'years':distinct_years,'rows':con.execute('SELECT COUNT(*) FROM read_parquet(?)',[str(path)]).fetchone()[0],'schema_columns':len(cols),'missing_required':sorted(required-set(cols)),'denominator_check_failures':checks,'metric_diagnostics':diagnostics,'expected_identity_failures':bad,'kind':'final' if has_expected and 'rostered_weeks' not in cols else 'raw_or_normalized','columns':cols})
               con.close()
               return rows
           result=[]
