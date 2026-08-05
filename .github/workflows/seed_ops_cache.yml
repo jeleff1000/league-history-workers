@@ -19,7 +19,10 @@ permissions:
 jobs:
   seed:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # A cold/schema-changing rebuild transfers ~1.2M rows across ~1,000
+    # columns. The updater overlaps year downloads, but still needs headroom
+    # for a full cache rebuild and GitHub cache upload.
+    timeout-minutes: 180
 
     env:
       OPS_CACHE_KEY: ops-cache-v4-Linux-manual-v1
@@ -68,7 +71,8 @@ jobs:
           pip install duckdb==1.5.1 pandas
           python fantasy_football_data_scripts/build_ops_cache.py \
             --output ops_cache/ops_cache.duckdb \
-            --update-existing
+            --update-existing \
+            --max-workers 4
 
       - name: Validate ops cache
         run: |
