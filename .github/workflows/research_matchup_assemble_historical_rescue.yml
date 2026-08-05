@@ -10,6 +10,10 @@ on:
         description: Optional comma-separated runs containing complete weighted year assemblies
         required: false
         default: ''
+      normalized_years:
+        description: Comma-separated years to accept from normalized five-way artifacts
+        required: false
+        default: ''
       years:
         description: JSON list of rebuilt seasons
         required: true
@@ -56,6 +60,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SHARD_RUNS: ${{ inputs.shard_run }}
           ASSEMBLED_RUNS: ${{ inputs.assembled_runs }}
+          NORMALIZED_YEARS: ${{ inputs.normalized_years }}
           YEARS: ${{ inputs.years }}
         shell: bash
         run: |
@@ -68,6 +73,7 @@ jobs:
           token = os.environ['GH_TOKEN']
           shard_runs = [x.strip() for x in os.environ['SHARD_RUNS'].split(',') if x.strip()]
           assembled_runs = [x.strip() for x in os.environ['ASSEMBLED_RUNS'].split(',') if x.strip()]
+          normalized_years = {int(x.strip()) for x in os.environ['NORMALIZED_YEARS'].split(',') if x.strip()}
           headers = {'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28'}
           class Redirect(urllib.request.HTTPRedirectHandler):
               def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -97,7 +103,8 @@ jobs:
                   # are raw shard parents and must go through the denominator
                   # assembler, not the final-format merge below.
                   normalized = re.fullmatch(r'research-matchup-(\d{4})-normalized-5way-[0-9a-f]+', name)
-                  if normalized and int(normalized.group(1)) in years:
+                  if normalized and int(normalized.group(1)) in years and (
+                      not normalized_years or int(normalized.group(1)) in normalized_years):
                       artifacts.append(item)
                       continue
                   # Some completed multi-year assemblies predate the
