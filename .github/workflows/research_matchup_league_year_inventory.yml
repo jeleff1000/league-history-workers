@@ -1,0 +1,68 @@
+name: Inventory matchup league-years from GH lake
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        description: Immutable public research lake cache key
+        required: true
+        default: research-public-lake-v3-Linux-20260730
+      years:
+        description: Comma-separated seasons; blank means every season in the lake
+        required: false
+        default: '2003,2004,2005,2006,2007,2008,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018,2019,2020,2021,2022,2023,2024,2025'
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
+      RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
+      RESEARCH_YEAR_START: '2003'
+      RESEARCH_YEAR_END: '2025'
+      RESEARCH_READER_MEMORY_MB: '6000'
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1
+      - name: Verify public-only inputs
+        run: |
+          test -s research_public_lake/corpus_snapshot.duckdb
+          test -s research_public_lake/ops_cache.duckdb
+          test ! -e research_public_lake/leagues_snapshot.duckdb
+          mkdir -p out
+      - name: Inventory every league-year and emit focused rescue list
+        run: >-
+          python code/scripts/research_cohorts/inventory_matchup_league_years.py
+          --root research_public_lake
+          --years '${{ inputs.years }}'
+          --out out
+      - name: Upload league-year inventory and rescue targets
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-league-year-inventory-${{ github.run_id }}
+          path: |
+            out/matchup_league_year_inventory.json
+            out/matchup_league_year_inventory.csv
+            out/matchup_rescue_targets.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
