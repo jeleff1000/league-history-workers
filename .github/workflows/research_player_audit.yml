@@ -44,7 +44,7 @@ jobs:
           con.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
           rows = con.execute("""
             SELECT db_name, year, week, player, NFL_player_id, platform, manager,
-                   franchise_id, is_started, is_rostered, win, loss, tie,
+                   is_started, is_rostered, win, loss, tie,
                    is_playoffs, is_championship, championship, champion,
                    playoff_round, playoff_seed, final_playoff_seed,
                    team_made_playoffs
