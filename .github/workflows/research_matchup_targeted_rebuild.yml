@@ -9,6 +9,10 @@ on:
       db_names:
         description: Comma-separated source DB names to rebuild
         required: true
+      buckets:
+        description: Number of disjoint league buckets to run
+        required: false
+        default: '1'
       year_start:
         required: true
         default: '2003'
@@ -20,18 +24,37 @@ permissions:
   contents: read
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      bucket_list: ${{ steps.matrix.outputs.bucket_list }}
+    steps:
+      - id: matrix
+        shell: bash
+        env:
+          BUCKETS: ${{ inputs.buckets }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          n = int(os.environ["BUCKETS"])
+          if n < 1:
+              raise SystemExit("buckets must be positive")
+          print("bucket_list=" + json.dumps(list(range(n))))
+          PY
+
   matchup:
+    needs: prepare
     strategy:
       fail-fast: false
       max-parallel: 15
       matrix:
-        bucket: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+        bucket: ${{ fromJSON(needs.prepare.outputs.bucket_list) }}
     runs-on: ubuntu-latest
     timeout-minutes: 355
     env:
       RESEARCH_YEAR_START: ${{ inputs.year_start }}
       RESEARCH_YEAR_END: ${{ inputs.year_end }}
-      RESEARCH_LEAGUE_BUCKETS: '15'
+      RESEARCH_LEAGUE_BUCKETS: ${{ inputs.buckets }}
       RESEARCH_LEAGUE_BUCKET: ${{ matrix.bucket }}
       RESEARCH_OUT_DIR: ${{ github.workspace }}/out
       RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
@@ -93,7 +116,7 @@ jobs:
       - name: Upload focused additive matchup shard
         uses: actions/upload-artifact@v4
         with:
-          name: research-matchup-targeted-b${{ matrix.bucket }}-of15-${{ github.run_id }}
+          name: research-matchup-targeted-b${{ matrix.bucket }}-of${{ inputs.buckets }}-${{ github.run_id }}
           path: out/*.parquet
           if-no-files-found: error
           retention-days: 30
