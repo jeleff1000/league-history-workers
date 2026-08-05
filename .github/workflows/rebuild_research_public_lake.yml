@@ -90,7 +90,8 @@ jobs:
           python code/scripts/sleeper_corpus/merge_public_corpus_snapshot.py \
             --base research_public_lake/corpus_snapshot.duckdb \
             --overlay "$CORPUS_DIR/corpus_snapshot.duckdb" \
-            --out "$CORPUS_DIR/merged_corpus_snapshot.duckdb"
+            --out "$CORPUS_DIR/merged_corpus_snapshot.duckdb" \
+            --crosswalk research_public_lake/native_id_crosswalk.parquet
           mv "$CORPUS_DIR/merged_corpus_snapshot.duckdb" research_public_lake/corpus_snapshot.duckdb
           python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
       - name: Archive rebuilt public lake
