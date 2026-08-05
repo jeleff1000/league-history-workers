@@ -27,7 +27,9 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      max-parallel: 1
+      # Two independent checkpoint downloads are safe; higher fan-out caused
+      # Fly's DuckDB API to return 503/504s during the previous rebuild.
+      max-parallel: 2
       matrix:
         include:
           - batch_id: nfl_player_stats_all-batch-00
