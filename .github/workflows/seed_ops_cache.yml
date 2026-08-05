@@ -54,23 +54,7 @@ jobs:
           if [ -s ops_cache/ops_cache.duckdb ]; then
             echo "[ops-cache] existing-size-bytes=$(stat -c%s ops_cache/ops_cache.duckdb)"
             echo "[ops-cache] existing-size-human=$(du -h ops_cache/ops_cache.duckdb | cut -f1)"
-            python - <<'PYEOF'
-            import duckdb
-
-            conn = duckdb.connect("ops_cache/ops_cache.duckdb", read_only=True)
-            try:
-                for schema, table in [
-                    ("nfl_historical", "nfl_player_stats_all"),
-                    ("nfl_historical", "player_bio"),
-                ]:
-                    try:
-                        count = conn.execute(f"SELECT COUNT(*) FROM {schema}.{table}").fetchone()[0]
-                        print(f"[ops-cache] before {schema}.{table}: {count:,} rows")
-                    except Exception as exc:
-                        print(f"[ops-cache] before {schema}.{table}: unavailable ({exc})")
-            finally:
-                conn.close()
-            PYEOF
+            python -c 'import duckdb; conn = duckdb.connect("ops_cache/ops_cache.duckdb", read_only=True); print("[ops-cache] existing-cache-readable=true"); conn.close()'
           else
             echo "[ops-cache] existing-cache-file=missing"
           fi
