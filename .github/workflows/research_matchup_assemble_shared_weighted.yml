@@ -194,8 +194,10 @@ jobs:
               for name in ('research_matchup_player_season.parquet','research_matchup_weekly.parquet'):
                   source = src / name
                   target = dest / name
-                  con.execute(f"COPY (SELECT * FROM read_parquet(?) WHERE CAST(year AS INTEGER)=?) TO ? (FORMAT PARQUET, COMPRESSION ZSTD)", [str(source), year, str(target)])
-                  n = con.execute("SELECT COUNT(*) FROM read_parquet(?)", [str(target)]).fetchone()[0]
+                  source_sql = str(source).replace("'", "''")
+                  target_sql = str(target).replace("'", "''")
+                  con.execute(f"COPY (SELECT * FROM read_parquet('{source_sql}') WHERE CAST(year AS INTEGER)={year}) TO '{target_sql}' (FORMAT PARQUET, COMPRESSION ZSTD)")
+                  n = con.execute(f"SELECT COUNT(*) FROM read_parquet('{target_sql}')").fetchone()[0]
                   if not n: raise SystemExit(f'{target} is empty')
               print(f'{year}: split PASS')
           PY
