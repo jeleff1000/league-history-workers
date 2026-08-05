@@ -76,7 +76,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
         run: |
-          gh release download research-native-id-crosswalk-v1 \
+          gh release download research-native-id-crosswalk-v4 \
             --repo jeleff1000/yahoo_oauth \
             --pattern native_id_crosswalk.parquet \
             --dir research_public_lake
