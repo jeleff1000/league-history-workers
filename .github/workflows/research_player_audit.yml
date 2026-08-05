@@ -12,6 +12,9 @@ on:
       year:
         required: true
         default: "2003"
+      nfl_id:
+        required: true
+        default: "00-0017693"
 
 permissions:
   contents: read
@@ -35,6 +38,7 @@ jobs:
         env:
           PLAYER: ${{ inputs.player }}
           YEAR: ${{ inputs.year }}
+          NFL_ID: ${{ inputs.nfl_id }}
         run: |
           python - <<'PY'
           import json, os
@@ -45,8 +49,8 @@ jobs:
           available = {r[0] for r in con.execute("DESCRIBE lake.public.player_fantasy").fetchall()}
           wanted = ['db_name','year','week','player','NFL_player_id','platform','manager','is_started','is_rostered','win','loss','tie','is_playoffs','is_playoffs_bf','has_po_signal','is_championship','championship','champion','playoff_round','playoff_seed','final_playoff_seed','team_made_playoffs']
           selected = [c for c in wanted if c in available]
-          q = 'SELECT ' + ', '.join('"'+c+'"' for c in selected) + ' FROM lake.public.player_fantasy WHERE year = ? AND lower(player) = lower(?) ORDER BY db_name, week, manager'
-          rows = con.execute(q, [int(os.environ['YEAR']), os.environ['PLAYER']]).fetchdf().to_dict('records')
+          q = 'SELECT ' + ', '.join('"'+c+'"' for c in selected) + ' FROM lake.public.player_fantasy WHERE year = ? AND (lower(player) = lower(?) OR NFL_player_id = ?) ORDER BY db_name, week, manager'
+          rows = con.execute(q, [int(os.environ['YEAR']), os.environ['PLAYER'], os.environ['NFL_ID']]).fetchdf().to_dict('records')
           started = [r for r in rows if int(r.get('is_started') or 0) == 1]
           result = {'player': os.environ['PLAYER'], 'year': int(os.environ['YEAR']), 'rows': rows,
                     'row_count': len(rows), 'started_row_count': len(started),
