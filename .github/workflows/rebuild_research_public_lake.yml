@@ -58,6 +58,7 @@ jobs:
           gh release download research-native-id-crosswalk-v4 \
             --repo jeleff1000/yahoo_oauth \
             --pattern native_id_crosswalk.parquet \
+            --clobber \
             --dir research_public_lake
           echo "RESEARCH_NATIVE_ID_CROSSWALK=${{ github.workspace }}/research_public_lake/native_id_crosswalk.parquet" >> "$GITHUB_ENV"
       - name: Download processed source shards
