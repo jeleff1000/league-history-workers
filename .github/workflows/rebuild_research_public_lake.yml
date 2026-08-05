@@ -93,7 +93,8 @@ jobs:
             --overlay "$CORPUS_DIR/corpus_snapshot.duckdb" \
             --out "$CORPUS_DIR/merged_corpus_snapshot.duckdb" \
             --crosswalk research_public_lake/native_id_crosswalk.parquet \
-            --espn-map code/ops_data/public/espn_nfl_player_map.parquet
+            --espn-map code/ops_data/public/espn_nfl_player_map.parquet \
+            --aliases code/scripts/research_cohorts/research_identity_aliases.csv
           mv "$CORPUS_DIR/merged_corpus_snapshot.duckdb" research_public_lake/corpus_snapshot.duckdb
           python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
       - name: Archive rebuilt public lake
