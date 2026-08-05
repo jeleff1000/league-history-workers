@@ -72,11 +72,25 @@ jobs:
           DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
         run: |
           pip install duckdb==1.5.1 pandas
-          python fantasy_football_data_scripts/build_ops_cache.py \
-            --output ops_cache/unused.duckdb \
-            --checkpoint-dir ops_cache/checkpoints \
-            --batch-id '${{ matrix.batch_id }}' \
-            --status-file ops_cache/checkpoints/${{ matrix.batch_id }}.status.json
+          succeeded=false
+          for attempt in 1 2 3; do
+            echo "[ops-cache] checkpoint attempt $attempt/3"
+            if python fantasy_football_data_scripts/build_ops_cache.py \
+              --output ops_cache/unused.duckdb \
+              --checkpoint-dir ops_cache/checkpoints \
+              --batch-id '${{ matrix.batch_id }}' \
+              --status-file ops_cache/checkpoints/${{ matrix.batch_id }}.status.json; then
+              succeeded=true
+              break
+            fi
+            if [ "$attempt" != 3 ]; then
+              sleep $((attempt * 15))
+            fi
+          done
+          if [ "$succeeded" != true ]; then
+            echo "[ops-cache] checkpoint failed after 3 attempts"
+            exit 1
+          fi
           reused=$(python -c "import json; print(str(json.load(open('ops_cache/checkpoints/${{ matrix.batch_id }}.status.json'))['reused']).lower())")
           echo "reused=$reused" >> "$GITHUB_OUTPUT"
 
