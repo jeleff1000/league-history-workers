@@ -1,0 +1,53 @@
+name: Research native player identity audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260805-identity-repair-replace-c1cb3662a
+      db_names:
+        description: Comma-separated MFL/Fleaflicker DB names
+        required: true
+      year_start:
+        required: false
+        default: '2003'
+      year_end:
+        required: false
+        default: '2025'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - name: Audit native identity repairability
+        run: |
+          python code/scripts/research_cohorts/audit_native_identity_repairs.py \
+            --snapshot research_public_lake/corpus_snapshot.duckdb \
+            --corpus research_public_lake/no-second-source.duckdb \
+            --db-names '${{ inputs.db_names }}' \
+            --out out/native_identity_audit.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-native-identity-audit-${{ github.run_id }}
+          path: out/native_identity_audit.json
+          if-no-files-found: error
