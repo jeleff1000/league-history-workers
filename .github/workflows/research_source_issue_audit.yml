@@ -69,11 +69,12 @@ jobs:
                   join_keys.append('team_key'); msel = ['db_name','year','week','team_key'] + [c for c in [mflag,mchamp,'champion','final_playoff_seed','playoff_round'] if c in mcols]
               mq = 'SELECT ' + ','.join('"'+c+'"' for c in msel) + ' FROM lake.public.matchup'
               mu = con.execute(mq).fetchdf()
+              mu = mu.drop_duplicates(join_keys)
               players = players.merge(mu, on=join_keys, how='left', suffixes=('_player','_team'))
           rows = []
           for name, g in players.groupby('player', dropna=False):
               def count_flag(col):
-                  return int(g[col].astype(str).str.lower().isin({'1','true','t','yes'}).sum()) if col in g else 0
+                  return int(g[col].astype(str).str.lower().isin({'1','1.0','true','t','yes','starter'}).sum()) if col in g else 0
               rows.append({
                   'player': name,
                   'nfl_ids': sorted({str(x) for x in g['NFL_player_id'].dropna().unique()}),
