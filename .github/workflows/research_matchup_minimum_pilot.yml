@@ -36,6 +36,7 @@ jobs:
       RESEARCH_YEAR_END: ${{ inputs.year }}
       RESEARCH_LEAGUE_BATCHES: ${{ inputs.batches }}
       RESEARCH_LEAGUE_BATCH: ${{ inputs.batch }}
+      RESEARCH_LEAGUE_BATCH_PLAN: ${{ github.workspace }}/plan/league_batch_plan.parquet
       RESEARCH_OUT_DIR: ${{ github.workspace }}/out
       RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
       RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
