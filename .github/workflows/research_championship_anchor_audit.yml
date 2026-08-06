@@ -1,0 +1,45 @@
+name: Audit Championship Anchor Blast Radius
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        description: Canonical research cache to audit
+        required: true
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-canonical
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - name: Audit champion anchor
+        run: |
+          python code/scripts/research_cohorts/audit_championship_anchor.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --out championship_anchor_audit.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-championship-anchor-audit-${{ github.run_id }}
+          path: championship_anchor_audit.json
+          if-no-files-found: error
+          retention-days: 30
