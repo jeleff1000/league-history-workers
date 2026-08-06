@@ -134,6 +134,17 @@ jobs:
           path: ops_cache/checkpoints
           key: ${{ env.CHECKPOINT_CACHE_PREFIX }}${{ matrix.batch_id }}
 
+      # Artifacts are the run-scoped handoff to assembly.  Unlike Actions
+      # caches, they are not evicted when research caches consume the quota.
+      - name: Upload checkpoint artifact
+        if: steps.download.outcome == 'success'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ops-checkpoint-${{ matrix.batch_id }}
+          path: ops_cache/checkpoints
+          if-no-files-found: error
+          retention-days: 7
+
   assemble:
     name: Assemble and publish ops cache
     needs: [preflight, checkpoint]
@@ -168,6 +179,13 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+
+      - name: Download checkpoint artifacts
+        uses: actions/download-artifact@v6
+        with:
+          pattern: ops-checkpoint-*
+          path: ops_cache/checkpoints
+          merge-multiple: true
 
       - name: Restore stats checkpoint 00
         uses: actions/cache/restore@v5
