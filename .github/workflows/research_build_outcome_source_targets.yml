@@ -12,6 +12,10 @@ on:
       base_cache_key:
         required: true
         default: research-public-lake-v4-Linux-20260806-signal-rescue-canonical-final
+      exclude_source_run_id:
+        description: Optional completed source rescue run whose successful targets should be excluded
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -53,6 +57,34 @@ jobs:
             --input inputs/a/outcome_targets_0_90000.parquet \
             --input inputs/b/outcome_targets_90000_1145460.parquet \
             --out out/outcome_source_targets.json
+      - name: Exclude already successful source targets
+        if: inputs.exclude_source_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p exclude
+          gh run download '${{ inputs.exclude_source_run_id }}' \
+            --repo '${{ github.repository }}' \
+            --pattern 'research-source-matchup-rescue-*' \
+            --dir exclude
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = Path('out/outcome_source_targets.json')
+          payload = json.loads(manifest.read_text())
+          done = set()
+          for path in Path('exclude').rglob('*.jsonl'):
+              for line in path.read_text().splitlines():
+                  if line.strip():
+                      row = json.loads(line)
+                      if row.get('status') == 'done':
+                          done.add((str(row['db_name']), int(row['year'])))
+          before = len(payload['targets'])
+          payload['targets'] = [r for r in payload['targets'] if (str(r['db_name']), int(r['year'])) not in done]
+          payload['target_rows'] = sum(int(r['target_rows']) for r in payload['targets'])
+          manifest.write_text(json.dumps(payload, indent=2) + '\n')
+          print({'excluded_successful_league_years': before - len(payload['targets']), 'remaining': len(payload['targets']), 'player_week_targets': payload['target_rows']})
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: research-outcome-source-target-manifest-${{ github.run_id }}
