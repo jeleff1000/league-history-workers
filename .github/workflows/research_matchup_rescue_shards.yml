@@ -82,7 +82,14 @@ jobs:
 
       - name: Fail-fast source SQL guards
         run: |
-          python -m pytest -q \
+          env -u RESEARCH_YEAR_START -u RESEARCH_YEAR_END \
+            -u RESEARCH_LEAGUE_BUCKETS -u RESEARCH_LEAGUE_BUCKET \
+            -u RESEARCH_OUT_DIR -u RESEARCH_SNAPSHOT_PATH \
+            -u RESEARCH_CORPUS_PATH -u RESEARCH_OPS_CACHE_PATH \
+            -u RESEARCH_NATIVE_ID_CROSSWALK -u RESEARCH_REF_DIR \
+            -u RESEARCH_NO_CACHE -u RESEARCH_READER_MEMORY_MB \
+            -u RESEARCH_MATCHUP_MEMORY_MB -u RESEARCH_MATCHUP_THREADS \
+            python -m pytest -q \
             code/scripts/research_cohorts/test_build_research_matchup_canon.py \
             code/scripts/research_cohorts/test_matchup_po_validation.py \
             code/scripts/research_cohorts/test_matchup_sql_binds.py
