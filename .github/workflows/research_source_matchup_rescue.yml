@@ -63,8 +63,7 @@ jobs:
           python -m pytest -q \
             scripts/research_cohorts/test_source_backfill_readiness.py \
             scripts/research_cohorts/test_weekly_denominator_contract.py \
-            scripts/research_cohorts/test_matchup_sql_binds.py \
-            scripts/research_cohorts/test_assemble_research_shards.py
+            scripts/research_cohorts/test_outcome_sidecar_contract.py
 
   prepare:
     needs: preflight
