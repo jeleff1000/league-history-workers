@@ -15,42 +15,30 @@ jobs:
     timeout-minutes: 10
 
     env:
-      OPS_CACHE_KEY: ops-cache-v5-Linux-manual-request-${{ github.run_id }}
-      OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
+      RESEARCH_LAKE_KEY: research-public-lake-v4-Linux-20260806-signal-rescue-canonical
+      OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
 
     steps:
-      - name: Restore cached ops cache
-        id: ops-cache
+      - name: Restore canonical research public lake
+        id: research-lake
         uses: actions/cache/restore@v5
         with:
-          path: ops_cache
-          key: ${{ env.OPS_CACHE_KEY }}
-          restore-keys: |
-            ops-cache-v5-Linux-manual-
+          path: research_public_lake
+          key: ${{ env.RESEARCH_LAKE_KEY }}
+          fail-on-cache-miss: true
 
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
-      - name: Download durable ops cache fallback
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          mkdir -p ops_cache
-          if [ ! -s ops_cache/ops_cache.duckdb ]; then
-            gh release download ops-cache-v5 \
-              --repo jeleff1000/league-history-workers \
-              --pattern ops_cache.duckdb \
-              --dir ops_cache
-          fi
-          test -s ops_cache/ops_cache.duckdb
+      - name: Verify ops cache from research lake
+        run: test -s research_public_lake/ops_cache.duckdb
 
       - name: Verify cache contents
         run: |
-          echo "[ops-cache] key=${OPS_CACHE_KEY}"
-          echo "[ops-cache] restore-hit=${{ steps.ops-cache.outputs.cache-hit }}"
+          echo "[research-lake] key=${RESEARCH_LAKE_KEY}"
+          echo "[research-lake] restore-hit=${{ steps.research-lake.outputs.cache-hit }}"
           echo "[ops-cache] OPS_CACHE_PATH=${OPS_CACHE_PATH}"
           test -s "${OPS_CACHE_PATH}" || {
             echo "::error::ops_cache.duckdb is missing after cache restore."

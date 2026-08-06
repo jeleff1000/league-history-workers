@@ -57,7 +57,7 @@ jobs:
       FLY_PUBLISH_FORMAT: delta
       FLY_DELTA_FALLBACK_TO_DUCKDB: '0'
       FLY_FINALIZE_INVENTORY: '1'
-      OPS_CACHE_PATH: ${{ github.workspace }}/ops_cache/ops_cache.duckdb
+      OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
 
     steps:
       - name: Checkout code
@@ -81,33 +81,23 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Restore cached ops cache
-        id: ops-cache
+      - name: Restore canonical research public lake
+        id: research-lake
         uses: actions/cache/restore@v5
         with:
-          path: ops_cache
-          key: ops-cache-v5-${{ runner.os }}-manual-request-${{ github.run_id }}
-          restore-keys: |
-            ops-cache-v5-${{ runner.os }}-manual-
+          path: research_public_lake
+          key: research-public-lake-v4-Linux-20260806-signal-rescue-canonical
+          fail-on-cache-miss: true
 
-      - name: Download durable ops cache fallback
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Verify ops cache from research lake
         shell: bash
         run: |
-          mkdir -p ops_cache
-          if [ ! -s ops_cache/ops_cache.duckdb ]; then
-            gh release download ops-cache-v5 \
-              --repo jeleff1000/league-history-workers \
-              --pattern ops_cache.duckdb \
-              --dir ops_cache
-          fi
-          test -s ops_cache/ops_cache.duckdb
+          test -s research_public_lake/ops_cache.duckdb
 
       - name: Log cached ops cache
         run: |
           echo "[ops-cache] key-prefix=ops-cache-v5-${{ runner.os }}-manual-"
-          echo "[ops-cache] restore-hit=${{ steps.ops-cache.outputs.cache-hit }}"
+          echo "[research-lake] restore-hit=${{ steps.research-lake.outputs.cache-hit }}"
           echo "[ops-cache] OPS_CACHE_PATH=${OPS_CACHE_PATH}"
           test -s "${OPS_CACHE_PATH}" || {
             echo "::error::ops_cache.duckdb is missing after cache restore. Run the Seed Ops Cache workflow before imports."
