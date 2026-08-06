@@ -14,7 +14,11 @@ on:
       base_cache_key:
         description: Current immutable public lake cache
         required: true
-        default: research-public-lake-v4-Linux-20260805-identity-repair-final5-cdfd7934d
+        default: research-public-lake-v4-Linux-20260806-start-flags-fixed
+      output_cache_key:
+        description: Explicit versioned cache key for the validated merged lake
+        required: true
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-current
 
 permissions:
   contents: read
@@ -75,7 +79,7 @@ jobs:
       - uses: actions/cache/save@v5
         with:
           path: research_public_lake
-          key: research-public-lake-v4-Linux-20260806-signal-rescue-${{ github.run_id }}
+          key: ${{ inputs.output_cache_key }}
       - uses: actions/upload-artifact@v4
         with:
           name: research-public-lake-signal-rescue-${{ github.run_id }}
