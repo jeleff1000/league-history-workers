@@ -59,6 +59,27 @@ jobs:
           test -s "$corpus"
           mv "$corpus" research_public_lake/corpus_snapshot.duckdb
           test -s research_public_lake/ops_cache.duckdb
+      - name: Restore auxiliary public-lake files without old databases
+        shell: bash
+        run: |
+          set -euo pipefail
+          pipe=$(mktemp -u)
+          mkfifo "$pipe"
+          tar -xf "$pipe" -C research_public_lake \
+            --exclude='corpus_snapshot.duckdb' \
+            --exclude='ops_cache.duckdb' &
+          tar_pid=$!
+          for part in 00 01 02 03; do
+            rm -f "research-public-lake.tar.part-$part"
+            gh release download "${{ inputs.ops_release_tag }}" \
+              --repo jeleff1000/yahoo_oauth \
+              --pattern "research-public-lake.tar.part-$part" \
+              --dir .
+            cat "research-public-lake.tar.part-$part" > "$pipe"
+            rm -f "research-public-lake.tar.part-$part"
+          done
+          wait "$tar_pid"
+          rm -f "$pipe"
       - name: Validate restored lake
         run: |
           python -m pip install duckdb==1.5.1 pyarrow==15.0.2
