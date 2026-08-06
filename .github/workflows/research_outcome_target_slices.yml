@@ -9,6 +9,10 @@ on:
       max_rows:
         required: true
         default: "90000"
+      start_row:
+        description: Inclusive global target ordinal; use 90000 for the continuation pass
+        required: true
+        default: "0"
       shard_count:
         required: true
         default: "256"
@@ -63,6 +67,7 @@ jobs:
           python code/scripts/research_cohorts/materialize_outcome_targets.py \
             --snapshot research_public_lake/corpus_snapshot.duckdb \
             --out "out/outcome_targets_${{ matrix.shard }}.parquet" \
+            --start-row '${{ inputs.start_row }}' \
             --max-rows '${{ inputs.max_rows }}' \
             --shard-index '${{ matrix.shard }}' \
             --shard-count '${{ inputs.shard_count }}'

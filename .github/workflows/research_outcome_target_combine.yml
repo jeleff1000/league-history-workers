@@ -1,0 +1,60 @@
+name: Combine Research Outcome Target Sidecar
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Completed target-slice workflow run to combine
+        required: true
+        default: "31057089304"
+      start_row:
+        description: Inclusive global target ordinal
+        required: true
+        default: "0"
+      end_row:
+        description: Exclusive global target ordinal
+        required: true
+        default: "90000"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  combine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1
+      - name: Download target slices
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p input
+          gh run download '${{ inputs.source_run_id }}' \
+            --repo '${{ github.repository }}' \
+            --pattern 'research-outcome-targets-*' \
+            --dir input
+      - name: Combine and validate target sidecar
+        run: |
+          mkdir -p out
+          python code/scripts/research_cohorts/combine_outcome_target_slices.py \
+            --input-dir input \
+            --out out/outcome_targets_${{ inputs.start_row }}_${{ inputs.end_row }}.parquet \
+            --start-row '${{ inputs.start_row }}' \
+            --end-row '${{ inputs.end_row }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-outcome-targets-combined-${{ inputs.start_row }}-${{ inputs.end_row }}
+          path: out/*.parquet
+          if-no-files-found: error
+          retention-days: 30
