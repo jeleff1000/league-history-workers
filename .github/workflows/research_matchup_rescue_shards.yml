@@ -76,6 +76,13 @@ jobs:
       - name: Install bounded dependencies
         run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1
 
+      - name: Fail-fast source SQL guards
+        run: |
+          python -m pytest -q \
+            code/scripts/research_cohorts/test_build_research_matchup_canon.py \
+            code/scripts/research_cohorts/test_matchup_po_validation.py \
+            code/scripts/research_cohorts/test_matchup_sql_binds.py
+
       - name: Download deterministic native identity crosswalk
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
