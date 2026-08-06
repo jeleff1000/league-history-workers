@@ -142,7 +142,6 @@ jobs:
           key: ops-cache-v5-${{ runner.os }}-manual-request-${{ github.run_id }}
           restore-keys: |
             ops-cache-v5-${{ runner.os }}-manual-
-          fail-on-cache-miss: true
 
       - name: Log cached ops cache
         run: |

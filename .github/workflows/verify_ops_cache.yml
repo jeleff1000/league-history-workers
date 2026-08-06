@@ -27,7 +27,6 @@ jobs:
           key: ${{ env.OPS_CACHE_KEY }}
           restore-keys: |
             ops-cache-v5-Linux-manual-
-          fail-on-cache-miss: true
 
       - name: Setup Python
         uses: actions/setup-python@v6
