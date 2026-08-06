@@ -53,7 +53,7 @@ jobs:
           print(f'starter_nulls_before={before:,} starter_nulls_after={after:,}')
           print(con.execute('''SELECT UPPER(TRIM(CAST(fantasy_position AS VARCHAR))) slot,
               is_started, COUNT(*) n FROM public.player_fantasy
-              GROUP BY 1,2 ORDER BY 1,2''').fetchdf().to_string(index=False))
+              GROUP BY 1,2 ORDER BY 1,2''').fetchall())
           con.close()
           PY
       - name: Validate repaired public lake
