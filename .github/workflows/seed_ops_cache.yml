@@ -22,6 +22,11 @@ on:
         required: false
         type: string
         default: ''
+      resume_checkpoint_ids:
+        description: 'Comma-separated checkpoint IDs already present in resume artifacts'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   actions: write
@@ -45,6 +50,7 @@ jobs:
           CACHE_PREFIX: ops-cache-checkpoint-v4-Linux-
           RESUME_RUN_1: ${{ github.event.inputs.resume_run_id }}
           RESUME_RUN_2: ${{ github.event.inputs.resume_run_id_2 }}
+          RESUME_CHECKPOINT_IDS: ${{ github.event.inputs.resume_checkpoint_ids }}
         shell: bash
         run: |
           set -euo pipefail
@@ -61,6 +67,8 @@ jobs:
               artifact_keys="$(jq -cn --argjson a "$artifact_keys" --argjson b "$(jq -c . /tmp/ops-artifacts.json)" '$a + $b | unique')"
             fi
           done
+          manual_keys="$(printf '%s' "$RESUME_CHECKPOINT_IDS" | jq -R 'split(",") | map(select(length > 0))')"
+          artifact_keys="$(jq -cn --argjson a "$artifact_keys" --argjson b "$manual_keys" '$a + $b | unique')"
           available="$(jq -cn --argjson cached "$cached_keys" --argjson artifacts "$artifact_keys" '$cached + $artifacts | unique')"
           missing="$(jq -cn --argjson all "$all_keys" --argjson available "$available" '$all - $available | map({batch_id: .}) | {include: .}')"
           count="$(jq '.include | length' <<< "$missing")"
