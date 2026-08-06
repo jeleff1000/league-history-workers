@@ -7,6 +7,10 @@ on:
         description: Completed targeted source rescue run
         required: true
         default: "31061989974"
+      source_run_ids:
+        description: Optional comma-separated rescue runs to combine; overrides source_run_id
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -32,10 +36,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p input
-          gh run download '${{ inputs.source_run_id }}' \
-            --repo '${{ github.repository }}' \
-            --pattern 'research-source-matchup-rescue-*' \
-            --dir input
+          RUNS='${{ inputs.source_run_ids }}'
+          if [ -z "$RUNS" ]; then RUNS='${{ inputs.source_run_id }}'; fi
+          IFS=',' read -ra IDS <<< "$RUNS"
+          for ID in "${IDS[@]}"; do
+            gh run download "$ID" \
+              --repo '${{ github.repository }}' \
+              --pattern 'research-source-matchup-rescue-*' \
+              --dir input
+          done
       - name: Combine and validate
         run: |
           mkdir -p out

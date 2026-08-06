@@ -11,6 +11,10 @@ on:
         description: Number of API workers
         required: true
         default: "15"
+      shard_list:
+        description: Optional comma-separated shard numbers to run; empty runs all shards
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -25,11 +29,16 @@ jobs:
       - id: matrix
         env:
           SHARDS: ${{ inputs.shards }}
+          SHARD_LIST: ${{ inputs.shard_list }}
         run: |
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os
           n = int(os.environ["SHARDS"])
-          print("shard_list=" + json.dumps(list(range(n))))
+          requested = [x.strip() for x in os.environ.get("SHARD_LIST", "").split(",") if x.strip()]
+          values = [int(x) for x in requested] if requested else list(range(n))
+          if any(x < 0 or x >= n for x in values):
+              raise SystemExit(f"shard_list must be within 0..{n-1}: {values}")
+          print("shard_list=" + json.dumps(values))
           PY
 
   rescue:
