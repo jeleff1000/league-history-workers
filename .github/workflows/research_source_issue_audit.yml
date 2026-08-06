@@ -59,7 +59,8 @@ jobs:
           players = con.execute(q, names).fetchdf()
           if players.empty:
               raise SystemExit('No matching player rows found')
-          players['started'] = players.get('is_started', 0).astype(str).str.lower().isin({'1','true','t','yes'}).astype(int)
+          print('raw_matching_rows=', len(players), 'raw_start_values=', players['is_started'].value_counts(dropna=False).to_dict())
+          players['started'] = players.get('is_started', 0).astype(str).str.lower().isin({'1','true','t','yes','starter'}).astype(int)
           players = players[players.started.eq(1)].copy()
           if mflag:
               msel = ['db_name','year','week','manager'] + [c for c in [mflag,mchamp,'champion','final_playoff_seed','playoff_round'] if c in mcols]
