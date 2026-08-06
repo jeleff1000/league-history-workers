@@ -19,6 +19,10 @@ on:
         description: Optional comma-separated shard numbers to run; empty runs all shards
         required: false
         default: ""
+      target_limit:
+        description: Optional per-worker target limit for pilots
+        required: false
+        default: "0"
 
 permissions:
   contents: read
@@ -127,6 +131,7 @@ jobs:
             --targets targets.json \
             --shard '${{ matrix.shard }}' \
             --shards '${{ inputs.shards }}' \
+            --limit '${{ inputs.target_limit }}' \
             --workers 1 \
             --out out/source_matchup_rescue_${{ matrix.shard }}.parquet
       - name: Fail closed on source fetch failures
