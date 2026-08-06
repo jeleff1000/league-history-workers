@@ -23,6 +23,14 @@ on:
         description: Optional per-worker target limit for pilots
         required: false
         default: "0"
+      platform:
+        description: Optional platform filter (mfl, fleaflicker, sleeper)
+        required: false
+        default: ""
+      target_year:
+        description: Optional target season filter
+        required: false
+        default: "0"
 
 permissions:
   contents: read
@@ -122,6 +130,29 @@ jobs:
           if not rows:
               raise SystemExit('empty signal target manifest')
           PY
+      - name: Filter exact platform and season targets
+        env:
+          TARGET_PLATFORM: ${{ inputs.platform }}
+          TARGET_YEAR: ${{ inputs.target_year }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          payload = json.loads(Path('targets.json').read_text())
+          rows = payload.get('targets', payload) if isinstance(payload, dict) else payload
+          platform = os.environ.get('TARGET_PLATFORM', '').strip().lower()
+          year = int(os.environ.get('TARGET_YEAR', '0') or 0)
+          if platform:
+              rows = [r for r in rows if str(r.get('platform', '')).lower() == platform]
+          if year:
+              rows = [r for r in rows if int(r.get('year', 0)) == year]
+          if not rows:
+              raise SystemExit(f'empty filtered target manifest platform={platform!r} year={year}')
+          payload['targets'] = rows
+          payload['target_rows'] = sum(int(r.get('target_rows', 0) or 0) for r in rows)
+          Path('targets.json').write_text(json.dumps(payload, indent=2) + '\n')
+          print({'targets': len(rows), 'target_rows': payload['target_rows'], 'platform': platform, 'year': year})
+          PY
       - name: Fetch canonical source matchup sidecar
         env:
           PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
@@ -140,9 +171,10 @@ jobs:
           import json
           from pathlib import Path
           rows = [json.loads(x) for x in Path('out/source_matchup_rescue_${{ matrix.shard }}.jsonl').read_text().splitlines() if x.strip()]
-          bad = [r for r in rows if r.get('status') not in ('done', 'source_returned_no_matchups', 'source_fetch_failed')]
+          allowed = {'done', 'source_returned_no_matchups', 'source_returned_no_target_weeks', 'missing_historical_source_id', 'source_fetch_failed'}
+          bad = [r for r in rows if r.get('status') not in allowed]
           failed = [r for r in rows if r.get('status') == 'source_fetch_failed']
-          print({'targets': len(rows), 'done': sum(r.get('status') == 'done' for r in rows), 'source_empty': sum(r.get('status') == 'source_returned_no_matchups' for r in rows), 'source_failed_for_retry': len(failed), 'unexpected_bad': len(bad)})
+          print({'targets': len(rows), 'done': sum(r.get('status') == 'done' for r in rows), 'source_empty': sum(r.get('status') in ('source_returned_no_matchups', 'source_returned_no_target_weeks') for r in rows), 'missing_historical_id': sum(r.get('status') == 'missing_historical_source_id' for r in rows), 'source_failed_for_retry': len(failed), 'unexpected_bad': len(bad)})
           if failed:
               print('targets requiring focused retry:', failed[:10])
           if bad:
