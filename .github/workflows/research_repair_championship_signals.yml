@@ -6,11 +6,11 @@ on:
       base_cache_key:
         description: Current validated public research lake cache
         required: true
-        default: research-public-lake-v4-Linux-20260806-start-flags-fixed
+        default: research-public-lake-v4-Linux-20260806-championship-repaired-v4
       output_cache_key:
         description: New immutable cache key for the repaired lake
         required: true
-        default: research-public-lake-v4-Linux-20260806-championship-repaired
+        default: research-public-lake-v4-Linux-20260806-championship-repaired-v5
 
 permissions:
   contents: read
