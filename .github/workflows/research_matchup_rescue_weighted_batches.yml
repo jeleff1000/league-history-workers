@@ -19,6 +19,10 @@ on:
        description: Optional single batch number for a targeted retry/debug run
        required: false
        default: ''
+     global_batches:
+       description: Build one global batch matrix across all supplied years
+       required: false
+       default: 'false'
 
 concurrency:
  group: research-matchup-weighted-${{ github.repository }}
@@ -73,6 +77,7 @@ jobs:
          YEARS: ${{ inputs.years }}
          BATCHES: ${{ inputs.batches }}
          ONLY_BATCH: ${{ inputs.only_batch }}
+         GLOBAL_BATCHES: ${{ inputs.global_batches }}
          RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
          RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
          RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
@@ -89,6 +94,14 @@ jobs:
          import pathlib
          matrix = json.loads(pathlib.Path("plan/matrix.json").read_text())
          only = os.environ.get("ONLY_BATCH", "").strip()
+         global_batches = os.environ.get("GLOBAL_BATCHES", "false").strip().lower() == "true"
+         years = json.loads(os.environ["YEARS"])
+         batches = int(os.environ["BATCHES"])
+         if global_batches:
+             matrix = [
+                 {"year_start": min(years), "year_end": max(years), "batch": batch}
+                 for batch in range(batches)
+             ]
          if only:
              n = int(only)
              matrix = [x for x in matrix if int(x["batch"]) == n]
@@ -127,8 +140,8 @@ jobs:
    runs-on: ubuntu-24.04
    timeout-minutes: 355
    env:
-     RESEARCH_YEAR_START: ${{ matrix.year }}
-     RESEARCH_YEAR_END: ${{ matrix.year }}
+     RESEARCH_YEAR_START: ${{ matrix.year_start || matrix.year }}
+     RESEARCH_YEAR_END: ${{ matrix.year_end || matrix.year }}
      RESEARCH_LEAGUE_BATCHES: ${{ inputs.batches }}
      RESEARCH_LEAGUE_BATCH: ${{ matrix.batch }}
      RESEARCH_LEAGUE_BATCH_PLAN: ${{ github.workspace }}/plan/league_batch_plan.parquet
@@ -191,7 +204,8 @@ jobs:
          import os
          from pathlib import Path
          import duckdb
-         year = int(os.environ["RESEARCH_YEAR_START"])
+         year_start = int(os.environ["RESEARCH_YEAR_START"])
+         year_end = int(os.environ["RESEARCH_YEAR_END"])
          batch = int(os.environ["RESEARCH_LEAGUE_BATCH"])
          batches = int(os.environ["RESEARCH_LEAGUE_BATCHES"])
          files = list(Path("out").glob("*.parquet"))
@@ -207,8 +221,8 @@ jobs:
              ).fetchone()
              if got[2] == 0:
                  continue
-             assert got[0] == got[1] == year, (path, got, year)
-         print(f"validated year={year} batch={batch}/{batches}")
+             assert year_start <= got[0] <= got[1] <= year_end, (path, got, year_start, year_end)
+         print(f"validated years={year_start}-{year_end} batch={batch}/{batches}")
          PY
 
      - name: Fail-fast validate matchup shard
@@ -221,7 +235,7 @@ jobs:
      - name: Upload additive weighted batch
        uses: actions/upload-artifact@v4
        with:
-         name: research-matchup-${{ matrix.year }}-batch${{ matrix.batch }}-of${{ inputs.batches }}-${{ github.sha }}
+         name: research-matchup-${{ matrix.year_start || matrix.year }}-${{ matrix.year_end || matrix.year }}-batch${{ matrix.batch }}-of${{ inputs.batches }}-${{ github.sha }}
          path: out/*.parquet
          if-no-files-found: error
          retention-days: 14
