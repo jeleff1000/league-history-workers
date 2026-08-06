@@ -1,0 +1,37 @@
+name: Research Denominator Contract Preflight
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install test dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 requests==2.32.4 polars==1.35.2 pytest==8.3.3
+      - name: Compile schedule and matchup builders
+        working-directory: code
+        run: python -m py_compile scripts/sleeper_corpus/local_reader.py scripts/research_cohorts/build_research_matchup_cohort.py
+      - name: Run denominator and source contract tests
+        working-directory: code
+        run: |
+          python -m pytest -q \
+            scripts/sleeper_corpus/test_local_reader_sharding.py \
+            scripts/research_cohorts/test_source_backfill_readiness.py \
+            scripts/research_cohorts/test_weekly_denominator_contract.py \
+            scripts/research_cohorts/test_matchup_sql_binds.py \
+            scripts/research_cohorts/test_assemble_research_shards.py \
+            scripts/research_cohorts/test_release_gate_matchup_metrics.py \
+            scripts/research_cohorts/test_research_matchup_career_rollup.py
