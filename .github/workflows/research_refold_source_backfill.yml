@@ -27,6 +27,7 @@ permissions:
 jobs:
   refold:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     timeout-minutes: 355
     env:
       GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
@@ -63,11 +64,13 @@ jobs:
           test "${#artifacts[@]}" -gt 0
           echo "source_artifacts=${#artifacts[@]}"
           : > results/all.jsonl
+          index=0
           for artifact in "${artifacts[@]}"; do
+            index=$((index + 1))
             rm -rf batch "$CORPUS_DIR/leagues" "$CORPUS_DIR/logs"
             mkdir -p batch
-            echo "processing=$artifact"
-            gh run download "$SOURCE_RUN_ID" --repo "$REPO" --name "$artifact" --dir batch
+            echo "processing=${index}/${#artifacts[@]} artifact=$artifact"
+            timeout 600s gh run download "$SOURCE_RUN_ID" --repo "$REPO" --name "$artifact" --dir batch
             tarball=$(find batch -type f -name '*.tar' -print -quit)
             test -n "$tarball"
             tar -xf "$tarball" -C "$CORPUS_DIR"
