@@ -15,6 +15,10 @@ on:
         description: 'Maximum concurrent full-lake shard builds; keep low enough to avoid runner memory contention.'
         required: true
         default: '5'
+      buckets:
+        description: 'JSON list of bucket IDs to build; use [0] for an isolated pilot.'
+        required: true
+        default: '[0,1,2,3,4]'
 
 permissions:
   contents: read
@@ -29,7 +33,7 @@ jobs:
       max-parallel: ${{ fromJSON(inputs.max_parallel) }}
       matrix:
         year: ${{ fromJSON(inputs.years) }}
-        bucket: [0, 1, 2, 3, 4]
+        bucket: ${{ fromJSON(inputs.buckets) }}
     runs-on: ubuntu-latest
     timeout-minutes: 355
     env:
