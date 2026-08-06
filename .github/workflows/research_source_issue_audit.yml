@@ -50,7 +50,7 @@ jobs:
           pchamp = pick(pcols, ['is_championship', 'championship'])
           mflag = pick(mcols, ['is_playoffs', 'is_playoffs_bf'])
           mchamp = pick(mcols, ['is_championship', 'championship'])
-          required = ['db_name','year','week','player','NFL_player_id','manager','is_started','is_rostered']
+          required = ['db_name','year','week','player','NFL_player_id','manager','fantasy_position','is_started','is_rostered']
           selected = [c for c in required if c in pcols]
           for c in [pflag, pchamp, 'win', 'loss', 'tie']:
               if c not in pcols: continue
