@@ -60,7 +60,7 @@ jobs:
       fail-fast: false
       # The single Fly DuckDB machine can spend 10-30 seconds on metadata
       # scans; serialize cold-cache batches to keep health checks responsive.
-      max-parallel: 1
+      max-parallel: 2
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
 
     steps:
