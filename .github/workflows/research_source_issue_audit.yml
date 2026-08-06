@@ -1,0 +1,98 @@
+name: Research Source Issue Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-31066261053
+      players:
+        description: Comma-separated player names to audit across all years
+        required: true
+        default: LaDainian Tomlinson,Priest Holmes,Shaun Alexander,David Johnson,Jeff Wilkins
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pandas==2.2.3 pyarrow==15.0.2
+      - name: Audit player rows against source matchup rows
+        env:
+          PLAYERS: ${{ inputs.players }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          import duckdb
+          import pandas as pd
+
+          names = [x.strip() for x in os.environ['PLAYERS'].split(',') if x.strip()]
+          con = duckdb.connect()
+          con.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          pcols = {r[0] for r in con.execute('DESCRIBE lake.public.player_fantasy').fetchall()}
+          mcols = {r[0] for r in con.execute('DESCRIBE lake.public.matchup').fetchall()}
+          def pick(cols, choices):
+              return next((c for c in choices if c in cols), None)
+          pflag = pick(pcols, ['is_playoffs', 'is_playoffs_bf'])
+          pchamp = pick(pcols, ['is_championship', 'championship'])
+          mflag = pick(mcols, ['is_playoffs', 'is_playoffs_bf'])
+          mchamp = pick(mcols, ['is_championship', 'championship'])
+          required = ['db_name','year','week','player','NFL_player_id','manager','is_started','is_rostered']
+          selected = [c for c in required if c in pcols]
+          for c in [pflag, pchamp, 'win', 'loss', 'tie']:
+              if c and c not in selected: selected.append(c)
+          q = 'SELECT ' + ','.join('"'+c+'"' for c in selected) + ' FROM lake.public.player_fantasy WHERE lower(player) IN (' + ','.join('lower(?)' for _ in names) + ')'
+          players = con.execute(q, names).fetchdf()
+          if players.empty:
+              raise SystemExit('No matching player rows found')
+          players['started'] = pd.to_numeric(players.get('is_started', 0), errors='coerce').fillna(0).astype(int)
+          players = players[players.started.eq(1)].copy()
+          if mflag:
+              msel = ['db_name','year','week','manager'] + [c for c in [mflag,mchamp,'champion','final_playoff_seed','playoff_round'] if c in mcols]
+              mq = 'SELECT ' + ','.join('"'+c+'"' for c in msel) + ' FROM lake.public.matchup'
+              mu = con.execute(mq).fetchdf()
+              players = players.merge(mu, on=['db_name','year','week','manager'], how='left', suffixes=('_player','_team'))
+          rows = []
+          for name, g in players.groupby('player', dropna=False):
+              def count_flag(col):
+                  return int(pd.to_numeric(g[col], errors='coerce').fillna(0).astype(int).eq(1).sum()) if col in g else 0
+              rows.append({
+                  'player': name,
+                  'nfl_ids': sorted({str(x) for x in g['NFL_player_id'].dropna().unique()}),
+                  'years': sorted({int(x) for x in g['year'].dropna().unique()}),
+                  'started_rows': len(g),
+                  'started_leagues': g[['db_name','year']].drop_duplicates().shape[0],
+                  'player_playoff_starts': count_flag(pflag + '_player' if pflag and pflag + '_player' in g else pflag),
+                  'team_playoff_starts': count_flag(mflag),
+                  'player_championship_starts': count_flag(pchamp + '_player' if pchamp and pchamp + '_player' in g else pchamp),
+                  'team_championship_starts': count_flag(mchamp),
+                  'champion_flag_rows': count_flag('champion'),
+                  'rows_with_null_id': int(g['NFL_player_id'].isna().sum()),
+                  'rows_with_null_playoff_signal': int(g[mflag].isna().sum()) if mflag in g else len(g),
+                  'rows_with_null_champ_signal': int(g[mchamp].isna().sum()) if mchamp in g else len(g),
+              })
+          out = pd.DataFrame(rows)
+          out.to_csv('research_source_issue_audit.csv', index=False)
+          Path('research_source_issue_audit.json').write_text(json.dumps(rows, indent=2, default=str))
+          print(out.to_string(index=False))
+          print('player_columns=', sorted(pcols))
+          print('matchup_columns=', sorted(mcols))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-source-issue-audit-${{ github.run_id }}
+          path: research_source_issue_audit.*
+          if-no-files-found: error
