@@ -43,7 +43,7 @@ permissions:
 
 jobs:
   preflight:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout private pipeline code
@@ -68,7 +68,7 @@ jobs:
 
   prepare:
     needs: preflight
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     outputs:
       shard_list: ${{ steps.matrix.outputs.shard_list }}
@@ -90,7 +90,7 @@ jobs:
 
   rescue:
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 355
     strategy:
       fail-fast: false
