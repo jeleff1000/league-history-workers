@@ -72,6 +72,21 @@ jobs:
           rows = json.loads(source.read_text())
           wanted = {'no_championship_signal', 'no_playoff_signal', 'no_team_game_denominator_source'}
           rows = [r for r in rows if wanted.intersection(r.get('reason_codes') or []) and r.get('platform') and r.get('source_id')]
+          # The inventory is signal-grained: one league-season can have more
+          # than one missing-signal reason. Fetch each source season once and
+          # union its reasons before sharding, otherwise every shard emits
+          # duplicate matchup keys.
+          unique = {}
+          for row in rows:
+              key = (str(row['db_name']), int(row['year']))
+              if key not in unique:
+                  unique[key] = dict(row)
+                  unique[key]['reason_codes'] = sorted(set(row.get('reason_codes') or []))
+              else:
+                  unique[key]['reason_codes'] = sorted(
+                      set(unique[key].get('reason_codes') or []) | set(row.get('reason_codes') or [])
+                  )
+          rows = list(unique.values())
           Path('targets.json').write_text(json.dumps({'schema_version': 1, 'targets': rows}, indent=2) + '\n')
           print({'targets': len(rows), 'db_names': len({r['db_name'] for r in rows})})
           if not rows:
