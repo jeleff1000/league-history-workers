@@ -143,6 +143,20 @@ jobs:
           restore-keys: |
             ops-cache-v5-${{ runner.os }}-manual-
 
+      - name: Download durable ops cache fallback
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          mkdir -p ops_cache
+          if [ ! -s ops_cache/ops_cache.duckdb ]; then
+            gh release download ops-cache-v5 \
+              --repo jeleff1000/league-history-workers \
+              --pattern ops_cache.duckdb \
+              --dir ops_cache
+          fi
+          test -s ops_cache/ops_cache.duckdb
+
       - name: Log cached ops cache
         run: |
           echo "[ops-cache] key-prefix=ops-cache-v5-${{ runner.os }}-manual-"

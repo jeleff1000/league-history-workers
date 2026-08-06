@@ -15,7 +15,7 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
 
 env:
   CHECKPOINT_CACHE_PREFIX: ops-cache-checkpoint-v4-Linux-
@@ -151,6 +151,18 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           ref: ${{ github.event.inputs.yahoo_oauth_ref || 'main' }}
+
+      - name: Protect ops checkpoint storage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh cache list --repo jeleff1000/league-history-workers \
+            --key research-public-lake-v4-Linux- --limit 1000 --json id |
+            jq -r '.[].id' |
+            while read -r id; do
+              [ -z "$id" ] || gh api --method DELETE "/repos/jeleff1000/league-history-workers/actions/caches/$id"
+            done
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -744,6 +756,22 @@ jobs:
         with:
           path: ops_cache/ops_cache.duckdb
           key: ${{ env.OPS_CACHE_KEY }}
+
+      - name: Publish durable ops cache release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if ! gh release view ops-cache-v5 --repo jeleff1000/league-history-workers >/dev/null 2>&1; then
+            gh release create ops-cache-v5 \
+              --repo jeleff1000/league-history-workers \
+              --target main \
+              --title "Ops cache v5" \
+              --notes "Validated ___ops cache published by the Seed Ops Cache workflow."
+          fi
+          gh release upload ops-cache-v5 ops_cache/ops_cache.duckdb#ops_cache.duckdb \
+            --repo jeleff1000/league-history-workers --clobber
+          echo "[ops-cache] durable-release=ops-cache-v5"
 
       - name: Remove superseded canonical generations
         env:
