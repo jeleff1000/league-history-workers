@@ -77,7 +77,12 @@ jobs:
                       ORDER BY table_schema, table_name
                   """).fetchall()
               }
-              extra = data_tables - set(required)
+              allowed_auxiliary = {
+                  ("public", "espn_nfl_player_map"),
+                  ("public", "sleeper_nfl_player_map"),
+                  ("public", "yahoo_nfl_player_map"),
+              }
+              extra = data_tables - set(required) - allowed_auxiliary
               if extra:
                   raise SystemExit(f"Unexpected data tables in ops cache: {sorted(extra)}")
           finally:
