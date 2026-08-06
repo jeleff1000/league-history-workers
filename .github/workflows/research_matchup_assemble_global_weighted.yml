@@ -1,0 +1,179 @@
+name: Assemble Global Weighted Research Matchup Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      shard_run:
+        description: Completed global weighted shard run ID
+        required: true
+        default: "31129650746"
+      year_start:
+        description: First season represented by the run
+        required: true
+        default: "2003"
+      year_end:
+        description: Last season represented by the run
+        required: true
+        default: "2025"
+      batches:
+        description: Expected global batch count
+        required: true
+        default: "256"
+      cache_key:
+        description: Immutable public research cache key used by the shard run
+        required: true
+        default: research-public-lake-v4-Linux-20260806-source-sidecar-31129191026
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  assemble:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SHARD_RUN: ${{ inputs.shard_run }}
+      YEAR_START: ${{ inputs.year_start }}
+      YEAR_END: ${{ inputs.year_end }}
+      BATCHES: ${{ inputs.batches }}
+      RESEARCH_YEAR_START: ${{ inputs.year_start }}
+      RESEARCH_YEAR_END: ${{ inputs.year_end }}
+      RESEARCH_ASSEMBLE_MEMORY_MB: "12000"
+      RESEARCH_ASSEMBLE_THREADS: "2"
+      RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
+      RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
+      RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - name: Download all global weighted shard artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import io, json, os, urllib.parse, urllib.request, zipfile
+          from concurrent.futures import ThreadPoolExecutor, as_completed
+          from pathlib import Path
+
+          token = os.environ['GH_TOKEN']
+          repo = 'jeleff1000/league-history-workers'
+          prefix = f"research-matchup-{os.environ['YEAR_START']}-{os.environ['YEAR_END']}-batch"
+          expected = int(os.environ['BATCHES'])
+          headers = {'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json', 'User-Agent': 'global-weighted-assembly'}
+          api = f'https://api.github.com/repos/{repo}/actions/runs/{os.environ["SHARD_RUN"]}/artifacts'
+
+          def get(url):
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req, timeout=120) as response:
+                  return json.load(response)
+
+          class NoAuthRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, fp, code, msg, headers, newurl):
+                  h = dict(request.headers)
+                  if urllib.parse.urlparse(newurl).netloc != urllib.parse.urlparse(request.full_url).netloc:
+                      h.pop('Authorization', None)
+                  return urllib.request.Request(newurl, headers=h, method=request.get_method())
+
+          opener = urllib.request.build_opener(NoAuthRedirect)
+          items = []
+          page = 1
+          while True:
+              payload = get(f'{api}?per_page=100&page={page}')
+              items.extend(x for x in payload.get('artifacts', []) if x['name'].startswith(prefix))
+              if len(payload.get('artifacts', [])) < 100:
+                  break
+              page += 1
+          if len(items) != expected:
+              raise SystemExit(f'expected {expected} global artifacts, found {len(items)}')
+          print(f'found {len(items)} global artifacts', flush=True)
+          out = Path('shards'); out.mkdir(parents=True, exist_ok=True)
+
+          def download(item):
+              target = out / item['name']; target.mkdir(parents=True, exist_ok=True)
+              req = urllib.request.Request(item['archive_download_url'], headers=headers)
+              with opener.open(req, timeout=600) as response:
+                  data = response.read()
+              with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                  for member in archive.infolist():
+                      p = Path(member.filename)
+                      if p.is_absolute() or '..' in p.parts:
+                          raise RuntimeError(f'unsafe artifact member: {member.filename}')
+                  archive.extractall(target)
+              return item['name']
+
+          with ThreadPoolExecutor(max_workers=8) as pool:
+              futures = [pool.submit(download, item) for item in items]
+              for n, future in enumerate(as_completed(futures), 1):
+                  print(f'downloaded {n}/{len(futures)}: {future.result()}', flush=True)
+          PY
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 requests
+      - name: Verify complete global coverage
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import duckdb
+          con = duckdb.connect()
+          manifests = sorted(Path('shards').rglob('shard_manifest.parquet'))
+          n = int(os.environ['BATCHES'])
+          if len(manifests) != n:
+              raise SystemExit(f'expected {n} manifests, found {len(manifests)}')
+          rows = con.execute('SELECT DISTINCT year_start,year_end,bucket,buckets,fingerprint FROM read_parquet(?) ORDER BY bucket', [[str(p) for p in manifests]]).fetchall()
+          if len(rows) != n or [r[2] for r in rows] != list(range(n)):
+              raise SystemExit('global batch coverage is incomplete or duplicated')
+          if any(r[0] != int(os.environ['YEAR_START']) or r[1] != int(os.environ['YEAR_END']) or r[3] != n for r in rows):
+              raise SystemExit('global manifest bounds or width mismatch')
+          if len({r[4] for r in rows}) != 1:
+              raise SystemExit('mixed source fingerprints')
+          for name in ('research_matchup_weekly.parquet','research_matchup_player_season.parquet'):
+              if len(list(Path('shards').rglob(name))) != n:
+                  raise SystemExit(f'{name}: incomplete artifact coverage')
+          print(f'PASS: {n} disjoint global batches, years {rows[0][0]}-{rows[0][1]}')
+          PY
+      - name: Build population denominator lattices
+        run: |
+          mkdir -p out/denominators
+          python code/scripts/research_cohorts/build_population_denominators.py \
+            --output "${{ github.workspace }}/out/denominators" \
+            --ops-cache "${{ github.workspace }}/research_public_lake/ops_cache.duckdb"
+      - name: Assemble global weighted population
+        shell: bash
+        run: |
+          set -euo pipefail
+          roots=()
+          while IFS= read -r root; do roots+=(--input "$root"); done < <(find shards -mindepth 1 -maxdepth 2 -type d -name 'research-matchup-*batch*' -print)
+          test "${#roots[@]}" -gt 0
+          python code/scripts/research_cohorts/assemble_research_shards.py \
+            --table matchup "${roots[@]}" \
+            --denom-season "${{ github.workspace }}/out/denominators/research_matchup_denom_season.parquet" \
+            --denom-week "${{ github.workspace }}/out/denominators/research_matchup_denom_week.parquet" \
+            --pos-grp "${{ github.workspace }}/out/denominators/research_matchup_pos_grp.parquet" \
+            --output "${{ github.workspace }}/out/assembled"
+      - name: Upload assembled global population
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-assembled-global-${{ inputs.shard_run }}
+          path: |
+            out/assembled/research_matchup_weekly.parquet
+            out/assembled/research_matchup_player_season.parquet
+            out/assembled/research_matchup_player_career.parquet
+            out/assembled/research_matchup_manifest.parquet
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
