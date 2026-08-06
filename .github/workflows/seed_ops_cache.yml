@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 1 seconds
+Output:
 name: Seed Ops Cache
 
 # Resumable publisher for the two-table ___ops DuckDB cache.
@@ -25,7 +28,7 @@ jobs:
     name: Find missing checkpoints
     runs-on: ubuntu-latest
     outputs:
-      missing: ${{ steps.missing.outputs.missing }}
+      matrix: ${{ steps.missing.outputs.matrix }}
     steps:
       - name: Find missing checkpoint cache keys
         id: missing
@@ -49,11 +52,10 @@ jobs:
           print("|" + "|".join(absent) + "|" if absent else "")
           ')
           echo "[ops-cache] missing-count=$(grep -o '|' <<< "$missing" | wc -l | awk '{print int($1/2)}')"
-          echo "missing=$missing" >> "$GITHUB_OUTPUT"
+          MISSING="$missing" python -c 'import json, os; missing = [value for value in os.environ["MISSING"].split("|") if value]; print("matrix=" + json.dumps({"include": [{"batch_id": value} for value in (missing or ["__none__"])]}))' >> "$GITHUB_OUTPUT"
 
   checkpoint:
     needs: prepare
-    if: contains(needs.prepare.outputs.missing, format('|{0}|', matrix.batch_id))
     name: Checkpoint ${{ matrix.batch_id }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -62,119 +64,7 @@ jobs:
       # The single Fly DuckDB machine can spend 10-30 seconds on metadata
       # scans; serialize cold-cache batches to keep health checks responsive.
       max-parallel: 1
-      matrix:
-        include:
-          - batch_id: nfl_player_stats_all-batch-00
-          - batch_id: nfl_player_stats_all-batch-01
-          - batch_id: nfl_player_stats_all-batch-02
-          - batch_id: nfl_player_stats_all-batch-03
-          - batch_id: nfl_player_stats_all-batch-04
-          - batch_id: nfl_player_stats_all-batch-05
-          - batch_id: nfl_player_stats_all-batch-06
-          - batch_id: nfl_player_stats_all-batch-07
-          - batch_id: nfl_player_stats_all-batch-08
-          - batch_id: nfl_player_stats_all-batch-09
-          - batch_id: nfl_player_stats_all-batch-10
-          - batch_id: nfl_player_stats_all-batch-11
-          - batch_id: nfl_player_stats_all-batch-12
-          - batch_id: nfl_player_stats_all-batch-13
-          - batch_id: nfl_player_stats_all-batch-14
-          - batch_id: nfl_player_stats_all-batch-15
-          - batch_id: nfl_player_stats_all-batch-16
-          - batch_id: nfl_player_stats_all-batch-17
-          - batch_id: nfl_player_stats_all-batch-18
-          - batch_id: nfl_player_stats_all-batch-19
-          - batch_id: nfl_player_stats_all-batch-20
-          - batch_id: nfl_player_stats_all-batch-21
-          - batch_id: nfl_player_stats_all-batch-22
-          - batch_id: nfl_player_stats_all-batch-23
-          - batch_id: nfl_player_stats_all-batch-24
-          - batch_id: nfl_player_stats_all-batch-25
-          - batch_id: nfl_player_stats_all-batch-26
-          - batch_id: nfl_player_stats_all-batch-27
-          - batch_id: nfl_player_stats_all-batch-28
-          - batch_id: nfl_player_stats_all-batch-29
-          - batch_id: nfl_player_stats_all-batch-30
-          - batch_id: nfl_player_stats_all-batch-31
-          - batch_id: nfl_player_stats_all-batch-32
-          - batch_id: nfl_player_stats_all-batch-33
-          - batch_id: nfl_player_stats_all-batch-34
-          - batch_id: nfl_player_stats_all-batch-35
-          - batch_id: nfl_player_stats_all-batch-36
-          - batch_id: nfl_player_stats_all-batch-37
-          - batch_id: nfl_player_stats_all-batch-38
-          - batch_id: nfl_player_stats_all-batch-39
-          - batch_id: nfl_player_stats_all-batch-40
-          - batch_id: nfl_player_stats_all-batch-41
-          - batch_id: nfl_player_stats_all-batch-42
-          - batch_id: nfl_player_stats_all-batch-43
-          - batch_id: nfl_player_stats_all-batch-44
-          - batch_id: nfl_player_stats_all-batch-45
-          - batch_id: nfl_player_stats_all-batch-46
-          - batch_id: nfl_player_stats_all-batch-47
-          - batch_id: nfl_player_stats_all-batch-48
-          - batch_id: nfl_player_stats_all-batch-49
-          - batch_id: nfl_player_stats_all-batch-50
-          - batch_id: nfl_player_stats_all-batch-51
-          - batch_id: nfl_player_stats_all-batch-52
-          - batch_id: nfl_player_stats_all-batch-53
-          - batch_id: nfl_player_stats_all-batch-54
-          - batch_id: nfl_player_stats_all-batch-55
-          - batch_id: nfl_player_stats_all-batch-56
-          - batch_id: nfl_player_stats_all-batch-57
-          - batch_id: nfl_player_stats_all-batch-58
-          - batch_id: nfl_player_stats_all-batch-59
-          - batch_id: nfl_player_stats_all-batch-60
-          - batch_id: nfl_player_stats_all-batch-61
-          - batch_id: nfl_player_stats_all-batch-62
-          - batch_id: nfl_player_stats_all-batch-63
-          - batch_id: nfl_player_stats_all-batch-64
-          - batch_id: nfl_player_stats_all-batch-65
-          - batch_id: nfl_player_stats_all-batch-66
-          - batch_id: nfl_player_stats_all-batch-67
-          - batch_id: nfl_player_stats_all-batch-68
-          - batch_id: nfl_player_stats_all-batch-69
-          - batch_id: nfl_player_stats_all-batch-70
-          - batch_id: nfl_player_stats_all-batch-71
-          - batch_id: nfl_player_stats_all-batch-72
-          - batch_id: nfl_player_stats_all-batch-73
-          - batch_id: nfl_player_stats_all-batch-74
-          - batch_id: nfl_player_stats_all-batch-75
-          - batch_id: nfl_player_stats_all-batch-76
-          - batch_id: nfl_player_stats_all-batch-77
-          - batch_id: nfl_player_stats_all-batch-78
-          - batch_id: nfl_player_stats_all-batch-79
-          - batch_id: nfl_player_stats_all-batch-80
-          - batch_id: nfl_player_stats_all-batch-81
-          - batch_id: nfl_player_stats_all-batch-82
-          - batch_id: nfl_player_stats_all-batch-83
-          - batch_id: nfl_player_stats_all-batch-84
-          - batch_id: nfl_player_stats_all-batch-85
-          - batch_id: nfl_player_stats_all-batch-86
-          - batch_id: nfl_player_stats_all-batch-87
-          - batch_id: nfl_player_stats_all-batch-88
-          - batch_id: nfl_player_stats_all-batch-89
-          - batch_id: nfl_player_stats_all-batch-90
-          - batch_id: nfl_player_stats_all-batch-91
-          - batch_id: nfl_player_stats_all-batch-92
-          - batch_id: nfl_player_stats_all-batch-93
-          - batch_id: nfl_player_stats_all-batch-94
-          - batch_id: nfl_player_stats_all-batch-95
-          - batch_id: nfl_player_stats_all-batch-96
-          - batch_id: nfl_player_stats_all-batch-97
-          - batch_id: nfl_player_stats_all-batch-98
-          - batch_id: nfl_player_stats_all-batch-99
-          - batch_id: nfl_player_stats_all-batch-100
-          - batch_id: nfl_player_stats_all-batch-101
-          - batch_id: nfl_player_stats_all-batch-102
-          - batch_id: nfl_player_stats_all-batch-103
-          - batch_id: nfl_player_stats_all-batch-104
-          - batch_id: nfl_player_stats_all-batch-105
-          - batch_id: nfl_player_stats_all-batch-106
-          - batch_id: nfl_player_stats_all-batch-107
-          - batch_id: nfl_player_stats_all-batch-108
-          - batch_id: nfl_player_stats_all-batch-109
-          - batch_id: player_bio-all
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
 
     steps:
       - name: Checkout code
@@ -202,6 +92,10 @@ jobs:
           DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
           DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
         run: |
+          if [ '${{ matrix.batch_id }}' = '__none__' ]; then
+            echo "reused=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           pip install duckdb==1.5.1 pandas
           succeeded=false
           for attempt in 1 2 3; do
