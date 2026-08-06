@@ -16,6 +16,10 @@ on:
         description: Optional completed source rescue run whose successful targets should be excluded
         required: false
         default: ""
+      include_continuation:
+        description: Include the 90000-plus continuation slice
+        required: false
+        default: "false"
 
 permissions:
   contents: read
@@ -48,15 +52,22 @@ jobs:
         run: |
           mkdir -p inputs/a inputs/b
           gh run download '${{ inputs.outcome_run_id_a }}' --repo '${{ github.repository }}' --name research-outcome-targets-combined-0-90000 --dir inputs/a
-          gh run download '${{ inputs.outcome_run_id_b }}' --repo '${{ github.repository }}' --name research-outcome-targets-combined-90000-1145460 --dir inputs/b
+          if [ '${{ inputs.include_continuation }}' = 'true' ]; then
+            gh run download '${{ inputs.outcome_run_id_b }}' --repo '${{ github.repository }}' --name research-outcome-targets-combined-90000-1145460 --dir inputs/b
+          fi
       - name: Build source manifest
         run: |
           mkdir -p out
-          python code/scripts/research_cohorts/build_outcome_source_targets.py \
-            --snapshot research_public_lake/corpus_snapshot.duckdb \
-            --input inputs/a/outcome_targets_0_90000.parquet \
-            --input inputs/b/outcome_targets_90000_1145460.parquet \
+          ARGS=(
+            --snapshot research_public_lake/corpus_snapshot.duckdb
+            --input inputs/a/outcome_targets_0_90000.parquet
             --out out/outcome_source_targets.json
+          )
+          if [ '${{ inputs.include_continuation }}' = 'true' ]; then
+            ARGS+=(--input inputs/b/outcome_targets_90000_1145460.parquet)
+          fi
+          python code/scripts/research_cohorts/build_outcome_source_targets.py \
+            "${ARGS[@]}"
       - name: Exclude already successful source targets
         if: inputs.exclude_source_run_id != ''
         env:
