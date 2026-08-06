@@ -47,17 +47,28 @@ jobs:
           con = duckdb.connect()
           con.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
           available = {r[0] for r in con.execute("DESCRIBE lake.public.player_fantasy").fetchall()}
-          wanted = ['db_name','year','week','player','NFL_player_id','platform','manager','is_started','is_rostered','win','loss','tie','is_playoffs','is_playoffs_bf','has_po_signal','is_championship','championship','champion','playoff_round','playoff_seed','final_playoff_seed','team_made_playoffs']
+          wanted = ['db_name','year','week','player','NFL_player_id','platform','manager','is_started','is_rostered','win','loss','tie','clutch_equity','is_playoffs','is_playoffs_bf','has_po_signal','is_championship','championship','champion','playoff_round','playoff_seed','final_playoff_seed','team_made_playoffs']
           selected = [c for c in wanted if c in available]
           q = 'SELECT ' + ', '.join('"'+c+'"' for c in selected) + ' FROM lake.public.player_fantasy WHERE year = ? AND (lower(player) = lower(?) OR NFL_player_id = ?) ORDER BY db_name, week, manager'
           rows = con.execute(q, [int(os.environ['YEAR']), os.environ['PLAYER'], os.environ['NFL_ID']]).fetchdf().to_dict('records')
           started = [r for r in rows if int(r.get('is_started') or 0) == 1]
+          def truthy(value):
+              return str(value).lower() in {'1', '1.0', 'true', 't', 'yes', 'starter'}
+          playoff_started = [r for r in started if truthy(r.get('is_playoffs')) or truthy(r.get('is_playoffs_bf'))]
+          clutch_values = [float(r['clutch_equity']) for r in rows if r.get('clutch_equity') is not None]
+          clutch_started = [float(r['clutch_equity']) for r in started if r.get('clutch_equity') is not None]
+          clutch_playoff_started = [float(r['clutch_equity']) for r in playoff_started if r.get('clutch_equity') is not None]
           result = {'player': os.environ['PLAYER'], 'year': int(os.environ['YEAR']), 'rows': rows,
                     'row_count': len(rows), 'started_row_count': len(started),
                     'started_leagues': len({r.get('db_name') for r in started}),
-                    'playoff_starts': sum(bool(r.get('is_playoffs') or r.get('is_playoffs_bf')) for r in started),
+                    'playoff_starts': len(playoff_started),
                     'championship_starts': sum(int(r.get('is_championship') or r.get('championship') or 0) == 1 for r in started),
-                    'championship_signal_leagues': len({r.get('db_name') for r in rows if any(r.get(c) is not None for c in ('is_championship','championship','champion'))})}
+                    'championship_signal_leagues': len({r.get('db_name') for r in rows if any(r.get(c) is not None for c in ('is_championship','championship','champion'))}),
+                    'clutch_nonnull_rows': len(clutch_values),
+                    'clutch_nonnull_started_rows': len(clutch_started),
+                    'clutch_sum_all_rows': sum(clutch_values),
+                    'clutch_sum_started': sum(clutch_started),
+                    'clutch_sum_playoff_started': sum(clutch_playoff_started)}
           Path('research_player_audit.json').write_text(json.dumps(result, indent=2, default=str))
           print(json.dumps({k:v for k,v in result.items() if k != 'rows'}, indent=2))
           PY
