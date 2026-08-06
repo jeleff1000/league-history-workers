@@ -27,7 +27,6 @@ permissions:
 jobs:
   refold:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
     timeout-minutes: 355
     env:
       GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
