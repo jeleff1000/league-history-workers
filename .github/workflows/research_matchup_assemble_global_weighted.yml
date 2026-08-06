@@ -145,6 +145,22 @@ jobs:
               if len(list(Path('shards').rglob(name))) != n:
                   raise SystemExit(f'{name}: incomplete artifact coverage')
           print(f'PASS: {n} disjoint global batches, years {rows[0][0]}-{rows[0][1]}')
+          weekly = [str(p) for p in Path('shards').rglob('research_matchup_weekly.parquet')]
+          season = [str(p) for p in Path('shards').rglob('research_matchup_player_season.parquet')]
+          bad = con.execute('''
+              SELECT COUNT(*) FROM read_parquet(?, union_by_name=true)
+              WHERE abs(coalesce(expected_wins,0)+coalesce(expected_losses,0)-coalesce(expected_starts,0)) > 1e-6
+                 OR champ_started < 0 OR champ_eligible < 0 OR champ_started > champ_eligible
+                 OR wins_started + losses_started > started_leagues
+          ''', [weekly]).fetchone()[0]
+          if bad: raise SystemExit(f'weekly invariant failures: {bad}')
+          bad = con.execute('''
+              SELECT COUNT(*) FROM read_parquet(?, union_by_name=true)
+              WHERE abs(coalesce(expected_wins,0)+coalesce(expected_losses,0)-coalesce(expected_starts,0)) > 1e-6
+                 OR champ_as_starter_pct < 0 OR champ_as_starter_pct > 1
+          ''', [season]).fetchone()[0]
+          if bad: raise SystemExit(f'season invariant failures: {bad}')
+          print('PASS: expected W/L, start, and championship denominator invariants')
           PY
       - name: Build population denominator lattices
         run: |

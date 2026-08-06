@@ -1,0 +1,63 @@
+name: Audit LaDainian Tomlinson 2003 Research Signals
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        description: Research cache to audit
+        required: true
+        default: research-public-lake-v4-Linux-20260806-source-sidecar-31129191026
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1
+      - name: Audit 2003 LT signals
+        run: |
+          python - <<'PY'
+          import duckdb
+          from pathlib import Path
+          lake = Path('research_public_lake/corpus_snapshot.duckdb').resolve()
+          ops = Path('research_public_lake/ops_cache.duckdb').resolve()
+          c = duckdb.connect(str(lake), read_only=True)
+          c.execute(f"attach '{ops.as_posix()}' as ops (read_only)")
+          ids = c.execute("""
+            select distinct cast(NFL_player_id as varchar) from ops.nfl_historical.nfl_player_stats_all
+            where year=2003 and lower(cast(player as varchar)) like '%tomlinson%'
+          """).fetchall()
+          if not ids: raise SystemExit('LaDainian Tomlinson not found in 2003 super table')
+          pid = ids[0][0]
+          print({'NFL_player_id': pid})
+          pf_cols = {r[0] for r in c.execute('describe public.player_fantasy').fetchall()}
+          pf = c.execute("""
+            select count(distinct db_name), count(*) rows,
+                   count(*) filter (where coalesce(cast(is_started as integer),0)=1) started,
+                   count(*) filter (where coalesce(cast(champion as integer),0)=1) raw_champion,
+                   count(*) filter (where clutch_equity is not null) clutch_rows,
+                   count(*) filter (where win is not null) outcome_rows,
+                   count(*) filter (where final_playoff_seed is not null or coalesce(cast(is_playoffs_bf as integer),0)=1) playoff_rows
+            from public.player_fantasy where year=2003 and cast(NFL_player_id as varchar)=?
+          """, [pid]).fetchone()
+          print({'player_fantasy_2003': pf, 'columns': sorted(pf_cols)})
+          mcols = {r[0] for r in c.execute('describe public.matchup').fetchall()}
+          print({'matchup_columns': sorted(mcols)})
+          if 'is_championship' in mcols:
+              print({'championship_matchup_rows': c.execute("select count(*) from public.matchup where year=2003 and cast(is_championship as integer)=1").fetchone()[0]})
+          else:
+              print({'championship_matchup_rows': 'NO_EXPLICIT_IS_CHAMPIONSHIP_COLUMN'})
+          if 'is_playoffs' in mcols:
+              print({'playoff_matchup_rows': c.execute("select count(*) from public.matchup where year=2003 and cast(is_playoffs as integer)=1").fetchone()[0]})
+          PY
