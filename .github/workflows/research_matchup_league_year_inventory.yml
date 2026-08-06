@@ -6,7 +6,7 @@ on:
       cache_key:
         description: Immutable public research lake cache key
         required: true
-        default: research-public-lake-v4-Linux-20260806-signal-rescue-clutch-championship-v11
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-canonical
       years:
         description: Comma-separated seasons; blank means every season in the lake
         required: false

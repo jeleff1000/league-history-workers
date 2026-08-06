@@ -14,7 +14,7 @@ on:
       base_cache_key:
         description: Current merged research lake cache
         required: true
-        default: research-public-lake-v4-Linux-20260806-signal-rescue-clutch-championship-v11
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-canonical
       output_cache_key:
         description: Refolded cache key before championship reapplication
         required: true

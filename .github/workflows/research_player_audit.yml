@@ -5,7 +5,7 @@ on:
     inputs:
       cache_key:
         required: true
-        default: research-public-lake-v4-Linux-20260806-signal-rescue-clutch-championship-v11
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-canonical
       player:
         required: true
         default: Jeff Wilkins
