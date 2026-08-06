@@ -1,0 +1,83 @@
+name: Repair Research Championship Signals
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_cache_key:
+        description: Current validated public research lake cache
+        required: true
+        default: research-public-lake-v4-Linux-20260806-start-flags-fixed
+      output_cache_key:
+        description: New immutable cache key for the repaired lake
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-repaired
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.base_cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Build championship sidecar
+        run: |
+          python code/scripts/research_cohorts/repair_championship_signals.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --out championship_signal_sidecar.duckdb
+      - name: Apply title rows to immutable lake copy
+        run: |
+          python - <<'PY'
+          import duckdb
+          con = duckdb.connect('research_public_lake/corpus_snapshot.duckdb')
+          con.execute("attach 'championship_signal_sidecar.duckdb' as sidecar (read_only)")
+          cols = {r[0] for r in con.execute('describe public.matchup').fetchall()}
+          if 'is_championship' not in cols:
+              con.execute('alter table public.matchup add column is_championship integer')
+          con.execute('''
+            update public.matchup m
+               set is_championship=1, is_playoffs=1
+              from sidecar.public.championship_signal_sidecar s
+             where m.db_name=s.db_name and cast(m.year as integer)=s.year
+               and cast(m.week as integer)=s.week
+               and m.manager is not distinct from s.manager
+               and m.franchise_id is not distinct from s.franchise_id
+          ''')
+          n = con.execute('select count(*) from public.matchup where cast(is_championship as integer)=1').fetchone()[0]
+          bad = con.execute('''select count(*) from public.matchup
+                                where cast(is_championship as integer)=1
+                                  and coalesce(cast(is_playoffs as integer),0)<>1''').fetchone()[0]
+          print({'championship_rows': n, 'championship_without_playoff': bad})
+          if bad:
+              raise SystemExit('championship rows must also be playoff rows')
+          con.close()
+          PY
+      - name: Validate repaired public lake
+        run: python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.output_cache_key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-championship-signal-sidecar-${{ github.run_id }}
+          path: championship_signal_sidecar.duckdb
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
