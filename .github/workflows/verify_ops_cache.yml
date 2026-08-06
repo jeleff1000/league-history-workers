@@ -56,6 +56,9 @@ jobs:
           required = [
               ("nfl_historical", "nfl_player_stats_all"),
               ("nfl_historical", "player_bio"),
+              ("public", "espn_nfl_player_map"),
+              ("public", "sleeper_nfl_player_map"),
+              ("public", "yahoo_nfl_player_map"),
           ]
           conn = duckdb.connect(os.environ["OPS_CACHE_PATH"], read_only=True)
           try:
