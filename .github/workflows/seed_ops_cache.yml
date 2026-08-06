@@ -21,7 +21,39 @@ env:
   CHECKPOINT_CACHE_PREFIX: ops-cache-checkpoint-v4-Linux-
 
 jobs:
+  prepare:
+    name: Find missing checkpoints
+    runs-on: ubuntu-latest
+    outputs:
+      missing: ${{ steps.missing.outputs.missing }}
+    steps:
+      - name: Find missing checkpoint cache keys
+        id: missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_PROMPT_DISABLED: 1
+        run: |
+          existing=$(gh cache list \
+            --repo jeleff1000/league-history-workers \
+            --key "$CHECKPOINT_CACHE_PREFIX" \
+            --limit 200 \
+            --json key)
+          missing=$(printf '%s' "$existing" | python -c '
+          import json, sys
+          existing = {row["key"] for row in json.load(sys.stdin)}
+          expected = [
+              f"nfl_player_stats_all-batch-{index:02d}" for index in range(110)
+          ] + ["player_bio-all"]
+          absent = [batch_id for batch_id in expected
+                    if "ops-cache-checkpoint-v4-Linux-" + batch_id not in existing]
+          print("|" + "|".join(absent) + "|" if absent else "")
+          ')
+          echo "[ops-cache] missing-count=$(grep -o '|' <<< "$missing" | wc -l | awk '{print int($1/2)}')"
+          echo "missing=$missing" >> "$GITHUB_OUTPUT"
+
   checkpoint:
+    needs: prepare
+    if: contains(needs.prepare.outputs.missing, format('|{0}|', matrix.batch_id))
     name: Checkpoint ${{ matrix.batch_id }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -216,6 +248,7 @@ jobs:
   assemble:
     name: Assemble and publish ops cache
     needs: checkpoint
+    if: always() && (needs.checkpoint.result == 'success' || needs.checkpoint.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
