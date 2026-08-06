@@ -1,0 +1,123 @@
+name: Rebuild Canonical Research Cache With Outcome and Source Sidecars
+
+on:
+  workflow_dispatch:
+    inputs:
+      outcome_applied_run_id:
+        description: Successful outcome-applied lake artifact run
+        required: true
+        default: "31108438350"
+      source_matchup_run_id:
+        description: Successful combined source matchup sidecar run
+        required: true
+        default: "31129191026"
+      base_cache_key:
+        description: Cache containing the canonical ops/super-table files
+        required: true
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-canonical-final
+      output_cache_key:
+        description: New cache containing both sidecar classes
+        required: true
+        default: research-public-lake-v4-Linux-20260806-outcomes-source-31108438350-31129191026
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  merge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.base_cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Restore outcome-applied corpus snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p outcome_base
+          gh run download '${{ inputs.outcome_applied_run_id }}' \
+            --repo '${{ github.repository }}' \
+            --name 'research-outcome-applied-lake-${{ inputs.outcome_applied_run_id }}' \
+            --dir outcome_base
+          BASE=$(find outcome_base -name corpus_snapshot.duckdb -type f | head -1)
+          test -s "$BASE"
+          cp "$BASE" research_public_lake/corpus_snapshot.duckdb
+      - name: Download combined source matchup sidecar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p rescue
+          gh run download '${{ inputs.source_matchup_run_id }}' \
+            --repo '${{ github.repository }}' \
+            --pattern 'research-source-matchup-rescue-combined-*' \
+            --dir rescue
+      - name: Materialize overlays and merge
+        run: |
+          MATCHUP=$(find rescue -name source_matchup_rescue.parquet | head -1)
+          test -s "$MATCHUP"
+          python - "$MATCHUP" <<'PY'
+          import duckdb, sys
+          matchup = sys.argv[1]
+          out = duckdb.connect('overlay_outcome_targets.duckdb')
+          out.execute('create schema public')
+          out.execute('''create table public.outcome_targets (
+              db_name varchar, year integer, week integer,
+              NFL_player_id varchar, win integer, team_points double
+          )''')
+          out.close()
+          rescue = duckdb.connect('overlay_source_matchup_rescue.duckdb')
+          rescue.execute('create schema public')
+          rescue.execute('create table public.source_matchup_rescue as select * from read_parquet(?)', [matchup])
+          rescue.close()
+          PY
+          python code/scripts/research_cohorts/merge_research_sidecars.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --out merged_corpus_snapshot.duckdb \
+            --outcomes overlay_outcome_targets.duckdb \
+            --matchups overlay_source_matchup_rescue.duckdb
+          mv merged_corpus_snapshot.duckdb research_public_lake/corpus_snapshot.duckdb
+      - name: Validate canonical sidecar state and LT 2003
+        run: |
+          python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
+          python - <<'PY'
+          import duckdb
+          c=duckdb.connect('research_public_lake/corpus_snapshot.duckdb',read_only=True)
+          ids=c.execute("select distinct cast(NFL_player_id as varchar) from public.player_fantasy where year=2003 and lower(cast(player as varchar)) like '%tomlinson%'").fetchall()
+          if not ids: raise SystemExit('LT 2003 not found after sidecar merge')
+          pid=ids[0][0]
+          r=c.execute("""select count(distinct db_name),
+              count(*) filter(where cast(is_started as integer)=1),
+              count(*) filter(where cast(is_started as integer)=1 and week<=16 and win is null),
+              count(*) filter(where cast(is_started as integer)=1 and (coalesce(cast(is_playoffs_bf as integer),0)=1 or final_playoff_seed is not null)),
+              count(*) filter(where cast(is_started as integer)=1 and clutch_equity is not null),
+              count(*) filter(where cast(is_started as integer)=1 and cast(champion as integer)=1)
+              from public.player_fantasy where year=2003 and cast(NFL_player_id as varchar)=?""",[pid]).fetchone()
+          print({'LT_2003':r})
+          if r[2] != 0: raise SystemExit(f'LT still has {r[2]} regular-season started rows without outcomes')
+          PY
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.output_cache_key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-canonical-sidecars-${{ github.run_id }}
+          path: research_public_lake/corpus_snapshot.duckdb
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
