@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       source_run_id:
-        description: Completed target-slice workflow run to combine
+        description: Completed target-slice workflow run(s), comma-separated
         required: true
-        default: "31057089304"
+        default: "31059385445,31060749133"
       start_row:
         description: Inclusive global target ordinal
         required: true
@@ -14,7 +14,7 @@ on:
       end_row:
         description: Exclusive global target ordinal
         required: true
-        default: "90000"
+        default: "1145460"
 
 permissions:
   contents: read
@@ -40,10 +40,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p input
-          gh run download '${{ inputs.source_run_id }}' \
-            --repo '${{ github.repository }}' \
-            --pattern 'research-outcome-targets-*' \
-            --dir input
+          IFS=',' read -ra RUN_IDS <<< '${{ inputs.source_run_id }}'
+          for run_id in "${RUN_IDS[@]}"; do
+            gh run download "$run_id" \
+              --repo '${{ github.repository }}' \
+              --pattern 'research-outcome-targets-*' \
+              --dir "input/$run_id"
+          done
       - name: Combine and validate target sidecar
         run: |
           mkdir -p out
