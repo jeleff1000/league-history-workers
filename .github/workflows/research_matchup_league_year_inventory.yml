@@ -1,4 +1,5 @@
 name: Inventory matchup league-years from GH lake
+# Targeted-rescue inventory revision: emits source-week scopes for sidecars.
 
 on:
   workflow_dispatch:

@@ -1,4 +1,5 @@
 name: Targeted Source Matchup Signal Rescue
+# Targeted-rescue dispatch revision: platform/year filters are fail-closed.
 
 on:
   workflow_dispatch:
