@@ -1,0 +1,75 @@
+name: Restore Canonical Research Cache From Backup Artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Run containing the canonical research-lake backup artifact
+        required: true
+        default: "31066261053"
+      artifact_name:
+        description: Canonical research-lake backup artifact name
+        required: true
+        default: research-public-lake-signal-rescue-31066261053
+      ops_release_tag:
+        description: Private release containing the compatible ops cache
+        required: true
+        default: research-public-lake-v2-20260730
+      cache_key:
+        description: Canonical cache key to recreate
+        required: true
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-31066261053
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Download canonical corpus backup
+        uses: actions/download-artifact@v5
+        with:
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          name: ${{ inputs.artifact_name }}
+          path: backup
+      - name: Restore compatible ops cache
+        run: |
+          mkdir -p research_public_lake
+          gh release download "${{ inputs.ops_release_tag }}" \
+            --repo jeleff1000/yahoo_oauth \
+            --pattern ops_cache.duckdb \
+            --dir research_public_lake
+          corpus=$(find backup -name corpus_snapshot.duckdb -type f | head -1)
+          test -s "$corpus"
+          mv "$corpus" research_public_lake/corpus_snapshot.duckdb
+          test -s research_public_lake/ops_cache.duckdb
+      - name: Validate restored lake
+        run: |
+          python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+          python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
+      - name: Save canonical cache
+        uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+      - name: Verify cache contents
+        run: |
+          test -s research_public_lake/corpus_snapshot.duckdb
+          test -s research_public_lake/ops_cache.duckdb
+          du -sh research_public_lake
