@@ -33,14 +33,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_PROMPT_DISABLED: 1
         run: |
-          existing=$(gh cache list \
-            --repo jeleff1000/league-history-workers \
-            --key "$CHECKPOINT_CACHE_PREFIX" \
-            --limit 200 \
-            --json key)
-          missing=$(printf '%s' "$existing" | python -c '
-          import json, sys
-          existing = {row["key"] for row in json.load(sys.stdin)}
+          existing=$(gh api --paginate \
+            "/repos/jeleff1000/league-history-workers/actions/caches?per_page=100" \
+            --jq '.actions_caches[].key')
+          missing=$(printf '%s\n' "$existing" | python -c '
+          import sys
+          existing = set(sys.stdin.read().splitlines())
           expected = [
               f"nfl_player_stats_all-batch-{index:02d}" for index in range(110)
           ] + ["player_bio-all"]
@@ -48,6 +46,7 @@ jobs:
                     if "ops-cache-checkpoint-v4-Linux-" + batch_id not in existing]
           print("|" + "|".join(absent) + "|" if absent else "")
           ')
+          echo "[ops-cache] existing-count=$(grep -c . <<< "$existing" || true)"
           echo "[ops-cache] missing-count=$(grep -o '|' <<< "$missing" | wc -l | awk '{print int($1/2)}')"
           MISSING="$missing" python -c 'import json, os; missing = [value for value in os.environ["MISSING"].split("|") if value]; print("matrix=" + json.dumps({"include": [{"batch_id": value} for value in (missing or ["__none__"])]}))' >> "$GITHUB_OUTPUT"
 
