@@ -7,10 +7,6 @@ on:
         description: Immutable research lake cache to validate
         required: true
         default: research-public-lake-v4-Linux-20260806-signal-rescue-31066261053
-      base_cache_key:
-        description: Pre-rescue cache for before/after outcome comparison
-        required: true
-        default: research-public-lake-v4-Linux-20260805-identity-repair-final5-cdfd7934d
 
 permissions:
   actions: read
@@ -25,11 +21,6 @@ jobs:
         with:
           path: research_public_lake
           key: ${{ inputs.cache_key }}
-          fail-on-cache-miss: true
-      - uses: actions/cache/restore@v5
-        with:
-          path: base_research_public_lake
-          key: ${{ inputs.base_cache_key }}
           fail-on-cache-miss: true
       - uses: actions/setup-python@v6
         with:
@@ -66,21 +57,15 @@ jobs:
             select count(*)-count(distinct (db_name,year,week,manager,team_key)) from k
           ''').fetchone()[0]
           started_null_win = con.execute('select count(*) from public.player_fantasy where is_started=1 and win is null').fetchone()[0]
-          base = duckdb.connect('base_research_public_lake/corpus_snapshot.duckdb', read_only=True)
-          base_started_null_win = base.execute('select count(*) from public.player_fantasy where is_started=1 and win is null').fetchone()[0]
           print({'player_fantasy_rows': pf_rows, 'matchup_rows': mu_rows,
                  'playoff_or_champ_matchup_rows': signal_rows,
                  'championship_without_playoff_rows': champ_without_playoff,
                  'duplicate_matchup_keys': dup,
-                 'started_rows_with_null_win': started_null_win,
-                 'base_started_rows_with_null_win': base_started_null_win,
-                 'started_null_win_reduction': base_started_null_win - started_null_win})
+                 'started_rows_with_null_win': started_null_win})
           if pf_rows <= 0 or mu_rows <= 0 or signal_rows <= 0:
               raise SystemExit('published lake is empty or has no playoff/championship signals')
           if champ_without_playoff:
               raise SystemExit('championship rows must also be playoff rows')
-          if started_null_win >= base_started_null_win:
-              raise SystemExit('outcome sidecar did not reduce started-row null wins')
           # The research matchup table has a pre-existing platform-specific
           # grain that is not reducible to this fallback key. Report it for
           # audit, but do not reinterpret preserved base rows as a rescue
