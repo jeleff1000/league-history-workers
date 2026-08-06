@@ -19,6 +19,10 @@ on:
         description: 'JSON list of bucket IDs to build; use [0] for an isolated pilot.'
         required: true
         default: '[0,1,2,3,4]'
+      bucket_count:
+        description: 'Total league buckets used by the builder; increase this when a five-way bucket is too large.'
+        required: true
+        default: '5'
 
 permissions:
   contents: read
@@ -39,7 +43,7 @@ jobs:
     env:
       RESEARCH_YEAR_START: ${{ matrix.year }}
       RESEARCH_YEAR_END: ${{ matrix.year }}
-      RESEARCH_LEAGUE_BUCKETS: "5"
+      RESEARCH_LEAGUE_BUCKETS: ${{ inputs.bucket_count }}
       RESEARCH_LEAGUE_BUCKET: ${{ matrix.bucket }}
       RESEARCH_OUT_DIR: ${{ github.workspace }}/out
       RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
