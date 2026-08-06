@@ -1,0 +1,103 @@
+name: Refold Source Playoff Clutch Backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Successful source playoff/clutch backfill run
+        required: true
+        default: "30989674360"
+      artifact_prefix:
+        description: Prefix for the numbered result artifacts
+        required: true
+        default: research-source-backfill-result-
+      base_cache_key:
+        description: Current merged research lake cache
+        required: true
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-championship-v9
+      output_cache_key:
+        description: Refolded cache key before championship reapplication
+        required: true
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-clutch-v10
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  refold:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+      REPO: jeleff1000/league-history-workers
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      CORPUS_DIR: ${{ github.workspace }}/source_corpus
+      PYTHONPATH: ${{ github.workspace }}/code
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.base_cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3
+      - name: Refold successful source artifacts one at a time
+        shell: bash
+        env:
+          ARTIFACT_PREFIX: ${{ inputs.artifact_prefix }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$CORPUS_DIR" results batch
+          mapfile -t artifacts < <(gh api --paginate \
+            "/repos/${REPO}/actions/runs/${SOURCE_RUN_ID}/artifacts?per_page=100" \
+            --jq ".artifacts[] | select(.expired == false and (.name | startswith(\"${ARTIFACT_PREFIX}\"))) | .name" | sort)
+          test "${#artifacts[@]}" -gt 0
+          echo "source_artifacts=${#artifacts[@]}"
+          : > results/all.jsonl
+          for artifact in "${artifacts[@]}"; do
+            rm -rf batch "$CORPUS_DIR/leagues" "$CORPUS_DIR/logs"
+            mkdir -p batch
+            echo "processing=$artifact"
+            gh run download "$SOURCE_RUN_ID" --repo "$REPO" --name "$artifact" --dir batch
+            tarball=$(find batch -type f -name '*.tar' -print -quit)
+            test -n "$tarball"
+            tar -xf "$tarball" -C "$CORPUS_DIR"
+            result="$CORPUS_DIR/source_playoff_clutch_backfill_results.jsonl"
+            test -s "$result"
+            cat "$result" >> results/all.jsonl
+            python code/scripts/research_cohorts/refold_repaired_sources.py \
+              --results "$result" \
+              --snapshot research_public_lake/corpus_snapshot.duckdb
+          done
+          python - <<'PY'
+          import json
+          from collections import Counter
+          rows=[json.loads(x) for x in open('results/all.jsonl', encoding='utf-8') if x.strip()]
+          done=[r for r in rows if r.get('status') == 'done']
+          if len({r.get('db_name') for r in done}) != len(done):
+              raise SystemExit('duplicate successful source database in refold inputs')
+          print({'result_rows':len(rows),'done':len(done),'statuses':Counter(r.get('status') for r in rows)})
+          if not done:
+              raise SystemExit('no successful source rows were refolded')
+          PY
+      - name: Validate refolded public lake
+        run: python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.output_cache_key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-refold-source-backfill-${{ github.run_id }}
+          path: results/all.jsonl
+          if-no-files-found: error
+          retention-days: 30
