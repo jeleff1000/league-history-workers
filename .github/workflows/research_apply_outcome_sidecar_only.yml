@@ -58,7 +58,7 @@ jobs:
           from pathlib import Path
           con = duckdb.connect('outcome_overlay.duckdb')
           con.execute('create schema public')
-          paths = sorted(Path('.').glob('outcomes_*/*.parquet'))
+          paths = sorted(p for root in (Path('outcomes_a'), Path('outcomes_b')) for p in root.rglob('*.parquet'))
           if len(paths) != 2 or any(p.stat().st_size == 0 for p in paths):
               raise SystemExit(f'expected two non-empty outcome artifacts, got {paths}')
           con.execute('create table public.outcome_targets as select * from read_parquet(?)', [str(paths[0])])
