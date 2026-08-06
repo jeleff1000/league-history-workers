@@ -5,7 +5,7 @@ on:
     inputs:
       cache_key:
         required: true
-        default: research-public-lake-v4-Linux-20260806-championship-repaired-v8
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-championship-v9
       db_name:
         required: true
       year:

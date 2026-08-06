@@ -14,11 +14,11 @@ on:
       base_cache_key:
         description: Current immutable public lake cache
         required: true
-        default: research-public-lake-v4-Linux-20260806-start-flags-fixed
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-championship-v9
       output_cache_key:
         description: Explicit versioned cache key for the validated merged lake
         required: true
-        default: research-public-lake-v4-Linux-20260806-signal-rescue-current
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-championship-v10
 
 permissions:
   contents: read

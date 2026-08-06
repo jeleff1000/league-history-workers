@@ -5,7 +5,7 @@ on:
     inputs:
       cache_key:
         required: true
-        default: research-public-lake-v4-Linux-20260806-championship-repaired-v8
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-championship-v9
       players:
         description: Comma-separated player names to audit across all years
         required: true
