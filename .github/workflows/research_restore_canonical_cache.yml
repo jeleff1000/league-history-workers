@@ -69,15 +69,17 @@ jobs:
             --exclude='corpus_snapshot.duckdb' \
             --exclude='ops_cache.duckdb' &
           tar_pid=$!
+          exec 3>"$pipe"
           for part in 00 01 02 03; do
             rm -f "research-public-lake.tar.part-$part"
             gh release download "${{ inputs.ops_release_tag }}" \
               --repo jeleff1000/yahoo_oauth \
               --pattern "research-public-lake.tar.part-$part" \
               --dir .
-            cat "research-public-lake.tar.part-$part" > "$pipe"
+            cat "research-public-lake.tar.part-$part" >&3
             rm -f "research-public-lake.tar.part-$part"
           done
+          exec 3>&-
           wait "$tar_pid"
           rm -f "$pipe"
       - name: Validate restored lake
