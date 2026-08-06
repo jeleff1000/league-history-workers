@@ -39,6 +39,21 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - name: Fail-fast verify sidecar artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base="research-outcome-applied-lake-${{ inputs.outcome_applied_run_id }}"
+          base_json=$(gh api "/repos/${{ github.repository }}/actions/runs/${{ inputs.outcome_applied_run_id }}/artifacts" --jq ".artifacts[] | select(.name == \"${base}\") | [.expired,.size_in_bytes] | @tsv")
+          test -n "$base_json"
+          expired=$(cut -f1 <<<"$base_json"); size=$(cut -f2 <<<"$base_json")
+          test "$expired" = "false"; test "$size" -gt 1000000000
+          rescue_json=$(gh api "/repos/${{ github.repository }}/actions/runs/${{ inputs.source_matchup_run_id }}/artifacts" --jq '.artifacts[] | select(.name | startswith("research-source-matchup-rescue-combined-")) | [.expired,.size_in_bytes] | @tsv')
+          test -n "$rescue_json"
+          test "$(cut -f1 <<<"$rescue_json")" = "false"
+          test "$(cut -f2 <<<"$rescue_json")" -gt 1000
+          echo "preflight PASS: base=${size} bytes; source=$(cut -f2 <<<"$rescue_json") bytes"
       - uses: actions/cache/restore@v5
         with:
           path: research_public_lake
