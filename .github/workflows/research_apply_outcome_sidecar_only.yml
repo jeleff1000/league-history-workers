@@ -1,0 +1,78 @@
+name: Apply Outcome Sidecar Only
+
+on:
+  workflow_dispatch:
+    inputs:
+      outcome_run_id:
+        description: Successful combined outcome sidecar run
+        required: true
+        default: "31061116294"
+      base_cache_key:
+        description: Current canonical source lake cache
+        required: true
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-canonical-final
+      output_cache_key:
+        description: Versioned cache key for the outcome-applied lake
+        required: true
+        default: research-public-lake-v4-Linux-20260806-outcomes-applied
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.base_cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Download combined outcome sidecar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p outcomes
+          gh run download '${{ inputs.outcome_run_id }}' --repo '${{ github.repository }}' \
+            --pattern 'research-outcome-targets-combined-*' --dir outcomes
+          OUTCOME=$(find outcomes -name '*.parquet' | head -1)
+          test -s "$OUTCOME"
+          python - "$OUTCOME" <<'PY'
+          import duckdb, sys
+          con = duckdb.connect('outcome_overlay.duckdb')
+          con.execute('create schema public')
+          con.execute('create table public.outcome_targets as select * from read_parquet(?)', [sys.argv[1]])
+          print(con.execute('select count(*) from public.outcome_targets').fetchone()[0])
+          con.close()
+          PY
+      - name: Apply outcome overlay only
+        run: |
+          python code/scripts/research_cohorts/apply_outcome_sidecar_only.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --out merged_corpus_snapshot.duckdb \
+            --outcomes outcome_overlay.duckdb
+          mv merged_corpus_snapshot.duckdb research_public_lake/corpus_snapshot.duckdb
+          python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.output_cache_key }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-outcome-applied-lake-${{ github.run_id }}
+          path: research_public_lake/corpus_snapshot.duckdb
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
