@@ -1,0 +1,204 @@
+name: Research Source Matchup Golden Sample
+
+on:
+  workflow_dispatch:
+    inputs:
+      inventory_run_id:
+        description: Inventory run containing rescue targets for all platforms
+        required: true
+        default: "31116250335"
+      base_cache_key:
+        description: Canonical public lake cache to test the merge against
+        required: true
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-canonical-final
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: research-source-matchup-golden-sample
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      target_count: ${{ steps.targets.outputs.target_count }}
+    steps:
+      - name: Download full rescue inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p inventory
+          gh run download '${{ inputs.inventory_run_id }}' \
+            --repo '${{ github.repository }}' \
+            --name 'research-matchup-league-year-inventory-${{ inputs.inventory_run_id }}' \
+            --dir inventory
+      - id: targets
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          rows = json.loads(Path('inventory/matchup_rescue_targets.json').read_text())
+          chosen = []
+          for platform in ('mfl', 'fleaflicker', 'sleeper'):
+              candidates = [r for r in rows if str(r.get('platform','')).lower() == platform
+                            and r.get('source_id') and r.get('db_name') and int(r.get('year',0))]
+              if not candidates:
+                  raise SystemExit(f'no usable {platform} golden target')
+              chosen.append(sorted(candidates, key=lambda r: (int(r['year']), str(r['db_name'])))[0])
+          Path('targets.json').write_text(json.dumps({'schema_version': 1, 'targets': chosen}, indent=2) + '\n')
+          print({'targets': [(r['platform'], r['db_name'], r['year'], r['source_id']) for r in chosen]})
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write('target_count=3\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-source-matchup-golden-targets-${{ github.run_id }}
+          path: targets.json
+          if-no-files-found: error
+          retention-days: 14
+
+  fetch:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pandas==2.2.3 pyarrow==15.0.2 duckdb==1.5.1 requests==2.32.4 polars==1.35.2
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-source-matchup-golden-targets-${{ github.run_id }}
+          path: golden
+      - name: Fetch exactly three platform targets
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
+        run: |
+          mkdir -p out
+          python code/scripts/research_cohorts/build_source_matchup_rescue_sidecar.py \
+            --targets golden/targets.json --shard 0 --shards 1 --workers 1 \
+            --out out/source_matchup_rescue_0.parquet
+      - name: Require all three source fetches to succeed
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows = [json.loads(x) for x in Path('out/source_matchup_rescue_0.jsonl').read_text().splitlines() if x.strip()]
+          if len(rows) != 3:
+              raise SystemExit(f'expected 3 target statuses, got {len(rows)}')
+          bad = [r for r in rows if r.get('status') != 'done' or int(r.get('rows', 0) or 0) <= 0]
+          print({'statuses': [(r.get('platform'), r.get('status'), r.get('rows')) for r in rows]})
+          if bad:
+              raise SystemExit(f'golden source fetch failed: {bad}')
+          if {str(r.get('platform')).lower() for r in rows} != {'mfl','fleaflicker','sleeper'}:
+              raise SystemExit('golden sample did not cover all three platforms')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-source-matchup-golden-fetch-${{ github.run_id }}
+          path: |
+            golden/targets.json
+            out/*
+          if-no-files-found: error
+          retention-days: 14
+
+  merge:
+    needs: fetch
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-source-matchup-golden-fetch-${{ github.run_id }}
+          path: golden
+      - name: Restore immutable base lake
+        uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.base_cache_key }}
+          fail-on-cache-miss: true
+      - name: Build overlays and merge golden sample
+        run: |
+          MATCHUP=$(find golden -name 'source_matchup_rescue_0.parquet' | head -1)
+          test -s "$MATCHUP"
+          python - "$MATCHUP" <<'PY'
+          import duckdb, sys
+          out = duckdb.connect('overlay_empty_outcomes.duckdb')
+          out.execute('create schema public')
+          out.execute('''create table public.outcome_targets (
+              db_name varchar, year integer, week integer,
+              NFL_player_id varchar, win integer, team_points double)''')
+          out.close()
+          res = duckdb.connect('overlay_golden_matchups.duckdb')
+          res.execute('create schema public')
+          res.execute('create table public.source_matchup_rescue as select * from read_parquet(?)', [sys.argv[1]])
+          res.close()
+          PY
+          python code/scripts/research_cohorts/merge_research_sidecars.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --out merged_corpus_snapshot.duckdb \
+            --outcomes overlay_empty_outcomes.duckdb \
+            --matchups overlay_golden_matchups.duckdb
+      - name: Verify golden keys survived the merge
+        run: |
+          python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          c=duckdb.connect('merged_corpus_snapshot.duckdb', read_only=True)
+          c.execute("create or replace temp table source as select * from read_parquet('golden/out/source_matchup_rescue_0.parquet')")
+          missing = c.execute('''
+            select count(*) from source s
+            where not exists (
+              select 1 from public.matchup m
+              where m.db_name=s.db_name and m.year=s.year and m.week=s.week
+                and m.manager is not distinct from s.manager
+                and coalesce(cast(m.franchise_id as varchar), cast(m.manager as varchar))
+                    is not distinct from coalesce(cast(s.franchise_id as varchar), cast(s.manager as varchar))
+            )
+          ''').fetchone()[0]
+          outcome_missing = c.execute('''
+            select count(*) from source s
+            where s.win is not null and not exists (
+              select 1 from public.matchup m
+              where m.db_name=s.db_name and m.year=s.year and m.week=s.week
+                and m.manager is not distinct from s.manager
+                and coalesce(cast(m.franchise_id as varchar), cast(m.manager as varchar))
+                    is not distinct from coalesce(cast(s.franchise_id as varchar), cast(s.manager as varchar))
+                and (m.win is not null or m.loss is not null or m.tie is not null)
+            )
+          ''').fetchone()[0]
+          platforms=c.execute('select distinct lower(platform) from source order by 1').fetchall()
+          print({'source_rows': c.execute('select count(*) from source').fetchone()[0], 'platforms': platforms, 'missing_keys': missing, 'missing_outcomes': outcome_missing})
+          if missing or outcome_missing or {p[0] for p in platforms} != {'mfl','fleaflicker','sleeper'}:
+              raise SystemExit('golden sidecar did not survive end-to-end merge')
+          Path('golden_report.json').write_text(json.dumps({'missing_keys':missing,'missing_outcomes':outcome_missing,'platforms':[p[0] for p in platforms]}))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-source-matchup-golden-report-${{ github.run_id }}
+          path: golden_report.json
+          if-no-files-found: error
+          retention-days: 30
