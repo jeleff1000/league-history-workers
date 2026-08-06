@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 env:
-  CHECKPOINT_CACHE_PREFIX: ops-cache-checkpoint-v3-Linux-
+  CHECKPOINT_CACHE_PREFIX: ops-cache-checkpoint-v4-Linux-
 
 jobs:
   checkpoint:
@@ -87,6 +87,61 @@ jobs:
           - batch_id: nfl_player_stats_all-batch-52
           - batch_id: nfl_player_stats_all-batch-53
           - batch_id: nfl_player_stats_all-batch-54
+          - batch_id: nfl_player_stats_all-batch-55
+          - batch_id: nfl_player_stats_all-batch-56
+          - batch_id: nfl_player_stats_all-batch-57
+          - batch_id: nfl_player_stats_all-batch-58
+          - batch_id: nfl_player_stats_all-batch-59
+          - batch_id: nfl_player_stats_all-batch-60
+          - batch_id: nfl_player_stats_all-batch-61
+          - batch_id: nfl_player_stats_all-batch-62
+          - batch_id: nfl_player_stats_all-batch-63
+          - batch_id: nfl_player_stats_all-batch-64
+          - batch_id: nfl_player_stats_all-batch-65
+          - batch_id: nfl_player_stats_all-batch-66
+          - batch_id: nfl_player_stats_all-batch-67
+          - batch_id: nfl_player_stats_all-batch-68
+          - batch_id: nfl_player_stats_all-batch-69
+          - batch_id: nfl_player_stats_all-batch-70
+          - batch_id: nfl_player_stats_all-batch-71
+          - batch_id: nfl_player_stats_all-batch-72
+          - batch_id: nfl_player_stats_all-batch-73
+          - batch_id: nfl_player_stats_all-batch-74
+          - batch_id: nfl_player_stats_all-batch-75
+          - batch_id: nfl_player_stats_all-batch-76
+          - batch_id: nfl_player_stats_all-batch-77
+          - batch_id: nfl_player_stats_all-batch-78
+          - batch_id: nfl_player_stats_all-batch-79
+          - batch_id: nfl_player_stats_all-batch-80
+          - batch_id: nfl_player_stats_all-batch-81
+          - batch_id: nfl_player_stats_all-batch-82
+          - batch_id: nfl_player_stats_all-batch-83
+          - batch_id: nfl_player_stats_all-batch-84
+          - batch_id: nfl_player_stats_all-batch-85
+          - batch_id: nfl_player_stats_all-batch-86
+          - batch_id: nfl_player_stats_all-batch-87
+          - batch_id: nfl_player_stats_all-batch-88
+          - batch_id: nfl_player_stats_all-batch-89
+          - batch_id: nfl_player_stats_all-batch-90
+          - batch_id: nfl_player_stats_all-batch-91
+          - batch_id: nfl_player_stats_all-batch-92
+          - batch_id: nfl_player_stats_all-batch-93
+          - batch_id: nfl_player_stats_all-batch-94
+          - batch_id: nfl_player_stats_all-batch-95
+          - batch_id: nfl_player_stats_all-batch-96
+          - batch_id: nfl_player_stats_all-batch-97
+          - batch_id: nfl_player_stats_all-batch-98
+          - batch_id: nfl_player_stats_all-batch-99
+          - batch_id: nfl_player_stats_all-batch-100
+          - batch_id: nfl_player_stats_all-batch-101
+          - batch_id: nfl_player_stats_all-batch-102
+          - batch_id: nfl_player_stats_all-batch-103
+          - batch_id: nfl_player_stats_all-batch-104
+          - batch_id: nfl_player_stats_all-batch-105
+          - batch_id: nfl_player_stats_all-batch-106
+          - batch_id: nfl_player_stats_all-batch-107
+          - batch_id: nfl_player_stats_all-batch-108
+          - batch_id: nfl_player_stats_all-batch-109
           - batch_id: player_bio-all
 
     steps:
@@ -184,282 +239,557 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-00
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-00
       - name: Restore stats checkpoint 01
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-01
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-01
       - name: Restore stats checkpoint 02
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-02
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-02
       - name: Restore stats checkpoint 03
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-03
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-03
       - name: Restore stats checkpoint 04
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-04
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-04
       - name: Restore stats checkpoint 05
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-05
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-05
       - name: Restore stats checkpoint 06
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-06
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-06
       - name: Restore stats checkpoint 07
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-07
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-07
       - name: Restore stats checkpoint 08
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-08
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-08
       - name: Restore stats checkpoint 09
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-09
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-09
       - name: Restore stats checkpoint 10
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-10
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-10
       - name: Restore stats checkpoint 11
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-11
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-11
       - name: Restore stats checkpoint 12
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-12
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-12
       - name: Restore stats checkpoint 13
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-13
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-13
       - name: Restore stats checkpoint 14
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-14
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-14
       - name: Restore stats checkpoint 15
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-15
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-15
       - name: Restore stats checkpoint 16
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-16
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-16
       - name: Restore stats checkpoint 17
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-17
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-17
       - name: Restore stats checkpoint 18
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-18
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-18
       - name: Restore stats checkpoint 19
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-19
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-19
       - name: Restore stats checkpoint 20
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-20
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-20
       - name: Restore stats checkpoint 21
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-21
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-21
       - name: Restore stats checkpoint 22
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-22
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-22
       - name: Restore stats checkpoint 23
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-23
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-23
       - name: Restore stats checkpoint 24
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-24
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-24
       - name: Restore stats checkpoint 25
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-25
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-25
       - name: Restore stats checkpoint 26
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-26
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-26
       - name: Restore stats checkpoint 27
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-27
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-27
       - name: Restore stats checkpoint 28
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-28
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-28
       - name: Restore stats checkpoint 29
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-29
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-29
       - name: Restore stats checkpoint 30
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-30
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-30
       - name: Restore stats checkpoint 31
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-31
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-31
       - name: Restore stats checkpoint 32
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-32
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-32
       - name: Restore stats checkpoint 33
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-33
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-33
       - name: Restore stats checkpoint 34
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-34
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-34
       - name: Restore stats checkpoint 35
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-35
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-35
       - name: Restore stats checkpoint 36
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-36
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-36
       - name: Restore stats checkpoint 37
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-37
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-37
       - name: Restore stats checkpoint 38
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-38
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-38
       - name: Restore stats checkpoint 39
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-39
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-39
       - name: Restore stats checkpoint 40
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-40
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-40
       - name: Restore stats checkpoint 41
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-41
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-41
       - name: Restore stats checkpoint 42
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-42
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-42
       - name: Restore stats checkpoint 43
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-43
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-43
       - name: Restore stats checkpoint 44
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-44
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-44
       - name: Restore stats checkpoint 45
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-45
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-45
       - name: Restore stats checkpoint 46
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-46
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-46
       - name: Restore stats checkpoint 47
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-47
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-47
       - name: Restore stats checkpoint 48
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-48
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-48
       - name: Restore stats checkpoint 49
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-49
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-49
       - name: Restore stats checkpoint 50
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-50
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-50
       - name: Restore stats checkpoint 51
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-51
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-51
       - name: Restore stats checkpoint 52
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-52
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-52
       - name: Restore stats checkpoint 53
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-53
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-53
       - name: Restore stats checkpoint 54
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-nfl_player_stats_all-batch-54
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-54
+      - name: Restore stats checkpoint 55
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-55
+      - name: Restore stats checkpoint 56
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-56
+      - name: Restore stats checkpoint 57
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-57
+      - name: Restore stats checkpoint 58
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-58
+      - name: Restore stats checkpoint 59
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-59
+      - name: Restore stats checkpoint 60
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-60
+      - name: Restore stats checkpoint 61
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-61
+      - name: Restore stats checkpoint 62
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-62
+      - name: Restore stats checkpoint 63
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-63
+      - name: Restore stats checkpoint 64
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-64
+      - name: Restore stats checkpoint 65
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-65
+      - name: Restore stats checkpoint 66
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-66
+      - name: Restore stats checkpoint 67
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-67
+      - name: Restore stats checkpoint 68
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-68
+      - name: Restore stats checkpoint 69
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-69
+      - name: Restore stats checkpoint 70
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-70
+      - name: Restore stats checkpoint 71
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-71
+      - name: Restore stats checkpoint 72
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-72
+      - name: Restore stats checkpoint 73
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-73
+      - name: Restore stats checkpoint 74
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-74
+      - name: Restore stats checkpoint 75
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-75
+      - name: Restore stats checkpoint 76
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-76
+      - name: Restore stats checkpoint 77
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-77
+      - name: Restore stats checkpoint 78
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-78
+      - name: Restore stats checkpoint 79
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-79
+      - name: Restore stats checkpoint 80
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-80
+      - name: Restore stats checkpoint 81
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-81
+      - name: Restore stats checkpoint 82
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-82
+      - name: Restore stats checkpoint 83
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-83
+      - name: Restore stats checkpoint 84
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-84
+      - name: Restore stats checkpoint 85
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-85
+      - name: Restore stats checkpoint 86
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-86
+      - name: Restore stats checkpoint 87
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-87
+      - name: Restore stats checkpoint 88
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-88
+      - name: Restore stats checkpoint 89
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-89
+      - name: Restore stats checkpoint 90
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-90
+      - name: Restore stats checkpoint 91
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-91
+      - name: Restore stats checkpoint 92
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-92
+      - name: Restore stats checkpoint 93
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-93
+      - name: Restore stats checkpoint 94
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-94
+      - name: Restore stats checkpoint 95
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-95
+      - name: Restore stats checkpoint 96
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-96
+      - name: Restore stats checkpoint 97
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-97
+      - name: Restore stats checkpoint 98
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-98
+      - name: Restore stats checkpoint 99
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-99
+      - name: Restore stats checkpoint 100
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-100
+      - name: Restore stats checkpoint 101
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-101
+      - name: Restore stats checkpoint 102
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-102
+      - name: Restore stats checkpoint 103
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-103
+      - name: Restore stats checkpoint 104
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-104
+      - name: Restore stats checkpoint 105
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-105
+      - name: Restore stats checkpoint 106
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-106
+      - name: Restore stats checkpoint 107
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-107
+      - name: Restore stats checkpoint 108
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-108
+      - name: Restore stats checkpoint 109
+        uses: actions/cache/restore@v5
+        with:
+          path: ops_cache/checkpoints
+          key: ops-cache-checkpoint-v4-Linux-nfl_player_stats_all-batch-109
       - name: Restore player bio checkpoint
         uses: actions/cache/restore@v5
         with:
           path: ops_cache/checkpoints
-          key: ops-cache-checkpoint-v3-Linux-player_bio-all
+          key: ops-cache-checkpoint-v4-Linux-player_bio-all
 
       - name: Assemble checkpoints
         run: |
