@@ -17,6 +17,11 @@ on:
         required: false
         type: string
         default: ''
+      resume_run_id_2:
+        description: 'Optional second prior seed run whose checkpoint artifacts should be reused'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   actions: write
@@ -44,12 +49,15 @@ jobs:
           all_keys="$(jq -cn '[range(0;110) | "nfl_player_stats_all-batch-" + (if . < 10 then "0" else "" end) + tostring] + ["player_bio-all"]')"
           cached_keys="$(gh cache list --repo jeleff1000/league-history-workers --key "$CACHE_PREFIX" --limit 1000 --json key | jq -c '[.[].key | sub("^ops-cache-checkpoint-v4-Linux-"; "")]')"
           artifact_keys='[]'
-          if [ -n "${{ github.event.inputs.resume_run_id || '' }}" ]; then
-            artifact_keys="$(gh api --paginate \
-              "/repos/jeleff1000/league-history-workers/actions/runs/${{ github.event.inputs.resume_run_id }}/artifacts" \
-              --jq '[.artifacts[] | select(.name | startswith("ops-checkpoint-")) | .name | sub("^ops-checkpoint-"; "")]' \
-              | jq -s 'add // []')"
-          fi
+          for resume_id in "${{ github.event.inputs.resume_run_id || '' }}" "${{ github.event.inputs.resume_run_id_2 || '' }}"; do
+            if [ -n "$resume_id" ]; then
+              gh api --paginate \
+                "/repos/jeleff1000/league-history-workers/actions/runs/$resume_id/artifacts" \
+                --jq '.artifacts[] | select(.name | startswith("ops-checkpoint-")) | .name | sub("^ops-checkpoint-"; "")' \
+                | jq -R -s 'split("\\n") | map(select(length > 0))' > /tmp/ops-artifacts.json
+              artifact_keys="$(jq -cn --argjson a "$artifact_keys" --argjson b "$(jq -c . /tmp/ops-artifacts.json)" '$a + $b | unique')"
+            fi
+          done
           available="$(jq -cn --argjson cached "$cached_keys" --argjson artifacts "$artifact_keys" '$cached + $artifacts | unique')"
           missing="$(jq -cn --argjson all "$all_keys" --argjson available "$available" '$all - $available | map({batch_id: .}) | {include: .}')"
           count="$(jq '.include | length' <<< "$missing")"
@@ -207,6 +215,17 @@ jobs:
           github-token: ${{ github.token }}
           repository: jeleff1000/league-history-workers
           run-id: ${{ github.event.inputs.resume_run_id }}
+          pattern: ops-checkpoint-*
+          path: ops_cache/checkpoints
+          merge-multiple: true
+
+      - name: Download artifacts from second resumed seed run
+        if: ${{ github.event.inputs.resume_run_id_2 != '' }}
+        uses: actions/download-artifact@v6
+        with:
+          github-token: ${{ github.token }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ github.event.inputs.resume_run_id_2 }}
           pattern: ops-checkpoint-*
           path: ops_cache/checkpoints
           merge-multiple: true
