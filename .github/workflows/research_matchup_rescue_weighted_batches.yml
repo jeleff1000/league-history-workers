@@ -29,7 +29,7 @@ permissions:
 
 jobs:
  plan:
-   runs-on: ubuntu-latest
+   runs-on: ubuntu-24.04
    timeout-minutes: 15
    outputs:
      matrix: ${{ steps.plan.outputs.matrix }}
@@ -124,7 +124,7 @@ jobs:
      max-parallel: 15
      matrix:
        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
-   runs-on: ubuntu-latest
+   runs-on: ubuntu-24.04
    timeout-minutes: 355
    env:
      RESEARCH_YEAR_START: ${{ matrix.year }}
