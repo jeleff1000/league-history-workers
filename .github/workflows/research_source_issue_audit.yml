@@ -59,7 +59,7 @@ jobs:
           players = con.execute(q, names).fetchdf()
           if players.empty:
               raise SystemExit('No matching player rows found')
-          print('raw_matching_rows=', len(players), 'raw_start_values=', players['is_started'].value_counts(dropna=False).to_dict())
+          print('raw_matching_rows=', len(players), 'raw_start_values=', players['is_started'].value_counts(dropna=False).to_dict(), 'fantasy_positions=', players['fantasy_position'].value_counts(dropna=False).to_dict())
           players['started'] = players.get('is_started', 0).astype(str).str.lower().isin({'1','true','t','yes','starter'}).astype(int)
           players = players[players.started.eq(1)].copy()
           if mflag:
