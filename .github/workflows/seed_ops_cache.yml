@@ -43,13 +43,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CACHE_PREFIX: ops-cache-checkpoint-v4-Linux-
+          RESUME_RUN_1: ${{ github.event.inputs.resume_run_id }}
+          RESUME_RUN_2: ${{ github.event.inputs.resume_run_id_2 }}
         shell: bash
         run: |
           set -euo pipefail
           all_keys="$(jq -cn '[range(0;110) | "nfl_player_stats_all-batch-" + (if . < 10 then "0" else "" end) + tostring] + ["player_bio-all"]')"
           cached_keys="$(gh cache list --repo jeleff1000/league-history-workers --key "$CACHE_PREFIX" --limit 1000 --json key | jq -c '[.[].key | sub("^ops-cache-checkpoint-v4-Linux-"; "")]')"
           artifact_keys='[]'
-          for resume_id in "${{ inputs.resume_run_id }}" "${{ inputs.resume_run_id_2 }}"; do
+          for resume_id in "$RESUME_RUN_1" "$RESUME_RUN_2"; do
             if [ -n "$resume_id" ]; then
               gh api --paginate \
                 "/repos/jeleff1000/league-history-workers/actions/runs/$resume_id/artifacts" \
