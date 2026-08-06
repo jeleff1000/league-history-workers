@@ -47,6 +47,10 @@ env:
 
 jobs:
   preflight:
+    # The research lake now carries the validated ops snapshot. Keep this
+    # legacy workflow dispatchable for history, but make stale/manual
+    # dispatches a no-op so checkpoint caches cannot evict the canonical lake.
+    if: ${{ false }}
     name: Plan missing checkpoints
     runs-on: ubuntu-latest
     outputs:
