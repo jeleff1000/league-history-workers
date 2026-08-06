@@ -49,8 +49,12 @@ jobs:
          key: ${{ inputs.cache_key }}
          fail-on-cache-miss: true
 
-     - name: Install bounded dependencies
-       run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1
+       - name: Install bounded dependencies
+         run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 pytest==8.3.3
+
+       - name: Run fast planner contract test
+         working-directory: code
+         run: python -m pytest -q scripts/research_cohorts/test_build_league_batch_plan.py
 
      - name: Verify public-only inputs
        shell: bash
