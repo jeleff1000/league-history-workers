@@ -62,11 +62,14 @@ jobs:
           print('raw_matching_rows=', len(players), 'raw_start_values=', players['is_started'].value_counts(dropna=False).to_dict(), 'fantasy_positions=', players['fantasy_position'].value_counts(dropna=False).to_dict())
           players['started'] = players.get('is_started', 0).astype(str).str.lower().isin({'1','true','t','yes','starter'}).astype(int)
           players = players[players.started.eq(1)].copy()
+          join_keys = ['db_name','year','week']
           if mflag:
               msel = ['db_name','year','week','manager'] + [c for c in [mflag,mchamp,'champion','final_playoff_seed','playoff_round'] if c in mcols]
+              if 'team_key' in pcols and 'team_key' in mcols:
+                  join_keys.append('team_key'); msel = ['db_name','year','week','team_key'] + [c for c in [mflag,mchamp,'champion','final_playoff_seed','playoff_round'] if c in mcols]
               mq = 'SELECT ' + ','.join('"'+c+'"' for c in msel) + ' FROM lake.public.matchup'
               mu = con.execute(mq).fetchdf()
-              players = players.merge(mu, on=['db_name','year','week','manager'], how='left', suffixes=('_player','_team'))
+              players = players.merge(mu, on=join_keys, how='left', suffixes=('_player','_team'))
           rows = []
           for name, g in players.groupby('player', dropna=False):
               def count_flag(col):
@@ -78,13 +81,13 @@ jobs:
                   'started_rows': len(g),
                   'started_leagues': g[['db_name','year']].drop_duplicates().shape[0],
                   'player_playoff_starts': count_flag(pflag + '_player' if pflag and pflag + '_player' in g else pflag),
-                  'team_playoff_starts': count_flag(mflag),
+                  'team_playoff_starts': count_flag(mflag + '_team' if mflag + '_team' in g else mflag),
                   'player_championship_starts': count_flag(pchamp + '_player' if pchamp and pchamp + '_player' in g else pchamp),
-                  'team_championship_starts': count_flag(mchamp),
-                  'champion_flag_rows': count_flag('champion'),
+                  'team_championship_starts': count_flag(mchamp + '_team' if mchamp and mchamp + '_team' in g else mchamp),
+                  'champion_flag_rows': count_flag('champion_player' if 'champion_player' in g else 'champion'),
                   'rows_with_null_id': int(g['NFL_player_id'].isna().sum()),
-                  'rows_with_null_playoff_signal': int(g[mflag].isna().sum()) if mflag in g else len(g),
-                  'rows_with_null_champ_signal': int(g[mchamp].isna().sum()) if mchamp in g else len(g),
+                  'rows_with_null_playoff_signal': int(g[mflag + '_team'].isna().sum()) if mflag and mflag + '_team' in g else len(g),
+                  'rows_with_null_champ_signal': int(g[mchamp + '_team'].isna().sum()) if mchamp and mchamp + '_team' in g else len(g),
               })
           out = pd.DataFrame(rows)
           out.to_csv('research_source_issue_audit.csv', index=False)
