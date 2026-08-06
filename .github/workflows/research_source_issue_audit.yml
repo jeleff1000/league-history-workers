@@ -53,6 +53,7 @@ jobs:
           required = ['db_name','year','week','player','NFL_player_id','manager','is_started','is_rostered']
           selected = [c for c in required if c in pcols]
           for c in [pflag, pchamp, 'win', 'loss', 'tie']:
+              if c not in pcols: continue
               if c and c not in selected: selected.append(c)
           q = 'SELECT ' + ','.join('"'+c+'"' for c in selected) + ' FROM lake.public.player_fantasy WHERE lower(player) IN (' + ','.join('lower(?)' for _ in names) + ')'
           players = con.execute(q, names).fetchdf()
