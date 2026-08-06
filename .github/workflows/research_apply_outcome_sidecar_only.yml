@@ -3,10 +3,14 @@ name: Apply Outcome Sidecar Only
 on:
   workflow_dispatch:
     inputs:
-      outcome_run_id:
-        description: Successful combined outcome sidecar run
+      outcome_run_id_a:
+        description: Successful combined outcome sidecar run for targets 0-90000
         required: true
-        default: "31061116294"
+        default: "31059385445"
+      outcome_run_id_b:
+        description: Successful combined outcome sidecar run for targets 90000-1145460
+        required: true
+        default: "31060749133"
       base_cache_key:
         description: Current canonical source lake cache
         required: true
@@ -44,16 +48,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p outcomes
-          gh run download '${{ inputs.outcome_run_id }}' --repo '${{ github.repository }}' \
-            --pattern 'research-outcome-targets-combined-*' --dir outcomes
-          OUTCOME=$(find outcomes -name '*.parquet' | head -1)
-          test -s "$OUTCOME"
-          python - "$OUTCOME" <<'PY'
-          import duckdb, sys
+          mkdir -p outcomes_a outcomes_b
+          gh run download '${{ inputs.outcome_run_id_a }}' --repo '${{ github.repository }}' \
+            --pattern 'research-outcome-targets-combined-*' --dir outcomes_a
+          gh run download '${{ inputs.outcome_run_id_b }}' --repo '${{ github.repository }}' \
+            --pattern 'research-outcome-targets-combined-*' --dir outcomes_b
+          python - <<'PY'
+          import duckdb
+          from pathlib import Path
           con = duckdb.connect('outcome_overlay.duckdb')
           con.execute('create schema public')
-          con.execute('create table public.outcome_targets as select * from read_parquet(?)', [sys.argv[1]])
+          paths = sorted(Path('.').glob('outcomes_*/*.parquet'))
+          if len(paths) != 2 or any(p.stat().st_size == 0 for p in paths):
+              raise SystemExit(f'expected two non-empty outcome artifacts, got {paths}')
+          con.execute('create table public.outcome_targets as select * from read_parquet(?)', [str(paths[0])])
+          con.execute('insert into public.outcome_targets select * from read_parquet(?)', [str(paths[1])])
           print(con.execute('select count(*) from public.outcome_targets').fetchone()[0])
           con.close()
           PY
