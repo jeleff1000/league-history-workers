@@ -94,8 +94,11 @@ jobs:
           import json
           from pathlib import Path
           rows = [json.loads(x) for x in Path('out/source_matchup_rescue_${{ matrix.shard }}.jsonl').read_text().splitlines() if x.strip()]
-          bad = [r for r in rows if r.get('status') not in ('done', 'source_returned_no_matchups')]
-          print({'targets': len(rows), 'done': sum(r.get('status') == 'done' for r in rows), 'bad': len(bad)})
+          bad = [r for r in rows if r.get('status') not in ('done', 'source_returned_no_matchups', 'source_fetch_failed')]
+          failed = [r for r in rows if r.get('status') == 'source_fetch_failed']
+          print({'targets': len(rows), 'done': sum(r.get('status') == 'done' for r in rows), 'source_empty': sum(r.get('status') == 'source_returned_no_matchups' for r in rows), 'source_failed_for_retry': len(failed), 'unexpected_bad': len(bad)})
+          if failed:
+              print('targets requiring focused retry:', failed[:10])
           if bad:
               print('first failures:', bad[:5])
               raise SystemExit(1)
