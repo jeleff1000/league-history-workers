@@ -11,6 +11,10 @@ on:
         description: 'JSON list of 2018-2025 seasons. Each season is separately partitioned into five buckets.'
         required: true
         default: '["2025","2024","2023","2022","2021","2020","2019","2018"]'
+      max_parallel:
+        description: 'Maximum concurrent full-lake shard builds; keep low enough to avoid runner memory contention.'
+        required: true
+        default: '5'
 
 permissions:
   contents: read
@@ -19,9 +23,10 @@ jobs:
   matchup:
     strategy:
       fail-fast: false
-      # Fifteen runners = three independent year partitions at once.  Within each
-      # year the five bucket IDs still cover the league population exactly once.
-      max-parallel: 15
+      # Full-lake DuckDB builds contend heavily when too many run at once.  Keep
+      # this dispatch-configurable; the five bucket IDs still cover each year
+      # exactly once regardless of concurrency.
+      max-parallel: ${{ fromJSON(inputs.max_parallel) }}
       matrix:
         year: ${{ fromJSON(inputs.years) }}
         bucket: [0, 1, 2, 3, 4]
