@@ -1,0 +1,210 @@
+name: Assemble five-way research matchup rebuild
+
+on:
+  workflow_dispatch:
+    inputs:
+      shard_run:
+        description: Completed five-bucket research matchup shard run
+        required: true
+      years:
+        description: JSON list of seasons represented by the shard run
+        required: true
+        default: '["2025","2024","2023","2022","2021","2020","2019","2018"]'
+      cache_key:
+        description: Immutable public research cache key
+        required: true
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-canonical-final
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  assemble_year:
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        year: ${{ fromJSON(inputs.years) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      SOURCE_RUN: ${{ inputs.shard_run }}
+      SOURCE_YEAR: ${{ matrix.year }}
+      RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
+      RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
+      RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
+      RESEARCH_ASSEMBLE_MEMORY_MB: '12000'
+      RESEARCH_ASSEMBLE_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Restore immutable public research lake
+        uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - name: Download this year's five source shards
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          python - <<'PY'
+          import io, json, os, re, urllib.request, zipfile
+          from pathlib import Path
+
+          token = os.environ['GH_TOKEN']
+          run_id = os.environ['SOURCE_RUN']
+          year = int(os.environ['SOURCE_YEAR'])
+          api = f'https://api.github.com/repos/jeleff1000/league-history-workers/actions/runs/{run_id}/artifacts'
+          headers = {'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json'}
+          found = []
+          page = 1
+          while True:
+              req = urllib.request.Request(f'{api}?per_page=100&page={page}', headers=headers)
+              with urllib.request.urlopen(req) as response:
+                  payload = json.load(response)
+              batch = payload.get('artifacts', [])
+              found.extend(a for a in batch if re.fullmatch(
+                  rf'research-matchup-{year}-b[0-4]-of5-[0-9a-f]+', a['name']))
+              if len(batch) < 100:
+                  break
+              page += 1
+          if len(found) != 5:
+              raise SystemExit(f'expected five shards for {year}, found {len(found)}')
+          out = Path('shards'); out.mkdir(parents=True, exist_ok=True)
+          for artifact in sorted(found, key=lambda a: a['name']):
+              req = urllib.request.Request(artifact['archive_download_url'], headers=headers)
+              with urllib.request.urlopen(req) as response:
+                  data = response.read()
+              target = out / artifact['name']; target.mkdir(parents=True, exist_ok=True)
+              with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                  archive.extractall(target)
+          print(f'downloaded {len(found)} five-way shards for {year}')
+          PY
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1
+      - name: Verify complete five-way coverage
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import duckdb, os
+          year = int(os.environ['SOURCE_YEAR'])
+          manifests = sorted(Path('shards').rglob('shard_manifest.parquet'))
+          if len(manifests) != 5:
+              raise SystemExit(f'expected five manifests, found {len(manifests)}')
+          con = duckdb.connect()
+          rows = con.execute(
+              'SELECT DISTINCT year_start, year_end, bucket, buckets '
+              'FROM read_parquet(?) ORDER BY bucket', [[str(p) for p in manifests]]).fetchall()
+          if rows != [(year, year, i, 5) for i in range(5)]:
+              raise SystemExit(f'invalid manifest coverage: {rows}')
+          for name in ('research_matchup_weekly.parquet', 'research_matchup_player_season.parquet'):
+              files = sorted(Path('shards').rglob(name))
+              if len(files) != 5:
+                  raise SystemExit(f'{name}: expected five files, found {len(files)}')
+          print(f'PASS: {year} has five disjoint source buckets')
+          PY
+      - name: Build population denominator lattices
+        run: |
+          mkdir -p out/denominators
+          python code/scripts/research_cohorts/build_population_denominators.py \
+            --output '${{ github.workspace }}/out/denominators' \
+            --ops-cache '${{ github.workspace }}/research_public_lake/ops_cache.duckdb'
+      - name: Assemble year
+        shell: bash
+        run: |
+          set -euo pipefail
+          roots=()
+          while IFS= read -r root; do roots+=(--input "$root"); done < <(
+            find shards -mindepth 1 -maxdepth 2 -type d -name "research-matchup-${SOURCE_YEAR}-*" -print
+          )
+          python code/scripts/research_cohorts/assemble_research_shards.py \
+            --table matchup "${roots[@]}" \
+            --denom-season '${{ github.workspace }}/out/denominators/research_matchup_denom_season.parquet' \
+            --denom-week '${{ github.workspace }}/out/denominators/research_matchup_denom_week.parquet' \
+            --pos-grp '${{ github.workspace }}/out/denominators/research_matchup_pos_grp.parquet' \
+            --output '${{ github.workspace }}/out/assembled'
+      - name: Validate assembled year
+        run: |
+          python code/scripts/research_cohorts/audit_research_matchup.py \
+            --input '${{ github.workspace }}/out/assembled' \
+            --slug 12t_flx_ppr_4pt --ops-cache '${{ github.workspace }}/research_public_lake/ops_cache.duckdb' \
+            --skip-boards --skip-career --year '${{ matrix.year }}'
+      - name: Upload assembled year
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-assembled-year-${{ matrix.year }}-${{ github.run_id }}
+          path: |
+            out/assembled/research_matchup_weekly.parquet
+            out/assembled/research_matchup_player_season.parquet
+            out/assembled/research_matchup_manifest.parquet
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  combine_years:
+    needs: assemble_year
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Download assembled years
+        uses: actions/download-artifact@v5
+        with:
+          pattern: research-matchup-assembled-year-*
+          path: assembled_years
+          merge-multiple: false
+      - name: Combine and validate all replacement years
+        shell: bash
+        env:
+          EXPECTED_YEARS: ${{ inputs.years }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          import duckdb
+          expected = sorted(int(y) for y in json.loads(os.environ['EXPECTED_YEARS']))
+          files = {}
+          for name in ('research_matchup_weekly.parquet', 'research_matchup_player_season.parquet'):
+              paths = sorted(Path('assembled_years').rglob(name))
+              if len(paths) != len(expected):
+                  raise SystemExit(f'{name}: expected {len(expected)} files, found {len(paths)}')
+              files[name] = paths
+          out = Path('out'); out.mkdir()
+          con = duckdb.connect()
+          for name, paths in files.items():
+              quoted = '[' + ','.join("'" + str(p.resolve()).replace("'", "''") + "'" for p in paths) + ']'
+              target = (out / name).resolve().as_posix().replace("'", "''")
+              con.execute(f"COPY (SELECT * FROM read_parquet({quoted}, union_by_name=true)) "
+                          f"TO '{target}' (FORMAT PARQUET, COMPRESSION ZSTD)")
+              years = [r[0] for r in con.execute(
+                  f"SELECT DISTINCT CAST(year AS INTEGER) FROM read_parquet('{target}') ORDER BY 1").fetchall()]
+              if years != expected:
+                  raise SystemExit(f'{name}: coverage {years} != {expected}')
+              print(name, con.execute(f"SELECT COUNT(*) FROM read_parquet('{target}')").fetchone()[0])
+          con.close()
+          PY
+      - name: Upload combined historical replacement
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-assembled-historical-run-${{ github.run_id }}
+          path: |
+            out/research_matchup_weekly.parquet
+            out/research_matchup_player_season.parquet
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
