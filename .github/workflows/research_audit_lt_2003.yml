@@ -43,7 +43,7 @@ jobs:
           print({'NFL_player_id': pid})
           pf_cols = {r[0] for r in c.execute('describe public.player_fantasy').fetchall()}
           pf = c.execute("""
-            select count(distinct db_name), count(*) rows,
+                   select count(distinct db_name), count(*) as n_rows,
                    count(*) filter (where coalesce(cast(is_started as integer),0)=1) started,
                    count(*) filter (where coalesce(cast(champion as integer),0)=1) raw_champion,
                    count(*) filter (where clutch_equity is not null) clutch_rows,
