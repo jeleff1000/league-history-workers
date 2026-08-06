@@ -1,0 +1,71 @@
+name: Validate Published Research Signal Rescue
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        description: Immutable research lake cache to validate
+        required: true
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-31066261053
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1
+      - name: Validate published lake invariants
+        run: |
+          python - <<'PY'
+          import duckdb
+          con = duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          tables = {r[0] for r in con.execute("select table_name from duckdb_tables() where schema_name='public'").fetchall()}
+          required = {'player_fantasy', 'matchup'}
+          missing = required - tables
+          if missing:
+              raise SystemExit(f'missing required tables: {sorted(missing)}')
+          pf = {r[0] for r in con.execute('describe public.player_fantasy').fetchall()}
+          mu = {r[0] for r in con.execute('describe public.matchup').fetchall()}
+          required_pf = {'db_name', 'year', 'week', 'NFL_player_id', 'is_started', 'win'}
+          required_mu = {'db_name', 'year', 'week', 'manager', 'is_playoffs', 'is_championship'}
+          if required_pf - pf:
+              raise SystemExit(f'player_fantasy missing columns: {sorted(required_pf-pf)}')
+          if required_mu - mu:
+              raise SystemExit(f'matchup missing columns: {sorted(required_mu-mu)}')
+          pf_rows = con.execute('select count(*) from public.player_fantasy').fetchone()[0]
+          mu_rows = con.execute('select count(*) from public.matchup').fetchone()[0]
+          signal_rows = con.execute('select count(*) from public.matchup where is_playoffs=1 or is_championship=1').fetchone()[0]
+          champ_without_playoff = con.execute('select count(*) from public.matchup where is_championship=1 and coalesce(is_playoffs,0)<>1').fetchone()[0]
+          dup = con.execute('''
+            with k as (
+              select db_name, year, week, manager,
+                     coalesce(cast(franchise_id as varchar), cast(manager as varchar)) as team_key
+              from public.matchup
+            )
+            select count(*)-count(distinct (db_name,year,week,manager,team_key)) from k
+          ''').fetchone()[0]
+          started_null_win = con.execute('select count(*) from public.player_fantasy where is_started=1 and win is null').fetchone()[0]
+          print({'player_fantasy_rows': pf_rows, 'matchup_rows': mu_rows,
+                 'playoff_or_champ_matchup_rows': signal_rows,
+                 'championship_without_playoff_rows': champ_without_playoff,
+                 'duplicate_matchup_keys': dup,
+                 'started_rows_with_null_win': started_null_win})
+          if pf_rows <= 0 or mu_rows <= 0 or signal_rows <= 0:
+              raise SystemExit('published lake is empty or has no playoff/championship signals')
+          if champ_without_playoff:
+              raise SystemExit('championship rows must also be playoff rows')
+          if dup:
+              raise SystemExit(f'duplicate matchup keys: {dup}')
+          PY
