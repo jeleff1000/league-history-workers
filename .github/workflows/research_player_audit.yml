@@ -41,7 +41,7 @@ jobs:
           NFL_ID: ${{ inputs.nfl_id }}
         run: |
           python - <<'PY'
-          import json, os
+          import json, math, os
           from pathlib import Path
           import duckdb
           con = duckdb.connect()
@@ -55,9 +55,15 @@ jobs:
           def truthy(value):
               return str(value).lower() in {'1', '1.0', 'true', 't', 'yes', 'starter'}
           playoff_started = [r for r in started if truthy(r.get('is_playoffs')) or truthy(r.get('is_playoffs_bf'))]
-          clutch_values = [float(r['clutch_equity']) for r in rows if r.get('clutch_equity') is not None]
-          clutch_started = [float(r['clutch_equity']) for r in started if r.get('clutch_equity') is not None]
-          clutch_playoff_started = [float(r['clutch_equity']) for r in playoff_started if r.get('clutch_equity') is not None]
+          def clutch_value(row):
+              try:
+                  value = float(row.get('clutch_equity'))
+              except (TypeError, ValueError):
+                  return None
+              return value if math.isfinite(value) else None
+          clutch_values = [value for r in rows if (value := clutch_value(r)) is not None]
+          clutch_started = [value for r in started if (value := clutch_value(r)) is not None]
+          clutch_playoff_started = [value for r in playoff_started if (value := clutch_value(r)) is not None]
           result = {'player': os.environ['PLAYER'], 'year': int(os.environ['YEAR']), 'rows': rows,
                     'row_count': len(rows), 'started_row_count': len(started),
                     'started_leagues': len({r.get('db_name') for r in started}),
