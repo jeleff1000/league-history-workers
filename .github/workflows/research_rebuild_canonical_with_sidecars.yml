@@ -112,7 +112,11 @@ jobs:
           python - <<'PY'
           import duckdb
           c=duckdb.connect('research_public_lake/corpus_snapshot.duckdb',read_only=True)
-          ids=c.execute("select distinct cast(NFL_player_id as varchar) from public.player_fantasy where year=2003 and lower(cast(player as varchar)) like '%tomlinson%'").fetchall()
+          ids=c.execute("""select distinct cast(pf.NFL_player_id as varchar)
+              from public.player_fantasy pf
+              join ops.nfl_historical.nfl_player_stats_all s
+                on s.NFL_player_id=pf.NFL_player_id and s.year=pf.year
+              where pf.year=2003 and lower(cast(s.player as varchar)) like '%tomlinson%'""").fetchall()
           if not ids: raise SystemExit('LT 2003 not found after sidecar merge')
           pid=ids[0][0]
           r=c.execute("""select count(distinct db_name),
