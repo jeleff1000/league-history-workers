@@ -53,7 +53,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install API-sidecar dependencies
-        run: python -m pip install pandas==2.2.3 pyarrow==15.0.2 duckdb==1.5.1 requests==2.32.4
+        run: python -m pip install pandas==2.2.3 pyarrow==15.0.2 duckdb==1.5.1 requests==2.32.4 polars==1.35.2
       - name: Download inventory artifact
         env:
           GH_TOKEN: ${{ github.token }}
