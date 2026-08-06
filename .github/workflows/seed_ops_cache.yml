@@ -198,7 +198,7 @@ jobs:
           echo "reused=$reused" >> "$GITHUB_OUTPUT"
 
       - name: Replace invalid checkpoint cache
-        if: steps.download.outputs.reused != 'true'
+        if: steps.download.outcome == 'success' && steps.download.outputs.reused != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_PROMPT_DISABLED: 1
@@ -211,7 +211,7 @@ jobs:
             done
 
       - name: Save checkpoint
-        if: steps.download.outputs.reused != 'true'
+        if: steps.download.outcome == 'success' && steps.download.outputs.reused != 'true'
         uses: actions/cache/save@v5
         with:
           path: ops_cache/checkpoints
