@@ -79,7 +79,8 @@ jobs:
           gh release download research-native-id-crosswalk-v4 \
             --repo jeleff1000/yahoo_oauth \
             --pattern native_id_crosswalk.parquet \
-            --dir research_public_lake
+            --dir research_public_lake \
+            --clobber
 
       - name: Verify public-only inputs
         shell: bash
