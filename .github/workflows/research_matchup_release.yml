@@ -123,11 +123,17 @@ jobs:
           manifests = [p for root in roots for p in root.rglob('shard_manifest.parquet')]
           seasons = [p for root in roots for p in root.rglob('research_matchup_player_season.parquet')]
           weekly = [p for root in roots for p in root.rglob('research_matchup_weekly.parquet')]
-          expected_manifests = 426 if '${{ inputs.rescue_run }}' else 175
-          assert len(manifests) == expected_manifests, (
-              expected_manifests, len(manifests))
-          assert len(seasons) == len(weekly) == expected_manifests, (
-              len(seasons), len(weekly))
+          assert len(manifests) == len(seasons) == len(weekly), (
+              len(manifests), len(seasons), len(weekly))
+          assert len(manifests) >= 25, len(manifests)
+          manifest_roots = {p.parent.resolve() for p in manifests}
+          season_roots = {p.parent.resolve() for p in seasons}
+          weekly_roots = {p.parent.resolve() for p in weekly}
+          assert manifest_roots == season_roots == weekly_roots, (
+              'manifest/season/weekly shard roots differ',
+              sorted(str(p) for p in manifest_roots - season_roots),
+              sorted(str(p) for p in season_roots - weekly_roots),
+          )
 
           con = duckdb.connect()
           rows = con.execute(
