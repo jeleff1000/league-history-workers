@@ -139,7 +139,7 @@ jobs:
           echo "[research-lake] restore-hit=${{ steps.research-lake.outputs.cache-hit }}"
           echo "[ops-cache] OPS_CACHE_PATH=${OPS_CACHE_PATH}"
           test -s "${OPS_CACHE_PATH}" || {
-            echo "::error::ops_cache.duckdb is missing after cache restore. Run the Seed Ops Cache workflow before imports."
+            echo "::error::research_public_lake/ops_cache.duckdb is missing from the canonical research lake cache."
             exit 1
           }
           echo "[ops-cache] size-bytes=$(stat -c%s "${OPS_CACHE_PATH}")"

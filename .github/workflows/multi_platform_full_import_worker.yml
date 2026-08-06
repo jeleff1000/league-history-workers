@@ -100,7 +100,7 @@ jobs:
         run: |
           echo "[ops-cache] OPS_CACHE_PATH=${OPS_CACHE_PATH}"
           test -s "${OPS_CACHE_PATH}" || {
-            echo "::error::ops_cache.duckdb is missing after cache restore. Run the Seed Ops Cache workflow before imports."
+            echo "::error::research_public_lake/ops_cache.duckdb is missing from the canonical research lake cache."
             exit 1
           }
           echo "[ops-cache] size-human=$(du -h "${OPS_CACHE_PATH}" | cut -f1)"
