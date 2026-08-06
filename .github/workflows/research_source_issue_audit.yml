@@ -62,11 +62,12 @@ jobs:
           print('raw_matching_rows=', len(players), 'raw_start_values=', players['is_started'].value_counts(dropna=False).to_dict(), 'fantasy_positions=', players['fantasy_position'].value_counts(dropna=False).to_dict())
           players['started'] = players.get('is_started', 0).astype(str).str.lower().isin({'1','true','t','yes','starter'}).astype(int)
           players = players[players.started.eq(1)].copy()
-          join_keys = ['db_name','year','week']
+          # Team keys are not stable across source folds. Audit by normalized
+          # manager identity so a refreshed player key cannot hide a real
+          # matchup signal; the cohort builder gives exact keys precedence.
+          join_keys = ['db_name','year','week','manager']
           if mflag:
               msel = ['db_name','year','week','manager'] + [c for c in [mflag,mchamp,'champion','final_playoff_seed','playoff_round'] if c in mcols]
-              if 'team_key' in pcols and 'team_key' in mcols:
-                  join_keys.append('team_key'); msel = ['db_name','year','week','team_key'] + [c for c in [mflag,mchamp,'champion','final_playoff_seed','playoff_round'] if c in mcols]
               mq = 'SELECT ' + ','.join('"'+c+'"' for c in msel) + ' FROM lake.public.matchup'
               mu = con.execute(mq).fetchdf()
               mu = mu.drop_duplicates(join_keys)
