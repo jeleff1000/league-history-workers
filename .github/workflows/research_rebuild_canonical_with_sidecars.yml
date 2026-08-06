@@ -112,13 +112,10 @@ jobs:
           python - <<'PY'
           import duckdb
           c=duckdb.connect('research_public_lake/corpus_snapshot.duckdb',read_only=True)
-          ids=c.execute("""select distinct cast(pf.NFL_player_id as varchar)
-              from public.player_fantasy pf
-              join ops.nfl_historical.nfl_player_stats_all s
-                on s.NFL_player_id=pf.NFL_player_id and s.year=pf.year
-              where pf.year=2003 and lower(cast(s.player as varchar)) like '%tomlinson%'""").fetchall()
-          if not ids: raise SystemExit('LT 2003 not found after sidecar merge')
-          pid=ids[0][0]
+          # The public corpus intentionally has no attached ops schema.  Use
+          # the canonical NFL ID from the audit fixture, not a display-name
+          # join that only exists in the build environment.
+          pid='00-0020536'  # LaDainian Tomlinson
           r=c.execute("""select count(distinct db_name),
               count(*) filter(where cast(is_started as integer)=1),
               count(*) filter(where cast(is_started as integer)=1 and week<=16 and win is null),
@@ -127,6 +124,7 @@ jobs:
               count(*) filter(where cast(is_started as integer)=1 and cast(champion as integer)=1)
               from public.player_fantasy where year=2003 and cast(NFL_player_id as varchar)=?""",[pid]).fetchone()
           print({'LT_2003':r})
+          if r[0] == 0: raise SystemExit('LT 2003 not found after sidecar merge')
           if r[2] != 0: raise SystemExit(f'LT still has {r[2]} regular-season started rows without outcomes')
           PY
       - uses: actions/cache/save@v5
