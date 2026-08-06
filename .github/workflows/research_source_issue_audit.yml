@@ -59,7 +59,7 @@ jobs:
           players = con.execute(q, names).fetchdf()
           if players.empty:
               raise SystemExit('No matching player rows found')
-          players['started'] = pd.to_numeric(players.get('is_started', 0), errors='coerce').fillna(0).astype(int)
+          players['started'] = players.get('is_started', 0).astype(str).str.lower().isin({'1','true','t','yes'}).astype(int)
           players = players[players.started.eq(1)].copy()
           if mflag:
               msel = ['db_name','year','week','manager'] + [c for c in [mflag,mchamp,'champion','final_playoff_seed','playoff_round'] if c in mcols]
@@ -69,7 +69,7 @@ jobs:
           rows = []
           for name, g in players.groupby('player', dropna=False):
               def count_flag(col):
-                  return int(pd.to_numeric(g[col], errors='coerce').fillna(0).astype(int).eq(1).sum()) if col in g else 0
+                  return int(g[col].astype(str).str.lower().isin({'1','true','t','yes'}).sum()) if col in g else 0
               rows.append({
                   'player': name,
                   'nfl_ids': sorted({str(x) for x in g['NFL_player_id'].dropna().unique()}),
