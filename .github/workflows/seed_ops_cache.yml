@@ -12,6 +12,11 @@ on:
         required: false
         type: string
         default: 'main'
+      resume_run_id:
+        description: 'Optional prior seed run whose checkpoint artifacts should be reused'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   actions: write
@@ -38,7 +43,15 @@ jobs:
           set -euo pipefail
           all_keys="$(jq -cn '[range(0;110) | "nfl_player_stats_all-batch-" + (if . < 10 then "0" else "" end) + tostring] + ["player_bio-all"]')"
           cached_keys="$(gh cache list --repo jeleff1000/league-history-workers --key "$CACHE_PREFIX" --limit 1000 --json key | jq -c '[.[].key | sub("^ops-cache-checkpoint-v4-Linux-"; "")]')"
-          missing="$(jq -cn --argjson all "$all_keys" --argjson cached "$cached_keys" '$all - $cached | map({batch_id: .}) | {include: .}')"
+          artifact_keys='[]'
+          if [ -n "${{ github.event.inputs.resume_run_id || '' }}" ]; then
+            artifact_keys="$(gh api --paginate \
+              "/repos/jeleff1000/league-history-workers/actions/runs/${{ github.event.inputs.resume_run_id }}/artifacts" \
+              --jq '[.artifacts[] | select(.name | startswith("ops-checkpoint-")) | .name | sub("^ops-checkpoint-"; "")]' \
+              | jq -s 'add // []')"
+          fi
+          available="$(jq -cn --argjson cached "$cached_keys" --argjson artifacts "$artifact_keys" '$cached + $artifacts | unique')"
+          missing="$(jq -cn --argjson all "$all_keys" --argjson available "$available" '$all - $available | map({batch_id: .}) | {include: .}')"
           count="$(jq '.include | length' <<< "$missing")"
           echo "matrix=$missing" >> "$GITHUB_OUTPUT"
           if [ "$count" -gt 0 ]; then
@@ -58,7 +71,7 @@ jobs:
       fail-fast: false
       # The single Fly DuckDB machine can spend 10-30 seconds on metadata
       # scans; serialize cold-cache batches to keep health checks responsive.
-      max-parallel: 2
+      max-parallel: 6
       matrix: ${{ fromJSON(needs.preflight.outputs.matrix) }}
 
     steps:
@@ -183,6 +196,17 @@ jobs:
       - name: Download checkpoint artifacts
         uses: actions/download-artifact@v6
         with:
+          pattern: ops-checkpoint-*
+          path: ops_cache/checkpoints
+          merge-multiple: true
+
+      - name: Download artifacts from resumed seed run
+        if: ${{ github.event.inputs.resume_run_id != '' }}
+        uses: actions/download-artifact@v6
+        with:
+          github-token: ${{ github.token }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ github.event.inputs.resume_run_id }}
           pattern: ops-checkpoint-*
           path: ops_cache/checkpoints
           merge-multiple: true
