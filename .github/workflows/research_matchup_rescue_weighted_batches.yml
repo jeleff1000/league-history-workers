@@ -18,7 +18,11 @@ on:
      only_batch:
        description: Optional single batch number for a targeted retry/debug run
        required: false
-       default: ''
+     default: ''
+
+concurrency:
+ group: research-matchup-weighted-${{ github.repository }}
+ cancel-in-progress: true
 
 permissions:
  contents: read

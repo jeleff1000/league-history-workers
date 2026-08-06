@@ -33,6 +33,10 @@ on:
         required: false
         default: "0"
 
+concurrency:
+  group: research-source-rescue-${{ github.repository }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   actions: read
