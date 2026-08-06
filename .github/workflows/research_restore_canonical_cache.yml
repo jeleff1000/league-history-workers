@@ -18,7 +18,7 @@ on:
       cache_key:
         description: Canonical cache key to recreate
         required: true
-        default: research-public-lake-v4-Linux-20260806-signal-rescue-31066261053
+        default: research-public-lake-v4-Linux-20260806-start-flags-fixed
 
 permissions:
   actions: write

@@ -5,7 +5,7 @@ on:
     inputs:
       cache_key:
         required: true
-        default: research-public-lake-v4-Linux-20260805-identity-repair-final5-cdfd7934d
+        default: research-public-lake-v4-Linux-20260806-start-flags-fixed
       player:
         required: true
         default: Jeff Wilkins

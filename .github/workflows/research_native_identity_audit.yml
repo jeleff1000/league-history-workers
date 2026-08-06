@@ -5,7 +5,7 @@ on:
     inputs:
       cache_key:
         required: true
-        default: research-public-lake-v4-Linux-20260805-identity-repair-replace-c1cb3662a
+        default: research-public-lake-v4-Linux-20260806-start-flags-fixed
       db_names:
         description: Comma-separated MFL/Fleaflicker DB names
         required: true
