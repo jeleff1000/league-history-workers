@@ -27,9 +27,9 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
-      # Four small checkpoint downloads are safe; the previous 503/504 storm
-      # came from four simultaneous ten-year downloads.
-      max-parallel: 4
+      # Keep Fly query pressure low; failed batches otherwise spend 10-15
+      # minutes retrying after concurrent requests contend on the API.
+      max-parallel: 2
       matrix:
         include:
           - batch_id: nfl_player_stats_all-batch-00
