@@ -5,7 +5,7 @@ on:
     inputs:
       cache_key:
         required: true
-        default: research-public-lake-v4-Linux-20260806-signal-rescue-championship-v9
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-clutch-championship-v11
       db_names:
         description: Comma-separated MFL/Fleaflicker DB names
         required: true

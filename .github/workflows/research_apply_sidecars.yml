@@ -14,7 +14,7 @@ on:
       base_cache_key:
         description: Current immutable public lake cache
         required: true
-        default: research-public-lake-v4-Linux-20260806-signal-rescue-championship-v9
+        default: research-public-lake-v4-Linux-20260806-signal-rescue-clutch-championship-v11
       output_cache_key:
         description: Explicit versioned cache key for the validated merged lake
         required: true
