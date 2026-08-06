@@ -5,10 +5,10 @@ on:
     inputs:
       base_cache_key:
         required: true
-        default: research-public-lake-v4-Linux-20260806-start-flags-fixed
+        default: research-public-lake-v4-Linux-20260806-championship-repaired-v8
       output_cache_key:
         required: true
-        default: research-public-lake-v4-Linux-20260806-start-flags-fixed
+        default: research-public-lake-v4-Linux-20260806-start-flags-fixed-v2
 
 permissions:
   actions: write

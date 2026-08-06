@@ -5,7 +5,7 @@ on:
     inputs:
       cache_key:
         required: true
-        default: research-public-lake-v4-Linux-20260806-championship-repaired-v4
+        default: research-public-lake-v4-Linux-20260806-championship-repaired-v8
       db_name:
         required: true
       year:
