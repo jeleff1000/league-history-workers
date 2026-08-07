@@ -232,6 +232,16 @@ jobs:
            --year-start "${RESEARCH_YEAR_START}" \
            --year-end "${RESEARCH_YEAR_END}"
 
+     - name: Preserve failed shard diagnostics
+       if: ${{ failure() }}
+       uses: actions/upload-artifact@v4
+       with:
+         name: research-matchup-${{ matrix.year_start || matrix.year }}-${{ matrix.year_end || matrix.year }}-batch${{ matrix.batch }}-of${{ inputs.batches }}-${{ github.sha }}-diagnostic
+         path: out
+         if-no-files-found: ignore
+         retention-days: 14
+         compression-level: 0
+
      - name: Upload additive weighted batch
        uses: actions/upload-artifact@v4
        with:
