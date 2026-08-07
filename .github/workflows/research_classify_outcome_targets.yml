@@ -4,13 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       target_run_id:
-        description: Combine run containing the exact 1,145,460 target rows
+        description: Comma-separated runs containing exact target partitions
         required: true
-        default: "31061116294"
+        default: "31059385445,31060749133"
       target_artifact:
-        description: Exact combined target artifact name
+        description: Comma-separated exact target artifact names in the same order
         required: true
-        default: "research-outcome-targets-combined-0-1145460"
+        default: "research-outcome-targets-combined-0-90000,research-outcome-targets-combined-90000-1145460"
       manifest_run_id:
         description: Run containing the source-id manifest
         required: true
@@ -69,10 +69,28 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p input/targets
-          gh run download '${{ inputs.target_run_id }}' \
-            --repo '${{ github.repository }}' \
-            --name '${{ inputs.target_artifact }}' \
-            --dir input/targets
+          IFS=',' read -ra RUNS <<< '${{ inputs.target_run_id }}'
+          IFS=',' read -ra NAMES <<< '${{ inputs.target_artifact }}'
+          test "${#RUNS[@]}" -eq "${#NAMES[@]}"
+          for i in "${!RUNS[@]}"; do
+            mkdir -p "input/targets/$i"
+            gh run download "${RUNS[$i]}" --repo '${{ github.repository }}' \
+              --name "${NAMES[$i]}" --dir "input/targets/$i"
+          done
+          python - <<'PY'
+          import duckdb
+          from pathlib import Path
+          paths = sorted(str(p).replace('\\', '/') for p in Path('input/targets').glob('**/*.parquet'))
+          if len(paths) != 2:
+              raise SystemExit(f'expected two target partitions, found {len(paths)}: {paths}')
+          sql_paths = '[' + ','.join("'" + p.replace("'", "''") + "'" for p in paths) + ']'
+          con = duckdb.connect()
+          con.execute(f"COPY (SELECT * FROM read_parquet({sql_paths}, union_by_name=true)) TO 'input/targets/all_targets.parquet' (FORMAT PARQUET)")
+          n = con.execute("SELECT COUNT(*) FROM read_parquet('input/targets/all_targets.parquet')").fetchone()[0]
+          if n != 1145460:
+              raise SystemExit(f'exact target count mismatch: {n}')
+          print({'target_files': paths, 'target_rows': n})
+          PY
       - name: Download source manifest
         env:
           GH_TOKEN: ${{ github.token }}
@@ -86,7 +104,7 @@ jobs:
         run: |
           mkdir -p out
           python code/scripts/research_cohorts/classify_outcome_targets.py \
-            --targets "$(find input/targets -name '*.parquet' -type f | head -1)" \
+            --targets input/targets/all_targets.parquet \
             --manifest "$(find input/manifest -name '*.json' -type f | head -1)" \
             --player-map code/ops_data/public/sleeper_nfl_player_map.parquet \
             --shard '${{ matrix.shard }}' \
