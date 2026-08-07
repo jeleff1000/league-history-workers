@@ -6,7 +6,7 @@ on:
       cache_key:
         description: Research cache to audit
         required: true
-        default: research-public-lake-v4-Linux-20260806-source-sidecar-31129191026
+        default: research-public-lake-v4-Linux-20260806-championship-v1
 
 permissions:
   contents: read
@@ -31,15 +31,8 @@ jobs:
           import duckdb
           from pathlib import Path
           lake = Path('research_public_lake/corpus_snapshot.duckdb').resolve()
-          ops = Path('research_public_lake/ops_cache.duckdb').resolve()
           c = duckdb.connect(str(lake), read_only=True)
-          c.execute(f"attach '{ops.as_posix()}' as ops (read_only)")
-          ids = c.execute("""
-            select distinct cast(NFL_player_id as varchar) from ops.nfl_historical.nfl_player_stats_all
-            where year=2003 and lower(cast(player as varchar)) like '%tomlinson%'
-          """).fetchall()
-          if not ids: raise SystemExit('LaDainian Tomlinson not found in 2003 super table')
-          pid = ids[0][0]
+          pid = '00-0020536'  # LaDainian Tomlinson
           print({'NFL_player_id': pid})
           pf_cols = {r[0] for r in c.execute('describe public.player_fantasy').fetchall()}
           pf = c.execute("""
@@ -56,8 +49,19 @@ jobs:
           print({'matchup_columns': sorted(mcols)})
           if 'is_championship' in mcols:
               print({'championship_matchup_rows': c.execute("select count(*) from public.matchup where year=2003 and cast(is_championship as integer)=1").fetchone()[0]})
+              if 'manager' in pf_cols and 'manager' in mcols:
+                  joined = c.execute("""
+                    select count(*) from public.player_fantasy p
+                    join public.matchup m on m.db_name=p.db_name and m.year=p.year and m.week=p.week
+                      and m.manager is not distinct from p.manager
+                    where p.year=2003 and cast(p.NFL_player_id as varchar)=?
+                      and coalesce(cast(p.is_started as integer),0)=1
+                      and coalesce(cast(m.is_championship as integer),0)=1
+                  """, [pid]).fetchone()[0]
+                  print({'LT_started_championship_rows': joined})
           else:
               print({'championship_matchup_rows': 'NO_EXPLICIT_IS_CHAMPIONSHIP_COLUMN'})
+              raise SystemExit('championship layer missing explicit matchup signal')
           if 'is_playoffs' in mcols:
               print({'playoff_matchup_rows': c.execute("select count(*) from public.matchup where year=2003 and cast(is_playoffs as integer)=1").fetchone()[0]})
           PY
