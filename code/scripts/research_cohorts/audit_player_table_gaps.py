@@ -36,10 +36,14 @@ def audit(snapshot: Path) -> dict[str, object]:
     clutch = _first(("clutch_equity", "clutch", "clutch_value"), available)
 
     outcome_terms = []
-    if win and loss:
+    if win:
+        # The canonical player table stores win as a 0/1 result.  A zero is a
+        # confirmed loss, so only NULL is an unresolved outcome.
+        outcome_terms.append(f"{_qi(win)} IS NOT NULL")
+    elif loss:
         tie_term = f" OR {_qi(tie)} IS NOT NULL" if tie else ""
-        outcome_terms.append(f"({_qi(win)} IS NOT NULL OR {_qi(loss)} IS NOT NULL{tie_term})")
-    if team_points and opponent_points:
+        outcome_terms.append(f"({_qi(loss)} IS NOT NULL{tie_term})")
+    if not win and team_points and opponent_points:
         outcome_terms.append(f"({_qi(team_points)} IS NOT NULL AND {_qi(opponent_points)} IS NOT NULL)")
     outcome_present = " OR ".join(outcome_terms) if outcome_terms else "FALSE"
 
@@ -60,7 +64,7 @@ def audit(snapshot: Path) -> dict[str, object]:
     if team_points and opponent_points:
         select.append(f"COUNT(*) FILTER (WHERE CAST(is_started AS INTEGER)=1 AND ({_qi(team_points)} IS NULL OR {_qi(opponent_points)} IS NULL)) AS started_missing_team_game_denominator")
     else:
-        select.append("COUNT(*) AS started_missing_team_game_denominator")
+        select.append("NULL::BIGINT AS started_missing_team_game_denominator")
 
     rows = con.execute("SELECT " + ", ".join(select) + " FROM public.player_fantasy GROUP BY 1,2 ORDER BY 1,2").fetchall()
     names = [d[0] for d in con.description]
@@ -70,6 +74,7 @@ def audit(snapshot: Path) -> dict[str, object]:
         "player_rows": int(con.execute("SELECT COUNT(*) FROM public.player_fantasy").fetchone()[0]),
         "player_league_years": int(con.execute("SELECT COUNT(*) FROM (SELECT db_name, year FROM public.player_fantasy GROUP BY 1,2)").fetchone()[0]),
         "resolved_columns": {"win": win, "loss": loss, "tie": tie, "team_points": team_points, "opponent_points": opponent_points, "playoff": playoff, "championship": championship, "clutch": clutch},
+        "unavailable_player_fields": [name for name, value in {"loss": loss, "tie": tie, "opponent_points": opponent_points, "championship_start": championship}.items() if value is None],
         "available_columns": sorted(available),
         "totals": dict(zip(names[2:], totals)),
         "league_season_rows": [dict(zip(names, row)) for row in rows],
