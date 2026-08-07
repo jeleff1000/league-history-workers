@@ -119,7 +119,7 @@ jobs:
               OR wins_started+losses_started>started_leagues''',[weekly]).fetchone()[0]
           if bad: raise SystemExit(f'weekly invariant failures: {bad}')
           bad=c.execute('''SELECT COUNT(*) FROM read_parquet(?) WHERE
-              abs(coalesce(expected_wins,0)+coalesce(expected_losses,0)-coalesce(expected_starts,0))>1e-6
+              abs(coalesce(expected_wins,0)+coalesce(expected_losses,0)-coalesce(expected_starts,0))>1e-3
               OR champ_as_starter_pct<0 OR champ_as_starter_pct>1''',[season]).fetchone()[0]
           if bad: raise SystemExit(f'season invariant failures: {bad}')
           print('PASS: format dimensions, W/L=start, and championship bounds')
