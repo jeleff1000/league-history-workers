@@ -75,7 +75,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh cache delete "$CANONICAL_CACHE_KEY" --ref refs/heads/main --confirm
+          yes | gh cache delete "$CANONICAL_CACHE_KEY" --ref refs/heads/main
           echo "[cache] deleted old canonical key; saving the validated replacement under the identical key"
       - name: Save validated canonical cache under identical key
         if: inputs.replace_canonical_cache == true
