@@ -10,6 +10,10 @@ on:
         description: Expected rows in this classification population
         required: true
         default: "1145460"
+      shards:
+        description: Number of classification shards in the source run
+        required: true
+        default: "256"
 
 permissions:
   contents: read
@@ -41,8 +45,9 @@ jobs:
           import duckdb, json
           from pathlib import Path
           paths=sorted(str(p).replace('\\','/') for p in Path('input').glob('**/*.parquet'))
-          if len(paths) != 256:
-              raise SystemExit(f'expected 256 classification parquet shards, found {len(paths)}')
+          expected_shards=int('${{ inputs.shards }}')
+          if len(paths) != expected_shards:
+              raise SystemExit(f'expected {expected_shards} classification parquet shards, found {len(paths)}')
           sql='['+','.join("'"+p.replace("'","''")+"'" for p in paths)+']'
           c=duckdb.connect()
           c.execute(f"COPY (SELECT * FROM read_parquet({sql}, union_by_name=true) ORDER BY target_ordinal) TO 'out/outcome_target_classification.parquet' (FORMAT PARQUET)")
