@@ -6,7 +6,7 @@ on:
       shards:
         description: Number of deterministic API shards
         required: true
-        default: "15"
+        default: "256"
       expected_groups:
         description: Exact expected MFL db/year/week target count
         required: true
@@ -65,8 +65,8 @@ jobs:
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os
           n = int(os.environ["SHARDS"])
-          if n != 15:
-              raise SystemExit("This rescue lane is fixed at exactly 15 shards.")
+          if not 1 <= n <= 256:
+              raise SystemExit("shards must be between 1 and 256")
           print("shard_list=" + json.dumps(list(range(n))))
           PY
       - uses: actions/upload-artifact@v4
@@ -112,7 +112,7 @@ jobs:
           mkdir -p out
           python code/scripts/research_cohorts/build_source_matchup_rescue_sidecar.py \
             --targets inventory/mfl_underpopulated_week_targets.json \
-            --shard '${{ matrix.shard }}' --shards 15 --workers 1 \
+            --shard '${{ matrix.shard }}' --shards '${{ inputs.shards }}' --workers 1 \
             --out out/mfl_underpopulated_week_rescue_${{ matrix.shard }}.parquet
       - name: Fail closed on API failures or missing source IDs
         run: |
