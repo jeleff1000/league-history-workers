@@ -56,6 +56,41 @@ jobs:
           --root research_public_lake
           --years '${{ inputs.years }}'
           --out out
+      - name: Build single actionable gap artifact
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter, defaultdict
+          from pathlib import Path
+
+          rows = json.loads(Path('out/matchup_league_year_inventory.json').read_text())
+          targets = [r for r in rows if r.get('needs_rescue')]
+          reason_counts = Counter()
+          reason_platform = defaultdict(Counter)
+          reason_year = defaultdict(Counter)
+          for row in targets:
+              platform = row.get('platform') or 'unknown'
+              for reason in row.get('reason_codes') or []:
+                  reason_counts[reason] += 1
+                  reason_platform[reason][platform] += 1
+                  reason_year[reason][str(row.get('year'))] += 1
+          summary = {
+              'schema_version': 1,
+              'population_rows': len(rows),
+              'populated_league_years': sum(bool(r.get('populated_league_year')) for r in rows),
+              'settings_only_or_unidentified': sum(not bool(r.get('populated_league_year')) for r in rows),
+              'actionable_league_years': len(targets),
+              'reason_counts': dict(sorted(reason_counts.items())),
+              'reason_by_platform': {k: dict(sorted(v.items())) for k, v in sorted(reason_platform.items())},
+              'reason_by_year': {k: dict(sorted(v.items())) for k, v in sorted(reason_year.items())},
+              'targets_missing_source_id': sum(not str(r.get('source_id') or '').strip() for r in targets),
+          }
+          Path('out/actionable_gap_inventory.json').write_text(json.dumps({
+              'summary': summary,
+              'targets': targets,
+          }, indent=2) + '\n')
+          print(json.dumps(summary, indent=2))
+          PY
       - name: Upload league-year inventory and rescue targets
         uses: actions/upload-artifact@v4
         with:
@@ -64,6 +99,7 @@ jobs:
             out/matchup_league_year_inventory.json
             out/matchup_league_year_inventory.csv
             out/matchup_rescue_targets.json
+            out/actionable_gap_inventory.json
           if-no-files-found: error
           retention-days: 30
           compression-level: 0

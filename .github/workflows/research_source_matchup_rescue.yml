@@ -133,11 +133,16 @@ jobs:
       - name: Build signal-only target manifest
         if: inputs.target_manifest_run_id == ''
         run: |
+          test -s inventory/actionable_gap_inventory.json
           python - <<'PY'
           import json
           from pathlib import Path
           source = Path('inventory/matchup_rescue_targets.json')
+          bundle = json.loads(Path('inventory/actionable_gap_inventory.json').read_text())
           rows = json.loads(source.read_text())
+          expected = int(bundle.get('summary', {}).get('actionable_league_years', -1))
+          if expected != len(rows):
+              raise SystemExit(f'actionable inventory mismatch: summary={expected} targets={len(rows)}')
           wanted = {'no_championship_signal', 'no_playoff_signal', 'no_team_game_denominator_source'}
           rows = [r for r in rows if wanted.intersection(r.get('reason_codes') or []) and r.get('platform') and r.get('source_id')]
           # The inventory is signal-grained: one league-season can have more
