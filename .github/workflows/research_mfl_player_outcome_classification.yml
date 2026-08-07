@@ -1,0 +1,172 @@
+name: Classify MFL missing player outcomes
+
+on:
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: Number of API shards
+        required: true
+        default: "15"
+      expected_rows:
+        description: Exact canonical MFL started rows with win IS NULL
+        required: true
+        default: "1359202"
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+  LINEAGE_ID: research-matchup-v2-final-playoff-anchor-outcomes
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      shard_list: ${{ steps.matrix.outputs.shard_list }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private research code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Build exact canonical MFL target inventory
+        run: |
+          mkdir -p inventory
+          python code/scripts/research_cohorts/prepare_mfl_player_outcome_targets.py \
+            --snapshot research_public_lake/corpus_snapshot.duckdb \
+            --targets inventory/mfl_player_outcome_targets.parquet \
+            --manifest inventory/mfl_player_outcome_manifest.json \
+            --expected '${{ inputs.expected_rows }}'
+      - id: matrix
+        env:
+          SHARDS: ${{ inputs.shards }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          n = int(os.environ["SHARDS"])
+          if n < 1 or n > 64:
+              raise SystemExit("shards must be between 1 and 64")
+          print("shard_list=" + json.dumps(list(range(n))))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-player-outcome-targets-${{ github.run_id }}
+          path: inventory/
+          retention-days: 30
+          compression-level: 0
+
+  classify:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.shard_list) }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private research code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 requests==2.32.4
+      - name: Download exact target inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p inventory
+          gh run download '${{ github.run_id }}' --repo '${{ github.repository }}' \
+            --name 'mfl-player-outcome-targets-${{ github.run_id }}' --dir inventory
+      - name: Classify exact target rows from MFL
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
+          MFL_RATE_LIMIT_PER_MIN: "25"
+        run: |
+          mkdir -p out
+          python code/scripts/research_cohorts/classify_mfl_player_outcome_targets.py \
+            --targets inventory/mfl_player_outcome_targets.parquet \
+            --manifest inventory/mfl_player_outcome_manifest.json \
+            --shard '${{ matrix.shard }}' --shards '${{ inputs.shards }}' \
+            --out out/mfl_outcome_classification_${{ matrix.shard }}.parquet
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-player-outcome-classification-${{ matrix.shard }}-${{ github.run_id }}
+          path: out/
+          retention-days: 30
+          compression-level: 0
+
+  combine:
+    needs: [prepare, classify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Download target and classification artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p inventory classified
+          gh run download '${{ github.run_id }}' --repo '${{ github.repository }}' \
+            --name 'mfl-player-outcome-targets-${{ github.run_id }}' --dir inventory
+          # Download all run artifacts; validation below only reads classification parquet files.
+          gh run download '${{ github.run_id }}' --repo '${{ github.repository }}' --dir classified
+      - name: Validate complete classification
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import duckdb
+          target = Path('inventory/mfl_player_outcome_targets.parquet')
+          files = [str(p) for p in Path('classified').rglob('mfl_outcome_classification_*.parquet')]
+          if not files:
+              raise SystemExit('no classification shards downloaded')
+          con = duckdb.connect()
+          con.execute("CREATE VIEW t AS SELECT * FROM read_parquet(?)", [str(target)])
+          con.execute("CREATE VIEW c AS SELECT * FROM read_parquet(?)", [files])
+          expected = int(con.execute('SELECT COUNT(*) FROM t').fetchone()[0])
+          actual = int(con.execute('SELECT COUNT(*) FROM c').fetchone()[0])
+          distinct = int(con.execute('SELECT COUNT(DISTINCT target_ordinal) FROM c').fetchone()[0])
+          duplicates = int(con.execute('SELECT COUNT(*) - COUNT(DISTINCT target_ordinal) FROM c').fetchone()[0])
+          allowed = {'confirmed_outcome','eliminated_no_opponent','bye_or_bracket_no_opponent','regular_week_unmatched','source_team_row_no_outcome','source_error'}
+          statuses = {str(r[0]): int(r[1]) for r in con.execute('SELECT status, COUNT(*) FROM c GROUP BY 1 ORDER BY 1').fetchall()}
+          bad = sorted(set(statuses) - allowed)
+          missing = int(con.execute('SELECT COUNT(*) FROM t x LEFT JOIN c y USING(target_ordinal) WHERE y.target_ordinal IS NULL').fetchone()[0])
+          extra = int(con.execute('SELECT COUNT(*) FROM c y LEFT JOIN t x USING(target_ordinal) WHERE x.target_ordinal IS NULL').fetchone()[0])
+          summary = {'lineage_id': '${{ env.LINEAGE_ID }}', 'expected_rows': expected, 'classified_rows': actual, 'distinct_target_ordinals': distinct, 'duplicate_rows': duplicates, 'missing_targets': missing, 'extra_targets': extra, 'statuses': statuses, 'unexpected_statuses': bad}
+          Path('mfl_outcome_classification_summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+          print(json.dumps(summary, indent=2))
+          if actual != expected or distinct != expected or duplicates or missing or extra or bad:
+              raise SystemExit('classification is incomplete or invalid')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-player-outcome-classification-final-${{ github.run_id }}
+          path: |
+            classified/**/mfl_outcome_classification_*.parquet
+            mfl_outcome_classification_summary.json
+          retention-days: 90
+          compression-level: 0
