@@ -36,6 +36,9 @@ jobs:
             --pattern ops_cache.duckdb \
             --dir research_public_lake
 
+      - name: Install validator dependency
+        run: python -m pip install duckdb==1.5.1
+
       - name: Validate exact contents
         run: |
           python - <<'PY'
