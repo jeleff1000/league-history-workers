@@ -1,0 +1,165 @@
+name: Classify Fleaflicker missing player outcomes
+
+on:
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: Number of API shards
+        required: true
+        default: "15"
+      expected_rows:
+        description: Exact canonical Fleaflicker started rows with win IS NULL
+        required: true
+        default: "392546"
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+  LINEAGE_ID: research-matchup-v2-final-playoff-anchor-outcomes
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      shard_list: ${{ steps.matrix.outputs.shard_list }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Build exact canonical target inventory
+        run: |
+          mkdir -p inventory
+          python code/scripts/research_cohorts/prepare_fleaflicker_player_outcome_targets.py \
+            --snapshot research_public_lake/corpus_snapshot.duckdb \
+            --targets inventory/fleaflicker_player_outcome_targets.parquet \
+            --manifest inventory/fleaflicker_player_outcome_manifest.json \
+            --expected '${{ inputs.expected_rows }}'
+      - id: matrix
+        env:
+          SHARDS: ${{ inputs.shards }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          n=int(os.environ['SHARDS'])
+          if n<1 or n>64: raise SystemExit('shards must be 1..64')
+          print('shard_list='+json.dumps(list(range(n))))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fleaflicker-player-outcome-targets-${{ github.run_id }}
+          path: inventory/
+          retention-days: 30
+          compression-level: 0
+
+  classify:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.shard_list) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 requests==2.32.4 polars==1.35.2
+      - name: Download exact target inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p inventory
+          gh run download '${{ github.run_id }}' --repo '${{ github.repository }}' \
+            --name 'fleaflicker-player-outcome-targets-${{ github.run_id }}' --dir inventory
+      - name: Classify exact target rows from Fleaflicker
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
+          FLEAFLICKER_RATE_LIMIT_PER_MIN: "60"
+        run: |
+          mkdir -p out
+          python code/scripts/research_cohorts/classify_fleaflicker_player_outcome_targets.py \
+            --targets inventory/fleaflicker_player_outcome_targets.parquet \
+            --manifest inventory/fleaflicker_player_outcome_manifest.json \
+            --shard '${{ matrix.shard }}' --shards '${{ inputs.shards }}' \
+            --out out/fleaflicker_outcome_classification_${{ matrix.shard }}.parquet
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fleaflicker-player-outcome-classification-${{ matrix.shard }}-${{ github.run_id }}
+          path: out/
+          retention-days: 30
+          compression-level: 0
+
+  combine:
+    needs: [prepare, classify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Download all run artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p inventory classified
+          gh run download '${{ github.run_id }}' --repo '${{ github.repository }}' \
+            --name 'fleaflicker-player-outcome-targets-${{ github.run_id }}' --dir inventory
+          gh run download '${{ github.run_id }}' --repo '${{ github.repository }}' --dir classified
+      - name: Validate complete classification
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import duckdb
+          files=[str(p) for p in Path('classified').rglob('fleaflicker_outcome_classification_*.parquet')]
+          if not files: raise SystemExit('no classification shards downloaded')
+          con=duckdb.connect()
+          con.execute("create view t as select * from read_parquet('inventory/fleaflicker_player_outcome_targets.parquet')")
+          con.execute("create view c as select * from read_parquet(?)",[files])
+          expected=int(con.execute('select count(*) from t').fetchone()[0])
+          actual=int(con.execute('select count(*) from c').fetchone()[0])
+          distinct=int(con.execute('select count(distinct target_ordinal) from c').fetchone()[0])
+          dup=int(con.execute('select count(*)-count(distinct target_ordinal) from c').fetchone()[0])
+          missing=int(con.execute('select count(*) from t x left join c y using(target_ordinal) where y.target_ordinal is null').fetchone()[0])
+          extra=int(con.execute('select count(*) from c y left join t x using(target_ordinal) where x.target_ordinal is null').fetchone()[0])
+          statuses={str(r[0]):int(r[1]) for r in con.execute('select status,count(*) from c group by 1 order by 1').fetchall()}
+          allowed={'confirmed_outcome','eliminated_or_no_opponent','identity_missing','regular_week_no_source_game','source_identity_unmatched','source_week_no_game','source_error'}
+          bad=sorted(set(statuses)-allowed)
+          summary={'lineage_id':'${{ env.LINEAGE_ID }}','expected_rows':expected,'classified_rows':actual,'distinct_target_ordinals':distinct,'duplicate_rows':dup,'missing_targets':missing,'extra_targets':extra,'statuses':statuses,'unexpected_statuses':bad}
+          Path('fleaflicker_outcome_classification_summary.json').write_text(json.dumps(summary,indent=2)+'\n')
+          print(json.dumps(summary,indent=2))
+          if actual!=expected or distinct!=expected or dup or missing or extra or bad: raise SystemExit('classification incomplete or invalid')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fleaflicker-player-outcome-classification-final-${{ github.run_id }}
+          path: |
+            classified/**/fleaflicker_outcome_classification_*.parquet
+            fleaflicker_outcome_classification_summary.json
+          retention-days: 90
+          compression-level: 0
