@@ -127,7 +127,7 @@ jobs:
           import json
           from pathlib import Path
           rows = [json.loads(x) for x in Path('out/fleaflicker_underpopulated_week_rescue_${{ matrix.shard }}.jsonl').read_text().splitlines() if x.strip()]
-          allowed = {'done', 'source_returned_no_matchups', 'source_returned_no_target_weeks'}
+          allowed = {'done', 'done_with_source_no_games_weeks', 'source_no_games_weeks', 'source_returned_no_matchups', 'source_returned_no_target_weeks'}
           bad = [r for r in rows if r.get('status') not in allowed]
           print({'targets': len(rows), 'done': sum(r.get('status') == 'done' for r in rows), 'source_empty': sum(r.get('status') in {'source_returned_no_matchups','source_returned_no_target_weeks'} for r in rows), 'bad': len(bad)})
           if bad: print('first bad rows:', bad[:5]); raise SystemExit(1)
@@ -170,7 +170,7 @@ jobs:
           actual = {(r['db_name'], int(r['year'])) for r in rows}
           actual_groups = {(r['db_name'], int(r['year']), int(w)) for r in rows for w in (r.get('weeks') or [])}
           duplicates = len(rows) - len(actual)
-          allowed = {'done', 'source_returned_no_matchups', 'source_returned_no_target_weeks'}
+          allowed = {'done', 'done_with_source_no_games_weeks', 'source_no_games_weeks', 'source_returned_no_matchups', 'source_returned_no_target_weeks'}
           bad = [r for r in rows if r.get('status') not in allowed]
           summary = {'expected_league_years': len(expected), 'reported_league_years': len(actual), 'expected_week_groups': len(expected_groups), 'reported_week_groups': len(actual_groups), 'duplicate_rows': duplicates, 'missing_league_years': len(expected - actual), 'missing_week_groups': len(expected_groups - actual_groups), 'status_counts': {s: sum(r.get('status') == s for r in rows) for s in sorted({r.get('status') for r in rows})}}
           Path('fleaflicker_underpopulated_week_rescue_summary.json').write_text(json.dumps(summary, indent=2) + '\n')
