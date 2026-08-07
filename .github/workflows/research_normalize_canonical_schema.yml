@@ -14,6 +14,10 @@ permissions:
   contents: read
   actions: write
 
+concurrency:
+  group: canonical-research-cache-replacement
+  cancel-in-progress: false
+
 jobs:
   normalize:
     runs-on: ubuntu-24.04
@@ -54,6 +58,24 @@ jobs:
           PY
           python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
       - name: Save validated canonical cache generation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CACHE_KEY: ${{ inputs.canonical_cache_key }}
+        run: |
+          set -euo pipefail
+          gh api --method DELETE "/repos/${GITHUB_REPOSITORY}/actions/caches?key=${CACHE_KEY}"
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            count=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/caches?key=${CACHE_KEY}&per_page=100" --jq '.total_count')
+            if [ "$count" = "0" ]; then
+              echo "[canonical-cache] old key deleted"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "[canonical-cache] old key still exists after deletion" >&2
+          exit 1
+
+      - name: Save repaired canonical cache under the same key
         uses: actions/cache/save@v5
         with:
           path: research_public_lake
