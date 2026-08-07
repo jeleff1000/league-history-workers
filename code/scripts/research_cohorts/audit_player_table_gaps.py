@@ -117,6 +117,32 @@ def audit(snapshot: Path) -> dict[str, object]:
         if field in available:
             values = con.execute(f"SELECT CAST({_qi(field)} AS VARCHAR) AS value, COUNT(*) AS rows FROM public.player_fantasy GROUP BY 1 ORDER BY rows DESC LIMIT 20").fetchall()
             signal_distributions[field] = [{"value": value, "rows": int(count)} for value, count in values]
+    platform_year_rows = []
+    if "platform" in available:
+        platform_expr = "COALESCE(NULLIF(LOWER(TRIM(CAST(platform AS VARCHAR))), ''), 'unknown')"
+        py_sql = f"""
+        WITH ly AS (
+          SELECT {platform_expr} AS platform, CAST(db_name AS VARCHAR) AS db_name,
+                 CAST(year AS INTEGER) AS year,
+                 COUNT(*) AS player_rows,
+                 COUNT(*) FILTER (WHERE CAST(is_started AS INTEGER)=1) AS started_rows,
+                 COUNT(*) FILTER (WHERE CAST(is_started AS INTEGER)=1 AND NOT ({outcome_present})) AS missing_outcome,
+                 COUNT(*) FILTER (WHERE CAST(is_started AS INTEGER)=1 AND {null_signal(clutch)}) AS missing_clutch,
+                 MAX(CASE WHEN {f'CAST({_qi(playoff_flag)} AS INTEGER)=1' if playoff_flag else 'FALSE'} THEN 1 ELSE 0 END) AS has_playoff_signal,
+                 MAX(CASE WHEN {f'CAST({_qi(champion_marker)} AS INTEGER)=1' if champion_marker else 'FALSE'} THEN 1 ELSE 0 END) AS has_champion_marker
+          FROM public.player_fantasy GROUP BY 1,2,3
+        )
+        SELECT platform, year, COUNT(*) AS league_seasons,
+               SUM(player_rows) AS player_rows, SUM(started_rows) AS started_rows,
+               SUM(missing_outcome) AS missing_outcome, SUM(missing_clutch) AS missing_clutch,
+               COUNT(*) FILTER (WHERE has_playoff_signal=1) AS with_playoff_signal,
+               COUNT(*) FILTER (WHERE has_champion_marker=1) AS with_champion_marker,
+               COUNT(*) FILTER (WHERE has_playoff_signal=1 AND has_champion_marker=1) AS with_both
+        FROM ly GROUP BY 1,2 ORDER BY 1,2
+        """
+        py_rows = con.execute(py_sql).fetchall()
+        py_names = [d[0] for d in con.description]
+        platform_year_rows = [dict(zip(py_names, row)) for row in py_rows]
     result = {
         "population_source": "public.player_fantasy only",
         "player_rows": int(con.execute("SELECT COUNT(*) FROM public.player_fantasy").fetchone()[0]),
@@ -132,6 +158,7 @@ def audit(snapshot: Path) -> dict[str, object]:
             "signal_settings_mismatch": sum(r["playoff_signal_vs_settings"] == "signal_settings_mismatch" for r in signal_rows),
         },
         "player_signal_distributions": signal_distributions,
+        "platform_year_rows": platform_year_rows,
         "league_season_signal_rows": signal_rows,
         "league_season_rows": [dict(zip(names, row)) for row in rows],
     }
