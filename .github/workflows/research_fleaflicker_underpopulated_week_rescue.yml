@@ -10,7 +10,7 @@ on:
       expected_groups:
         description: Exact Fleaflicker db/year/week target count
         required: true
-        default: "51514"
+        default: "2188"
       expected_low_starter_groups:
         description: Exact low-starter target count
         required: true
