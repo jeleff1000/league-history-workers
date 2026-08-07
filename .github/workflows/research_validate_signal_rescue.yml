@@ -48,6 +48,10 @@ jobs:
           mu_rows = con.execute('select count(*) from public.matchup').fetchone()[0]
           signal_rows = con.execute('select count(*) from public.matchup where is_playoffs=1 or is_championship=1').fetchone()[0]
           champ_without_playoff = con.execute('select count(*) from public.matchup where is_championship=1 and coalesce(is_playoffs,0)<>1').fetchone()[0]
+          league_years = con.execute('select count(distinct (db_name,year)) from public.matchup').fetchone()[0]
+          league_years_with_playoffs = con.execute('select count(*) from (select db_name,year from public.matchup group by 1,2 having max(coalesce(cast(is_playoffs as integer),0))=1)').fetchone()[0]
+          league_years_with_championship = con.execute('select count(*) from (select db_name,year from public.matchup group by 1,2 having max(coalesce(cast(is_championship as integer),0))=1)').fetchone()[0]
+          playoff_years_without_championship = con.execute('select count(*) from (select db_name,year from public.matchup group by 1,2 having max(coalesce(cast(is_playoffs as integer),0))=1 and max(coalesce(cast(is_championship as integer),0))=0)').fetchone()[0]
           dup = con.execute('''
             with k as (
               select db_name, year, week, manager,
@@ -58,6 +62,10 @@ jobs:
           ''').fetchone()[0]
           started_null_win = con.execute('select count(*) from public.player_fantasy where is_started=1 and win is null').fetchone()[0]
           print({'player_fantasy_rows': pf_rows, 'matchup_rows': mu_rows,
+                 'league_years': league_years,
+                 'league_years_with_playoffs': league_years_with_playoffs,
+                 'league_years_with_championship': league_years_with_championship,
+                 'playoff_years_without_championship': playoff_years_without_championship,
                  'playoff_or_champ_matchup_rows': signal_rows,
                  'championship_without_playoff_rows': champ_without_playoff,
                  'duplicate_matchup_keys': dup,
