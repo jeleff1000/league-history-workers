@@ -15,17 +15,17 @@ jobs:
     timeout-minutes: 10
 
     env:
-      RESEARCH_LAKE_KEY: research-public-lake-v4-Linux-20260806-signal-rescue-canonical
+      RESEARCH_LAKE_KEY: research-public-lake-v5-Linux-2000-plus-player-bio
+      OPS_CACHE_RELEASE_TAG: ops-cache-v6-2000-plus-player-bio
       OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
 
     steps:
       - name: Restore canonical research public lake
         id: research-lake
-        uses: actions/cache/restore@v5
+        uses: ./.github/actions/restore-research-ops-cache
         with:
-          path: research_public_lake
-          key: ${{ env.RESEARCH_LAKE_KEY }}
-          fail-on-cache-miss: true
+          cache-key: ${{ env.RESEARCH_LAKE_KEY }}
+          release-tag: ${{ env.OPS_CACHE_RELEASE_TAG }}
 
       - name: Setup Python
         uses: actions/setup-python@v6

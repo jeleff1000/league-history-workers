@@ -1,0 +1,97 @@
+name: Publish Minimal Ops Cache (2000+)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: publish-ops-cache-2000
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      DATABASE_BACKEND: fly
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      GH_TOKEN: ${{ github.token }}
+      CACHE_KEY: research-public-lake-v5-Linux-2000-plus-player-bio
+      RELEASE_TAG: ops-cache-v6-2000-plus-player-bio
+    steps:
+      - name: Checkout worker repository
+        uses: actions/checkout@v5
+
+      - name: Checkout pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pandas
+
+      - name: Build 2000-plus ops cache
+        run: |
+          set -euo pipefail
+          mkdir -p research_public_lake
+          python code/fantasy_football_data_scripts/build_ops_cache.py \
+            --output research_public_lake/ops_cache.duckdb \
+            --min-year 2000 \
+            --max-workers 4
+
+      - name: Validate exact cache scope
+        run: |
+          python - <<'PY'
+          import duckdb
+          path = "research_public_lake/ops_cache.duckdb"
+          con = duckdb.connect(path, read_only=True)
+          try:
+              stats_min, stats_max, stats_rows = con.execute(
+                  "SELECT MIN(year), MAX(year), COUNT(*) FROM nfl_historical.nfl_player_stats_all"
+              ).fetchone()
+              bio_rows = con.execute("SELECT COUNT(*) FROM nfl_historical.player_bio").fetchone()[0]
+              if stats_min < 2000:
+                  raise SystemExit(f"stats cache contains pre-2000 rows: {stats_min}")
+              if stats_rows <= 0 or bio_rows <= 0:
+                  raise SystemExit("required ops tables are empty")
+              print(f"nfl_player_stats_all: {stats_rows:,} rows, years {stats_min}-{stats_max}")
+              print(f"player_bio: {bio_rows:,} rows")
+          finally:
+              con.close()
+          PY
+          test -s research_public_lake/ops_cache.duckdb
+          sha256sum research_public_lake/ops_cache.duckdb
+
+      - name: Save immutable Actions cache
+        uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: research-public-lake-v5-Linux-2000-plus-player-bio
+
+      - name: Publish durable release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "$RELEASE_TAG" \
+              --notes "Immutable minimal ___ops cache: nfl_player_stats_all from 2000 onward plus player_bio."
+          gh release upload "$RELEASE_TAG" research_public_lake/ops_cache.duckdb#ops_cache.duckdb \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+      - name: Final immutability report
+        run: |
+          echo "[ops-cache] cache-key=$CACHE_KEY"
+          echo "[ops-cache] durable-release=$RELEASE_TAG"
+          echo "[ops-cache] no cache deletion is permitted"

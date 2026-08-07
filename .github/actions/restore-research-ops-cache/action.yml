@@ -1,0 +1,46 @@
+name: Restore durable research ops cache
+description: Restore the 2000+ ops cache from Actions cache, with a release-asset fallback.
+inputs:
+  cache-key:
+    required: true
+  release-tag:
+    required: true
+  release-repository:
+    required: false
+    default: jeleff1000/league-history-workers
+outputs:
+  cache-hit:
+    value: ${{ steps.restore.outputs.cache-hit }}
+runs:
+  using: composite
+  steps:
+    - name: Restore Actions cache
+      id: restore
+      uses: actions/cache/restore@v5
+      with:
+        path: research_public_lake
+        key: ${{ inputs.cache-key }}
+        fail-on-cache-miss: false
+
+    - name: Restore release backup when Actions cache is absent
+      if: steps.restore.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        rm -rf research_public_lake
+        mkdir -p research_public_lake
+        gh release download "${{ inputs.release-tag }}" \
+          --repo "${{ inputs.release-repository }}" \
+          --pattern ops_cache.duckdb \
+          --dir research_public_lake
+        test -s research_public_lake/ops_cache.duckdb
+        echo "[ops-cache] restored durable release backup ${{ inputs.release-tag }}"
+
+    - name: Verify durable ops cache
+      shell: bash
+      run: |
+        set -euo pipefail
+        test -s research_public_lake/ops_cache.duckdb
+        echo "[ops-cache] source=${{ steps.restore.outputs.cache-hit == 'true' && 'actions-cache' || 'release-backup' }}"

@@ -165,19 +165,6 @@ jobs:
           reused=$(python -c "import json; print(str(json.load(open('ops_cache/checkpoints/${{ matrix.batch_id }}.status.json'))['reused']).lower())")
           echo "reused=$reused" >> "$GITHUB_OUTPUT"
 
-      - name: Replace invalid checkpoint cache
-        if: steps.download.outcome == 'success' && steps.download.outputs.reused != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_PROMPT_DISABLED: 1
-        run: |
-          key="${CHECKPOINT_CACHE_PREFIX}${{ matrix.batch_id }}"
-          gh cache list --repo jeleff1000/league-history-workers --key "$key" --json id |
-            jq -r '.[].id' |
-            while read -r id; do
-              [ -z "$id" ] || gh api --method DELETE "/repos/jeleff1000/league-history-workers/actions/caches/$id"
-            done
-
       - name: Save checkpoint
         if: steps.download.outcome == 'success' && steps.download.outputs.reused != 'true'
         uses: actions/cache/save@v5
@@ -214,17 +201,11 @@ jobs:
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           ref: ${{ github.event.inputs.yahoo_oauth_ref || 'main' }}
 
-      - name: Protect ops checkpoint storage
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Protect research-lake caches
         shell: bash
         run: |
-          gh cache list --repo jeleff1000/league-history-workers \
-            --key research-public-lake-v4-Linux- --limit 1000 --json id |
-            jq -r '.[].id' |
-            while read -r id; do
-              [ -z "$id" ] || gh api --method DELETE "/repos/jeleff1000/league-history-workers/actions/caches/$id"
-            done
+          set -euo pipefail
+          echo "[ops-cache] research-public-lake caches are immutable and are never deleted by this workflow"
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -887,14 +868,5 @@ jobs:
             --repo jeleff1000/league-history-workers --clobber
           echo "[ops-cache] durable-release=ops-cache-v5"
 
-      - name: Remove superseded canonical generations
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_PROMPT_DISABLED: 1
-        run: |
-          gh cache list --repo jeleff1000/league-history-workers --key "$OPS_CACHE_PREFIX" --json id,key |
-            jq -r --arg keep "$OPS_CACHE_KEY" '.[] | select(.key != $keep) | .id' |
-            while read -r id; do
-              [ -z "$id" ] || gh api --method DELETE "/repos/jeleff1000/league-history-workers/actions/caches/$id"
-            done
-          echo "[ops-cache] published=$OPS_CACHE_KEY"
+      - name: Record published generation
+        run: echo "[ops-cache] published=$OPS_CACHE_KEY; no prior cache generations deleted"

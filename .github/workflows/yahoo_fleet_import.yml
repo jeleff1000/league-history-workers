@@ -284,11 +284,10 @@ jobs:
 
       - name: Restore canonical research public lake
         id: research-lake
-        uses: actions/cache/restore@v5
+        uses: ./.github/actions/restore-research-ops-cache
         with:
-          path: research_public_lake
-          key: research-public-lake-v4-Linux-20260806-signal-rescue-canonical
-          fail-on-cache-miss: true
+          cache-key: research-public-lake-v5-Linux-2000-plus-player-bio
+          release-tag: ops-cache-v6-2000-plus-player-bio
 
       - name: Verify ops cache from research lake
         shell: bash
