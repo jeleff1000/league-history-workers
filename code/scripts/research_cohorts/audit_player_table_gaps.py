@@ -109,6 +109,11 @@ def audit(snapshot: Path) -> dict[str, object]:
         else:
             expected = row["configured_playoff_teams"] is not None and row["configured_playoff_teams"] > 0
             row["playoff_signal_vs_settings"] = "consistent_presence" if expected == row["player_playoff_signal"] else "signal_settings_mismatch"
+    signal_distributions = {}
+    for field in ("is_playoffs", "is_playoffs_bf", "has_po_signal", "made_po", "final_playoff_seed", "champion"):
+        if field in available:
+            values = con.execute(f"SELECT CAST({_qi(field)} AS VARCHAR) AS value, COUNT(*) AS rows FROM public.player_fantasy GROUP BY 1 ORDER BY rows DESC LIMIT 20").fetchall()
+            signal_distributions[field] = [{"value": value, "rows": int(count)} for value, count in values]
     result = {
         "population_source": "public.player_fantasy only",
         "player_rows": int(con.execute("SELECT COUNT(*) FROM public.player_fantasy").fetchone()[0]),
@@ -123,6 +128,7 @@ def audit(snapshot: Path) -> dict[str, object]:
             "with_player_champion_signal": sum(r["player_champion_signal"] for r in signal_rows),
             "signal_settings_mismatch": sum(r["playoff_signal_vs_settings"] == "signal_settings_mismatch" for r in signal_rows),
         },
+        "player_signal_distributions": signal_distributions,
         "league_season_signal_rows": signal_rows,
         "league_season_rows": [dict(zip(names, row)) for row in rows],
     }
