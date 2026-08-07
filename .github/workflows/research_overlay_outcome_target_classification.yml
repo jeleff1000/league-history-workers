@@ -1,0 +1,75 @@
+name: Overlay Focused Outcome Classification
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_run_id:
+        description: Existing full classification combine run
+        required: true
+        default: "31141018414"
+      base_artifact:
+        required: true
+        default: "research-outcome-target-classification-combined-31141018414"
+      patch_run_id:
+        description: Focused classification combine run
+        required: true
+      patch_artifact:
+        required: true
+      expected_rows:
+        required: true
+        default: "1145460"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  overlay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3
+      - name: Download base and focused classifications
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p input/base input/patch
+          gh run download '${{ inputs.base_run_id }}' --repo '${{ github.repository }}' --name '${{ inputs.base_artifact }}' --dir input/base
+          gh run download '${{ inputs.patch_run_id }}' --repo '${{ github.repository }}' --name '${{ inputs.patch_artifact }}' --dir input/patch
+      - name: Overlay and validate
+        run: |
+          mkdir -p out
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          base=sorted(str(p).replace('\\','/') for p in Path('input/base').glob('**/*.parquet'))
+          patch=sorted(str(p).replace('\\','/') for p in Path('input/patch').glob('**/*.parquet'))
+          if len(base)!=1 or len(patch)!=1: raise SystemExit(f'expected one base and one patch parquet: {base} {patch}')
+          esc=lambda p: "'"+p.replace("'","''")+"'"
+          c=duckdb.connect()
+          sql=f"""SELECT b.* FROM read_parquet({esc(base[0])}) b
+          WHERE NOT EXISTS (SELECT 1 FROM read_parquet({esc(patch[0])}) p WHERE p.target_ordinal=b.target_ordinal)
+          UNION ALL SELECT * FROM read_parquet({esc(patch[0])})
+          ORDER BY target_ordinal"""
+          c.execute(f"COPY ({sql}) TO 'out/outcome_target_classification.parquet' (FORMAT PARQUET)")
+          n,o=c.execute("SELECT COUNT(*),COUNT(DISTINCT target_ordinal) FROM read_parquet('out/outcome_target_classification.parquet')").fetchone()
+          expected=int('${{ inputs.expected_rows }}')
+          if (n,o)!=(expected,expected): raise SystemExit(f'coverage mismatch rows={n} ordinals={o} expected={expected}')
+          bad=c.execute("SELECT COUNT(*) FROM read_parquet('out/outcome_target_classification.parquet') WHERE NFL_player_id LIKE 'DEF-%' AND status='player_map_missing'").fetchone()[0]
+          if bad: raise SystemExit(f'DST map gaps remain after focused repair: {bad}')
+          statuses=c.execute("SELECT status,COUNT(*) n_rows,COUNT(DISTINCT db_name||'|'||CAST(year AS VARCHAR)) league_years FROM read_parquet('out/outcome_target_classification.parquet') GROUP BY 1 ORDER BY 1").fetchall()
+          payload={'target_rows':n,'distinct_ordinals':o,'dst_map_missing':bad,'statuses':[dict(zip(['status','n_rows','league_years'],r)) for r in statuses]}
+          Path('out/outcome_target_classification_summary.json').write_text(json.dumps(payload,indent=2,sort_keys=True)+'\\n')
+          print(json.dumps(payload,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-outcome-target-classification-overlay-${{ github.run_id }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 60
+          compression-level: 0

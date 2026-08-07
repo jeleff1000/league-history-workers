@@ -6,6 +6,10 @@ on:
       classification_run_id:
         required: true
         default: "31139643337"
+      expected_rows:
+        description: Expected rows in this classification population
+        required: true
+        default: "1145460"
 
 permissions:
   contents: read
@@ -43,7 +47,8 @@ jobs:
           c=duckdb.connect()
           c.execute(f"COPY (SELECT * FROM read_parquet({sql}, union_by_name=true) ORDER BY target_ordinal) TO 'out/outcome_target_classification.parquet' (FORMAT PARQUET)")
           n,ords=c.execute("SELECT COUNT(*),COUNT(DISTINCT target_ordinal) FROM read_parquet('out/outcome_target_classification.parquet')").fetchone()
-          if (n,ords)!=(1145460,1145460): raise SystemExit(f'coverage mismatch rows={n} ordinals={ords}')
+          expected=int('${{ inputs.expected_rows }}')
+          if (n,ords)!=(expected,expected): raise SystemExit(f'coverage mismatch rows={n} ordinals={ords} expected={expected}')
           statuses=c.execute("SELECT status,COUNT(*) n_rows,COUNT(DISTINCT db_name||'|'||CAST(year AS VARCHAR)) league_years FROM read_parquet('out/outcome_target_classification.parquet') GROUP BY 1 ORDER BY 1").fetchall()
           by_format=c.execute("SELECT total_rosters,playoff_teams,playoff_start_week,status,COUNT(*) n_rows FROM read_parquet('out/outcome_target_classification.parquet') GROUP BY 1,2,3,4 ORDER BY 1,2,3,4").fetchall()
           by_time=c.execute("SELECT year,week,status,COUNT(*) n_rows FROM read_parquet('out/outcome_target_classification.parquet') GROUP BY 1,2,3 ORDER BY 1,2,3").fetchall()

@@ -19,6 +19,10 @@ on:
         description: Deterministic source-classification shards
         required: true
         default: "256"
+      target_filter:
+        description: ALL or DST; DST runs only the affected team-defense targets
+        required: true
+        default: "ALL"
 
 permissions:
   contents: read
@@ -89,7 +93,15 @@ jobs:
           n = con.execute("SELECT COUNT(*) FROM read_parquet('input/targets/all_targets.parquet')").fetchone()[0]
           if n != 1145460:
               raise SystemExit(f'exact target count mismatch: {n}')
-          print({'target_files': paths, 'target_rows': n})
+          target_filter = '${{ inputs.target_filter }}'.upper()
+          if target_filter not in {'ALL', 'DST'}:
+              raise SystemExit(f'unsupported target_filter: {target_filter}')
+          where = "" if target_filter == 'ALL' else "WHERE NFL_player_id LIKE 'DEF-%'"
+          con.execute(f"COPY (SELECT * FROM read_parquet('input/targets/all_targets.parquet') {where}) TO 'input/targets/selected_targets.parquet' (FORMAT PARQUET)")
+          selected = con.execute("SELECT COUNT(*) FROM read_parquet('input/targets/selected_targets.parquet')").fetchone()[0]
+          if not selected:
+              raise SystemExit('selected target population is empty')
+          print({'target_files': paths, 'target_rows': n, 'selected_rows': selected, 'target_filter': target_filter})
           PY
       - name: Download source manifest
         env:
@@ -104,9 +116,10 @@ jobs:
         run: |
           mkdir -p out
           python code/scripts/research_cohorts/classify_outcome_targets.py \
-            --targets input/targets/all_targets.parquet \
+            --targets input/targets/selected_targets.parquet \
             --manifest "$(find input/manifest -name '*.json' -type f | head -1)" \
             --player-map code/ops_data/public/sleeper_nfl_player_map.parquet \
+            --player-bio code/ops_data/nfl_historical/player_bio.parquet \
             --shard '${{ matrix.shard }}' \
             --shards '${{ inputs.shards }}' \
             --out out/outcome_target_classification_${{ matrix.shard }}.parquet
