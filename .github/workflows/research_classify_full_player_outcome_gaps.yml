@@ -1,0 +1,52 @@
+name: Classify full player outcome gaps
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  classify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - name: Classify without API or lake writes
+        run: |
+          python scripts/research_cohorts/classify_full_player_outcome_gaps.py \
+            --snapshot research_public_lake/corpus_snapshot.duckdb \
+            --out-dir out
+      - name: Validate conservation and expected population
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=json.loads(Path('out/player_outcome_gap_classification_summary.json').read_text())
+          n=p['missing_outcome_rows']
+          rows=sum(x['rows'] for x in p['classifications'])
+          if n != rows: raise SystemExit(f'classification conservation failed: {n} != {rows}')
+          if n < 1: raise SystemExit('empty missing-outcome population')
+          print({'missing_outcome_rows': n, 'classifications': p['classifications']})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-full-player-outcome-gap-classification-${{ github.run_id }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 60
+          compression-level: 0
