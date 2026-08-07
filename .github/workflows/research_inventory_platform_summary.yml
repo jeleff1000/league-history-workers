@@ -1,0 +1,65 @@
+name: Summarize research gap inventory by platform
+
+on:
+  workflow_dispatch:
+    inputs:
+      inventory_run_id:
+        description: Completed inventory run whose GH artifact should be summarized
+        required: true
+        default: "31179130085"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Download inventory artifact from GH
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p inventory
+          gh run download '${{ inputs.inventory_run_id }}' \
+            --repo '${{ github.repository }}' \
+            --name 'research-matchup-league-year-inventory-${{ inputs.inventory_run_id }}' \
+            --dir inventory
+      - name: Sum row-level gaps by platform
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter, defaultdict
+          from pathlib import Path
+
+          rows = json.loads(Path('inventory/matchup_league_year_inventory.json').read_text())
+          keys = (
+              'started_without_outcome_rows',
+              'started_without_clutch_rows',
+              'started_without_team_game_rows',
+          )
+          totals = defaultdict(lambda: Counter())
+          league_years = defaultdict(Counter)
+          for row in rows:
+              platform = row.get('platform') or 'unknown'
+              for key in keys:
+                  totals[platform][key] += int(row.get(key) or 0)
+              for reason in row.get('reason_codes') or []:
+                  league_years[platform][reason] += 1
+          result = {
+              'inventory_run_id': '${{ inputs.inventory_run_id }}',
+              'row_totals_by_platform': {p: dict(sorted(v.items())) for p, v in sorted(totals.items())},
+              'league_year_counts_by_platform': {p: dict(sorted(v.items())) for p, v in sorted(league_years.items())},
+              'row_totals': {k: sum(v[k] for v in totals.values()) for k in keys},
+          }
+          Path('gap_platform_summary.json').write_text(json.dumps(result, indent=2) + '\n')
+          print(json.dumps(result, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-gap-platform-summary-${{ github.run_id }}
+          path: gap_platform_summary.json
+          if-no-files-found: error
+          retention-days: 30
