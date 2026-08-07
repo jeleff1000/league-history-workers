@@ -68,6 +68,10 @@ jobs:
           cols = {r[0] for r in con.execute('describe public.matchup').fetchall()}
           if 'is_championship' not in cols:
               con.execute('alter table public.matchup add column is_championship integer')
+          # The parent may contain an older inferred sidecar.  Rebuild the
+          # championship layer from the corrected sidecar rather than leaving
+          # stale early-week anchors in the child lineage.
+          con.execute('update public.matchup set is_championship=0')
           con.execute('''
             update public.matchup m
                set is_championship=1, is_playoffs=1
