@@ -1,0 +1,37 @@
+name: Verify named research-cache fixes
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - run: |
+          python code/scripts/research_cohorts/verify_named_research_fixes.py \
+            research_public_lake --out named_fix_verification.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: named-research-fix-verification
+          path: named_fix_verification.json
+          if-no-files-found: error
+          retention-days: 30
