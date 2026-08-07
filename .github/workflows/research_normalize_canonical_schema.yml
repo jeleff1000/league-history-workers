@@ -34,6 +34,11 @@ jobs:
           path: research_public_lake
           key: ${{ inputs.base_cache_key }}
           fail-on-cache-miss: true
+      - name: Fingerprint ops cache before rebuild
+        run: |
+          set -euo pipefail
+          test -s research_public_lake/ops_cache.duckdb
+          sha256sum research_public_lake/ops_cache.duckdb | awk '{print "OPS_SHA_BEFORE="$1}' >> "$GITHUB_ENV"
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -44,6 +49,13 @@ jobs:
             --base research_public_lake/corpus_snapshot.duckdb \
             --out research_public_lake/corpus_snapshot.normalized.duckdb
           mv -f research_public_lake/corpus_snapshot.normalized.duckdb research_public_lake/corpus_snapshot.duckdb
+      - name: Fail-fast ops cache preservation gate
+        run: |
+          set -euo pipefail
+          test -s research_public_lake/ops_cache.duckdb
+          ops_sha_after=$(sha256sum research_public_lake/ops_cache.duckdb | awk '{print $1}')
+          test "$ops_sha_after" = "$OPS_SHA_BEFORE"
+          echo "[ops-cache] preserved sha256=$ops_sha_after"
       - name: Fail-fast canonical schema gate
         run: |
           python - <<'PY'
