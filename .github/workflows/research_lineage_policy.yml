@@ -1,0 +1,34 @@
+name: Research matchup lineage policy
+
+on:
+  push:
+    paths:
+      - ".github/workflows/**"
+      - "code/scripts/research_cohorts/research_lineage_*.py"
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+      - "code/scripts/research_cohorts/research_lineage_*.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Fail fast on a new research-matchup lineage
+        run: |
+          python code/scripts/research_cohorts/research_lineage_guard.py .
+          python -m pytest -q code/scripts/research_cohorts/test_research_lineage_policy.py code/scripts/research_cohorts/test_research_lineage_guard.py
