@@ -144,6 +144,14 @@ jobs:
           for name in ('research_matchup_weekly.parquet','research_matchup_player_season.parquet'):
               if len(list(Path('shards').rglob(name))) != n:
                   raise SystemExit(f'{name}: incomplete artifact coverage')
+          required_dims = {'bracket', 'league_type', 'lineup_mode', 'keeper_mode'}
+          for name in ('research_matchup_weekly.parquet','research_matchup_player_season.parquet'):
+              paths = [str(p) for p in Path('shards').rglob(name)]
+              schema = {r[0] for r in con.execute('DESCRIBE SELECT * FROM read_parquet(?)', [paths]).fetchall()}
+              missing = required_dims - schema
+              if missing:
+                  raise SystemExit(f'{name}: missing format dimensions {sorted(missing)}')
+          print('PASS: dynasty/best-ball/bracket dimensions present in every shard grain')
           print(f'PASS: {n} disjoint global batches, years {rows[0][0]}-{rows[0][1]}')
           weekly = [str(p) for p in Path('shards').rglob('research_matchup_weekly.parquet')]
           season = [str(p) for p in Path('shards').rglob('research_matchup_player_season.parquet')]
