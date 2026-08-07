@@ -101,6 +101,13 @@ jobs:
           out.execute("create schema public")
           old = str(Path(old_path).resolve()).replace("'", "''")
           out.execute(f"attach '{old}' as old (read_only)")
+          out.execute("create temp table target_sample as select distinct db_name, year, week, NFL_player_id from read_parquet($files, union_by_name=true) limit 10", {"files": target_files})
+          old_cols = [r[0] for r in out.execute("describe old.public.player_fantasy").fetchall()]
+          print({"old_player_fantasy_has_NFL_player_id": "NFL_player_id" in old_cols, "old_key_columns": [c for c in old_cols if c in {"db_name","year","week","NFL_player_id","player_week","win","team_points"}]})
+          print({
+              "sample_exact_key_matches": out.execute("select count(*) from target_sample t join old.public.player_fantasy o on o.db_name=t.db_name and o.year=t.year and o.week=t.week and o.NFL_player_id=t.NFL_player_id").fetchone()[0],
+              "sample_league_week_matches": out.execute("select count(*) from target_sample t join old.public.player_fantasy o on o.db_name=t.db_name and o.year=t.year and o.week=t.week").fetchone()[0],
+          })
           out.execute("""
             create table public.outcome_targets as
             select t.db_name, cast(t.year as integer) as year,
