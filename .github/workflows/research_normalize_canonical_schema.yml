@@ -53,13 +53,8 @@ jobs:
           print({'player_columns':len(p),'player_rows':c.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0],'platform_null':platform_null})
           PY
           python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
-      - name: Replace the canonical cache key only after validation
-        env:
-          GH_TOKEN: ${{ github.token }}
-          CACHE_KEY: ${{ inputs.canonical_cache_key }}
-        run: |
-          gh api --method DELETE "/repos/${GITHUB_REPOSITORY}/actions/caches?key=${CACHE_KEY}" || true
-      - uses: actions/cache/save@v5
+      - name: Save validated canonical cache generation
+        uses: actions/cache/save@v5
         with:
           path: research_public_lake
           key: ${{ inputs.canonical_cache_key }}
