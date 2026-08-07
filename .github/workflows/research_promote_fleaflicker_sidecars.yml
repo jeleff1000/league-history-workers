@@ -1,0 +1,101 @@
+name: Promote validated Fleaflicker sidecars into canonical research cache
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Completed Fleaflicker rescue run whose successful artifacts are promoted
+        required: true
+        default: "31223307970"
+      replace_canonical_cache:
+        description: Replace the existing canonical cache key after validation
+        required: true
+        default: "true"
+        type: boolean
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+  CANONICAL_RELEASE_TAG: research-public-lake-v4-legacy-signal-rescue-canonical
+
+concurrency:
+  group: canonical-research-cache-promotion
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private research code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: false
+      - name: Restore canonical release backup when cache is absent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ ! -s research_public_lake/corpus_snapshot.duckdb ]; then
+            rm -rf research_public_lake release_parts
+            mkdir -p research_public_lake release_parts
+            gh release download "$CANONICAL_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --pattern 'research-public-lake.tar.part-*' --dir release_parts
+            cat release_parts/research-public-lake.tar.part-* | tar -xf - -C research_public_lake
+          fi
+          test -s research_public_lake/corpus_snapshot.duckdb
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Download successful Fleaflicker artifacts only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.source_run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p sidecars
+          gh run download "$SOURCE_RUN" --repo "$GITHUB_REPOSITORY" --dir sidecars
+          test -n "$(find sidecars -name 'fleaflicker_underpopulated_week_rescue_*.parquet' -print -quit)"
+      - name: Compare and build same-schema candidate
+        run: |
+          set -euo pipefail
+          python code/scripts/research_cohorts/promote_mfl_sidecars.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --sidecars sidecars \
+            --prefix fleaflicker_underpopulated_week_rescue_ \
+            --out promoted_corpus_snapshot.duckdb
+          cp promoted_corpus_snapshot.duckdb research_public_lake/corpus_snapshot.duckdb
+          python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
+      - name: Preserve promotion report
+        uses: actions/upload-artifact@v4
+        with:
+          name: fleaflicker-sidecar-promotion-report-${{ github.run_id }}
+          path: promoted_corpus_snapshot.json
+          retention-days: 180
+      - name: Replace only the approved canonical cache key
+        if: inputs.replace_canonical_cache == true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/caches?key=$CANONICAL_CACHE_KEY&ref=refs/heads/main"; then
+            echo "[cache] canonical key was already absent; continuing to save replacement"
+          fi
+      - name: Save validated canonical cache under identical key
+        if: inputs.replace_canonical_cache == true
+        uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
