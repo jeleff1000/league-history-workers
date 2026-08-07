@@ -102,7 +102,7 @@ jobs:
           if n != 1145460:
               raise SystemExit(f'exact target count mismatch: {n}')
           target_filter = '${{ inputs.target_filter }}'.upper()
-          if target_filter not in {'ALL', 'DST', 'MAP_MISSING'} and not (target_filter.startswith('DEF-') and target_filter[4:].isdigit()):
+          if target_filter not in {'ALL', 'DST', 'MAP_MISSING', 'DISCREPANCIES'} and not (target_filter.startswith('DEF-') and target_filter[4:].isdigit()):
               raise SystemExit(f'unsupported target_filter: {target_filter}')
           if target_filter == 'MAP_MISSING':
               import os, subprocess
@@ -112,6 +112,14 @@ jobs:
               paths=sorted(str(p).replace('\\','/') for p in Path('input/selection').glob('**/*.parquet'))
               if len(paths)!=1: raise SystemExit(f'expected one selection parquet, found {paths}')
               where=f"WHERE target_ordinal IN (SELECT target_ordinal FROM read_parquet('{paths[0]}') WHERE status='player_map_missing' AND NFL_player_id NOT LIKE 'DEF-%')"
+          elif target_filter == 'DISCREPANCIES':
+              import os, subprocess
+              run_id='${{ inputs.selection_run_id }}'; artifact='${{ inputs.selection_artifact }}'
+              if not run_id or not artifact: raise SystemExit('DISCREPANCIES requires selection_run_id and selection_artifact')
+              subprocess.run(['gh','run','download',run_id,'--repo',os.environ['GITHUB_REPOSITORY'],'--name',artifact,'--dir','input/selection'],check=True)
+              paths=sorted(str(p).replace('\\','/') for p in Path('input/selection').glob('**/*.parquet'))
+              if len(paths)!=1: raise SystemExit(f'expected one selection parquet, found {paths}')
+              where=f"WHERE target_ordinal IN (SELECT target_ordinal FROM read_parquet('{paths[0]}') WHERE status IN ('not_on_week_roster','rostered_not_started'))"
           else:
               where = "" if target_filter == 'ALL' else ("WHERE NFL_player_id LIKE 'DEF-%'" if target_filter == 'DST' else f"WHERE NFL_player_id = '{target_filter}'")
           con.execute(f"COPY (SELECT * FROM read_parquet('input/targets/all_targets.parquet') {where}) TO 'input/targets/selected_targets.parquet' (FORMAT PARQUET)")
