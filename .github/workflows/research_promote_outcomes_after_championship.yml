@@ -7,6 +7,14 @@ on:
         description: Successful full outcome-applied snapshot
         required: true
         default: "31108438350"
+      target_shard_run_id:
+        description: Run containing the exact target shard artifacts
+        required: true
+        default: "31057089304"
+      target_tail_run_id:
+        description: Run containing the combined target tail artifact
+        required: true
+        default: "31060749133"
       base_cache_key:
         description: Repaired championship cache to use as parent
         required: true
@@ -64,45 +72,56 @@ jobs:
             --dir outcome_base
           find outcome_base -name corpus_snapshot.duckdb -type f -size +1000000000c | head -1 > outcome_path.txt
           test -s outcome_path.txt
+      - name: Download exact outcome target inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p target_shards target_tail
+          gh run download '${{ inputs.target_shard_run_id }}' \
+            --repo '${{ github.repository }}' \
+            --pattern 'research-outcome-targets-*' \
+            --dir target_shards
+          gh run download '${{ inputs.target_tail_run_id }}' \
+            --repo '${{ github.repository }}' \
+            --name 'research-outcome-targets-combined-90000-1145460' \
+            --dir target_tail
+          test "$(find target_shards target_tail -name '*.parquet' | wc -l)" -gt 1
       - name: Extract exact outcome diff and merge
         run: |
           set -euo pipefail
           python - "$(cat outcome_path.txt)" <<'PY'
-          import duckdb, json, os, sys
+          import duckdb, os, sys
           from pathlib import Path
           old_path = sys.argv[1]
-          parent_path = Path("research_public_lake/corpus_snapshot.duckdb").resolve()
+          target_files = [str(p.resolve()) for root in (Path("target_shards"), Path("target_tail")) for p in root.rglob("*.parquet")]
+          if len(target_files) < 2:
+              raise SystemExit(f"target inventory incomplete: {len(target_files)} parquet files")
           out = duckdb.connect("outcome_overlay.duckdb")
           out.execute("create schema public")
-          parent = str(parent_path).replace("'", "''")
           old = str(Path(old_path).resolve()).replace("'", "''")
-          out.execute(f"attach '{parent}' as parent (read_only)")
           out.execute(f"attach '{old}' as old (read_only)")
           out.execute("""
             create table public.outcome_targets as
-            select o.db_name, cast(o.year as integer) as year,
-                   cast(o.week as integer) as week, o.NFL_player_id,
+            select t.db_name, cast(t.year as integer) as year,
+                   cast(t.week as integer) as week, t.NFL_player_id,
                    cast(max(o.win) as integer) as win,
                    cast(max(o.team_points) as double) as team_points
-            from old.public.player_fantasy o
-            join parent.public.player_fantasy b
-              on b.db_name=o.db_name and b.year=o.year and b.week=o.week
-             and b.NFL_player_id=o.NFL_player_id
-            where cast(b.is_started as integer)=1
-              and (b.win is null or b.team_points is null)
-              and (o.win is not null or o.team_points is not null)
+            from read_parquet($files, union_by_name=true) t
+            left join old.public.player_fantasy o
+              on o.db_name=t.db_name and o.year=t.year and o.week=t.week
+             and o.NFL_player_id=t.NFL_player_id
             group by 1,2,3,4
-          """)
+          """, {"files": target_files})
           count = out.execute("select count(*) from public.outcome_targets").fetchone()[0]
-          keys = out.execute("select count(*) from (select distinct db_name,year,week,NFL_player_id from public.outcome_targets)").fetchone()[0]
-          print({"outcome_diff_rows": count, "distinct_keys": keys})
-          if count != 1145460 or keys != 1145460:
-              raise SystemExit(f"unexpected outcome diff: rows={count}, keys={keys}")
+          unresolved = out.execute("select count(*) from public.outcome_targets where win is null and team_points is null").fetchone()[0]
+          print({"target_files": len(target_files), "outcome_target_rows": count, "unresolved_from_prior_snapshot": unresolved})
+          if count != 1145460 or unresolved:
+              raise SystemExit(f"target reconciliation failed: rows={count}, unresolved={unresolved}")
           out.close()
           empty = duckdb.connect("empty_matchups.duckdb")
           empty.execute("create schema public")
-          empty.execute(f"attach '{parent}' as parent (read_only)")
-          empty.execute("create table public.source_matchup_rescue as select * from parent.public.matchup where 1=0")
+          empty.execute("create table public.source_matchup_rescue (db_name varchar, year integer, week integer)")
           empty.close()
           os.remove(old_path)
           PY
@@ -120,6 +139,7 @@ jobs:
           import duckdb, json
           c=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
           o=duckdb.connect('outcome_overlay.duckdb', read_only=True)
+          c.execute("attach 'outcome_overlay.duckdb' as outcome_overlay (read_only)")
           missing=c.execute("""
             select count(*) from outcome_overlay.public.outcome_targets t
             join public.player_fantasy p using (db_name,year,week,NFL_player_id)
