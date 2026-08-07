@@ -1,0 +1,187 @@
+name: Fleaflicker underpopulated week rescue
+
+on:
+  workflow_dispatch:
+    inputs:
+      shards:
+        description: Number of deterministic API shards
+        required: true
+        default: "256"
+      expected_groups:
+        description: Exact Fleaflicker db/year/week target count
+        required: true
+        default: "51514"
+      expected_low_starter_groups:
+        description: Exact low-starter target count
+        required: true
+        default: "1000"
+      expected_low_winner_groups:
+        description: Exact low-winner target count
+        required: true
+        default: "2086"
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+concurrency:
+  group: fleaflicker-underpopulated-week-rescue
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      shard_list: ${{ steps.matrix.outputs.shard_list }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1
+      - name: Build exact Fleaflicker week inventory
+        run: |
+          mkdir -p inventory
+          python code/scripts/research_cohorts/build_mfl_underpopulated_week_targets.py \
+            --platform fleaflicker --snapshot research_public_lake/corpus_snapshot.duckdb \
+            --out inventory/fleaflicker_underpopulated_week_targets.json \
+            --expected-groups '${{ inputs.expected_groups }}' --expected-league-years 0
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = json.loads(Path('inventory/fleaflicker_underpopulated_week_targets.json').read_text())
+          expected = {'low_starter_groups': int('${{ inputs.expected_low_starter_groups }}'), 'low_winner_groups': int('${{ inputs.expected_low_winner_groups }}')}
+          actual = {k: int(p[k]) for k in expected}
+          print({'expected': expected, 'actual': actual, 'league_years': p['league_year_count']})
+          if actual != expected: raise SystemExit('Fleaflicker target reason counts do not match the audited population')
+          PY
+      - id: matrix
+        env:
+          SHARDS: ${{ inputs.shards }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          n = int(os.environ['SHARDS'])
+          if not 1 <= n <= 256: raise SystemExit('shards must be between 1 and 256')
+          print('shard_list=' + json.dumps(list(range(n))))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fleaflicker-underpopulated-week-targets-${{ github.run_id }}
+          path: inventory/fleaflicker_underpopulated_week_targets.json
+          retention-days: 90
+          compression-level: 0
+
+  rescue:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.shard_list) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pandas==2.2.3 pyarrow==15.0.2 duckdb==1.5.1 requests==2.32.4 polars==1.35.2
+      - name: Download exact inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p inventory
+          gh run download '${{ github.run_id }}' --repo '${{ github.repository }}' --name 'fleaflicker-underpopulated-week-targets-${{ github.run_id }}' --dir inventory
+      - name: Fetch only flagged Fleaflicker weeks
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
+        run: |
+          mkdir -p out
+          python code/scripts/research_cohorts/build_source_matchup_rescue_sidecar.py \
+            --platform fleaflicker --targets inventory/fleaflicker_underpopulated_week_targets.json \
+            --shard '${{ matrix.shard }}' --shards '${{ inputs.shards }}' --workers 1 \
+            --out out/fleaflicker_underpopulated_week_rescue_${{ matrix.shard }}.parquet
+      - name: Fail closed on API failures or partial weeks
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows = [json.loads(x) for x in Path('out/fleaflicker_underpopulated_week_rescue_${{ matrix.shard }}.jsonl').read_text().splitlines() if x.strip()]
+          allowed = {'done', 'source_returned_no_matchups', 'source_returned_no_target_weeks'}
+          bad = [r for r in rows if r.get('status') not in allowed]
+          print({'targets': len(rows), 'done': sum(r.get('status') == 'done' for r in rows), 'source_empty': sum(r.get('status') in {'source_returned_no_matchups','source_returned_no_target_weeks'} for r in rows), 'bad': len(bad)})
+          if bad: print('first bad rows:', bad[:5]); raise SystemExit(1)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fleaflicker-underpopulated-week-rescue-${{ matrix.shard }}-${{ github.run_id }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+
+  combine:
+    needs: [prepare, rescue]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3
+      - name: Download inventory and shards
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p inventory rescued
+          gh run download '${{ github.run_id }}' --repo '${{ github.repository }}' --name 'fleaflicker-underpopulated-week-targets-${{ github.run_id }}' --dir inventory
+          gh run download '${{ github.run_id }}' --repo '${{ github.repository }}' --dir rescued
+      - name: Validate exact flagged-week coverage
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          inv = json.loads(Path('inventory/fleaflicker_underpopulated_week_targets.json').read_text())
+          expected = {(r['db_name'], int(r['year'])) for r in inv['targets']}
+          expected_groups = {(r['db_name'], int(r['year']), int(r['week'])) for r in inv['groups']}
+          files = Path('rescued').rglob('fleaflicker_underpopulated_week_rescue_*.jsonl')
+          rows = [json.loads(line) for f in files for line in Path(f).read_text().splitlines() if line.strip()]
+          actual = {(r['db_name'], int(r['year'])) for r in rows}
+          actual_groups = {(r['db_name'], int(r['year']), int(w)) for r in rows for w in (r.get('weeks') or [])}
+          duplicates = len(rows) - len(actual)
+          allowed = {'done', 'source_returned_no_matchups', 'source_returned_no_target_weeks'}
+          bad = [r for r in rows if r.get('status') not in allowed]
+          summary = {'expected_league_years': len(expected), 'reported_league_years': len(actual), 'expected_week_groups': len(expected_groups), 'reported_week_groups': len(actual_groups), 'duplicate_rows': duplicates, 'missing_league_years': len(expected - actual), 'missing_week_groups': len(expected_groups - actual_groups), 'status_counts': {s: sum(r.get('status') == s for r in rows) for s in sorted({r.get('status') for r in rows})}}
+          Path('fleaflicker_underpopulated_week_rescue_summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+          print(json.dumps(summary, indent=2))
+          if actual != expected or actual_groups != expected_groups or duplicates or bad: raise SystemExit('targeted Fleaflicker coverage is incomplete or invalid')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fleaflicker-underpopulated-week-rescue-final-${{ github.run_id }}
+          path: |
+            rescued/**/fleaflicker_underpopulated_week_rescue_*.parquet
+            fleaflicker_underpopulated_week_rescue_summary.json
+          retention-days: 180
+          compression-level: 0
