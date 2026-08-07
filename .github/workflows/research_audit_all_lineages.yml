@@ -71,6 +71,10 @@ jobs:
           path: audits
           pattern: research-lineage-audit-*
           merge-multiple: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1
       - name: Compare lineages and identify winner
         run: |
           python - <<'PY'
