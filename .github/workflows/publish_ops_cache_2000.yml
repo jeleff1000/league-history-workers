@@ -48,7 +48,7 @@ jobs:
           python code/fantasy_football_data_scripts/build_ops_cache.py \
             --output research_public_lake/ops_cache.duckdb \
             --min-year 2000 \
-            --max-workers 4
+            --max-workers 1
 
       - name: Validate exact cache scope
         run: |
