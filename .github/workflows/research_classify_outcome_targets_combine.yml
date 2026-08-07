@@ -1,0 +1,60 @@
+name: Combine Exact Outcome Target Classification
+
+on:
+  workflow_dispatch:
+    inputs:
+      classification_run_id:
+        required: true
+        default: "31139643337"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  combine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3
+      - name: Download all classification shards
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p input
+          gh run download '${{ inputs.classification_run_id }}' \
+            --repo '${{ github.repository }}' \
+            --pattern 'research-outcome-target-classification-*' \
+            --dir input
+      - name: Combine and validate exact target coverage
+        run: |
+          mkdir -p out
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          paths=sorted(str(p).replace('\\','/') for p in Path('input').glob('**/*.parquet'))
+          if len(paths) != 256:
+              raise SystemExit(f'expected 256 classification parquet shards, found {len(paths)}')
+          sql='['+','.join("'"+p.replace("'","''")+"'" for p in paths)+']'
+          c=duckdb.connect()
+          c.execute(f"COPY (SELECT * FROM read_parquet({sql}, union_by_name=true) ORDER BY target_ordinal) TO 'out/outcome_target_classification.parquet' (FORMAT PARQUET)")
+          n,ords=c.execute("SELECT COUNT(*),COUNT(DISTINCT target_ordinal) FROM read_parquet('out/outcome_target_classification.parquet')").fetchone()
+          if (n,ords)!=(1145460,1145460): raise SystemExit(f'coverage mismatch rows={n} ordinals={ords}')
+          statuses=c.execute("SELECT status,COUNT(*) n_rows,COUNT(DISTINCT db_name||'|'||CAST(year AS VARCHAR)) league_years FROM read_parquet('out/outcome_target_classification.parquet') GROUP BY 1 ORDER BY 1").fetchall()
+          by_format=c.execute("SELECT total_rosters,playoff_teams,playoff_start_week,status,COUNT(*) n_rows FROM read_parquet('out/outcome_target_classification.parquet') GROUP BY 1,2,3,4 ORDER BY 1,2,3,4").fetchall()
+          by_time=c.execute("SELECT year,week,status,COUNT(*) n_rows FROM read_parquet('out/outcome_target_classification.parquet') GROUP BY 1,2,3 ORDER BY 1,2,3").fetchall()
+          payload={'target_rows':n,'distinct_ordinals':ords,'statuses':[dict(zip(['status','n_rows','league_years'],r)) for r in statuses], 'by_format':[dict(zip(['total_rosters','playoff_teams','playoff_start_week','status','n_rows'],r)) for r in by_format], 'by_time':[dict(zip(['year','week','status','n_rows'],r)) for r in by_time]}
+          Path('out/outcome_target_classification_summary.json').write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(payload['statuses'],sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-outcome-target-classification-combined-${{ github.run_id }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 60
+          compression-level: 0
