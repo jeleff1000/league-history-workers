@@ -35,6 +35,8 @@ def audit(snapshot: Path) -> dict[str, object]:
     championship = _first(("is_championship", "is_champ", "championship", "champ_start", "started_championship"), available)
     clutch = _first(("clutch_equity", "clutch", "clutch_value"), available)
     po_signal = _first(("has_po_signal", "is_playoffs", "is_playoff", "playoff", "made_po"), available)
+    playoff_flag = _first(("is_playoffs", "is_playoff", "playoff"), available)
+    made_po = _first(("made_po",), available)
     playoff_seed = _first(("final_playoff_seed", "playoff_seed"), available)
     champion_marker = _first(("champion", "is_champion"), available)
 
@@ -78,10 +80,8 @@ def audit(snapshot: Path) -> dict[str, object]:
         "COUNT(*) AS player_rows",
         "COUNT(*) FILTER (WHERE CAST(is_started AS INTEGER)=1) AS started_rows",
     ]
-    if po_signal:
-        signal_select.append(f"COUNT(*) FILTER (WHERE CAST({_qi(po_signal)} AS INTEGER)=1) AS playoff_marked_rows")
-    else:
-        signal_select.append("0 AS playoff_marked_rows")
+    for alias, field in (("playoff_flag_rows", playoff_flag), ("made_po_rows", made_po), ("po_signal_rows", po_signal)):
+        signal_select.append(f"COUNT(*) FILTER (WHERE CAST({_qi(field)} AS INTEGER)=1) AS {alias}" if field else f"0 AS {alias}")
     if playoff_seed:
         signal_select.append(f"COUNT(*) FILTER (WHERE {_qi(playoff_seed)} IS NOT NULL) AS playoff_seed_rows")
     else:
@@ -102,7 +102,7 @@ def audit(snapshot: Path) -> dict[str, object]:
         configured_map = {}
     for row in signal_rows:
         row["configured_playoff_teams"] = configured_map.get((row["db_name"], row["year"]))
-        row["player_playoff_signal"] = bool(row["playoff_marked_rows"] or row["playoff_seed_rows"])
+        row["player_playoff_signal"] = bool(row["playoff_flag_rows"] or row["made_po_rows"] or row["po_signal_rows"] or row["playoff_seed_rows"])
         row["player_champion_signal"] = bool(row["champion_marked_rows"])
         if not settings_bracket:
             row["playoff_signal_vs_settings"] = "no_settings_bracket_field"
