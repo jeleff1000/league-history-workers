@@ -108,16 +108,26 @@ jobs:
               "sample_exact_key_matches": out.execute("select count(*) from target_sample t join old.public.player_fantasy o on o.db_name=t.db_name and o.year=t.year and o.week=t.week and o.NFL_player_id=t.NFL_player_id").fetchone()[0],
               "sample_league_week_matches": out.execute("select count(*) from target_sample t join old.public.player_fantasy o on o.db_name=t.db_name and o.year=t.year and o.week=t.week").fetchone()[0],
           })
-          out.execute("""
+          pcols = {r[0] for r in out.execute("describe old.public.player_fantasy").fetchall()}
+          mcols = {r[0] for r in out.execute("describe old.public.matchup").fetchall()}
+          p_identity = "p.franchise_id is not distinct from m.franchise_id" if {"franchise_id"} <= pcols & mcols else "p.manager is not distinct from m.manager and p.team_name is not distinct from m.team_name"
+          p_win = "p.win" if "win" in pcols else "NULL"
+          m_win = "m.win" if "win" in mcols else "NULL"
+          p_team = "p.team_points" if "team_points" in pcols else "NULL"
+          m_team = "m.team_points" if "team_points" in mcols else "NULL"
+          out.execute(f"""
             create table public.outcome_targets as
             select t.db_name, cast(t.year as integer) as year,
                    cast(t.week as integer) as week, t.NFL_player_id,
-                   cast(max(o.win) as integer) as win,
-                   cast(max(o.team_points) as double) as team_points
+                   cast(max(coalesce({p_win}, {m_win})) as integer) as win,
+                   cast(max(coalesce({p_team}, {m_team})) as double) as team_points
             from read_parquet($files, union_by_name=true) t
-            left join old.public.player_fantasy o
-              on o.db_name=t.db_name and o.year=t.year and o.week=t.week
-             and o.NFL_player_id=t.NFL_player_id
+            left join old.public.player_fantasy p
+              on p.db_name=t.db_name and p.year=t.year and p.week=t.week
+             and p.NFL_player_id=t.NFL_player_id
+            left join old.public.matchup m
+              on m.db_name=p.db_name and m.year=p.year and m.week=p.week
+             and {p_identity}
             group by 1,2,3,4
           """, {"files": target_files})
           count = out.execute("select count(*) from public.outcome_targets").fetchone()[0]
