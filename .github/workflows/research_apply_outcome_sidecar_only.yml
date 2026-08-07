@@ -15,6 +15,10 @@ on:
         description: Audited classification overlay containing recovered and unresolved target statuses
         required: true
         default: "31144084870"
+      expected_recovered:
+        description: Exact recovered rows expected in the audited classification
+        required: true
+        default: "6789"
       base_cache_key:
         description: Current canonical source lake cache
         required: true
@@ -58,7 +62,8 @@ jobs:
           CLASSIFICATION=$(find classification -name 'outcome_target_classification.parquet' | head -1)
           test -s "$CLASSIFICATION"
           python code/scripts/research_cohorts/materialize_recovered_outcomes.py \
-            --input "$CLASSIFICATION" --output outcome_overlay.duckdb
+            --input "$CLASSIFICATION" --output outcome_overlay.duckdb \
+            --expected-recovered '${{ inputs.expected_recovered }}'
       - name: Apply outcome overlay only
         run: |
           python code/scripts/research_cohorts/apply_outcome_sidecar_only.py \
@@ -81,7 +86,7 @@ jobs:
              and cast(p.NFL_player_id as varchar)=cast(o.NFL_player_id as varchar)
             where p.win is not null and p.team_points is not null
           """).fetchone()[0]
-          if applied != 6789:
+          if applied != int('${{ inputs.expected_recovered }}'):
               raise SystemExit(f'exact recovered outcome validation failed: {applied}')
           print({'exact_recovered_outcomes_applied': applied})
           con.close()
