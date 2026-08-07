@@ -94,9 +94,9 @@ jobs:
           if n != 1145460:
               raise SystemExit(f'exact target count mismatch: {n}')
           target_filter = '${{ inputs.target_filter }}'.upper()
-          if target_filter not in {'ALL', 'DST'}:
+          if target_filter not in {'ALL', 'DST'} and not (target_filter.startswith('DEF-') and target_filter[4:].isdigit()):
               raise SystemExit(f'unsupported target_filter: {target_filter}')
-          where = "" if target_filter == 'ALL' else "WHERE NFL_player_id LIKE 'DEF-%'"
+          where = "" if target_filter == 'ALL' else ("WHERE NFL_player_id LIKE 'DEF-%'" if target_filter == 'DST' else f"WHERE NFL_player_id = '{target_filter}'")
           con.execute(f"COPY (SELECT * FROM read_parquet('input/targets/all_targets.parquet') {where}) TO 'input/targets/selected_targets.parquet' (FORMAT PARQUET)")
           selected = con.execute("SELECT COUNT(*) FROM read_parquet('input/targets/selected_targets.parquet')").fetchone()[0]
           if not selected:
