@@ -34,6 +34,9 @@ def audit(snapshot: Path) -> dict[str, object]:
     playoff = _first(("is_playoffs", "is_playoff", "playoff", "playoff_start", "started_playoffs"), available)
     championship = _first(("is_championship", "is_champ", "championship", "champ_start", "started_championship"), available)
     clutch = _first(("clutch_equity", "clutch", "clutch_value"), available)
+    po_signal = _first(("has_po_signal", "is_playoffs", "is_playoff", "playoff", "made_po"), available)
+    playoff_seed = _first(("final_playoff_seed", "playoff_seed"), available)
+    champion_marker = _first(("champion", "is_champion"), available)
 
     outcome_terms = []
     if win:
@@ -69,14 +72,58 @@ def audit(snapshot: Path) -> dict[str, object]:
     rows = con.execute("SELECT " + ", ".join(select) + " FROM public.player_fantasy GROUP BY 1,2 ORDER BY 1,2").fetchall()
     names = [d[0] for d in con.description]
     totals = con.execute("SELECT " + ", ".join(select[2:]) + " FROM public.player_fantasy").fetchone()
+    signal_select = [
+        "CAST(db_name AS VARCHAR) AS db_name",
+        "CAST(year AS INTEGER) AS year",
+        "COUNT(*) AS player_rows",
+        "COUNT(*) FILTER (WHERE CAST(is_started AS INTEGER)=1) AS started_rows",
+    ]
+    if po_signal:
+        signal_select.append(f"COUNT(*) FILTER (WHERE CAST({_qi(po_signal)} AS INTEGER)=1) AS playoff_marked_rows")
+    else:
+        signal_select.append("0 AS playoff_marked_rows")
+    if playoff_seed:
+        signal_select.append(f"COUNT(*) FILTER (WHERE {_qi(playoff_seed)} IS NOT NULL) AS playoff_seed_rows")
+    else:
+        signal_select.append("0 AS playoff_seed_rows")
+    if champion_marker:
+        signal_select.append(f"COUNT(*) FILTER (WHERE CAST({_qi(champion_marker)} AS INTEGER)=1) AS champion_marked_rows")
+    else:
+        signal_select.append("0 AS champion_marked_rows")
+    signal_rows_raw = con.execute("SELECT " + ", ".join(signal_select) + " FROM public.player_fantasy GROUP BY 1,2 ORDER BY 1,2").fetchall()
+    signal_names = [d[0] for d in con.description]
+    signal_rows = [dict(zip(signal_names, row)) for row in signal_rows_raw]
+    settings_cols = {r[0] for r in con.execute("DESCRIBE public.league_settings").fetchall()} if "league_settings" in tables else set()
+    settings_bracket = _first(("playoff_teams", "num_playoff_teams", "playoff_team_count", "playoff_bracket_size", "playoff_slots"), settings_cols)
+    if settings_bracket:
+        configured = con.execute(f"SELECT CAST(db_name AS VARCHAR), CAST(year AS INTEGER), MAX(TRY_CAST({_qi(settings_bracket)} AS DOUBLE)) FROM public.league_settings GROUP BY 1,2").fetchall()
+        configured_map = {(r[0], r[1]): r[2] for r in configured}
+    else:
+        configured_map = {}
+    for row in signal_rows:
+        row["configured_playoff_teams"] = configured_map.get((row["db_name"], row["year"]))
+        row["player_playoff_signal"] = bool(row["playoff_marked_rows"] or row["playoff_seed_rows"])
+        row["player_champion_signal"] = bool(row["champion_marked_rows"])
+        if not settings_bracket:
+            row["playoff_signal_vs_settings"] = "no_settings_bracket_field"
+        else:
+            expected = row["configured_playoff_teams"] is not None and row["configured_playoff_teams"] > 0
+            row["playoff_signal_vs_settings"] = "consistent_presence" if expected == row["player_playoff_signal"] else "signal_settings_mismatch"
     result = {
         "population_source": "public.player_fantasy only",
         "player_rows": int(con.execute("SELECT COUNT(*) FROM public.player_fantasy").fetchone()[0]),
         "player_league_years": int(con.execute("SELECT COUNT(*) FROM (SELECT db_name, year FROM public.player_fantasy GROUP BY 1,2)").fetchone()[0]),
-        "resolved_columns": {"win": win, "loss": loss, "tie": tie, "team_points": team_points, "opponent_points": opponent_points, "playoff": playoff, "championship": championship, "clutch": clutch},
+        "resolved_columns": {"win": win, "loss": loss, "tie": tie, "team_points": team_points, "opponent_points": opponent_points, "playoff": playoff, "championship": championship, "clutch": clutch, "player_playoff_signal": po_signal, "playoff_seed": playoff_seed, "player_champion_marker": champion_marker, "settings_playoff_teams": settings_bracket},
         "unavailable_player_fields": [name for name, value in {"loss": loss, "tie": tie, "opponent_points": opponent_points, "championship_start": championship}.items() if value is None],
         "available_columns": sorted(available),
         "totals": dict(zip(names[2:], totals)),
+        "league_season_signal_totals": {
+            "player_league_years": len(signal_rows),
+            "with_player_playoff_signal": sum(r["player_playoff_signal"] for r in signal_rows),
+            "with_player_champion_signal": sum(r["player_champion_signal"] for r in signal_rows),
+            "signal_settings_mismatch": sum(r["playoff_signal_vs_settings"] == "signal_settings_mismatch" for r in signal_rows),
+        },
+        "league_season_signal_rows": signal_rows,
         "league_season_rows": [dict(zip(names, row)) for row in rows],
     }
     con.close()
