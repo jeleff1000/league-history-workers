@@ -48,8 +48,9 @@ jobs:
           p={r[0] for r in c.execute('DESCRIBE public.player_fantasy').fetchall()}
           forbidden={'is_playoffs_bf','made_po_bf','made_po'} & p
           required={'is_playoffs','made_playoffs'} - p
-          if forbidden or required: raise SystemExit(f'bad canonical schema forbidden={forbidden} missing={required}')
-          print({'player_columns':len(p),'player_rows':c.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]})
+          platform_null=c.execute("SELECT COUNT(*) FROM public.player_fantasy WHERE platform IS NULL OR TRIM(CAST(platform AS VARCHAR))=''").fetchone()[0]
+          if forbidden or required or platform_null: raise SystemExit(f'bad canonical schema forbidden={forbidden} missing={required} platform_null={platform_null}')
+          print({'player_columns':len(p),'player_rows':c.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0],'platform_null':platform_null})
           PY
           python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
       - name: Replace the canonical cache key only after validation
