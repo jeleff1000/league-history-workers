@@ -1,0 +1,136 @@
+name: Release Global Research Matchup Tables to Fly
+
+on:
+  workflow_dispatch:
+    inputs:
+      assembled_run:
+        description: Successful global assembly run ID
+        required: true
+      shard_run:
+        description: Global shard run ID used in the assembly artifact name
+        required: true
+      cache_key:
+        description: Corrected immutable research cache key
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+      publish:
+        description: Apply the verified bundle to Fly production
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    env:
+      RESEARCH_OUT_DIR: ${{ github.workspace }}/out
+      RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
+      RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
+      RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
+      RESEARCH_WIDE_DATASETS: matchup
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/download-artifact@v5
+        with:
+          path: incoming
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.assembled_run }}
+          name: research-matchup-assembled-global-${{ inputs.shard_run }}
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 requests
+      - name: Materialize assembled grains
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          from pathlib import Path
+          import shutil
+          incoming=Path('incoming')
+          for name in ('research_matchup_weekly.parquet','research_matchup_player_season.parquet'):
+              paths=list(incoming.rglob(name))
+              if len(paths)!=1: raise SystemExit(f'{name}: expected one artifact, found {len(paths)}')
+              shutil.copy2(paths[0], Path('out')/name)
+          PY
+      - name: Fail-fast release schema and semantic gate
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import duckdb
+          c=duckdb.connect()
+          required={'bracket','league_type','lineup_mode','keeper_mode'}
+          for name in ('research_matchup_weekly.parquet','research_matchup_player_season.parquet'):
+              p=Path('out')/name
+              cols={r[0] for r in c.execute('DESCRIBE SELECT * FROM read_parquet(?)',[str(p)]).fetchall()}
+              missing=required-cols
+              if missing: raise SystemExit(f'{name}: missing {sorted(missing)}')
+          weekly='out/research_matchup_weekly.parquet'; season='out/research_matchup_player_season.parquet'
+          bad=c.execute('''SELECT COUNT(*) FROM read_parquet(?) WHERE
+              abs(coalesce(expected_wins,0)+coalesce(expected_losses,0)-coalesce(expected_starts,0))>1e-6
+              OR champ_started<0 OR champ_eligible<0 OR champ_started>champ_eligible
+              OR wins_started+losses_started>started_leagues''',[weekly]).fetchone()[0]
+          if bad: raise SystemExit(f'weekly invariant failures: {bad}')
+          bad=c.execute('''SELECT COUNT(*) FROM read_parquet(?) WHERE
+              abs(coalesce(expected_wins,0)+coalesce(expected_losses,0)-coalesce(expected_starts,0))>1e-6
+              OR champ_as_starter_pct<0 OR champ_as_starter_pct>1''',[season]).fetchone()[0]
+          if bad: raise SystemExit(f'season invariant failures: {bad}')
+          print('PASS: format dimensions, W/L=start, and championship bounds')
+          PY
+      - name: Create research database
+        shell: bash
+        run: |
+          python - <<'PY'
+          import duckdb
+          c=duckdb.connect('out/research_cohorts.duckdb')
+          c.execute("CREATE TABLE matchup AS SELECT * FROM read_parquet('out/research_matchup_player_season.parquet')")
+          c.execute("CREATE TABLE matchup_weekly AS SELECT * FROM read_parquet('out/research_matchup_weekly.parquet')")
+          c.close()
+          PY
+      - name: Build career rollup from corrected season grain
+        run: |
+          python code/scripts/research_cohorts/build_research_career_rollup.py --only matchup --matchup-source "$PWD/out/research_matchup_player_season.parquet" --out-dir "$PWD/out"
+      - name: Audit assembled matchup tables
+        run: python code/scripts/research_cohorts/audit_research_matchup.py --input "$PWD/out" --slug 12t_flx_ppr_4pt --ops-cache "$PWD/research_public_lake/ops_cache.duckdb" --skip-boards
+      - name: Build matchup wide bundle
+        run: python code/scripts/research_cohorts/build_wide_bundle.py
+      - name: Fail-fast semantic release gate
+        run: python code/scripts/research_cohorts/release_gate.py
+      - name: Read-only Fly preflight
+        run: python code/scripts/research_cohorts/publish_research_matchup_to_fly.py --bundle "$PWD/out/research_merge_bundle.duckdb"
+      - name: Publish verified bundle to Fly
+        if: ${{ inputs.publish }}
+        run: python code/scripts/research_cohorts/publish_research_matchup_to_fly.py --bundle "$PWD/out/research_merge_bundle.duckdb" --apply --i-understand-this-writes-prod
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-global-release-${{ github.run_id }}
+          path: |
+            out/research_matchup_player_season.parquet
+            out/research_matchup_weekly.parquet
+            out/matchup_career.parquet
+            out/research_merge_bundle.duckdb
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
