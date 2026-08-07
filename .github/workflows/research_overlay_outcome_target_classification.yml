@@ -51,9 +51,15 @@ jobs:
           if len(base)!=1 or len(patch)!=1: raise SystemExit(f'expected one base and one patch parquet: {base} {patch}')
           esc=lambda p: "'"+p.replace("'","''")+"'"
           c=duckdb.connect()
-          sql=f"""SELECT b.* FROM read_parquet({esc(base[0])}) b
-          WHERE NOT EXISTS (SELECT 1 FROM read_parquet({esc(patch[0])}) p WHERE p.target_ordinal=b.target_ordinal)
-          UNION ALL SELECT * FROM read_parquet({esc(patch[0])})
+          paths='['+esc(base[0])+','+esc(patch[0])+']'
+          sql=f"""WITH all_rows AS (
+          SELECT *, CASE WHEN filename={esc(patch[0])} THEN 1 ELSE 0 END AS patch_priority
+          FROM read_parquet({paths}, union_by_name=true, filename=true)
+          ), ranked AS (
+          SELECT *, ROW_NUMBER() OVER (PARTITION BY target_ordinal ORDER BY patch_priority DESC) AS rn
+          FROM all_rows
+          )
+          SELECT * EXCLUDE (filename, patch_priority, rn) FROM ranked WHERE rn=1
           ORDER BY target_ordinal"""
           c.execute(f"COPY ({sql}) TO 'out/outcome_target_classification.parquet' (FORMAT PARQUET)")
           n,o=c.execute("SELECT COUNT(*),COUNT(DISTINCT target_ordinal) FROM read_parquet('out/outcome_target_classification.parquet')").fetchone()
