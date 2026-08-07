@@ -20,6 +20,9 @@ jobs:
       OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
 
     steps:
+      - name: Checkout workflow actions
+        uses: actions/checkout@v5
+
       - name: Restore canonical research public lake
         id: research-lake
         uses: ./.github/actions/restore-research-ops-cache
