@@ -5,7 +5,7 @@ on:
     inputs:
       cache_key:
         required: true
-        default: research-public-lake-v4-Linux-20260806-championship-v1-outcomes-recovered-crosswalk-31146476622
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
 
 permissions:
   contents: read
