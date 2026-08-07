@@ -137,6 +137,7 @@ jobs:
             --manifest "$(find input/manifest -name '*.json' -type f | head -1)" \
             --player-map code/ops_data/public/sleeper_nfl_player_map.parquet \
             --player-bio code/ops_data/nfl_historical/player_bio.parquet \
+            --identity-overrides code/ops_data/public/sleeper_research_identity_overrides.json \
             --shard '${{ matrix.shard }}' \
             --shards '${{ inputs.shards }}' \
             --out out/outcome_target_classification_${{ matrix.shard }}.parquet
