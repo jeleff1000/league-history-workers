@@ -19,6 +19,7 @@ permissions:
 
 env:
   CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+  CANONICAL_RELEASE_TAG: research-public-lake-v4-legacy-signal-rescue-canonical
 
 concurrency:
   group: canonical-research-cache-promotion
@@ -40,7 +41,20 @@ jobs:
         with:
           path: research_public_lake
           key: ${{ env.CANONICAL_CACHE_KEY }}
-          fail-on-cache-miss: true
+          fail-on-cache-miss: false
+      - name: Restore canonical release backup when cache is absent
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ ! -s research_public_lake/corpus_snapshot.duckdb ]; then
+            rm -rf research_public_lake release_parts
+            mkdir -p research_public_lake release_parts
+            gh release download "$CANONICAL_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --pattern 'research-public-lake.tar.part-*' --dir release_parts
+            cat release_parts/research-public-lake.tar.part-* | tar -xf - -C research_public_lake
+          fi
+          test -s research_public_lake/corpus_snapshot.duckdb
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -75,7 +89,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          yes | gh cache delete "$CANONICAL_CACHE_KEY" --ref refs/heads/main
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/caches?key=$CANONICAL_CACHE_KEY&ref=refs/heads/main"
           echo "[cache] deleted old canonical key; saving the validated replacement under the identical key"
       - name: Save validated canonical cache under identical key
         if: inputs.replace_canonical_cache == true
