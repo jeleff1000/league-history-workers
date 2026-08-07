@@ -34,8 +34,11 @@ def audit(snapshot: Path) -> dict[str, object]:
     playoff = _first(("is_playoffs", "is_playoff", "playoff", "playoff_start", "started_playoffs"), available)
     championship = _first(("is_championship", "is_champ", "championship", "champ_start", "started_championship"), available)
     clutch = _first(("clutch_equity", "clutch", "clutch_value"), available)
-    po_signal = _first(("has_po_signal", "is_playoffs", "is_playoff", "playoff", "made_po"), available)
-    playoff_flag = _first(("is_playoffs", "is_playoff", "playoff"), available)
+    # *_bf is the populated player-level playoff flag in the canonical lake.
+    # has_po_signal and made_po are present in the schema but null in this
+    # lineage, so they must not win candidate selection.
+    po_signal = _first(("is_playoffs_bf", "is_playoffs", "is_playoff", "playoff"), available)
+    playoff_flag = _first(("is_playoffs_bf", "is_playoffs", "is_playoff", "playoff"), available)
     made_po = _first(("made_po",), available)
     playoff_seed = _first(("final_playoff_seed", "playoff_seed"), available)
     champion_marker = _first(("champion", "is_champion"), available)
