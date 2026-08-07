@@ -1,0 +1,95 @@
+name: Audit all research matchup lineages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        include:
+          - name: championship-v2-final-playoff-anchor-outcomes
+            cache_key: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+          - name: championship-v1-outcomes-recovered-crosswalk
+            cache_key: research-public-lake-v4-Linux-20260806-championship-v1-outcomes-recovered-crosswalk-31146476622
+          - name: championship-v1-outcomes-recovered
+            cache_key: research-public-lake-v4-Linux-20260806-championship-v1-outcomes-recovered-31144084870
+          - name: championship-v1
+            cache_key: research-public-lake-v4-Linux-20260806-championship-v1
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ matrix.cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - name: Audit lineage contents
+        run: |
+          mkdir -p audit
+          python code/scripts/research_cohorts/audit_research_lineages.py \
+            research_public_lake \
+            --lineage '${{ matrix.name }}' \
+            --out audit/lineage_audit.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-lineage-audit-${{ matrix.name }}
+          path: audit/lineage_audit.json
+          if-no-files-found: error
+          retention-days: 30
+
+  compare:
+    needs: audit
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - name: Download lineage audits
+        uses: actions/download-artifact@v5
+        with:
+          path: audits
+          pattern: research-lineage-audit-*
+          merge-multiple: false
+      - name: Compare lineages and identify winner
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from importlib.util import spec_from_file_location, module_from_spec
+          p=Path('code/scripts/research_cohorts/audit_research_lineages.py')
+          spec=spec_from_file_location('audit_lineages', p)
+          mod=module_from_spec(spec); spec.loader.exec_module(mod)
+          records=[json.loads(path.read_text(encoding='utf-8')) for path in sorted(Path('audits').glob('research-lineage-audit-*/lineage_audit.json'))]
+          if len(records) != 4: raise SystemExit(f'expected 4 lineage audits, found {len(records)}')
+          comparison=mod.rank_lineages(records)
+          Path('lineage_comparison.json').write_text(json.dumps(comparison, indent=2, default=str), encoding='utf-8')
+          print(json.dumps(comparison, indent=2, default=str))
+          if comparison['winner'] is None: raise SystemExit('No unique quality-qualified winner; refusing to crown or delete a lineage')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-lineage-comparison
+          path: lineage_comparison.json
+          if-no-files-found: error
+          retention-days: 30
