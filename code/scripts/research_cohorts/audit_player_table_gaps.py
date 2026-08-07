@@ -118,19 +118,31 @@ def audit(snapshot: Path) -> dict[str, object]:
             values = con.execute(f"SELECT CAST({_qi(field)} AS VARCHAR) AS value, COUNT(*) AS rows FROM public.player_fantasy GROUP BY 1 ORDER BY rows DESC LIMIT 20").fetchall()
             signal_distributions[field] = [{"value": value, "rows": int(count)} for value, count in values]
     platform_year_rows = []
-    if "platform" in available:
-        platform_expr = "COALESCE(NULLIF(LOWER(TRIM(CAST(platform AS VARCHAR))), ''), 'unknown')"
+    if "league_settings" in tables:
+        settings_platform = {r[0] for r in con.execute("DESCRIBE public.league_settings").fetchall()}
+        if "platform" in settings_platform:
+            platform_expr = "COALESCE(NULLIF(LOWER(TRIM(CAST(p.platform AS VARCHAR))), ''), NULLIF(LOWER(TRIM(CAST(s.platform AS VARCHAR))), ''), CASE WHEN LOWER(CAST(p.db_name AS VARCHAR)) LIKE 'smpl_mfl_%' THEN 'mfl' WHEN LOWER(CAST(p.db_name AS VARCHAR)) LIKE 'smpl_ffl_%' THEN 'fleaflicker' WHEN LOWER(CAST(p.db_name AS VARCHAR)) LIKE 'smpl_slpr_%' OR LOWER(CAST(p.db_name AS VARCHAR)) LIKE 'smpl_sleeper_%' THEN 'sleeper' ELSE 'unknown' END)"
+        else:
+            platform_expr = "CASE WHEN LOWER(CAST(p.db_name AS VARCHAR)) LIKE 'smpl_mfl_%' THEN 'mfl' WHEN LOWER(CAST(p.db_name AS VARCHAR)) LIKE 'smpl_ffl_%' THEN 'fleaflicker' WHEN LOWER(CAST(p.db_name AS VARCHAR)) LIKE 'smpl_slpr_%' OR LOWER(CAST(p.db_name AS VARCHAR)) LIKE 'smpl_sleeper_%' THEN 'sleeper' ELSE 'unknown' END"
+        source_from = "public.player_fantasy p LEFT JOIN (SELECT CAST(db_name AS VARCHAR) AS db_name, CAST(year AS INTEGER) AS year, MAX(platform) AS platform FROM public.league_settings GROUP BY 1,2) s ON p.db_name=s.db_name AND p.year=s.year"
+    elif "platform" in available:
+        platform_expr = "COALESCE(NULLIF(LOWER(TRIM(CAST(p.platform AS VARCHAR))), ''), 'unknown')"
+        source_from = "public.player_fantasy p"
+    else:
+        platform_expr = "'unknown'"
+        source_from = "public.player_fantasy p"
+    if source_from:
         py_sql = f"""
         WITH ly AS (
-          SELECT {platform_expr} AS platform, CAST(db_name AS VARCHAR) AS db_name,
-                 CAST(year AS INTEGER) AS year,
+          SELECT {platform_expr} AS platform, CAST(p.db_name AS VARCHAR) AS db_name,
+                 CAST(p.year AS INTEGER) AS year,
                  COUNT(*) AS player_rows,
                  COUNT(*) FILTER (WHERE CAST(is_started AS INTEGER)=1) AS started_rows,
                  COUNT(*) FILTER (WHERE CAST(is_started AS INTEGER)=1 AND NOT ({outcome_present})) AS missing_outcome,
                  COUNT(*) FILTER (WHERE CAST(is_started AS INTEGER)=1 AND {null_signal(clutch)}) AS missing_clutch,
                  MAX(CASE WHEN {f'CAST({_qi(playoff_flag)} AS INTEGER)=1' if playoff_flag else 'FALSE'} THEN 1 ELSE 0 END) AS has_playoff_signal,
                  MAX(CASE WHEN {f'CAST({_qi(champion_marker)} AS INTEGER)=1' if champion_marker else 'FALSE'} THEN 1 ELSE 0 END) AS has_champion_marker
-          FROM public.player_fantasy GROUP BY 1,2,3
+          FROM {source_from} GROUP BY 1,2,3
         )
         SELECT platform, year, COUNT(*) AS league_seasons,
                SUM(player_rows) AS player_rows, SUM(started_rows) AS started_rows,
