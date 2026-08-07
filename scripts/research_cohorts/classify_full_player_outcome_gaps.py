@@ -49,11 +49,9 @@ def classify(snapshot: Path, out_dir: Path) -> dict[str, object]:
         raise SystemExit("cannot classify teammates: no team identity column exists")
 
     outcome_terms: list[str] = []
-    if win and loss:
-        terms = [f"{qident(win)} IS NOT NULL", f"{qident(loss)} IS NOT NULL"]
-        if tie:
-            terms.append(f"{qident(tie)} IS NOT NULL")
-        outcome_terms.append("(" + " OR ".join(terms) + ")")
+    for outcome_col in (win, loss, tie):
+        if outcome_col:
+            outcome_terms.append(f"{qident(outcome_col)} IS NOT NULL")
     if team_points and opponent_points:
         outcome_terms.append(
             f"({qident(team_points)} IS NOT NULL AND {qident(opponent_points)} IS NOT NULL)"
