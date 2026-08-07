@@ -1,0 +1,61 @@
+name: Guard legacy research cache
+
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPOSITORY: jeleff1000/league-history-workers
+      CACHE_KEY: research-public-lake-v4-Linux-20260806-signal-rescue-canonical
+      RELEASE_TAG: research-public-lake-v4-legacy-signal-rescue-canonical
+
+    steps:
+      - name: Check exact legacy cache
+        id: check
+        shell: bash
+        run: |
+          set -euo pipefail
+          count=$(gh api --paginate \
+            "/repos/${REPOSITORY}/actions/caches?key=${CACHE_KEY}" \
+            --jq '.total_count')
+          echo "cache-count=$count"
+          if [ "$count" -gt 0 ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download durable legacy backup
+        if: steps.check.outputs.present != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p research_public_lake
+          gh release download "$RELEASE_TAG" \
+            --repo "$REPOSITORY" \
+            --pattern 'research-public-lake.tar.part-*'
+          cat research-public-lake.tar.part-* | tar -xf - -C research_public_lake
+          test -s research_public_lake/ops_cache.duckdb
+          test -s research_public_lake/corpus_snapshot.duckdb
+
+      - name: Repopulate exact legacy cache
+        if: steps.check.outputs.present != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: research-public-lake-v4-Linux-20260806-signal-rescue-canonical
+
+      - name: Report cache is already present
+        if: steps.check.outputs.present == 'true'
+        run: echo "Exact legacy cache is present; no write performed."
+
