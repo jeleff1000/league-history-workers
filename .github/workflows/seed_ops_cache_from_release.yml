@@ -1,0 +1,61 @@
+name: Seed Ops Cache From Durable Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Durable release containing ops_cache.duckdb
+        required: true
+        default: ops-cache-v6-2000-plus-player-bio
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: seed-ops-cache-from-release
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CACHE_KEY: research-public-lake-v5-Linux-2000-plus-player-bio
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download durable local cache
+        run: |
+          set -euo pipefail
+          mkdir -p research_public_lake
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern ops_cache.duckdb \
+            --dir research_public_lake
+
+      - name: Validate exact contents
+        run: |
+          python - <<'PY'
+          import duckdb
+          con = duckdb.connect('research_public_lake/ops_cache.duckdb', read_only=True)
+          try:
+              low, high, stats = con.execute('SELECT MIN(year), MAX(year), COUNT(*) FROM nfl_historical.nfl_player_stats_all').fetchone()
+              bio = con.execute('SELECT COUNT(*) FROM nfl_historical.player_bio').fetchone()[0]
+              if low < 2000 or stats <= 0 or bio <= 0:
+                  raise SystemExit(f'invalid cache scope: stats={low}-{high}/{stats}, bio={bio}')
+              print(f'stats={low}-{high} rows={stats:,}; player_bio={bio:,}')
+          finally:
+              con.close()
+          PY
+
+      - name: Save immutable Actions cache
+        uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: research-public-lake-v5-Linux-2000-plus-player-bio
+
+      - name: Report
+        run: echo "[ops-cache] seeded $CACHE_KEY from durable release $RELEASE_TAG; no deletion performed"
