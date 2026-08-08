@@ -187,10 +187,10 @@ jobs:
         run: |
           mkdir -p out /tmp
           YEARS=$(seq -s, "${{ inputs.start_year || '1997' }}" "${{ inputs.end_year || '1998' }}")
-          MFL_YEARS="$YEARS" \
           # Keep the named-directory pass within the same ~10-minute runner
           # budget as the numeric shards: 120 requests at the configured 5s
           # throttle, with validation consuming the final 40%.
+          MFL_YEARS="$YEARS" \
           MFL_REQ_CAP=120 \
           MFL_TARGET=200 \
           MFL_ALLOW_EXPIRED_CERT=1 \
