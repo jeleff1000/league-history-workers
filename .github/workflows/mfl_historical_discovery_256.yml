@@ -108,6 +108,7 @@ jobs:
             --out "out/mfl_shard_${{ matrix.shard }}.json"
 
       - name: Upload shard artifact
+        if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: mfl-discovery-shard-${{ matrix.shard }}-${{ github.run_id }}
