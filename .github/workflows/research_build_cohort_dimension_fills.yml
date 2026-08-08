@@ -60,6 +60,9 @@ jobs:
               print(name, {'columns': cols, 'rows': rows, 'distinct_keys': distinct})
               assert all(k in cols for k in key), (name, key, cols)
               assert rows == distinct, (name, rows, distinct)
+          settings = out / 'league_settings_updates.parquet'
+          bad_flex = con.execute(f"SELECT COUNT(*) FROM read_parquet('{settings}') WHERE roster_FLX_fill IS NOT NULL AND roster_FLX_fill > 5").fetchone()[0]
+          assert bad_flex == 0, ('impossible_roster_FLX_fill', bad_flex)
           con.close()
           print(json.dumps(report, sort_keys=True))
           PY
