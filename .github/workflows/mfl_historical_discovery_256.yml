@@ -295,7 +295,8 @@ jobs:
           fi
           # Feed named-directory results through the same season/id dedupe and
           # lineage merge as numeric shards.
-          cp directory/mfl_directory_seed.json shards/mfl_directory_seed.json
+          mkdir -p shards
+          cp directory/mfl_directory_seed.json shards/mfl_shard_directory.json
           python code/scripts/extraplatform_corpus/merge_mfl_shards.py \
             --input-glob "shards/**/mfl_shard_*.json" \
             $SEED \
