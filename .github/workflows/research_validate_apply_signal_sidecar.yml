@@ -45,6 +45,7 @@ jobs:
             --pattern 'research-source-matchup-rescue-combined-*' --dir sidecar
       - name: Build exact-schema candidate
         run: |
+          mkdir -p out
           SIDE=$(find sidecar -name 'source_matchup_rescue.parquet' -print -quit)
           test -s "$SIDE"
           python code/scripts/research_cohorts/apply_source_signal_sidecar_same_schema.py \
