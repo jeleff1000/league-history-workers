@@ -1,0 +1,61 @@
+name: Validate and Apply Signal Sidecar (Artifact Only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_combine_run_id:
+        description: Combined source signal sidecar run
+        required: true
+      base_cache_key:
+        description: Immutable canonical research lake cache key
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.base_cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Download combined source sidecar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p sidecar
+          gh run download '${{ inputs.source_combine_run_id }}' --repo '${{ github.repository }}' \
+            --pattern 'research-source-matchup-rescue-combined-*' --dir sidecar
+      - name: Build exact-schema candidate
+        run: |
+          SIDE=$(find sidecar -name 'source_matchup_rescue.parquet' -print -quit)
+          test -s "$SIDE"
+          python code/scripts/research_cohorts/apply_source_signal_sidecar_same_schema.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --sidecar "$SIDE" \
+            --out out/merged_corpus_snapshot.duckdb \
+            --report out/signal_sidecar_apply_report.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-signal-sidecar-candidate-${{ github.run_id }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
