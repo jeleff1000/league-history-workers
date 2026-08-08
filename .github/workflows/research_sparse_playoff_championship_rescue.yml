@@ -60,12 +60,20 @@ jobs:
         env:
           SHARDS: ${{ inputs.shards }}
           SHARD_LIST: ${{ inputs.shard_list }}
+          PILOT: ${{ inputs.pilot }}
         run: |
           python - <<'PY' >> "$GITHUB_OUTPUT"
-          import json, os
+          import hashlib, json, os
           n=int(os.environ['SHARDS'])
           requested=[int(x.strip()) for x in os.environ.get('SHARD_LIST','').split(',') if x.strip()]
-          values=requested or list(range(n))
+          if requested:
+              values=requested
+          elif os.environ.get('PILOT','').lower() == 'true':
+              payload=json.load(open('out/sparse_playoff_championship_targets.json'))
+              values=sorted({int(hashlib.sha256(f"{r['db_name']}|{r['year']}".encode()).hexdigest()[:12],16) % n for r in payload.get('targets',[])})
+          else:
+              values=list(range(n))
+          if not values: raise SystemExit('empty shard matrix')
           if any(x<0 or x>=n for x in values): raise SystemExit('invalid shard_list')
           print('shard_list='+json.dumps(values))
           PY
