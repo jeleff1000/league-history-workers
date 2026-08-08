@@ -78,7 +78,7 @@ jobs:
   discover:
     needs: prepare
     runs-on: ubuntu-latest
-    timeout-minutes: 1440
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       max-parallel: ${{ fromJSON(needs.prepare.outputs.max_parallel) }}
