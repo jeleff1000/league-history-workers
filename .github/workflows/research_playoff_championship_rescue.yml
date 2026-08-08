@@ -137,6 +137,14 @@ jobs:
             --targets inventory/playoff_championship_targets.json \
             --shard '${{ matrix.shard }}' --shards '${{ inputs.shards }}' --workers 1 \
             --out out/source_matchup_rescue_${{ matrix.shard }}.parquet
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: research-source-matchup-rescue-${{ matrix.shard }}-${{ github.run_id }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
       - name: Fail closed on source errors or partial weeks
         run: |
           python - <<'PY'
@@ -150,10 +158,3 @@ jobs:
           print({'targets':len(rows),'done':sum(r.get('status')=='done' for r in rows),'source_empty':sum(r.get('status') in allowed-{'done'} for r in rows),'retry_required':len(retry),'unexpected':len(bad)})
           if retry or bad: raise SystemExit(1)
           PY
-      - uses: actions/upload-artifact@v4
-        with:
-          name: research-source-matchup-rescue-${{ matrix.shard }}-${{ github.run_id }}
-          path: out/*
-          if-no-files-found: error
-          retention-days: 30
-          compression-level: 0
