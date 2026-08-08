@@ -1,0 +1,123 @@
+name: Retry Sparse Playoff + Championship Targets
+
+on:
+  workflow_dispatch:
+    inputs:
+      combine_run_id:
+        required: true
+        description: Combine run containing retry_targets
+        default: "31259322832"
+      shards:
+        required: true
+        default: "16"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    outputs:
+      shard_list: ${{ steps.matrix.outputs.shard_list }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with: {python-version: "3.12"}
+      - uses: actions/download-artifact@v5
+        with:
+          github-token: ${{ github.token }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.combine_run_id }}
+          name: research-source-matchup-rescue-combined-${{ inputs.combine_run_id }}
+          path: input
+      - name: Build exact retry manifest
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('input/source_matchup_rescue_summary.json').read_text())
+          rows=report.get('retry_targets', [])
+          if not rows: raise SystemExit('retry manifest is empty')
+          targets=[]
+          for row in rows:
+              target=dict(row)
+              target['weeks']=sorted(set(target.get('weeks') or target.get('missing_target_weeks') or []))
+              if not target['weeks']: raise SystemExit(f"retry target has no weeks: {target}")
+              targets.append(target)
+          Path('out').mkdir()
+          Path('out/retry_targets.json').write_text(json.dumps({'targets':targets},indent=2)+'\n')
+          print({'targets':len(targets),'platforms':sorted({r.get('platform') for r in targets})})
+          PY
+      - name: Build nonempty shard matrix
+        id: matrix
+        env:
+          SHARDS: ${{ inputs.shards }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import hashlib,json,os
+          payload=json.load(open('out/retry_targets.json'))
+          n=int(os.environ['SHARDS'])
+          vals=sorted({int(hashlib.sha256(f"{r['platform']}|{r['db_name']}|{r['year']}".encode()).hexdigest()[:12],16)%n for r in payload['targets']})
+          print('shard_list='+json.dumps(vals))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sparse-playoff-championship-retry-targets-${{ github.run_id }}
+          path: out/retry_targets.json
+          if-no-files-found: error
+          retention-days: 30
+  retry:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.shard_list) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with: {python-version: "3.12"}
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 requests==2.32.4 polars==1.35.2 scipy==1.14.1
+      - uses: actions/download-artifact@v5
+        with:
+          name: sparse-playoff-championship-retry-targets-${{ github.run_id }}
+          path: inventory
+      - name: Fetch exact retry targets
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
+        run: |
+          mkdir -p out
+          python code/scripts/research_cohorts/build_source_matchup_rescue_sidecar.py \
+            --targets inventory/retry_targets.json \
+            --shard '${{ matrix.shard }}' --shards '${{ inputs.shards }}' --workers 1 \
+            --out out/source_matchup_rescue_${{ matrix.shard }}.parquet
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: research-sparse-playoff-championship-retry-${{ matrix.shard }}-${{ github.run_id }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 30
+      - name: Fail closed on fetch failures or partial weeks
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows=[json.loads(x) for x in Path('out/source_matchup_rescue_${{ matrix.shard }}.jsonl').read_text().splitlines() if x.strip()]
+          bad=[r for r in rows if r.get('status') in {'source_fetch_failed','source_returned_partial_target_weeks'}]
+          print({'targets':len(rows),'statuses':{s:sum(r.get('status')==s for r in rows) for s in sorted({r.get('status') for r in rows})}})
+          if bad: raise SystemExit(1)
+          PY
