@@ -1,0 +1,89 @@
+name: Combine Research Settings Sidecars
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+      settings_run_id:
+        required: true
+        default: "31250219978"
+      local_fills_run_id:
+        required: true
+        default: "31248350611"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  combine:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with: {python-version: "3.12"}
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3
+      - uses: actions/download-artifact@v5
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.settings_run_id }}
+          pattern: source-settings-rescue-*
+          merge-multiple: true
+          path: source_artifacts
+      - uses: actions/download-artifact@v5
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.local_fills_run_id }}
+          name: cohort-dimension-fills-${{ inputs.local_fills_run_id }}
+          path: local_fills
+      - name: Export canonical settings read-only
+        run: |
+          mkdir -p out
+          python - <<'PY'
+          import duckdb
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb',read_only=True)
+          con.execute("COPY (SELECT * FROM public.league_settings) TO 'out/canonical_league_settings.parquet' (FORMAT PARQUET)")
+          con.close()
+          PY
+      - name: Combine and validate null-only overlay
+        run: |
+          python code/scripts/research_cohorts/combine_source_settings_sidecars.py \
+            --settings-parquet out/canonical_league_settings.parquet \
+            --sidecars 'source_artifacts/**/*.parquet' \
+            --local-sidecar local_fills/league_settings_updates.parquet \
+            --out out/combined
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import duckdb
+          report=json.loads(Path('out/combined/combine_report.json').read_text())
+          assert report['canonical_mutated'] is False
+          assert report['new_lineage'] is False
+          con=duckdb.connect()
+          cols=[r[0] for r in con.execute("describe select * from read_parquet('out/combined/league_settings_updates_combined.parquet')").fetchall()]
+          expected=['db_name','year','scoring_pass_td','playoff_teams','roster_FLX','roster_SUPER_FLEX','roster_IDP','sleeper_best_ball','source']
+          assert cols == expected, (cols,expected)
+          print(json.dumps(report,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: combined-settings-sidecar-${{ github.run_id }}
+          path: out/combined/*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
