@@ -51,6 +51,7 @@ jobs:
           assert report['new_columns'] == []
           con = duckdb.connect()
           for name, key in [('player_position_updates.parquet', ['nfl_id']),
+                            ('player_position_name_updates.parquet', ['row_key']),
                             ('league_settings_updates.parquet', ['db_name', 'year']),
                             ('unresolved_settings.parquet', ['db_name', 'year'])]:
               p = out / name
