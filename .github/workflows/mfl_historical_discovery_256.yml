@@ -1,12 +1,12 @@
-name: MFL Historical Discovery (256 shards)
+name: MFL Historical Discovery (250 shards / 1,000 sampled IDs)
 
 on:
   workflow_dispatch:
     inputs:
       shard_count:
-        description: "Deterministic discovery shards (maximum 256)"
+        description: "Deterministic discovery shards (250 for the reconnaissance pass)"
         required: false
-        default: "256"
+        default: "250"
         type: string
       max_parallel:
         description: "Concurrent runners; kept at 15 for MFL API safety"
@@ -32,6 +32,11 @@ on:
         description: "Seconds between MFL requests per runner"
         required: false
         default: "5.0"
+        type: string
+      ids_per_shard:
+        description: "Evenly spaced ID guesses per shard"
+        required: false
+        default: "4"
         type: string
       yahoo_oauth_ref:
         description: "Pipeline code ref"
@@ -59,7 +64,7 @@ jobs:
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
-          n = min(max(int("${{ inputs.shard_count || '256' }}"), 1), 256)
+          n = min(max(int("${{ inputs.shard_count || '250' }}"), 1), 250)
           mp = min(max(int("${{ inputs.max_parallel || '15' }}"), 1), 15, n)
           print("shards=" + json.dumps(list(range(n)), separators=(",", ":")))
           print("max_parallel=" + str(mp))
@@ -100,7 +105,8 @@ jobs:
           mkdir -p out
           python code/scripts/extraplatform_corpus/discover_mfl_shard.py \
             --shard-index "${{ matrix.shard }}" \
-            --shard-count "${{ inputs.shard_count || '256' }}" \
+            --shard-count "${{ inputs.shard_count || '250' }}" \
+            --ids-per-shard "${{ inputs.ids_per_shard || '4' }}" \
             --start-year "${{ inputs.start_year || '1997' }}" \
             --end-year "${{ inputs.end_year || '2025' }}" \
             --id-bands "${{ inputs.id_bands || '1-9999,10000-29999,30000-59999,60000-80000' }}" \
