@@ -179,8 +179,8 @@ jobs:
           mkdir -p out /tmp
           YEARS=$(seq -s, "${{ inputs.start_year || '1997' }}" "${{ inputs.end_year || '1998' }}")
           MFL_YEARS="$YEARS" \
-          MFL_REQ_CAP=2500 \
-          MFL_TARGET=2000 \
+          MFL_REQ_CAP=120 \
+          MFL_TARGET=200 \
           MFL_SLEEP="${{ inputs.request_sleep || '5.0' }}" \
           MFL_SEED_OUT="$PWD/out/mfl_directory_seed.json" \
           MFL_DISCOVERY_PROGRESS="$PWD/out/mfl_directory_progress.txt" \
