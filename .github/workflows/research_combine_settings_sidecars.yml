@@ -6,8 +6,9 @@ on:
       cache_key:
         required: true
         default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
-      settings_run_id:
+      settings_run_ids:
         required: true
+        description: Comma-separated source-settings rescue run IDs
         default: "31250219978"
       local_fills_run_id:
         required: true
@@ -36,14 +37,22 @@ jobs:
       - uses: actions/setup-python@v6
         with: {python-version: "3.12"}
       - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3
-      - uses: actions/download-artifact@v5
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          repository: jeleff1000/league-history-workers
-          run-id: ${{ inputs.settings_run_id }}
-          pattern: source-settings-rescue-*
-          merge-multiple: true
-          path: source_artifacts
+      - name: Download source settings artifacts without collisions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_RUN_IDS: ${{ inputs.settings_run_ids }}
+        run: |
+          mkdir -p source_artifacts
+          IFS=',' read -ra RUN_IDS <<< "$SOURCE_RUN_IDS"
+          for run_id in "${RUN_IDS[@]}"; do
+            run_id="$(echo "$run_id" | xargs)"
+            test -n "$run_id"
+            mkdir -p "source_artifacts/$run_id"
+            gh run download "$run_id" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern 'source-settings-rescue-*' \
+              --dir "source_artifacts/$run_id"
+          done
       - uses: actions/download-artifact@v5
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
