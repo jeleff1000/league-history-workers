@@ -42,7 +42,7 @@ jobs:
           fail-on-cache-miss: true
       - uses: actions/setup-python@v6
         with: {python-version: "3.12"}
-      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 requests==2.32.4
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 requests==2.32.4 polars==1.35.1
       - name: Inventory only missing settings
         run: |
           python code/scripts/research_cohorts/build_source_settings_fill_sidecar.py \
@@ -98,7 +98,7 @@ jobs:
           path: code
       - uses: actions/setup-python@v6
         with: {python-version: "3.12"}
-      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 requests==2.32.4
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 requests==2.32.4 polars==1.35.1
       - uses: actions/download-artifact@v5
         with:
           name: source-settings-targets-${{ github.run_id }}
