@@ -48,7 +48,7 @@ jobs:
           python code/scripts/research_cohorts/build_source_settings_fill_sidecar.py \
             --snapshot research_public_lake/corpus_snapshot.duckdb \
             --platform '${{ inputs.platform }}' --out inventory
-          if [ '${{ inputs.pilot }}' = 'true' ]; then
+          if [[ "${{ inputs.pilot }}" =~ ^([Tt][Rr][Uu][Ee]|1)$ ]]; then
             python - <<'PY'
           import json
           from pathlib import Path
