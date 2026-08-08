@@ -75,6 +75,7 @@ jobs:
             --base research_public_lake/corpus_snapshot.duckdb \
             --sidecars sidecars \
             --prefix sleeper_missing_outcome_rescue_ \
+            --platform sleeper \
             --out promoted_corpus_snapshot.duckdb
           cp promoted_corpus_snapshot.duckdb research_public_lake/corpus_snapshot.duckdb
           python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
