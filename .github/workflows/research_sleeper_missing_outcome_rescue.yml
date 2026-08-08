@@ -44,8 +44,9 @@ jobs:
       - name: Build exact missing-outcome week inventory
         run: |
           mkdir -p inventory
-          python code/scripts/research_cohorts/build_sleeper_missing_outcome_targets.py \
+          python code/scripts/research_cohorts/build_mfl_underpopulated_week_targets.py \
             --snapshot research_public_lake/corpus_snapshot.duckdb \
+            --platform sleeper --expected-groups 0 --expected-league-years 0 \
             --out inventory/sleeper_missing_outcome_targets.json
       - id: matrix
         env:
