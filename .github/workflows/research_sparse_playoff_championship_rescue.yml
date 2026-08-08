@@ -57,7 +57,9 @@ jobs:
           fi
       - name: Build shard matrix
         id: matrix
-        env: {SHARDS: ${{ inputs.shards }}, SHARD_LIST: ${{ inputs.shard_list }}}
+        env:
+          SHARDS: ${{ inputs.shards }}
+          SHARD_LIST: ${{ inputs.shard_list }}
         run: |
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os
@@ -97,7 +99,8 @@ jobs:
       - uses: actions/download-artifact@v5
         with: {name: sparse-playoff-championship-targets-${{ github.run_id }}, path: inventory}
       - name: Fetch targeted sparse source signals
-        env: {PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts}
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
         run: |
           mkdir -p out
           python code/scripts/research_cohorts/build_source_matchup_rescue_sidecar.py \
