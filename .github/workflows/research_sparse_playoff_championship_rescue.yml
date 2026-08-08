@@ -1,0 +1,124 @@
+name: Research Sparse Playoff + Championship Rescue
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+      platform:
+        required: true
+        type: choice
+        options: [fleaflicker, mfl, sleeper]
+      shards:
+        required: true
+        default: "256"
+      pilot:
+        required: true
+        type: boolean
+        default: true
+      shard_list:
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    outputs:
+      shard_list: ${{ steps.matrix.outputs.shard_list }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with: {python-version: "3.12"}
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 requests==2.32.4 polars==1.35.2 scipy==1.14.1
+      - name: Build platform sparse target manifest
+        run: |
+          python code/scripts/research_cohorts/build_sparse_playoff_championship_targets.py \
+            --root research_public_lake --out out --platform '${{ inputs.platform }}'
+          if [ '${{ inputs.pilot }}' = 'true' ]; then
+            python code/scripts/research_cohorts/trim_playoff_championship_pilot.py \
+              --input out/sparse_playoff_championship_targets.json \
+              --output out/sparse_playoff_championship_targets.json --per-platform 15
+          fi
+      - name: Build shard matrix
+        id: matrix
+        env: {SHARDS: ${{ inputs.shards }}, SHARD_LIST: ${{ inputs.shard_list }}}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          n=int(os.environ['SHARDS'])
+          requested=[int(x.strip()) for x in os.environ.get('SHARD_LIST','').split(',') if x.strip()]
+          values=requested or list(range(n))
+          if any(x<0 or x>=n for x in values): raise SystemExit('invalid shard_list')
+          print('shard_list='+json.dumps(values))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sparse-playoff-championship-targets-${{ github.run_id }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  rescue:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.shard_list) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with: {python-version: "3.12"}
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 requests==2.32.4 polars==1.35.2 scipy==1.14.1
+      - uses: actions/download-artifact@v5
+        with: {name: sparse-playoff-championship-targets-${{ github.run_id }}, path: inventory}
+      - name: Fetch targeted sparse source signals
+        env: {PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts}
+        run: |
+          mkdir -p out
+          python code/scripts/research_cohorts/build_source_matchup_rescue_sidecar.py \
+            --targets inventory/sparse_playoff_championship_targets.json \
+            --shard '${{ matrix.shard }}' --shards '${{ inputs.shards }}' --workers 1 \
+            --out out/source_matchup_rescue_${{ matrix.shard }}.parquet
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: research-sparse-playoff-championship-rescue-${{ matrix.shard }}-${{ github.run_id }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+      - name: Fail closed on source errors or partial weeks
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows=[json.loads(x) for x in Path('out/source_matchup_rescue_${{ matrix.shard }}.jsonl').read_text().splitlines() if x.strip()]
+          retry=[r for r in rows if r.get('status') in {'source_fetch_failed','source_returned_partial_target_weeks'}]
+          print({'targets':len(rows),'retry_required':len(retry),'statuses':{s:sum(r.get('status')==s for r in rows) for s in sorted({r.get('status') for r in rows})}})
+          if retry: raise SystemExit(1)
+          PY
