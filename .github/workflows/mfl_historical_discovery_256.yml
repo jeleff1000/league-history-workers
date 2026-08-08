@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 0.6 seconds
+Output:
 name: MFL Historical Discovery (250 contiguous ID shards)
 
 on:
@@ -32,6 +35,11 @@ on:
         description: "Optional comma-separated shard indices to run; empty means all shards"
         required: false
         default: ""
+        type: string
+      directory_only:
+        description: "Run only the named-directory search; do not run numeric shards"
+        required: false
+        default: "false"
         type: string
       id_bands:
         description: "Inclusive numeric MFL ID bands"
@@ -81,18 +89,22 @@ jobs:
           import json
           n = min(max(int("${{ inputs.shard_count || '250' }}"), 1), 250)
           mp = min(max(int("${{ inputs.max_parallel || '15' }}"), 1), 15, n)
+          directory_only = "${{ inputs.directory_only || 'false' }}".strip().lower() == "true"
           raw = "${{ inputs.shard_indices || '' }}".strip()
-          if raw:
+          if directory_only:
+              shards = []
+          elif raw:
               shards = sorted({int(part.strip()) for part in raw.split(",") if part.strip()})
               if any(shard < 0 or shard >= n for shard in shards):
                   raise SystemExit(f"shard_indices must be within 0..{n - 1}")
           else:
               shards = list(range(n))
           print("shards=" + json.dumps(shards, separators=(",", ":")))
-          print("max_parallel=" + str(min(mp, len(shards))))
+          print("max_parallel=" + str(min(mp, len(shards)) if shards else 1))
           PY
 
   discover:
+    if: ${{ (inputs.directory_only || 'false') != 'true' }}
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -179,8 +191,12 @@ jobs:
           mkdir -p out /tmp
           YEARS=$(seq -s, "${{ inputs.start_year || '1997' }}" "${{ inputs.end_year || '1998' }}")
           MFL_YEARS="$YEARS" \
+          # Keep the named-directory pass within the same ~10-minute runner
+          # budget as the numeric shards: 120 requests at the configured 5s
+          # throttle, with validation consuming the final 40%.
           MFL_REQ_CAP=120 \
           MFL_TARGET=200 \
+          MFL_ALLOW_EXPIRED_CERT=1 \
           MFL_SLEEP="${{ inputs.request_sleep || '5.0' }}" \
           MFL_SEED_OUT="$PWD/out/mfl_directory_seed.json" \
           MFL_DISCOVERY_PROGRESS="$PWD/out/mfl_directory_progress.txt" \
@@ -194,72 +210,8 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  merge:
-    if: ${{ always() && needs.discover.result != 'cancelled' && needs.directory.result != 'cancelled' }}
-    needs: [prepare, discover, directory]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout pipeline code
-        uses: actions/checkout@v5
-        with:
-          repository: jeleff1000/yahoo_oauth
-          token: ${{ secrets.PRIVATE_REPO_PAT }}
-          ref: ${{ inputs.yahoo_oauth_ref || 'main' }}
-          path: code
-          filter: blob:none
-          sparse-checkout-cone-mode: false
-          sparse-checkout: |
-            /scripts/extraplatform_corpus/
-
-      - name: Checkout worker seed repository
-        uses: actions/checkout@v5
-        with:
-          path: worker
-
-      - name: Download shard artifacts
-        uses: actions/download-artifact@v5
-        with:
-          pattern: mfl-discovery-shard-*
-          path: shards
-          merge-multiple: true
-
-      - name: Download named directory artifact
-        uses: actions/download-artifact@v5
-        with:
-          name: mfl-directory-discovery-${{ github.run_id }}
-          path: directory
-
-      - name: Merge season records and lineages
-        run: |
-          mkdir -p out
-          SEED=""
-          if [ -f worker/corpus_seed/mfl_crawl_seed.json ]; then
-            SEED="--existing-seed worker/corpus_seed/mfl_crawl_seed.json"
-          fi
-          python code/scripts/extraplatform_corpus/merge_mfl_shards.py \
-            --input-glob "shards/**/mfl_shard_*.json" \
-            $SEED \
-            --out out/mfl_discovery_merged.json
-          python3 - <<'PY'
-          import json
-          d=json.load(open("out/mfl_discovery_merged.json"))
-          print(f"season_leagues={d['unique_season_leagues']}")
-          print(f"draft_records={d['records_with_draft']}")
-          print(f"lineages={d['lineage_count']}")
-          PY
-
-      - name: Upload merged inventory
-        uses: actions/upload-artifact@v4
-        with:
-          name: mfl-discovery-merged-${{ github.run_id }}
-          path: out/mfl_discovery_merged.json
-          if-no-files-found: error
-          retention-days: 30
-
-  # Advance one two-season window at a time after merge, keeping the campaign
-  # sequential while each matrix window remains capped at 15 runners.
   chain-next-window:
-    if: ${{ needs.merge.result == 'success' && (inputs.chain_next_window || 'true') == 'true' && fromJSON(inputs.end_year || '1998') < 2025 }}
+    if: ${{ needs.merge.result == 'success' && (inputs.directory_only || 'false') != 'true' && (inputs.chain_next_window || 'true') == 'true' && fromJSON(inputs.end_year || '1998') < 2025 }}
     needs: [merge]
     runs-on: ubuntu-latest
     permissions:
@@ -299,3 +251,67 @@ jobs:
             -f "inputs[id_end]=${ID_END}" \
             -f "inputs[yahoo_oauth_ref]=${CODE_REF}"
           echo "Dispatched MFL window ${next_start}-${next_end}"
+
+  merge:
+    if: ${{ always() && needs.discover.result != 'cancelled' && needs.directory.result != 'cancelled' }}
+    needs: [prepare, discover, directory]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref || 'main' }}
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/extraplatform_corpus/
+
+      - name: Checkout worker seed repository
+        uses: actions/checkout@v5
+        with:
+          path: worker
+
+      - name: Download shard artifacts
+        if: ${{ (inputs.directory_only || 'false') != 'true' }}
+        uses: actions/download-artifact@v5
+        with:
+          pattern: mfl-discovery-shard-*
+          path: shards
+          merge-multiple: true
+
+      - name: Download named directory artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: mfl-directory-discovery-${{ github.run_id }}
+          path: directory
+
+      - name: Merge season records and lineages
+        run: |
+          mkdir -p out
+          SEED=""
+          if [ -f worker/corpus_seed/mfl_crawl_seed.json ]; then
+            SEED="--existing-seed worker/corpus_seed/mfl_crawl_seed.json"
+          fi
+          python code/scripts/extraplatform_corpus/merge_mfl_shards.py \
+            --input-glob "shards/**/mfl_shard_*.json" \
+            $SEED \
+            --out out/mfl_discovery_merged.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open("out/mfl_discovery_merged.json"))
+          print(f"season_leagues={d['unique_season_leagues']}")
+          print(f"draft_records={d['records_with_draft']}")
+          print(f"lineages={d['lineage_count']}")
+          PY
+
+      - name: Upload merged inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-discovery-merged-${{ github.run_id }}
+          path: out/mfl_discovery_merged.json
+          if-no-files-found: error
+          retention-days: 30
+
