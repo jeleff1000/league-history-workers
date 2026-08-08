@@ -43,12 +43,13 @@ jobs:
             gh run download "$ID" \
               --repo '${{ github.repository }}' \
               --pattern 'research-source-matchup-rescue-*' \
-              --dir input
+              --dir input || true
             gh run download "$ID" \
               --repo '${{ github.repository }}' \
               --pattern 'research-sparse-playoff-championship-rescue-*' \
-              --dir input
+              --dir input || true
           done
+          test -n "$(find input -type f -name '*.parquet' -print -quit)"
       - name: Combine and validate
         run: |
           mkdir -p out
