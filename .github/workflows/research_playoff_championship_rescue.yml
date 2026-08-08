@@ -74,21 +74,10 @@ jobs:
           python code/scripts/research_cohorts/build_playoff_championship_targets.py \
             --root research_public_lake --out out
           if [ '${{ inputs.pilot }}' = 'true' ]; then
-            python - <<'PY'
-            import json
-            from pathlib import Path
-            p = Path('out/playoff_championship_targets.json')
-            payload = json.loads(p.read_text())
-            selected=[]
-            for platform in ('fleaflicker','mfl','sleeper'):
-                selected.extend([r for r in payload['targets'] if r['platform']==platform][:15])
-            payload['pilot']=True
-            payload['pilot_source_target_count']=len(selected)
-            payload['targets']=selected
-            p.write_text(json.dumps(payload, indent=2)+'\n')
-            Path('out/playoff_championship_targets_summary.json').write_text(json.dumps({'pilot':True,'target_count':len(selected),'by_platform':{x:sum(r['platform']==x for r in selected) for x in ('fleaflicker','mfl','sleeper')}},indent=2)+'\n')
-            print({'pilot_targets':len(selected)})
-          PY
+            python code/scripts/research_cohorts/trim_playoff_championship_pilot.py \
+              --input out/playoff_championship_targets.json \
+              --output out/playoff_championship_targets.json \
+              --per-platform 15
           fi
       - name: Build shard matrix
         id: matrix
