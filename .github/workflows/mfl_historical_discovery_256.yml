@@ -23,6 +23,11 @@ on:
         required: false
         default: "1998"
         type: string
+      shard_indices:
+        description: "Optional comma-separated shard indices to run; empty means all shards"
+        required: false
+        default: ""
+        type: string
       id_bands:
         description: "Inclusive numeric MFL ID bands"
         required: false
@@ -71,8 +76,15 @@ jobs:
           import json
           n = min(max(int("${{ inputs.shard_count || '250' }}"), 1), 250)
           mp = min(max(int("${{ inputs.max_parallel || '15' }}"), 1), 15, n)
-          print("shards=" + json.dumps(list(range(n)), separators=(",", ":")))
-          print("max_parallel=" + str(mp))
+          raw = "${{ inputs.shard_indices || '' }}".strip()
+          if raw:
+              shards = sorted({int(part.strip()) for part in raw.split(",") if part.strip()})
+              if any(shard < 0 or shard >= n for shard in shards):
+                  raise SystemExit(f"shard_indices must be within 0..{n - 1}")
+          else:
+              shards = list(range(n))
+          print("shards=" + json.dumps(shards, separators=(",", ":")))
+          print("max_parallel=" + str(min(mp, len(shards))))
           PY
 
   discover:
