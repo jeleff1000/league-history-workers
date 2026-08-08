@@ -50,7 +50,7 @@ jobs:
           assert report['new_lineage'] is False
           assert report['new_columns'] == []
           con = duckdb.connect()
-          for name, key in [('player_position_updates.parquet', ['nfl_id']),
+          for name, key in [('player_position_updates.parquet', ['nfl_id', 'season_year']),
                             ('player_position_name_updates.parquet', ['row_key']),
                             ('league_settings_updates.parquet', ['db_name', 'year']),
                             ('unresolved_settings.parquet', ['db_name', 'year'])]:
