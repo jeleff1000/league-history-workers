@@ -44,6 +44,10 @@ jobs:
               --repo '${{ github.repository }}' \
               --pattern 'research-source-matchup-rescue-*' \
               --dir input
+            gh run download "$ID" \
+              --repo '${{ github.repository }}' \
+              --pattern 'research-sparse-playoff-championship-rescue-*' \
+              --dir input
           done
       - name: Combine and validate
         run: |
