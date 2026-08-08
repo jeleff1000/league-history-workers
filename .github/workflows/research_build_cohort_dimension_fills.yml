@@ -51,7 +51,8 @@ jobs:
           assert report['new_columns'] == []
           con = duckdb.connect()
           for name, key in [('player_position_updates.parquet', ['nfl_id']),
-                            ('league_settings_updates.parquet', ['db_name', 'year'])]:
+                            ('league_settings_updates.parquet', ['db_name', 'year']),
+                            ('unresolved_settings.parquet', ['db_name', 'year'])]:
               p = out / name
               assert p.exists(), p
               cols = [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{p}')").fetchall()]
