@@ -26,7 +26,7 @@ on:
       id_bands:
         description: "Inclusive numeric MFL ID bands"
         required: false
-        default: "10000-29999,30000-59999,60000-80000"
+        default: "1-9999,10000-29999,30000-59999,60000-80000"
         type: string
       request_sleep:
         description: "Seconds between MFL requests per runner"
@@ -103,7 +103,7 @@ jobs:
             --shard-count "${{ inputs.shard_count || '256' }}" \
             --start-year "${{ inputs.start_year || '1997' }}" \
             --end-year "${{ inputs.end_year || '2025' }}" \
-            --id-bands "${{ inputs.id_bands || '10000-29999,30000-59999,60000-80000' }}" \
+            --id-bands "${{ inputs.id_bands || '1-9999,10000-29999,30000-59999,60000-80000' }}" \
             --sleep "${{ inputs.request_sleep || '5.0' }}" \
             --out "out/mfl_shard_${{ matrix.shard }}.json"
 
