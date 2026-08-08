@@ -115,9 +115,58 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  merge:
+  # The numeric matrix finds IDs that have no searchable name.  Run the public
+  # directory search as a separate, single runner so named dynasty/keeper/IDP
+  # leagues are included without turning every matrix shard into a duplicate
+  # keyword crawl.  It starts only after the matrix, keeping total concurrency
+  # at the requested maximum of 15 runners.
+  directory:
     if: ${{ always() && needs.discover.result != 'cancelled' }}
     needs: [prepare, discover]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1440
+    steps:
+      - name: Checkout pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref || 'main' }}
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/extraplatform_corpus/
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Search named public MFL directories
+        shell: bash
+        run: |
+          mkdir -p out /tmp
+          YEARS=$(seq -s, "${{ inputs.start_year || '1997' }}" "${{ inputs.end_year || '2025' }}")
+          MFL_YEARS="$YEARS" \
+          MFL_REQ_CAP=2500 \
+          MFL_TARGET=2000 \
+          MFL_SLEEP="${{ inputs.request_sleep || '5.0' }}" \
+          MFL_SEED_OUT="$PWD/out/mfl_directory_seed.json" \
+          MFL_DISCOVERY_PROGRESS="$PWD/out/mfl_directory_progress.txt" \
+          python code/scripts/extraplatform_corpus/discover_mfl_leagues.py
+
+      - name: Upload directory artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-directory-discovery-${{ github.run_id }}
+          path: out/mfl_directory_seed.json
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    if: ${{ always() && needs.discover.result != 'cancelled' && needs.directory.result != 'cancelled' }}
+    needs: [prepare, discover, directory]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout pipeline code
@@ -143,6 +192,12 @@ jobs:
           pattern: mfl-discovery-shard-*
           path: shards
           merge-multiple: true
+
+      - name: Download named directory artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: mfl-directory-discovery-${{ github.run_id }}
+          path: directory
 
       - name: Merge season records and lineages
         run: |
@@ -170,4 +225,3 @@ jobs:
           path: out/mfl_discovery_merged.json
           if-no-files-found: error
           retention-days: 30
-
