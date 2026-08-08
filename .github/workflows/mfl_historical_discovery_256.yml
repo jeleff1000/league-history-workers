@@ -238,3 +238,47 @@ jobs:
           path: out/mfl_discovery_merged.json
           if-no-files-found: error
           retention-days: 30
+
+  # Advance one two-season window at a time after merge, keeping the campaign
+  # sequential while each matrix window remains capped at 15 runners.
+  chain-next-window:
+    if: ${{ needs.merge.result == 'success' && fromJSON(inputs.end_year || '1998') < 2025 }}
+    needs: [merge]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch next two-season window
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW: mfl_historical_discovery_256.yml
+          CURRENT_END: ${{ inputs.end_year || '1998' }}
+          SHARDS: ${{ inputs.shard_count || '250' }}
+          MAX_PARALLEL: ${{ inputs.max_parallel || '15' }}
+          ID_BANDS: ${{ inputs.id_bands || '1-9999,10000-29999,30000-59999,60000-80000' }}
+          SLEEP: ${{ inputs.request_sleep || '5.0' }}
+          ID_START: ${{ inputs.id_start || '0' }}
+          ID_END: ${{ inputs.id_end || '10000' }}
+          CODE_REF: ${{ inputs.yahoo_oauth_ref || 'main' }}
+        run: |
+          set -euo pipefail
+          next_start=$((CURRENT_END + 1))
+          next_end=$((next_start + 1))
+          if [ "$next_end" -gt 2025 ]; then next_end=2025; fi
+          gh api --method POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${REPOSITORY}/actions/workflows/${WORKFLOW}/dispatches" \
+            -f ref=main \
+            -f "inputs[shard_count]=${SHARDS}" \
+            -f "inputs[max_parallel]=${MAX_PARALLEL}" \
+            -f "inputs[start_year]=${next_start}" \
+            -f "inputs[end_year]=${next_end}" \
+            -f "inputs[id_bands]=${ID_BANDS}" \
+            -f "inputs[request_sleep]=${SLEEP}" \
+            -f "inputs[id_start]=${ID_START}" \
+            -f "inputs[id_end]=${ID_END}" \
+            -f "inputs[yahoo_oauth_ref]=${CODE_REF}"
+          echo "Dispatched MFL window ${next_start}-${next_end}"
