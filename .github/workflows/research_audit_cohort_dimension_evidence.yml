@@ -1,0 +1,46 @@
+name: Audit cohort dimension evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - name: Read-only dimension evidence audit
+        run: |
+          python code/scripts/research_cohorts/audit_cohort_dimension_evidence.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --ops research_public_lake/ops_cache.duckdb \
+            --out cohort_dimension_evidence.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cohort-dimension-evidence-${{ github.run_id }}
+          path: cohort_dimension_evidence.json
+          if-no-files-found: error
+          retention-days: 30
