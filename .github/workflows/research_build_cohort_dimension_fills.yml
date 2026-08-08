@@ -55,8 +55,11 @@ jobs:
               p = out / name
               assert p.exists(), p
               cols = [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{p}')").fetchall()]
-              assert all(k in cols for k in key), (name, cols)
-              assert con.execute(f"SELECT COUNT(*) FROM read_parquet('{p}')").fetchone()[0] == con.execute(f"SELECT COUNT(*) FROM (SELECT DISTINCT {', '.join(key)} FROM read_parquet('{p}'))").fetchone()[0]
+              rows = con.execute(f"SELECT COUNT(*) FROM read_parquet('{p}')").fetchone()[0]
+              distinct = con.execute(f"SELECT COUNT(*) FROM (SELECT DISTINCT {', '.join(key)} FROM read_parquet('{p}'))").fetchone()[0]
+              print(name, {'columns': cols, 'rows': rows, 'distinct_keys': distinct})
+              assert all(k in cols for k in key), (name, key, cols)
+              assert rows == distinct, (name, rows, distinct)
           con.close()
           print(json.dumps(report, sort_keys=True))
           PY
