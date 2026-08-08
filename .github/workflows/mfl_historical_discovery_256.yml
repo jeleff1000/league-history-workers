@@ -292,6 +292,9 @@ jobs:
           if [ -f worker/corpus_seed/mfl_crawl_seed.json ]; then
             SEED="--existing-seed worker/corpus_seed/mfl_crawl_seed.json"
           fi
+          # Feed named-directory results through the same season/id dedupe and
+          # lineage merge as numeric shards.
+          cp directory/mfl_directory_seed.json shards/mfl_directory_seed.json
           python code/scripts/extraplatform_corpus/merge_mfl_shards.py \
             --input-glob "shards/**/mfl_shard_*.json" \
             $SEED \
