@@ -1,4 +1,4 @@
-name: MFL Historical Discovery (250 shards / 1,000 sampled IDs)
+name: MFL Historical Discovery (250 contiguous ID shards)
 
 on:
   workflow_dispatch:
@@ -21,7 +21,7 @@ on:
       end_year:
         description: "Newest season to probe"
         required: false
-        default: "2025"
+        default: "1998"
         type: string
       id_bands:
         description: "Inclusive numeric MFL ID bands"
@@ -33,10 +33,15 @@ on:
         required: false
         default: "5.0"
         type: string
-      ids_per_shard:
-        description: "Evenly spaced ID guesses per shard"
+      id_start:
+        description: "First inclusive MFL ID"
         required: false
-        default: "4"
+        default: "0"
+        type: string
+      id_end:
+        description: "Last inclusive MFL ID"
+        required: false
+        default: "10000"
         type: string
       yahoo_oauth_ref:
         description: "Pipeline code ref"
@@ -106,9 +111,10 @@ jobs:
           python code/scripts/extraplatform_corpus/discover_mfl_shard.py \
             --shard-index "${{ matrix.shard }}" \
             --shard-count "${{ inputs.shard_count || '250' }}" \
-            --ids-per-shard "${{ inputs.ids_per_shard || '4' }}" \
             --start-year "${{ inputs.start_year || '1997' }}" \
-            --end-year "${{ inputs.end_year || '2025' }}" \
+            --end-year "${{ inputs.end_year || '1998' }}" \
+            --id-start "${{ inputs.id_start || '0' }}" \
+            --id-end "${{ inputs.id_end || '10000' }}" \
             --id-bands "${{ inputs.id_bands || '1-9999,10000-29999,30000-59999,60000-80000' }}" \
             --sleep "${{ inputs.request_sleep || '5.0' }}" \
             --out "out/mfl_shard_${{ matrix.shard }}.json"
@@ -154,7 +160,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p out /tmp
-          YEARS=$(seq -s, "${{ inputs.start_year || '1997' }}" "${{ inputs.end_year || '2025' }}")
+          YEARS=$(seq -s, "${{ inputs.start_year || '1997' }}" "${{ inputs.end_year || '1998' }}")
           MFL_YEARS="$YEARS" \
           MFL_REQ_CAP=2500 \
           MFL_TARGET=2000 \
