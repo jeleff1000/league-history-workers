@@ -194,6 +194,7 @@ jobs:
           MFL_REQ_CAP=120 \
           MFL_TARGET=200 \
           MFL_ALLOW_EXPIRED_CERT=1 \
+          MFL_HTTP_TIMEOUT=8 \
           MFL_SLEEP="${{ inputs.request_sleep || '5.0' }}" \
           MFL_SEED_OUT="$PWD/out/mfl_directory_seed.json" \
           MFL_DISCOVERY_PROGRESS="$PWD/out/mfl_directory_progress.txt" \
