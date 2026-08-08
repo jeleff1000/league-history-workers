@@ -23,6 +23,11 @@ on:
         required: false
         default: "1998"
         type: string
+      chain_next_window:
+        description: "Dispatch the next season window after merge"
+        required: false
+        default: "true"
+        type: string
       shard_indices:
         description: "Optional comma-separated shard indices to run; empty means all shards"
         required: false
@@ -254,7 +259,7 @@ jobs:
   # Advance one two-season window at a time after merge, keeping the campaign
   # sequential while each matrix window remains capped at 15 runners.
   chain-next-window:
-    if: ${{ needs.merge.result == 'success' && fromJSON(inputs.end_year || '1998') < 2025 }}
+    if: ${{ needs.merge.result == 'success' && (inputs.chain_next_window || 'true') == 'true' && fromJSON(inputs.end_year || '1998') < 2025 }}
     needs: [merge]
     runs-on: ubuntu-latest
     permissions:
