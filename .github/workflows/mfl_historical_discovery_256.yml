@@ -1,0 +1,173 @@
+name: MFL Historical Discovery (256 shards)
+
+on:
+  workflow_dispatch:
+    inputs:
+      shard_count:
+        description: "Deterministic discovery shards (maximum 256)"
+        required: false
+        default: "256"
+        type: string
+      max_parallel:
+        description: "Concurrent runners; kept at 15 for MFL API safety"
+        required: false
+        default: "15"
+        type: string
+      start_year:
+        description: "Oldest season to probe"
+        required: false
+        default: "1997"
+        type: string
+      end_year:
+        description: "Newest season to probe"
+        required: false
+        default: "2025"
+        type: string
+      id_bands:
+        description: "Inclusive numeric MFL ID bands"
+        required: false
+        default: "10000-29999,30000-59999,60000-80000"
+        type: string
+      request_sleep:
+        description: "Seconds between MFL requests per runner"
+        required: false
+        default: "5.0"
+        type: string
+      yahoo_oauth_ref:
+        description: "Pipeline code ref"
+        required: false
+        default: "main"
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: mfl-historical-discovery
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{ steps.matrix.outputs.shards }}
+      max_parallel: ${{ steps.matrix.outputs.max_parallel }}
+    steps:
+      - id: matrix
+        shell: bash
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          n = min(max(int("${{ inputs.shard_count || '256' }}"), 1), 256)
+          mp = min(max(int("${{ inputs.max_parallel || '15' }}"), 1), 15, n)
+          print("shards=" + json.dumps(list(range(n)), separators=(",", ":")))
+          print("max_parallel=" + str(mp))
+          PY
+
+  discover:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 1440
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(needs.prepare.outputs.max_parallel) }}
+      matrix:
+        shard: ${{ fromJSON(needs.prepare.outputs.shards) }}
+    steps:
+      - name: Checkout pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref || 'main' }}
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/extraplatform_corpus/
+            /fantasy_football_data_scripts/
+            /requirements.txt
+            /pyproject.toml
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Run historical MFL shard
+        run: |
+          mkdir -p out
+          python code/scripts/extraplatform_corpus/discover_mfl_shard.py \
+            --shard-index "${{ matrix.shard }}" \
+            --shard-count "${{ inputs.shard_count || '256' }}" \
+            --start-year "${{ inputs.start_year || '1997' }}" \
+            --end-year "${{ inputs.end_year || '2025' }}" \
+            --id-bands "${{ inputs.id_bands || '10000-29999,30000-59999,60000-80000' }}" \
+            --sleep "${{ inputs.request_sleep || '5.0' }}" \
+            --out "out/mfl_shard_${{ matrix.shard }}.json"
+
+      - name: Upload shard artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-discovery-shard-${{ matrix.shard }}-${{ github.run_id }}
+          path: out/mfl_shard_${{ matrix.shard }}.json
+          if-no-files-found: error
+          retention-days: 14
+
+  merge:
+    if: ${{ always() && needs.discover.result != 'cancelled' }}
+    needs: [prepare, discover]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref || 'main' }}
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/extraplatform_corpus/
+
+      - name: Checkout worker seed repository
+        uses: actions/checkout@v5
+        with:
+          path: worker
+
+      - name: Download shard artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: mfl-discovery-shard-*
+          path: shards
+          merge-multiple: true
+
+      - name: Merge season records and lineages
+        run: |
+          mkdir -p out
+          SEED=""
+          if [ -f worker/corpus_seed/mfl_crawl_seed.json ]; then
+            SEED="--existing-seed worker/corpus_seed/mfl_crawl_seed.json"
+          fi
+          python code/scripts/extraplatform_corpus/merge_mfl_shards.py \
+            --input-glob "shards/**/mfl_shard_*.json" \
+            $SEED \
+            --out out/mfl_discovery_merged.json
+          python3 - <<'PY'
+          import json
+          d=json.load(open("out/mfl_discovery_merged.json"))
+          print(f"season_leagues={d['unique_season_leagues']}")
+          print(f"draft_records={d['records_with_draft']}")
+          print(f"lineages={d['lineage_count']}")
+          PY
+
+      - name: Upload merged inventory
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-discovery-merged-${{ github.run_id }}
+          path: out/mfl_discovery_merged.json
+          if-no-files-found: error
+          retention-days: 30
+
