@@ -63,7 +63,7 @@ jobs:
           import hashlib,json,os
           payload=json.load(open('out/retry_targets.json'))
           n=int(os.environ['SHARDS'])
-          vals=sorted({int(hashlib.sha256(f"{r['platform']}|{r['db_name']}|{r['year']}".encode()).hexdigest()[:12],16)%n for r in payload['targets']})
+          vals=sorted({int(hashlib.sha256(f"{r['db_name']}|{r['year']}".encode()).hexdigest()[:12],16)%n for r in payload['targets']})
           print('shard_list='+json.dumps(vals))
           PY
       - uses: actions/upload-artifact@v4
