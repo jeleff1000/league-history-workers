@@ -62,6 +62,27 @@ jobs:
           print('cached_player_columns=', selected)
           qcols=','.join('"'+x+'"' for x in selected)
           print(c.execute(f"SELECT {qcols} FROM lake.public.player_fantasy WHERE NFL_player_id='00-0033280' AND year=2025 ORDER BY week LIMIT 30").fetchall())
+          print('cached_cmc_week1_target_counts=', c.execute("""
+            WITH target AS (
+              SELECT DISTINCT db_name, CAST(year AS INTEGER) AS year
+              FROM lake.public.league_settings
+              WHERE year=2025 AND num_teams > 11
+                AND COALESCE(roster_IDP,0)+COALESCE(roster_DL,0)+COALESCE(roster_LB,0)
+                    +COALESCE(roster_DB,0)+COALESCE(roster_DB_LB,0)+COALESCE(roster_DL_LB,0)=0
+                AND COALESCE(roster_SUPER_FLEX,0)=0
+                AND scoring_rec > 0 AND scoring_rec < 0.75
+                AND COALESCE(scoring_pass_td,4) < 5
+                AND playoff_teams BETWEEN 6 AND 7
+            )
+            SELECT COUNT(DISTINCT t.db_name) AS eligible_leagues,
+                   COUNT(DISTINCT p.db_name) AS rows_present,
+                   COUNT(DISTINCT p.db_name) FILTER (WHERE CAST(p.is_rostered AS INTEGER)=1) AS rostered_leagues,
+                   COUNT(DISTINCT p.db_name) FILTER (WHERE CAST(p.is_started AS INTEGER)=1) AS started_leagues,
+                   COUNT(*) FILTER (WHERE CAST(p.is_rostered AS INTEGER)=0) AS unrostered_rows
+            FROM target t
+            LEFT JOIN lake.public.player_fantasy p
+              ON p.db_name=t.db_name AND p.year=t.year AND p.week=1 AND p.NFL_player_id='00-0033280'
+          """).fetchall())
           PY
       - name: Build the complete adaptive matchup lattice from cache
         run: |
