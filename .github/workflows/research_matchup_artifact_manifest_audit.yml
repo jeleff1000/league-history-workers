@@ -81,7 +81,7 @@ jobs:
               raise SystemExit(f"exact artifact manifest invalid: count={len(all_items)} unique={len(set(all_ids))}")
           slice_index = int(os.environ['SLICE_INDEX'])
           slice_count = int(os.environ['SLICE_COUNT'])
-          retry_base_run_id = ''
+          retry_base_run_id = os.environ.get('BASE_RUN_ID', '')
           if os.environ['EVENT_NAME'] == 'push':
               slice_index = int(Path('audit_manifests/exact-audit-trigger.txt').read_text().strip())
               retry_config_path = Path('audit_manifests/exact-audit-retry.json')
