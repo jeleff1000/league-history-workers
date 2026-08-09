@@ -205,7 +205,7 @@ jobs:
     needs: manifest
     strategy:
       fail-fast: false
-      max-parallel: 5
+      max-parallel: 15
       matrix:
         shard_index: ${{ fromJSON(needs.manifest.outputs.matrix) }}
     runs-on: ubuntu-24.04
