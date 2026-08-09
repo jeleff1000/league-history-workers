@@ -17,11 +17,7 @@ permissions:
   contents: read
 
 env:
-  # The workflow only reads artifacts from this repository.  Use the scoped
-  # Actions token so every inspector can authenticate to the artifact API;
-  # the old private-repo secret was unavailable on these public runners and
-  # produced 401s for every artifact download.
-  GH_TOKEN: ${{ github.token }}
+  GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
   SINCE: ${{ inputs.since }}
   SHARD_COUNT: ${{ inputs.shard_count }}
 
