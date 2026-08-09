@@ -1,63 +1,19 @@
-name: Seed legacy research cache alias
+name: Legacy research cache disabled
 
 on:
   workflow_dispatch:
 
 permissions:
-  actions: write
-  contents: write
+  actions: read
+  contents: read
 
 jobs:
-  seed:
+  forbidden:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
-    env:
-      GH_TOKEN: ${{ github.token }}
-      SOURCE_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
-      LEGACY_CACHE_KEY: research-public-lake-v4-Linux-20260806-signal-rescue-canonical
-      RELEASE_TAG: research-public-lake-v4-legacy-signal-rescue-canonical
-
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
-
-      - name: Restore current canonical research lake
-        uses: actions/cache/restore@v5
-        with:
-          path: research_public_lake
-          key: ${{ env.SOURCE_CACHE_KEY }}
-          fail-on-cache-miss: true
-
-      - name: Validate restored snapshot
+      - name: Fail closed
         shell: bash
         run: |
-          set -euo pipefail
-          test -s research_public_lake/ops_cache.duckdb
-          test -s research_public_lake/corpus_snapshot.duckdb
-          du -sh research_public_lake
-
-      - name: Save exact legacy cache alias
-        uses: actions/cache/save@v5
-        continue-on-error: true
-        with:
-          path: research_public_lake
-          key: ${{ env.LEGACY_CACHE_KEY }}
-
-      - name: Archive durable legacy backup
-        shell: bash
-        run: |
-          set -euo pipefail
-          tar -cf research-public-lake.tar -C research_public_lake .
-          mkdir -p release_parts
-          split -b 1800000000 research-public-lake.tar release_parts/research-public-lake.tar.part-
-          ls -lh release_parts
-
-      - name: Publish durable legacy backup
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh release view "$RELEASE_TAG" --repo jeleff1000/league-history-workers >/dev/null 2>&1 || \
-            gh release create "$RELEASE_TAG" --repo jeleff1000/league-history-workers \
-              --title "$RELEASE_TAG" \
-              --notes "Durable backup for legacy cache key $LEGACY_CACHE_KEY"
-          gh release upload "$RELEASE_TAG" --repo jeleff1000/league-history-workers \
-            release_parts/research-public-lake.tar.part-* --clobber
+          echo "The legacy research cache is forbidden and this workflow may not create it."
+          exit 1
