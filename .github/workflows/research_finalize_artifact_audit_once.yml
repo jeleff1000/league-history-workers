@@ -59,3 +59,26 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
+
+  verify:
+    needs: aggregate
+    if: ${{ needs.aggregate.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-audit-complete-31319638678
+          path: completed
+      - name: Verify completeness gate from uploaded evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('completed/artifact_audit_complete.json').read_text())
+          print(json.dumps({k:report[k] for k in ('source_run_id','manifest_artifacts','inspected_records','inspection_errors','complete')}))
+          if not report.get('complete'):
+              raise SystemExit('artifact audit evidence is incomplete')
+          PY
