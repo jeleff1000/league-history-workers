@@ -151,7 +151,7 @@ jobs:
           con.execute('CREATE TABLE source_rows AS SELECT * FROM read_parquet(?, union_by_name=false)', [files])
           fallback='COALESCE(' + ','.join(f"NULLIF(TRIM(CAST(\"{c}\" AS VARCHAR)), '')" for c in ['NFL_player_id','sleeper_player_id','fleaflicker_player_id','mfl_player_id','espn_player_id','yahoo_player_id']) + ')'
           pid=f"CASE LOWER(NULLIF(TRIM(CAST(\"platform\" AS VARCHAR)), '')) WHEN 'sleeper' THEN COALESCE(NULLIF(TRIM(CAST(\"sleeper_player_id\" AS VARCHAR)), ''), {fallback}) WHEN 'fleaflicker' THEN COALESCE(NULLIF(TRIM(CAST(\"fleaflicker_player_id\" AS VARCHAR)), ''), {fallback}) WHEN 'mfl' THEN COALESCE(NULLIF(TRIM(CAST(\"mfl_player_id\" AS VARCHAR)), ''), {fallback}) ELSE {fallback} END"
-          key=f"CONCAT_WS('|', CAST(\"db_name\" AS VARCHAR), CAST(\"year\" AS VARCHAR), CAST(\"week\" AS VARCHAR), CAST(\"manager\" AS VARCHAR), CAST(\"team_name\" AS VARCHAR), CAST(\"team_key\" AS VARCHAR), {pid})"
+          key=f"CONCAT_WS('|', CAST(\"db_name\" AS VARCHAR), CAST(\"year\" AS VARCHAR), CAST(\"week\" AS VARCHAR), CAST(\"manager\" AS VARCHAR), CAST(\"team_name\" AS VARCHAR), CAST(\"team_key\" AS VARCHAR), CAST(\"fantasy_position\" AS VARCHAR), {pid})"
           row_hash='CONCAT_WS(\'|\',' + ','.join(f"COALESCE(CAST(\"{c}\" AS VARCHAR), '<NULL>')" for c in canonical) + ')'
           con.execute(f'CREATE TABLE keyed AS SELECT *, {key} AS join_key, {row_hash} AS row_hash FROM source_rows')
           raw_rows=con.execute('SELECT COUNT(*) FROM keyed').fetchone()[0]
@@ -160,7 +160,7 @@ jobs:
           conflict_keys=con.execute('SELECT COUNT(*) FROM (SELECT join_key FROM keyed GROUP BY join_key HAVING COUNT(DISTINCT row_hash)>1)').fetchone()[0]
           con.execute('CREATE TABLE clean AS SELECT * EXCLUDE (join_key,row_hash) FROM keyed WHERE join_key NOT IN (SELECT join_key FROM keyed GROUP BY join_key HAVING COUNT(DISTINCT row_hash)>1) QUALIFY ROW_NUMBER() OVER (PARTITION BY join_key ORDER BY row_hash)=1')
           con.execute("COPY clean TO 'deduped_exact_player.parquet' (FORMAT PARQUET)")
-          report={'read_only':True,'raw_rows':raw_rows,'source_keys':source_keys,'duplicate_keys':duplicate_keys,'conflict_keys_excluded':conflict_keys,'clean_rows':con.execute('SELECT COUNT(*) FROM clean').fetchone()[0],'artifact_files':len(files),'schema_unchanged':True,'cache_mutated':False,'new_lineage':False,'join_key':['db_name','year','week','manager','team_name','team_key','coalesced_player_id']}
+          report={'read_only':True,'raw_rows':raw_rows,'source_keys':source_keys,'duplicate_keys':duplicate_keys,'conflict_keys_excluded':conflict_keys,'clean_rows':con.execute('SELECT COUNT(*) FROM clean').fetchone()[0],'artifact_files':len(files),'schema_unchanged':True,'cache_mutated':False,'new_lineage':False,'join_key':['db_name','year','week','manager','team_name','team_key','fantasy_position','coalesced_player_id']}
           Path('out/source_dedup_report.json').write_text(json.dumps(report,indent=2)+'\n')
           con.close()
           PY
@@ -223,7 +223,7 @@ jobs:
           canonical=['db_name','year','week','NFL_player_id','is_started','is_rostered','fantasy_points','win','champion','clutch_equity','manager_lamar','manager','team_points','final_playoff_seed','is_playoffs','has_po_signal','player','position','fantasy_position','platform','team_key','team_name','nfl_team_api','yahoo_player_id','sleeper_player_id','espn_player_id','fleaflicker_player_id','mfl_player_id','made_playoffs']
           fallback='COALESCE(' + ','.join(f"NULLIF(TRIM(CAST(\"{c}\" AS VARCHAR)), '')" for c in ['NFL_player_id','sleeper_player_id','fleaflicker_player_id','mfl_player_id','espn_player_id','yahoo_player_id']) + ')'
           pid=f"CASE LOWER(NULLIF(TRIM(CAST(\"platform\" AS VARCHAR)), '')) WHEN 'sleeper' THEN COALESCE(NULLIF(TRIM(CAST(\"sleeper_player_id\" AS VARCHAR)), ''), {fallback}) WHEN 'fleaflicker' THEN COALESCE(NULLIF(TRIM(CAST(\"fleaflicker_player_id\" AS VARCHAR)), ''), {fallback}) WHEN 'mfl' THEN COALESCE(NULLIF(TRIM(CAST(\"mfl_player_id\" AS VARCHAR)), ''), {fallback}) ELSE {fallback} END"
-          key=f"CONCAT_WS('|', CAST(\"db_name\" AS VARCHAR), CAST(\"year\" AS VARCHAR), CAST(\"week\" AS VARCHAR), CAST(\"manager\" AS VARCHAR), CAST(\"team_name\" AS VARCHAR), CAST(\"team_key\" AS VARCHAR), {pid})"
+          key=f"CONCAT_WS('|', CAST(\"db_name\" AS VARCHAR), CAST(\"year\" AS VARCHAR), CAST(\"week\" AS VARCHAR), CAST(\"manager\" AS VARCHAR), CAST(\"team_name\" AS VARCHAR), CAST(\"team_key\" AS VARCHAR), CAST(\"fantasy_position\" AS VARCHAR), {pid})"
           row_hash='CONCAT_WS(\'|\',' + ','.join(f"COALESCE(CAST(\"{c}\" AS VARCHAR), '<NULL>')" for c in canonical) + ')'
           con.execute(f'CREATE TABLE keyed AS SELECT *, {key} AS join_key, {row_hash} AS row_hash FROM raw')
           conflicts=con.execute('SELECT COUNT(*) FROM (SELECT join_key FROM keyed GROUP BY join_key HAVING COUNT(DISTINCT row_hash)>1)').fetchone()[0]
