@@ -34,7 +34,7 @@ permissions:
 env:
   # The private token is required for the cross-run artifact API.  Downloads
   # The inspector uses one direct archive request per artifact.
-  GH_TOKEN: ${{ github.token }}
+  GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT || github.token }}
   SINCE: ${{ inputs.since || '2026-07-30T00:00:00Z' }}
   SHARD_COUNT: ${{ inputs.shard_count || '256' }}
   SLICE_INDEX: ${{ inputs.slice_index || '0' }}
