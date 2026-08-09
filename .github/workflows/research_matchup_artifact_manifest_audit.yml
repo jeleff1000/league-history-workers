@@ -32,58 +32,30 @@ jobs:
       manifest_count: ${{ steps.manifest.outputs.count }}
       matrix: ${{ steps.manifest.outputs.matrix }}
     steps:
+      - uses: actions/checkout@v4
       - id: manifest
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p out
           python - <<'PY'
-          import json, os, urllib.request
+          import json, os
           from pathlib import Path
 
-          headers = {
-              'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
-              'Accept': 'application/vnd.github+json',
-              'X-GitHub-Api-Version': '2022-11-28',
-          }
-          since = os.environ['SINCE']
-          items = []
-          page = 1
-          while True:
-              url = f"https://api.github.com/repos/${{ github.repository }}/actions/artifacts?per_page=100&page={page}"
-              req = urllib.request.Request(url, headers=headers)
-              with urllib.request.urlopen(req, timeout=120) as response:
-                  payload = json.load(response)
-              batch = payload.get('artifacts', [])
-              for item in batch:
-                  if item['created_at'] >= since and not item['expired']:
-                      items.append({
-                          'artifact_id': item['id'],
-                          'artifact': item['name'],
-                          'created_at': item['created_at'],
-                          'size_in_bytes': item['size_in_bytes'],
-                          'archive_download_url': item['archive_download_url'],
-                          'workflow_run_id': (item.get('workflow_run') or {}).get('id'),
-                      })
-              if len(batch) < 100:
-                  break
-              page += 1
-          items.sort(key=lambda x: (x['created_at'], x['artifact_id']))
-          before_dedupe = len(items)
-          deduped = {}
-          for item in items:
-              deduped.setdefault(item['artifact_id'], item)
-          items = sorted(deduped.values(), key=lambda x: (x['created_at'], x['artifact_id']))
-          duplicate_count = before_dedupe - len(items)
-          Path('out/artifact_manifest.json').write_text(json.dumps({
+          source = json.loads(Path('audit_manifests/research_matchup_artifact_manifest_20260809.json').read_text())
+          items = source['artifacts']
+          ids = [int(item['artifact_id']) for item in items]
+          if len(items) != 9479 or len(set(ids)) != len(ids):
+              raise SystemExit(f"exact artifact manifest invalid: count={len(items)} unique={len(set(ids))}")
+          manifest = {
+              **source,
               'repo': '${{ github.repository }}',
-              'since': since,
+              'since': os.environ['SINCE'],
               'shard_count': int(os.environ['SHARD_COUNT']),
               'artifact_count': len(items),
-              'duplicate_artifact_entries_removed': duplicate_count,
-              'artifacts': items,
-          }, indent=2, sort_keys=True) + '\n')
-          print(f'manifest artifacts={len(items)} bytes={sum(x["size_in_bytes"] for x in items)}')
+          }
+          Path('out/artifact_manifest.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
+          print(f'manifest artifacts={len(items)} bytes={sum(x["size_in_bytes"] for x in items)} exact_attachment_scope=true')
           print(f"name=research-artifact-manifest-${{ github.run_id }}")
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
               out.write(f"name=research-artifact-manifest-${{ github.run_id }}\n")
@@ -112,6 +84,10 @@ jobs:
           # identically named artifact_audit.json files and corrupts the
           # aggregate audit.
           merge-multiple: false
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-manifest-${{ github.run_id }}
+          path: manifest
       - name: Consolidate and validate complete artifact audit
         shell: bash
         run: |
@@ -120,20 +96,26 @@ jobs:
           import csv, json
           from pathlib import Path
           parts = [json.loads(path.read_text()) for path in sorted(Path('audit_parts').rglob('artifact_audit.json'))]
-          manifest_count = parts[0]['manifest_artifacts'] if parts else 0
+          scope = json.loads(Path('manifest/artifact_manifest.json').read_text())
+          manifest_ids = {int(item['artifact_id']) for item in scope['artifacts']}
+          manifest_count = len(manifest_ids)
           records = [record for part in parts for record in part['results']]
-          ids = [record['artifact_id'] for record in records]
+          ids = [int(record['artifact_id']) for record in records]
           errors = [record for record in records if record.get('status') != 'inspected']
           duplicate_ids = sorted({artifact_id for artifact_id in ids if ids.count(artifact_id) > 1})
+          missing_ids = sorted(manifest_ids - set(ids))
+          out_of_scope_ids = sorted(set(ids) - manifest_ids)
           report = {
               'manifest_artifacts': manifest_count,
               'inspected_records': len(records),
               'inspection_errors': len(errors),
               'duplicate_artifact_ids': duplicate_ids,
-              'complete': len(records) == manifest_count and not errors and not duplicate_ids,
+              'missing_artifact_ids': missing_ids,
+              'out_of_scope_artifact_ids': out_of_scope_ids,
+              'complete': len(records) == manifest_count and not errors and not duplicate_ids and not missing_ids and not out_of_scope_ids,
               'records': sorted(records, key=lambda record: (record['artifact_id'], record.get('artifact', ''))),
           }
-          Path('artifact_audit_complete.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\\n')
+          Path('artifact_audit_complete.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
           with Path('artifact_checklist.csv').open('w', newline='', encoding='utf-8') as handle:
               fields = ['artifact_id','artifact','workflow_run_id','created_at','artifact_status','file','file_type','kind','rows','column_count','columns','missing_canonical','forbidden_columns']
               writer = csv.DictWriter(handle, fieldnames=fields)
