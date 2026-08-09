@@ -1,0 +1,137 @@
+name: Promote canonical research lineage
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_combine_run_id:
+        description: Combined source team-week sidecar run
+        required: true
+        default: "31260290020"
+      player_delta_run_id:
+        description: Validated exact-schema player delta run
+        required: true
+        default: "31283057739"
+
+permissions:
+  contents: read
+  actions: write
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private research code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Capture immutable pre-promotion evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import duckdb, json
+          c=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          out={'player_columns':[r[0] for r in c.execute('describe public.player_fantasy').fetchall()], 'matchup_columns':[r[0] for r in c.execute('describe public.matchup').fetchall()], 'player_rows':c.execute('select count(*) from public.player_fantasy').fetchone()[0], 'matchup_rows':c.execute('select count(*) from public.matchup').fetchone()[0], 'league_settings_rows':c.execute('select count(*) from public.league_settings').fetchone()[0]}
+          json.dump(out, open('pre_promotion.json','w'), indent=2)
+          c.close()
+          PY
+      - name: Download validated sidecars
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source player_deltas
+          gh run download '${{ inputs.source_combine_run_id }}' --repo '${{ github.repository }}' --pattern 'research-source-matchup-rescue-combined-*' --dir source
+          gh run download '${{ inputs.player_delta_run_id }}' --repo '${{ github.repository }}' --pattern 'promotable-rescue-delta-*' --dir player_deltas
+          test "$(find source -name 'source_matchup_rescue.parquet' | wc -l)" -eq 1
+          test "$(find player_deltas -name 'promotable_delta.parquet' | wc -l)" -eq 15
+      - name: Materialize sidecar databases
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE=$(find source -name 'source_matchup_rescue.parquet' | head -1)
+          python - "$SOURCE" <<'PY'
+          import duckdb, sys
+          source=sys.argv[1]
+          c=duckdb.connect('overlay_source_matchup_rescue.duckdb'); c.execute('create schema public'); c.execute('create table public.source_matchup_rescue as select * from read_parquet(?)',[source]); c.close()
+          c=duckdb.connect('overlay_outcome_targets.duckdb'); c.execute('create schema public'); c.execute('''create table public.outcome_targets (db_name varchar, year integer, week integer, NFL_player_id varchar, win integer, team_points double)'''); c.close()
+          PY
+      - name: Apply exact player deltas
+        shell: bash
+        run: |
+          set -euo pipefail
+          python code/scripts/research_cohorts/apply_player_sidecar_delta.py --base research_public_lake/corpus_snapshot.duckdb --sidecars player_deltas --pattern 'promotable_delta.parquet' --out player_delta_candidate.duckdb
+      - name: Apply corrected source team-week fan-out
+        shell: bash
+        run: |
+          set -euo pipefail
+          python code/scripts/research_cohorts/merge_research_sidecars.py --base player_delta_candidate.duckdb --out merged_corpus_snapshot.duckdb --outcomes overlay_outcome_targets.duckdb --matchups overlay_source_matchup_rescue.duckdb
+          cp merged_corpus_snapshot.duckdb research_public_lake/corpus_snapshot.duckdb
+      - name: Fail-closed final validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
+          python - <<'PY'
+          import duckdb, json
+          expected=['db_name','year','week','NFL_player_id','is_started','is_rostered','fantasy_points','win','champion','clutch_equity','manager_lamar','manager','team_points','final_playoff_seed','is_playoffs','has_po_signal','player','position','fantasy_position','platform','team_key','team_name','nfl_team_api','yahoo_player_id','sleeper_player_id','espn_player_id','fleaflicker_player_id','mfl_player_id','made_playoffs']
+          c=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True); p=[r[0] for r in c.execute('describe public.player_fantasy').fetchall()]; m=[r[0] for r in c.execute('describe public.matchup').fetchall()]
+          if p != expected: raise SystemExit({'player_schema':p})
+          if len(m) != 59: raise SystemExit({'matchup_column_count':len(m),'matchup_columns':m})
+          if set(p) & {'loss','tie','opponent_points','is_championship','is_active','is_playoffs_bf','made_po_bf','made_po'}: raise SystemExit('forbidden player column')
+          json.dump({'player_rows':c.execute('select count(*) from public.player_fantasy').fetchone()[0], 'matchup_rows':c.execute('select count(*) from public.matchup').fetchone()[0], 'player_columns':p, 'matchup_column_count':len(m)}, open('post_promotion.json','w'), indent=2); c.close()
+          PY
+          cmp ops_before.sha256 <(sha256sum research_public_lake/ops_cache.duckdb)
+      - name: Publish promotion evidence before cache replacement
+        uses: actions/upload-artifact@v4
+        with:
+          name: canonical-promotion-evidence-${{ github.run_id }}
+          path: |
+            pre_promotion.json
+            post_promotion.json
+            ops_before.sha256
+            player_delta_candidate.json
+            merged_corpus_snapshot.duckdb
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
+      - name: Replace only the exact canonical cache key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${ids[0]}"
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+      - name: Verify canonical cache exists under the same key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          echo "canonical_cache_key=${CANONICAL_CACHE_KEY} cache_id=${ids[0]}"
