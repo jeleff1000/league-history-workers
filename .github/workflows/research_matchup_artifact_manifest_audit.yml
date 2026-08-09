@@ -26,6 +26,14 @@ on:
         description: Audit only artifacts not verified by the prior exact audit
         required: true
         default: 'false'
+      retry_artifact_ids:
+        description: Comma-separated artifact IDs to retry; overrides the normal manifest scope
+        required: false
+        default: ''
+      base_run_id:
+        description: Prior audit run whose aggregate report should be repaired
+        required: false
+        default: ''
 
 permissions:
   actions: read
@@ -40,6 +48,8 @@ env:
   SLICE_INDEX: ${{ inputs.slice_index || '0' }}
   SLICE_COUNT: ${{ inputs.slice_count || '2' }}
   RESUME_ONLY_UNVERIFIED: ${{ inputs.resume_only_unverified || 'true' }}
+  RETRY_ARTIFACT_IDS: ${{ inputs.retry_artifact_ids || '' }}
+  BASE_RUN_ID: ${{ inputs.base_run_id || '' }}
   EVENT_NAME: ${{ github.event_name }}
 
 jobs:
@@ -79,6 +89,9 @@ jobs:
               if len(resume_ids) != 5671:
                   raise SystemExit(f"unverified resume manifest invalid: {len(resume_ids)}")
               all_items = [item for item in all_items if int(item['artifact_id']) in resume_ids]
+          retry_ids = {int(value.strip()) for value in os.environ['RETRY_ARTIFACT_IDS'].split(',') if value.strip()}
+          if retry_ids:
+              all_items = [item for item in all_items if int(item['artifact_id']) in retry_ids]
           # Balance by compressed artifact size rather than artifact-id modulo.
           # Modulo assignment can strand multi-GB snapshots in a few shards and
           # leave the exact-manifest audit appearing stalled.  This remains
@@ -132,6 +145,15 @@ jobs:
           # identically named artifact_audit.json files and corrupts the
           # aggregate audit.
           merge-multiple: false
+          github-token: ${{ secrets.PRIVATE_REPO_PAT || github.token }}
+      - uses: actions/download-artifact@v5
+        if: ${{ inputs.base_run_id != '' }}
+        with:
+          name: research-artifact-audit-complete-${{ inputs.base_run_id }}
+          path: base_audit
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.base_run_id }}
+          github-token: ${{ secrets.PRIVATE_REPO_PAT || github.token }}
       - uses: actions/download-artifact@v5
         with:
           name: research-artifact-manifest-${{ github.run_id }}
@@ -144,10 +166,20 @@ jobs:
           import csv, json
           from pathlib import Path
           parts = [json.loads(path.read_text()) for path in sorted(Path('audit_parts').rglob('artifact_audit.json'))]
-          scope = json.loads(Path('manifest/artifact_manifest.json').read_text())
-          manifest_ids = {int(item['artifact_id']) for item in scope['artifacts']}
-          manifest_count = len(manifest_ids)
-          records = [record for part in parts for record in part['results']]
+          retry_records = [record for part in parts for record in part['results']]
+          base_path = Path('base_audit/artifact_audit_complete.json')
+          if base_path.exists():
+              base_report = json.loads(base_path.read_text())
+              manifest_count = int(base_report['manifest_artifacts'])
+              by_id = {int(record['artifact_id']): record for record in base_report['records']}
+              by_id.update({int(record['artifact_id']): record for record in retry_records})
+              records = list(by_id.values())
+              manifest_ids = set(by_id)
+          else:
+              scope = json.loads(Path('manifest/artifact_manifest.json').read_text())
+              manifest_ids = {int(item['artifact_id']) for item in scope['artifacts']}
+              manifest_count = len(manifest_ids)
+              records = retry_records
           ids = [int(record['artifact_id']) for record in records]
           errors = [record for record in records if record.get('status') != 'inspected']
           duplicate_ids = sorted({artifact_id for artifact_id in ids if ids.count(artifact_id) > 1})
