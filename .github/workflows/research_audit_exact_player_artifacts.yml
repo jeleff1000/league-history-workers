@@ -1,6 +1,9 @@
 name: Audit exact player artifacts against canonical cache
 
 on:
+  push:
+    paths:
+      - 'audit_manifests/exact-player-audit-trigger.txt'
   workflow_dispatch:
     inputs:
       audit_run_id:
@@ -21,9 +24,9 @@ permissions:
   actions: read
 
 env:
-  AUDIT_RUN_ID: ${{ inputs.audit_run_id }}
-  BASE_CACHE_KEY: ${{ inputs.base_cache_key }}
-  SHARD_COUNT: ${{ inputs.shard_count }}
+  AUDIT_RUN_ID: ${{ inputs.audit_run_id || '31337901490' }}
+  BASE_CACHE_KEY: ${{ inputs.base_cache_key || 'research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613' }}
+  SHARD_COUNT: ${{ inputs.shard_count || '15' }}
 
 jobs:
   manifest:
