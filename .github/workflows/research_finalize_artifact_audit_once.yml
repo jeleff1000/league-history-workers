@@ -66,12 +66,12 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
-          import json
+          import json, os
           from pathlib import Path
           report=json.loads(Path('artifact_audit_complete.json').read_text())
           summary=f"{report['manifest_artifacts']}-{report['inspected_records']}-{report['inspection_errors']}-{len(report['duplicate_artifact_ids'])}"
           print(summary)
-          with open('${GITHUB_OUTPUT}','a') as handle:
+          with open(os.environ['GITHUB_OUTPUT'],'a') as handle:
               handle.write('summary=' + summary + '\\n')
           PY
 
