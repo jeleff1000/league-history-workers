@@ -188,10 +188,13 @@ jobs:
               writer=csv.DictWriter(fh, fieldnames=fields); writer.writeheader()
               for rec in results: writer.writerow({k:rec.get(k,'') for k in fields})
           if failures:
+              for failure in failures[:25]:
+                  print(f"artifact_failure id={failure.get('artifact_id')} name={failure.get('artifact')} error={failure.get('error')}", flush=True)
               raise SystemExit(f'{len(failures)} artifact inspections failed')
           print(f'inspected {len(results)} artifacts on shard {shard}/{count}')
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: research-artifact-audit-${{ github.run_id }}-${{ matrix.shard_index }}
           path: out/*
