@@ -2,3 +2,4 @@
 packaging-fixed
 player-id-fallback-fixed
 source-conflicts-quarantined
+fieldwise-merge-fixed
