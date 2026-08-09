@@ -46,6 +46,14 @@ jobs:
           import duckdb
           con = duckdb.connect()
           con.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          status_counts = con.execute("SELECT is_rostered, COUNT(*) AS rows FROM lake.public.player_fantasy GROUP BY is_rostered ORDER BY is_rostered").fetchall()
+          print('global_is_rostered_counts=', status_counts)
+          explicit_zero_columns = [r[0] for r in con.execute('DESCRIBE lake.public.player_fantasy').fetchall()]
+          explicit_zero_query = 'SELECT * FROM lake.public.player_fantasy WHERE is_rostered = 0 LIMIT 5'
+          explicit_zero_rows = con.execute(explicit_zero_query).fetchall()
+          print('global_explicit_zero_sample_count=', len(explicit_zero_rows))
+          for values in explicit_zero_rows:
+              print('global_explicit_zero', {k: v for k, v in zip(explicit_zero_columns, values) if v is not None})
           available = {r[0] for r in con.execute("DESCRIBE lake.public.player_fantasy").fetchall()}
           wanted = ['db_name','league_id','year','week','player','NFL_player_id','platform','manager','manager_guid','franchise_id','team_key','team_name','opponent','fantasy_position','is_started','is_rostered','is_bye_week','win','loss','tie','team_points','opponent_points','margin','fantasy_points','clutch_equity','is_playoffs','is_playoffs_bf','has_po_signal','is_championship','championship','champion','playoff_round','playoff_seed','final_playoff_seed','team_made_playoffs']
           selected = [c for c in wanted if c in available]
