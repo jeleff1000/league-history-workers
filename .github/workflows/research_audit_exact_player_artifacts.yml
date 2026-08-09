@@ -1,0 +1,252 @@
+name: Audit exact player artifacts against canonical cache
+
+on:
+  workflow_dispatch:
+    inputs:
+      audit_run_id:
+        description: Exact 9,479-artifact audit run containing the checklist
+        required: true
+        default: "31337901490"
+      base_cache_key:
+        description: Frozen canonical research cache key
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+      shard_count:
+        description: Number of artifact download/compare shards
+        required: true
+        default: "15"
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  AUDIT_RUN_ID: ${{ inputs.audit_run_id }}
+  BASE_CACHE_KEY: ${{ inputs.base_cache_key }}
+  SHARD_COUNT: ${{ inputs.shard_count }}
+
+jobs:
+  manifest:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Download completed artifact checklist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p audit
+          gh run download "$AUDIT_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "research-artifact-audit-complete-$AUDIT_RUN_ID" --dir audit
+          test -s audit/artifact_checklist.csv
+      - id: select
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv, json, os
+          from pathlib import Path
+          shard_count = int(os.environ['SHARD_COUNT'])
+          selected = {}
+          with Path('audit/artifact_checklist.csv').open(newline='', encoding='utf-8') as fh:
+              for row in csv.DictReader(fh):
+                  if row.get('kind') != 'exact_canonical_player':
+                      continue
+                  aid = int(row['artifact_id'])
+                  selected[aid] = {
+                      'artifact_id': aid,
+                      'artifact': row['artifact'],
+                      'workflow_run_id': int(row['workflow_run_id']),
+                  }
+          if len(selected) != 120:
+              raise SystemExit(f'exact player artifact count changed: {len(selected)}')
+          buckets = [[] for _ in range(shard_count)]
+          for item in sorted(selected.values(), key=lambda x: x['artifact_id']):
+              buckets[item['artifact_id'] % shard_count].append(item)
+          Path('audit/exact_player_shards.json').write_text(json.dumps(buckets, indent=2) + '\n')
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              out.write('matrix=' + json.dumps(list(range(shard_count)), separators=(',', ':')) + '\n')
+          print(json.dumps({'exact_artifacts': len(selected), 'shards': [len(x) for x in buckets]}))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-player-shard-manifest-${{ github.run_id }}
+          path: audit/exact_player_shards.json
+          retention-days: 30
+
+  inspect:
+    needs: manifest
+    strategy:
+      fail-fast: true
+      max-parallel: 15
+      matrix:
+        shard_index: ${{ fromJSON(needs.manifest.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private research code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.BASE_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - uses: actions/download-artifact@v5
+        with:
+          name: exact-player-shard-manifest-${{ github.run_id }}
+          path: audit
+      - name: Download assigned exact player artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p raw
+          python - "$GITHUB_WORKSPACE/audit/exact_player_shards.json" '${{ matrix.shard_index }}' <<'PY'
+          import json, os, subprocess, sys
+          items = json.loads(open(sys.argv[1], encoding='utf-8').read())[int(sys.argv[2])]
+          for item in items:
+              target = os.path.join('raw', str(item['artifact_id']))
+              os.makedirs(target, exist_ok=True)
+              subprocess.run([
+                  'gh', 'run', 'download', str(item['workflow_run_id']),
+                  '--repo', os.environ['GITHUB_REPOSITORY'],
+                  '--name', item['artifact'], '--dir', target,
+              ], check=True)
+          print(f'downloaded={len(items)}')
+          PY
+      - name: Deduplicate source rows and compare this shard read-only
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          import duckdb
+
+          canonical = ['db_name','year','week','NFL_player_id','is_started','is_rostered','fantasy_points','win','champion','clutch_equity','manager_lamar','manager','team_points','final_playoff_seed','is_playoffs','has_po_signal','player','position','fantasy_position','platform','team_key','team_name','nfl_team_api','yahoo_player_id','sleeper_player_id','espn_player_id','fleaflicker_player_id','mfl_player_id','made_playoffs']
+          files=[]
+          for path in sorted(Path('raw').rglob('*.parquet')):
+              con=duckdb.connect()
+              cols=[r[0] for r in con.execute('DESCRIBE SELECT * FROM read_parquet(?)',[str(path)]).fetchall()]
+              con.close()
+              if cols == canonical: files.append(str(path))
+          if not files: raise SystemExit('no exact canonical parquet files downloaded')
+          con=duckdb.connect('source_dedup.duckdb')
+          con.execute('CREATE TABLE source_rows AS SELECT * FROM read_parquet(?, union_by_name=false)', [files])
+          fallback='COALESCE(' + ','.join(f"NULLIF(TRIM(CAST(\"{c}\" AS VARCHAR)), '')" for c in ['NFL_player_id','sleeper_player_id','fleaflicker_player_id','mfl_player_id','espn_player_id','yahoo_player_id']) + ')'
+          pid=f"CASE LOWER(NULLIF(TRIM(CAST(\"platform\" AS VARCHAR)), '')) WHEN 'sleeper' THEN COALESCE(NULLIF(TRIM(CAST(\"sleeper_player_id\" AS VARCHAR)), ''), {fallback}) WHEN 'fleaflicker' THEN COALESCE(NULLIF(TRIM(CAST(\"fleaflicker_player_id\" AS VARCHAR)), ''), {fallback}) WHEN 'mfl' THEN COALESCE(NULLIF(TRIM(CAST(\"mfl_player_id\" AS VARCHAR)), ''), {fallback}) ELSE {fallback} END"
+          key=f"CONCAT_WS('|', CAST(\"db_name\" AS VARCHAR), CAST(\"year\" AS VARCHAR), CAST(\"week\" AS VARCHAR), CAST(\"manager\" AS VARCHAR), CAST(\"team_name\" AS VARCHAR), CAST(\"team_key\" AS VARCHAR), {pid})"
+          row_hash='CONCAT_WS(\'|\',' + ','.join(f"COALESCE(CAST(\"{c}\" AS VARCHAR), '<NULL>')" for c in canonical) + ')'
+          con.execute(f'CREATE TABLE keyed AS SELECT *, {key} AS join_key, {row_hash} AS row_hash FROM source_rows')
+          raw_rows=con.execute('SELECT COUNT(*) FROM keyed').fetchone()[0]
+          source_keys=con.execute('SELECT COUNT(DISTINCT join_key) FROM keyed').fetchone()[0]
+          duplicate_keys=con.execute('SELECT COUNT(*) FROM (SELECT join_key FROM keyed GROUP BY join_key HAVING COUNT(*)>1)').fetchone()[0]
+          conflict_keys=con.execute('SELECT COUNT(*) FROM (SELECT join_key FROM keyed GROUP BY join_key HAVING COUNT(DISTINCT row_hash)>1)').fetchone()[0]
+          con.execute('CREATE TABLE clean AS SELECT * EXCLUDE (join_key,row_hash) FROM keyed WHERE join_key NOT IN (SELECT join_key FROM keyed GROUP BY join_key HAVING COUNT(DISTINCT row_hash)>1) QUALIFY ROW_NUMBER() OVER (PARTITION BY join_key ORDER BY row_hash)=1')
+          con.execute("COPY clean TO 'deduped_exact_player.parquet' (FORMAT PARQUET)")
+          report={'read_only':True,'raw_rows':raw_rows,'source_keys':source_keys,'duplicate_keys':duplicate_keys,'conflict_keys_excluded':conflict_keys,'clean_rows':con.execute('SELECT COUNT(*) FROM clean').fetchone()[0],'artifact_files':len(files),'schema_unchanged':True,'cache_mutated':False,'new_lineage':False,'join_key':['db_name','year','week','manager','team_name','team_key','coalesced_player_id']}
+          Path('out/source_dedup_report.json').write_text(json.dumps(report,indent=2)+'\n')
+          con.close()
+          PY
+          python code/scripts/research_cohorts/validate_player_sidecar_delta.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --sidecar deduped_exact_player.parquet \
+            --out-dir out --shard-index 0 --shard-count 1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('out/player_delta_report.json'); r=json.loads(p.read_text()); r.update(json.loads(Path('out/source_dedup_report.json').read_text())); p.write_text(json.dumps(r,indent=2)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-player-audit-${{ github.run_id }}-${{ matrix.shard_index }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 30
+
+  aggregate:
+    needs: inspect
+    if: ${{ always() && needs.inspect.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private research code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.BASE_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: exact-player-audit-${{ github.run_id }}-*
+          path: reports
+          merge-multiple: false
+      - name: Aggregate unique candidates and final cache comparison
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import duckdb
+          reports=sorted(Path('reports').rglob('player_delta_report.json'))
+          dedups=sorted(Path('reports').rglob('deduped_exact_player.parquet'))
+          if not reports or not dedups: raise SystemExit('missing shard audit outputs')
+          con=duckdb.connect('global_candidate.duckdb')
+          con.execute('CREATE TABLE raw AS SELECT * FROM read_parquet(?)',[ [str(p) for p in dedups] ])
+          cols=[r[0] for r in con.execute('DESCRIBE raw').fetchall()]
+          canonical=['db_name','year','week','NFL_player_id','is_started','is_rostered','fantasy_points','win','champion','clutch_equity','manager_lamar','manager','team_points','final_playoff_seed','is_playoffs','has_po_signal','player','position','fantasy_position','platform','team_key','team_name','nfl_team_api','yahoo_player_id','sleeper_player_id','espn_player_id','fleaflicker_player_id','mfl_player_id','made_playoffs']
+          fallback='COALESCE(' + ','.join(f"NULLIF(TRIM(CAST(\"{c}\" AS VARCHAR)), '')" for c in ['NFL_player_id','sleeper_player_id','fleaflicker_player_id','mfl_player_id','espn_player_id','yahoo_player_id']) + ')'
+          pid=f"CASE LOWER(NULLIF(TRIM(CAST(\"platform\" AS VARCHAR)), '')) WHEN 'sleeper' THEN COALESCE(NULLIF(TRIM(CAST(\"sleeper_player_id\" AS VARCHAR)), ''), {fallback}) WHEN 'fleaflicker' THEN COALESCE(NULLIF(TRIM(CAST(\"fleaflicker_player_id\" AS VARCHAR)), ''), {fallback}) WHEN 'mfl' THEN COALESCE(NULLIF(TRIM(CAST(\"mfl_player_id\" AS VARCHAR)), ''), {fallback}) ELSE {fallback} END"
+          key=f"CONCAT_WS('|', CAST(\"db_name\" AS VARCHAR), CAST(\"year\" AS VARCHAR), CAST(\"week\" AS VARCHAR), CAST(\"manager\" AS VARCHAR), CAST(\"team_name\" AS VARCHAR), CAST(\"team_key\" AS VARCHAR), {pid})"
+          row_hash='CONCAT_WS(\'|\',' + ','.join(f"COALESCE(CAST(\"{c}\" AS VARCHAR), '<NULL>')" for c in canonical) + ')'
+          con.execute(f'CREATE TABLE keyed AS SELECT *, {key} AS join_key, {row_hash} AS row_hash FROM raw')
+          conflicts=con.execute('SELECT COUNT(*) FROM (SELECT join_key FROM keyed GROUP BY join_key HAVING COUNT(DISTINCT row_hash)>1)').fetchone()[0]
+          con.execute('CREATE TABLE clean AS SELECT * EXCLUDE (join_key,row_hash) FROM keyed WHERE join_key NOT IN (SELECT join_key FROM keyed GROUP BY join_key HAVING COUNT(DISTINCT row_hash)>1) QUALIFY ROW_NUMBER() OVER (PARTITION BY join_key ORDER BY row_hash)=1')
+          con.execute("COPY clean TO 'global_exact_player_candidate.parquet' (FORMAT PARQUET)")
+          out={'shards':len(reports),'raw_candidate_rows':con.execute('SELECT COUNT(*) FROM raw').fetchone()[0],'unique_candidate_keys':con.execute('SELECT COUNT(DISTINCT join_key) FROM keyed').fetchone()[0],'global_conflict_keys_excluded':conflicts,'clean_candidate_rows':con.execute('SELECT COUNT(*) FROM clean').fetchone()[0],'schema_unchanged':True,'cache_mutated':False,'new_lineage':False}
+          Path('exact_player_audit_summary.json').write_text(json.dumps(out,indent=2)+'\n')
+          con.close()
+          PY
+          python code/scripts/research_cohorts/validate_player_sidecar_delta.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --sidecar global_exact_player_candidate.parquet \
+            --out-dir final --shard-index 0 --shard-count 1
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          a=json.loads(Path('exact_player_audit_summary.json').read_text()); b=json.loads(Path('final/player_delta_report.json').read_text()); a['cache_comparison']=b; Path('exact_player_audit_summary.json').write_text(json.dumps(a,indent=2)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-player-cache-comparison-${{ github.run_id }}
+          path: |
+            exact_player_audit_summary.json
+            final/player_delta_report.json
+            global_exact_player_candidate.parquet
+            final/promotable_player_delta.parquet
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
