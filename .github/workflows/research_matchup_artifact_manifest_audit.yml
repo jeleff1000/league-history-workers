@@ -1,6 +1,9 @@
 name: Audit every research matchup artifact from one manifest
 
 on:
+  push:
+    paths:
+      - 'audit_manifests/exact-audit-trigger.txt'
   workflow_dispatch:
     inputs:
       since:
@@ -34,12 +37,14 @@ env:
   GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
   SINCE: ${{ inputs.since }}
   SHARD_COUNT: ${{ inputs.shard_count }}
-  SLICE_INDEX: ${{ inputs.slice_index }}
-  SLICE_COUNT: ${{ inputs.slice_count }}
-  RESUME_ONLY_UNVERIFIED: ${{ inputs.resume_only_unverified }}
+  SLICE_INDEX: ${{ inputs.slice_index || '0' }}
+  SLICE_COUNT: ${{ inputs.slice_count || '2' }}
+  RESUME_ONLY_UNVERIFIED: ${{ inputs.resume_only_unverified || 'true' }}
+  EVENT_NAME: ${{ github.event_name }}
 
 jobs:
   manifest:
+    if: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, '[exact-audit-slice') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:
@@ -64,6 +69,8 @@ jobs:
               raise SystemExit(f"exact artifact manifest invalid: count={len(all_items)} unique={len(set(all_ids))}")
           slice_index = int(os.environ['SLICE_INDEX'])
           slice_count = int(os.environ['SLICE_COUNT'])
+          if os.environ['EVENT_NAME'] == 'push':
+              slice_index = int(Path('audit_manifests/exact-audit-trigger.txt').read_text().strip())
           if not 0 <= slice_index < slice_count:
               raise SystemExit(f"invalid slice {slice_index}/{slice_count}")
           if os.environ['RESUME_ONLY_UNVERIFIED'].lower() == 'true':
