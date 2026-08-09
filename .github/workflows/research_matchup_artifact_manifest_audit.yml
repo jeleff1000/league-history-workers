@@ -236,6 +236,10 @@ jobs:
           root = Path('work'); root.mkdir(exist_ok=True)
           results = []
           failures = []
+          class NoAuthRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return urllib.request.Request(newurl, headers={'Accept': 'application/octet-stream'})
+          opener = urllib.request.build_opener(NoAuthRedirect)
           for item in selected:
               rec = {k: item.get(k) for k in ('artifact_id','artifact','created_at','size_in_bytes','workflow_run_id')}
               rec['shard_index'] = shard
@@ -251,7 +255,7 @@ jobs:
                       },
                   )
                   archive = target / 'artifact.zip'
-                  with urllib.request.urlopen(request, timeout=300) as response, archive.open('wb') as handle:
+                  with opener.open(request, timeout=300) as response, archive.open('wb') as handle:
                       shutil.copyfileobj(response, handle)
                   with zipfile.ZipFile(archive) as bundle:
                       bundle.extractall(target / 'unzipped')
