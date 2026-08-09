@@ -1,0 +1,76 @@
+name: Research Validate Player Sidecar
+
+on:
+  workflow_dispatch:
+    inputs:
+      sidecar_run_id:
+        description: GitHub Actions run containing the exact-schema player sidecar
+        required: true
+      sidecar_artifact:
+        description: Artifact name containing the player sidecar parquet
+        required: true
+      base_cache_key:
+        description: Frozen canonical research cache key
+        required: true
+      shard_count:
+        description: Number of deterministic validation shards
+        required: false
+        default: "15"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate:
+    strategy:
+      fail-fast: true
+      matrix:
+        shard_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout private pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Restore frozen canonical cache read-only
+        uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.base_cache_key }}
+          fail-on-cache-miss: true
+      - name: Download exact player sidecar
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p sidecar
+          gh run download '${{ inputs.sidecar_run_id }}' \
+            --repo '${{ github.repository }}' \
+            --name '${{ inputs.sidecar_artifact }}' \
+            --dir sidecar
+          SIDECAR=$(find sidecar -type f -name '*.parquet' | head -1)
+          test -s "$SIDECAR"
+          echo "SIDECAR=$SIDECAR" >> "$GITHUB_ENV"
+      - name: Validate exact schema and unique player keys
+        run: |
+          mkdir -p out
+          python code/scripts/research_cohorts/validate_player_sidecar_delta.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --sidecar "$SIDECAR" \
+            --out-dir out \
+            --shard-index '${{ matrix.shard_index }}' \
+            --shard-count '${{ inputs.shard_count }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: player-sidecar-delta-${{ github.run_id }}-${{ matrix.shard_index }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 30
