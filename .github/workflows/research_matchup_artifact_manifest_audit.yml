@@ -112,7 +112,7 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json
+          import csv, json
           from pathlib import Path
           parts = [json.loads(path.read_text()) for path in sorted(Path('audit_parts').glob('artifact_audit.json'))]
           manifest_count = parts[0]['manifest_artifacts'] if parts else 0
@@ -129,6 +129,28 @@ jobs:
               'records': sorted(records, key=lambda record: (record['artifact_id'], record.get('artifact', ''))),
           }
           Path('artifact_audit_complete.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\\n')
+          with Path('artifact_checklist.csv').open('w', newline='', encoding='utf-8') as handle:
+              fields = ['artifact_id','artifact','workflow_run_id','created_at','artifact_status','file','file_type','kind','rows','column_count','columns','missing_canonical','forbidden_columns']
+              writer = csv.DictWriter(handle, fieldnames=fields)
+              writer.writeheader()
+              for record in report['records']:
+                  files = record.get('files') or [{}]
+                  for file_record in files:
+                      writer.writerow({
+                          'artifact_id': record.get('artifact_id'),
+                          'artifact': record.get('artifact'),
+                          'workflow_run_id': record.get('workflow_run_id'),
+                          'created_at': record.get('created_at'),
+                          'artifact_status': record.get('status'),
+                          'file': file_record.get('file'),
+                          'file_type': file_record.get('type'),
+                          'kind': file_record.get('kind'),
+                          'rows': file_record.get('rows'),
+                          'column_count': file_record.get('column_count'),
+                          'columns': json.dumps(file_record.get('columns', []), separators=(',', ':')),
+                          'missing_canonical': json.dumps(file_record.get('missing_canonical', []), separators=(',', ':')),
+                          'forbidden_columns': json.dumps(file_record.get('forbidden_columns', []), separators=(',', ':')),
+                      })
           print(json.dumps({k: report[k] for k in ('manifest_artifacts','inspected_records','inspection_errors','complete')}))
           if not report['complete']:
               raise SystemExit('complete artifact audit failed: every artifact was not successfully inspected')
@@ -137,7 +159,9 @@ jobs:
         if: always()
         with:
           name: research-artifact-audit-complete-${{ github.run_id }}
-          path: artifact_audit_complete.json
+          path: |
+            artifact_audit_complete.json
+            artifact_checklist.csv
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
