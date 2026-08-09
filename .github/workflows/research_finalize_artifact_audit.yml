@@ -23,7 +23,7 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ github.token }}
-          pattern: research-artifact-audit-${{ inputs.source_run_id }}-*
+          pattern: research-artifact-audit-${{ inputs.source_run_id }}-[0-9]*
           path: audit_parts
           merge-multiple: false
       - name: Consolidate and validate complete artifact audit
@@ -35,6 +35,9 @@ jobs:
           from pathlib import Path
           paths = sorted(Path('audit_parts').rglob('artifact_audit.json'))
           print(f'downloaded_inspector_json_files={len(paths)}')
+          expected = 256
+          if len(paths) != expected:
+              raise SystemExit(f'expected {expected} inspector result files, found {len(paths)}')
           parts = [json.loads(path.read_text()) for path in paths]
           if not parts:
               raise SystemExit('no inspector artifacts downloaded')
