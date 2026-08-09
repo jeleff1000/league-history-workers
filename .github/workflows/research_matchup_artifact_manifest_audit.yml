@@ -199,6 +199,12 @@ jobs:
           from pathlib import Path
           import duckdb
 
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          api_opener = urllib.request.build_opener(NoRedirect)
+
           manifest = json.loads(Path('manifest/artifact_manifest.json').read_text())
           shard = int('${{ matrix.shard_index }}')
           count = int(manifest['shard_count'])
@@ -230,7 +236,7 @@ jobs:
                       # The API redirects to Azure Blob Storage. Do not forward
                       # the GitHub bearer token to the blob host.
                       try:
-                          response = urllib.request.urlopen(request, timeout=120)
+                          response = api_opener.open(request, timeout=120)
                       except urllib.error.HTTPError as exc:
                           if exc.code not in (301, 302, 303, 307, 308):
                               raise
