@@ -70,6 +70,26 @@ jobs:
           ORDER BY NFL_player_id
           """
           print('elite_null_summary=', con.execute(elite_query).fetchall())
+          player_pivot = """
+          SELECT player,
+                 COUNT(*) AS rows,
+                 COUNT(DISTINCT db_name) AS leagues,
+                 COUNT(*) FILTER (WHERE manager IS NOT NULL AND TRIM(manager) != '') AS with_manager,
+                 COUNT(*) FILTER (WHERE is_started = 1) AS starts,
+                 COUNT(*) FILTER (WHERE team_points IS NOT NULL) AS with_team_points,
+                 COUNT(*) FILTER (WHERE win IS NOT NULL) AS with_win,
+                 COUNT(*) FILTER (WHERE manager_lamar IS NOT NULL) AS with_manager_lamar
+          FROM lake.public.player_fantasy
+          WHERE is_rostered IS NULL AND player IS NOT NULL AND TRIM(player) != ''
+          GROUP BY player
+          """
+          pivot = con.execute(player_pivot).fetchdf()
+          print('null_distinct_player_count=', len(pivot))
+          print('null_player_league_quantiles=', pivot['leagues'].quantile([0,.25,.5,.75,.9,.99,1]).to_dict())
+          print('null_player_row_quantiles=', pivot['rows'].quantile([0,.25,.5,.75,.9,.99,1]).to_dict())
+          print('null_players_top_by_leagues=', pivot.sort_values(['leagues','rows'], ascending=False).head(50).to_dict('records'))
+          print('null_players_top_by_starts=', pivot.sort_values(['starts','leagues'], ascending=False).head(50).to_dict('records'))
+          print('null_players_bottom_by_leagues=', pivot.sort_values(['leagues','rows'], ascending=True).head(50).to_dict('records'))
           available = {r[0] for r in con.execute("DESCRIBE lake.public.player_fantasy").fetchall()}
           wanted = ['db_name','league_id','year','week','player','NFL_player_id','platform','manager','manager_guid','franchise_id','team_key','team_name','opponent','fantasy_position','is_started','is_rostered','is_bye_week','win','loss','tie','team_points','opponent_points','margin','fantasy_points','clutch_equity','is_playoffs','is_playoffs_bf','has_po_signal','is_championship','championship','champion','playoff_round','playoff_seed','final_playoff_seed','team_made_playoffs']
           selected = [c for c in wanted if c in available]
