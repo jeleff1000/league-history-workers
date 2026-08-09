@@ -217,7 +217,7 @@ jobs:
           from pathlib import Path
           import duckdb
           reports=sorted(Path('reports').rglob('player_delta_report.json'))
-          dedups=sorted(Path('reports').rglob('deduped_exact_player.parquet'))
+          dedups=sorted(Path('reports').rglob('promotable_player_delta.parquet'))
           if not reports or not dedups: raise SystemExit('missing shard audit outputs')
           con=duckdb.connect('global_candidate.duckdb')
           con.execute('CREATE TABLE raw AS SELECT * FROM read_parquet(?)',[ [str(p) for p in dedups] ])
