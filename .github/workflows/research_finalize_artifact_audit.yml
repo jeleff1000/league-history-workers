@@ -33,7 +33,9 @@ jobs:
           python - <<'PY'
           import csv, json
           from pathlib import Path
-          parts = [json.loads(path.read_text()) for path in sorted(Path('audit_parts').glob('*/artifact_audit.json'))]
+          paths = sorted(Path('audit_parts').rglob('artifact_audit.json'))
+          print(f'downloaded_inspector_json_files={len(paths)}')
+          parts = [json.loads(path.read_text()) for path in paths]
           if not parts:
               raise SystemExit('no inspector artifacts downloaded')
           manifest_count = parts[0]['manifest_artifacts']
