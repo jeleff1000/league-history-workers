@@ -5,6 +5,9 @@ name: Discover canonical player identity key
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - "audit_triggers/exact-key-discovery.txt"
 
 permissions:
   contents: read
@@ -34,5 +37,4 @@ jobs:
           name: player-identity-key-discovery-${{ github.run_id }}
           path: player_identity_key_discovery.json
           retention-days: 30
-
 
