@@ -194,7 +194,7 @@ jobs:
     needs: manifest
     strategy:
       fail-fast: false
-      max-parallel: 15
+      max-parallel: 5
       matrix:
         shard_index: ${{ fromJSON(needs.manifest.outputs.matrix) }}
     runs-on: ubuntu-24.04
@@ -215,7 +215,7 @@ jobs:
           set -euo pipefail
           mkdir -p out
           python - <<'PY'
-          import csv, json, os, shutil, tempfile, urllib.request, zipfile
+          import csv, json, os, random, shutil, tempfile, time, urllib.error, urllib.request, zipfile
           from pathlib import Path
           import duckdb
 
@@ -255,8 +255,17 @@ jobs:
                       },
                   )
                   archive = target / 'artifact.zip'
-                  with opener.open(request, timeout=300) as response, archive.open('wb') as handle:
-                      shutil.copyfileobj(response, handle)
+                  for attempt in range(8):
+                      try:
+                          with opener.open(request, timeout=300) as response, archive.open('wb') as handle:
+                              shutil.copyfileobj(response, handle)
+                          break
+                      except urllib.error.HTTPError as exc:
+                          if exc.code not in {403, 429, 500, 502, 503, 504} or attempt == 7:
+                              raise
+                          retry_after = exc.headers.get('Retry-After')
+                          delay = float(retry_after) if retry_after else min(120.0, 10.0 * (2 ** attempt))
+                          time.sleep(delay + random.uniform(0.0, 3.0))
                   with zipfile.ZipFile(archive) as bundle:
                       bundle.extractall(target / 'unzipped')
                   archive.unlink()
