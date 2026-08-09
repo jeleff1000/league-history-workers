@@ -1,0 +1,200 @@
+name: Audit every research matchup artifact from one manifest
+
+on:
+  workflow_dispatch:
+    inputs:
+      since:
+        description: UTC timestamp; inspect research artifacts created at or after this time
+        required: true
+        default: '2026-08-05T00:00:00Z'
+      shard_count:
+        description: Number of read-only artifact inspectors
+        required: true
+        default: '15'
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  SINCE: ${{ inputs.since }}
+  SHARD_COUNT: ${{ inputs.shard_count }}
+
+jobs:
+  manifest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      manifest_artifact: ${{ steps.manifest.outputs.name }}
+      manifest_count: ${{ steps.manifest.outputs.count }}
+    steps:
+      - id: manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import json, os, urllib.request
+          from pathlib import Path
+
+          headers = {
+              'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+          }
+          since = os.environ['SINCE']
+          terms = ('matchup','sidecar','rescue','promot','outcome','signal','player','lineage','settings','cohort','canonical')
+          def relevant(name):
+              name = name.lower()
+              return any(term in name for term in terms)
+
+          items = []
+          page = 1
+          while True:
+              url = f"https://api.github.com/repos/${{ github.repository }}/actions/artifacts?per_page=100&page={page}"
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req, timeout=120) as response:
+                  payload = json.load(response)
+              batch = payload.get('artifacts', [])
+              for item in batch:
+                  if item['created_at'] >= since and not item['expired'] and relevant(item['name']):
+                      items.append({
+                          'artifact_id': item['id'],
+                          'artifact': item['name'],
+                          'created_at': item['created_at'],
+                          'size_in_bytes': item['size_in_bytes'],
+                          'archive_download_url': item['archive_download_url'],
+                          'workflow_run_id': (item.get('workflow_run') or {}).get('id'),
+                      })
+              if len(batch) < 100:
+                  break
+              page += 1
+          items.sort(key=lambda x: (x['created_at'], x['artifact_id']))
+          ids = [x['artifact_id'] for x in items]
+          if len(ids) != len(set(ids)):
+              raise SystemExit('manifest contains duplicate artifact IDs')
+          Path('out/artifact_manifest.json').write_text(json.dumps({
+              'repo': '${{ github.repository }}',
+              'since': since,
+              'shard_count': int(os.environ['SHARD_COUNT']),
+              'artifact_count': len(items),
+              'artifacts': items,
+          }, indent=2, sort_keys=True) + '\n')
+          print(f'manifest artifacts={len(items)} bytes={sum(x["size_in_bytes"] for x in items)}')
+          print(f"name=research-artifact-manifest-${{ github.run_id }}")
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              out.write(f"name=research-artifact-manifest-${{ github.run_id }}\n")
+              out.write(f"count={len(items)}\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-artifact-manifest-${{ github.run_id }}
+          path: out/artifact_manifest.json
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+  inspect:
+    needs: manifest
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        shard_index: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install bounded inspection dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-manifest-${{ github.run_id }}
+          path: manifest
+      - name: Download and inspect assigned artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import csv, hashlib, io, json, os, shutil, urllib.request, zipfile
+          from pathlib import Path
+          import duckdb
+
+          manifest = json.loads(Path('manifest/artifact_manifest.json').read_text())
+          shard = int('${{ matrix.shard_index }}')
+          count = int(manifest['shard_count'])
+          canonical = [
+              'db_name','year','week','NFL_player_id','is_started','is_rostered',
+              'fantasy_points','win','champion','clutch_equity','manager_lamar',
+              'manager','team_points','final_playoff_seed','is_playoffs',
+              'has_po_signal','player','position','fantasy_position','platform',
+              'team_key','team_name','nfl_team_api','yahoo_player_id',
+              'sleeper_player_id','espn_player_id','fleaflicker_player_id',
+              'mfl_player_id','made_playoffs',
+          ]
+          forbidden = {'loss','tie','opponent_points','is_championship','is_active','is_playoffs_bf','made_po_bf'}
+          headers = {'Authorization': f"Bearer {os.environ['GH_TOKEN']}", 'Accept': 'application/vnd.github+json'}
+          selected = [a for a in manifest['artifacts'] if int(a['artifact_id']) % count == shard]
+          root = Path('work'); root.mkdir(exist_ok=True)
+          results = []
+          failures = []
+          for item in selected:
+              rec = {k: item.get(k) for k in ('artifact_id','artifact','created_at','size_in_bytes','workflow_run_id')}
+              rec['shard_index'] = shard
+              try:
+                  req = urllib.request.Request(item['archive_download_url'], headers=headers)
+                  with urllib.request.urlopen(req, timeout=600) as response:
+                      data = response.read()
+                  rec['download_bytes'] = len(data)
+                  rec['download_sha256'] = hashlib.sha256(data).hexdigest()
+                  target = root / str(item['artifact_id'])
+                  target.mkdir(parents=True, exist_ok=True)
+                  with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                      for member in archive.infolist():
+                          destination = (target / member.filename).resolve()
+                          if target.resolve() not in destination.parents:
+                              raise RuntimeError(f'unsafe archive member: {member.filename}')
+                      archive.extractall(target)
+                  files = []
+                  con = duckdb.connect()
+                  for path in sorted(target.rglob('*')):
+                      if not path.is_file():
+                          continue
+                      suffix = path.suffix.lower()
+                      if suffix == '.parquet':
+                          cols = [r[0] for r in con.execute('DESCRIBE SELECT * FROM read_parquet(?)', [str(path)]).fetchall()]
+                          row_count = con.execute('SELECT COUNT(*) FROM read_parquet(?)', [str(path)]).fetchone()[0]
+                          kind = 'exact_canonical_player' if cols == canonical else ('source_team_or_matchup' if {'db_name','year','week','team_key'} <= set(cols) else 'other_parquet')
+                          files.append({'file': path.name, 'type': 'parquet', 'rows': row_count, 'columns': cols, 'column_count': len(cols), 'kind': kind, 'missing_canonical': sorted(set(canonical)-set(cols)), 'forbidden_columns': sorted(set(cols)&forbidden)})
+                      else:
+                          files.append({'file': path.name, 'type': suffix.lstrip('.') or 'no_extension', 'bytes': path.stat().st_size, 'kind': 'non_parquet'})
+                  con.close()
+                  rec['files'] = files
+                  rec['status'] = 'inspected'
+              except Exception as exc:
+                  rec['status'] = 'inspection_error'
+                  rec['error'] = f'{type(exc).__name__}: {exc}'
+                  failures.append(rec)
+              finally:
+                  shutil.rmtree(root / str(item['artifact_id']), ignore_errors=True)
+              results.append(rec)
+          Path('out/artifact_audit.json').write_text(json.dumps({'manifest_artifacts':len(manifest['artifacts']), 'shard_index':shard, 'shard_count':count, 'selected_artifacts':len(selected), 'results':results, 'failures':failures}, indent=2, sort_keys=True)+'\n')
+          with open('out/artifact_audit.csv','w',newline='',encoding='utf-8') as fh:
+              fields=['artifact_id','artifact','created_at','size_in_bytes','download_bytes','status','error']
+              writer=csv.DictWriter(fh, fieldnames=fields); writer.writeheader()
+              for rec in results: writer.writerow({k:rec.get(k,'') for k in fields})
+          if failures:
+              raise SystemExit(f'{len(failures)} artifact inspections failed')
+          print(f'inspected {len(results)} artifacts on shard {shard}/{count}')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-artifact-audit-${{ github.run_id }}-${{ matrix.shard_index }}
+          path: out/*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
