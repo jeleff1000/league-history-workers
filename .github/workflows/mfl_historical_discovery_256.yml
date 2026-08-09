@@ -1,3 +1,6 @@
+Exit code: 0
+Wall time: 0.5 seconds
+Output:
 name: MFL Historical Discovery (250 contiguous ID shards)
 
 on:
@@ -219,7 +222,11 @@ jobs:
       - name: Dispatch next two-season window
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          # The Actions installation token is rate-limited independently and
+          # has repeatedly exhausted its dispatch quota.  Prefer the PAT
+          # already required for the private pipeline checkout; retain the
+          # built-in token as a fallback for installations without that secret.
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT || github.token }}
           REPOSITORY: ${{ github.repository }}
           WORKFLOW: mfl_historical_discovery_256.yml
           CURRENT_END: ${{ inputs.end_year || '1998' }}
@@ -324,3 +331,4 @@ jobs:
           path: out/mfl_discovery_merged.json
           if-no-files-found: error
           retention-days: 30
+
