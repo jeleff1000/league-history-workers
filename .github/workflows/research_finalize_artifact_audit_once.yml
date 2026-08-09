@@ -10,6 +10,8 @@ permissions:
 
 jobs:
   aggregate:
+    outputs:
+      summary: ${{ steps.expose.outputs.summary }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -59,8 +61,22 @@ jobs:
           if-no-files-found: error
           retention-days: 30
           compression-level: 0
+      - id: expose
+        name: Expose audit counts
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('artifact_audit_complete.json').read_text())
+          summary=f"{report['manifest_artifacts']}-{report['inspected_records']}-{report['inspection_errors']}-{len(report['duplicate_artifact_ids'])}"
+          print(summary)
+          with open('${GITHUB_OUTPUT}','a') as handle:
+              handle.write('summary=' + summary + '\\n')
+          PY
 
   verify:
+    name: Verify audit (${{ needs.aggregate.outputs.summary }})
     needs: aggregate
     if: ${{ needs.aggregate.result == 'success' }}
     runs-on: ubuntu-24.04
