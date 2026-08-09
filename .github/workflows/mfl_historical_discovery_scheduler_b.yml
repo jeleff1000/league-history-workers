@@ -1,20 +1,9 @@
-name: MFL Historical Discovery Scheduler A
+name: MFL Historical Discovery Scheduler B
 
 on:
-  push:
-    paths:
-      - .github/mfl_historical_discovery_bootstrap_2006
-  workflow_dispatch:
-    inputs:
-      bootstrap_end_year:
-        description: "Last already-completed season; use 2006 to start the next missing window"
-        required: false
-        default: "2006"
-        type: string
   workflow_run:
     workflows:
-      - MFL Historical Discovery (250 contiguous ID shards)
-      - MFL Historical Discovery Scheduler B
+      - MFL Historical Discovery Scheduler A
     types: [completed]
     branches: [main]
 
@@ -23,7 +12,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: mfl-historical-discovery-scheduler-a
+  group: mfl-historical-discovery-scheduler-b
   cancel-in-progress: false
 
 jobs:
