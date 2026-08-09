@@ -17,7 +17,7 @@ permissions:
   contents: read
 
 env:
-  GH_TOKEN: ${{ github.token }}
+  GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
   SINCE: ${{ inputs.since }}
   SHARD_COUNT: ${{ inputs.shard_count }}
 
