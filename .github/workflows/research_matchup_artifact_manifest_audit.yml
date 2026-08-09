@@ -87,6 +87,8 @@ jobs:
               if retry_config_path.exists():
                   retry_config = json.loads(retry_config_path.read_text())
                   os.environ['RETRY_ARTIFACT_IDS'] = ','.join(str(value) for value in retry_config.get('artifact_ids', []))
+                  os.environ['SHARD_COUNT'] = str(retry_config.get('shard_count', 1))
+                  os.environ['SLICE_COUNT'] = str(retry_config.get('slice_count', 1))
           if not 0 <= slice_index < slice_count:
               raise SystemExit(f"invalid slice {slice_index}/{slice_count}")
           retry_ids = {int(value.strip()) for value in os.environ['RETRY_ARTIFACT_IDS'].split(',') if value.strip()}
@@ -113,6 +115,7 @@ jobs:
           ids = [int(item['artifact_id']) for item in items]
           manifest = {
               **source,
+              'artifacts': items,
               'repo': '${{ github.repository }}',
               'since': os.environ['SINCE'],
               'shard_count': int(os.environ['SHARD_COUNT']),

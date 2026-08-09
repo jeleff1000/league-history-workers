@@ -1,5 +1,7 @@
 {
-  "attempt": 1,
+  "attempt": 2,
+  "shard_count": 1,
+  "slice_count": 1,
   "base_run_id": 31332591073,
   "artifact_ids": [
     8826789251, 8830287741, 8830296700, 8830304385, 8830403715,
