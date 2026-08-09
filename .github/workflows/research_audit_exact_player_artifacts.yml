@@ -84,7 +84,7 @@ jobs:
   inspect:
     needs: manifest
     strategy:
-      fail-fast: true
+      fail-fast: false
       max-parallel: 15
       matrix:
         shard_index: ${{ fromJSON(needs.manifest.outputs.matrix) }}
