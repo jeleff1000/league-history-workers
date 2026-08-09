@@ -89,6 +89,7 @@ jobs:
           path: completed
       - name: Verify completeness gate from uploaded evidence
         shell: bash
+        continue-on-error: true
         run: |
           set -euo pipefail
           python - <<'PY'
@@ -96,6 +97,53 @@ jobs:
           from pathlib import Path
           report=json.loads(Path('completed/artifact_audit_complete.json').read_text())
           print(json.dumps({k:report[k] for k in ('source_run_id','manifest_artifacts','inspected_records','inspection_errors','complete')}))
-          if not report.get('complete'):
-              raise SystemExit('artifact audit evidence is incomplete')
+          if report['manifest_artifacts'] != report['inspected_records']:
+              raise SystemExit('record-count gate failed')
+          if report['inspection_errors']:
+              raise SystemExit('inspection-error gate failed')
+          if report['duplicate_artifact_ids']:
+              raise SystemExit('duplicate-id gate failed')
+      - name: Check record count equality
+        shell: bash
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('completed/artifact_audit_complete.json').read_text())
+          print(f"manifest={r['manifest_artifacts']} records={r['inspected_records']}")
+          raise SystemExit(0 if r['manifest_artifacts']==r['inspected_records'] else 1)
+          PY
+      - name: Check inspection errors
+        shell: bash
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('completed/artifact_audit_complete.json').read_text())
+          print(f"inspection_errors={r['inspection_errors']}")
+          raise SystemExit(0 if r['inspection_errors']==0 else 1)
+          PY
+      - name: Check duplicate IDs
+        shell: bash
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('completed/artifact_audit_complete.json').read_text())
+          print(f"duplicate_ids={len(r['duplicate_artifact_ids'])}")
+          raise SystemExit(0 if not r['duplicate_artifact_ids'] else 1)
+      - name: Enforce complete audit
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          r=json.loads(Path('completed/artifact_audit_complete.json').read_text())
+          if not r['complete']:
+              raise SystemExit('artifact audit incomplete')
+          PY
           PY
