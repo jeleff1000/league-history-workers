@@ -17,10 +17,9 @@ permissions:
   contents: read
 
 env:
-  # The repository token is the authority for this public repository's
-  # Actions artifacts.  PRIVATE_REPO_PAT was intermittently rejected by the
-  # artifact service, producing false 403 inspection failures.
-  GH_TOKEN: ${{ github.token }}
+  # The private token is required for the cross-run artifact API.  Downloads
+  # use `gh run download`, which handles the artifact-service redirect.
+  GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
   SINCE: ${{ inputs.since }}
   SHARD_COUNT: ${{ inputs.shard_count }}
 
@@ -197,7 +196,7 @@ jobs:
           set -euo pipefail
           mkdir -p out
           python - <<'PY'
-          import csv, hashlib, json, os, shutil, tempfile, urllib.error, urllib.request, zipfile
+          import csv, json, os, shutil, subprocess, tempfile
           from pathlib import Path
           import duckdb
 
@@ -222,46 +221,17 @@ jobs:
               rec = {k: item.get(k) for k in ('artifact_id','artifact','created_at','size_in_bytes','workflow_run_id')}
               rec['shard_index'] = shard
               try:
-                  with tempfile.NamedTemporaryFile(prefix='artifact-', suffix='.zip', delete=False) as fh:
-                      zip_path = Path(fh.name)
-                  request = urllib.request.Request(
-                      item['archive_download_url'],
-                      headers={'Authorization': f"Bearer {os.environ['GH_TOKEN']}", 'Accept': 'application/vnd.github+json'},
-                  )
-                  try:
-                      # The API redirects to Azure Blob Storage. Do not forward
-                      # the GitHub bearer token to the blob host.
-                      try:
-                          response = urllib.request.urlopen(request, timeout=120)
-                      except urllib.error.HTTPError as exc:
-                          if exc.code not in (301, 302, 303, 307, 308):
-                              raise
-                          location = exc.headers.get('Location')
-                          if not location:
-                              raise RuntimeError('artifact API redirect did not include Location') from exc
-                          response = urllib.request.urlopen(urllib.request.Request(location), timeout=120)
-                      sha = hashlib.sha256()
-                      size = 0
-                      with response, zip_path.open('wb') as out_zip:
-                          while True:
-                              chunk = response.read(1024 * 1024)
-                              if not chunk:
-                                  break
-                              out_zip.write(chunk)
-                              sha.update(chunk)
-                              size += len(chunk)
-                      rec['download_bytes'] = size
-                      rec['download_sha256'] = sha.hexdigest()
-                  finally:
-                      pass
                   target = root / str(item['artifact_id'])
                   target.mkdir(parents=True, exist_ok=True)
-                  with zipfile.ZipFile(zip_path) as archive:
-                      for member in archive.infolist():
-                          destination = (target / member.filename).resolve()
-                          if target.resolve() not in destination.parents:
-                              raise RuntimeError(f'unsafe archive member: {member.filename}')
-                      archive.extractall(target)
+                  subprocess.run(
+                      [
+                          'gh', 'run', 'download', str(item['workflow_run_id']),
+                          '--repo', os.environ['GITHUB_REPOSITORY'],
+                          '--name', item['artifact'], '--dir', str(target),
+                      ], check=True, timeout=300,
+                  )
+                  downloaded_files = [path for path in target.rglob('*') if path.is_file()]
+                  rec['download_bytes'] = sum(path.stat().st_size for path in downloaded_files)
                   files = []
                   con = duckdb.connect()
                   for path in sorted(target.rglob('*')):
@@ -283,7 +253,6 @@ jobs:
                   rec['error'] = f'{type(exc).__name__}: {exc}'
                   failures.append(rec)
               finally:
-                  zip_path.unlink(missing_ok=True)
                   shutil.rmtree(root / str(item['artifact_id']), ignore_errors=True)
               results.append(rec)
           Path('out/artifact_audit.json').write_text(json.dumps({'manifest_artifacts':len(manifest['artifacts']), 'shard_index':shard, 'shard_count':count, 'selected_artifacts':len(selected), 'results':results, 'failures':failures}, indent=2, sort_keys=True)+'\n')
