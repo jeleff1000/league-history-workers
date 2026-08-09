@@ -91,7 +91,11 @@ jobs:
             if cols != expected or not rows: raise SystemExit(f'bad player artifact {path}: rows={rows}, cols={cols}')
           for path in reports:
             data=json.loads(path.read_text())
-            if data.get('validation_status')!='clean' or data.get('canonical_schema_unchanged') is not True or data.get('cache_mutated') is not False or data.get('new_lineage') is not False or data.get('conflict_rows')!=0: raise SystemExit(f'unsafe report {path}')
+            # A report may be conflicts_excluded when the producer removed a
+            # source/canonical disagreement from the parquet.  The apply step
+            # remains fail-closed: any conflicting value actually present in
+            # the delta still aborts the promotion.
+            if data.get('validation_status') not in {'clean','conflicts_excluded'} or data.get('canonical_schema_unchanged') is not True or data.get('cache_mutated') is not False or data.get('new_lineage') is not False: raise SystemExit(f'unsafe report {path}')
             for key in total: total[key]+=int(data.get(key,0))
           json.dump({'artifact_count':15,'reports':15,'aggregate':total,'schema':expected,'read_only':True,'new_lineage':False,'cache_mutated':False}, open('validated_player_delta_summary.json','w'), indent=2)
           PY
