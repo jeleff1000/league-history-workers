@@ -54,6 +54,22 @@ jobs:
           print('global_explicit_zero_sample_count=', len(explicit_zero_rows))
           for values in explicit_zero_rows:
               print('global_explicit_zero', {k: v for k, v in zip(explicit_zero_columns, values) if v is not None})
+          elite_query = """
+          SELECT NFL_player_id, player,
+                 COUNT(*) AS null_rows,
+                 COUNT(DISTINCT db_name) AS leagues,
+                 COUNT(*) FILTER (WHERE manager IS NOT NULL AND TRIM(manager) != '') AS with_manager,
+                 COUNT(*) FILTER (WHERE is_started = 1) AS starts,
+                 COUNT(*) FILTER (WHERE team_points IS NOT NULL) AS with_team_points,
+                 COUNT(*) FILTER (WHERE win IS NOT NULL OR loss IS NOT NULL OR tie IS NOT NULL) AS with_outcome,
+                 COUNT(*) FILTER (WHERE manager_lamar IS NOT NULL) AS with_manager_lamar
+          FROM lake.public.player_fantasy
+          WHERE is_rostered IS NULL
+            AND NFL_player_id IN ('00-0033280', '00-0034857')
+          GROUP BY NFL_player_id, player
+          ORDER BY NFL_player_id
+          """
+          print('elite_null_summary=', con.execute(elite_query).fetchall())
           available = {r[0] for r in con.execute("DESCRIBE lake.public.player_fantasy").fetchall()}
           wanted = ['db_name','league_id','year','week','player','NFL_player_id','platform','manager','manager_guid','franchise_id','team_key','team_name','opponent','fantasy_position','is_started','is_rostered','is_bye_week','win','loss','tie','team_points','opponent_points','margin','fantasy_points','clutch_equity','is_playoffs','is_playoffs_bf','has_po_signal','is_championship','championship','champion','playoff_round','playoff_seed','final_playoff_seed','team_made_playoffs']
           selected = [c for c in wanted if c in available]
