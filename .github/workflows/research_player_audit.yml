@@ -61,7 +61,7 @@ jobs:
                  COUNT(*) FILTER (WHERE manager IS NOT NULL AND TRIM(manager) != '') AS with_manager,
                  COUNT(*) FILTER (WHERE is_started = 1) AS starts,
                  COUNT(*) FILTER (WHERE team_points IS NOT NULL) AS with_team_points,
-                 COUNT(*) FILTER (WHERE win IS NOT NULL OR loss IS NOT NULL OR tie IS NOT NULL) AS with_outcome,
+                 COUNT(*) FILTER (WHERE win IS NOT NULL) AS with_outcome,
                  COUNT(*) FILTER (WHERE manager_lamar IS NOT NULL) AS with_manager_lamar
           FROM lake.public.player_fantasy
           WHERE is_rostered IS NULL
