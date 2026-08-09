@@ -1,0 +1,38 @@
+Exit code: 0
+Wall time: 3.7 seconds
+Output:
+name: Discover canonical player identity key
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  BASE_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.BASE_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1
+      - run: python scripts/research_cohorts/discover_player_identity_key.py --base research_public_lake/corpus_snapshot.duckdb --out player_identity_key_discovery.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: player-identity-key-discovery-${{ github.run_id }}
+          path: player_identity_key_discovery.json
+          retention-days: 30
+
+
