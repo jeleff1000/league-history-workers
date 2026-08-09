@@ -95,12 +95,12 @@ jobs:
             for key in total: total[key]+=int(data.get(key,0))
           json.dump({'artifact_count':15,'reports':15,'aggregate':total,'schema':expected,'read_only':True,'new_lineage':False,'cache_mutated':False}, open('validated_player_delta_summary.json','w'), indent=2)
           PY
-      - name: Apply corrected source team-week fan-out
+      - name: Apply targeted in-place source fan-out
         shell: bash
         run: |
           set -euo pipefail
-          python code/scripts/research_cohorts/merge_research_sidecars.py --base research_public_lake/corpus_snapshot.duckdb --out merged_corpus_snapshot.duckdb --outcomes overlay_outcome_targets.duckdb --matchups overlay_source_matchup_rescue.duckdb
-          cp merged_corpus_snapshot.duckdb research_public_lake/corpus_snapshot.duckdb
+          SOURCE=$(find source -name 'source_matchup_rescue.parquet' | head -1)
+          python code/scripts/research_cohorts/apply_source_signal_sidecar_in_place.py --base research_public_lake/corpus_snapshot.duckdb --sidecar "$SOURCE" --report promotion_report.json
       - name: Fail-closed final validation
         shell: bash
         run: |
@@ -125,6 +125,7 @@ jobs:
             post_promotion.json
             ops_before.sha256
             validated_player_delta_summary.json
+            promotion_report.json
             merged_corpus_snapshot.duckdb
           if-no-files-found: error
           retention-days: 90
