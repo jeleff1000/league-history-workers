@@ -101,6 +101,15 @@ jobs:
           set -euo pipefail
           SOURCE=$(find source -name 'source_matchup_rescue.parquet' | head -1)
           python code/scripts/research_cohorts/apply_source_signal_sidecar_in_place.py --base research_public_lake/corpus_snapshot.duckdb --sidecar "$SOURCE" --report promotion_report.json
+      - name: Apply validated exact-schema player deltas
+        shell: bash
+        run: |
+          set -euo pipefail
+          python code/scripts/research_cohorts/apply_player_delta_in_place.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --sidecars player_deltas \
+            --pattern 'promotable_delta.parquet' \
+            --report player_delta_apply_report.json
       - name: Fail-closed final validation
         shell: bash
         run: |
@@ -126,6 +135,7 @@ jobs:
             ops_before.sha256
             validated_player_delta_summary.json
             promotion_report.json
+            player_delta_apply_report.json
             merged_corpus_snapshot.duckdb
           if-no-files-found: error
           retention-days: 90
