@@ -17,7 +17,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           run-id: 31319638678
-          github-token: ${{ secrets.PRIVATE_REPO_PAT }}
+          github-token: ${{ github.token }}
           pattern: research-artifact-audit-31319638678-*
           path: audit_parts
           merge-multiple: false

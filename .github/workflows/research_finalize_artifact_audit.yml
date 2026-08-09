@@ -22,7 +22,7 @@ jobs:
         with:
           repository: ${{ github.repository }}
           run-id: ${{ inputs.source_run_id }}
-          github-token: ${{ secrets.PRIVATE_REPO_PAT }}
+          github-token: ${{ github.token }}
           pattern: research-artifact-audit-${{ inputs.source_run_id }}-*
           path: audit_parts
           merge-multiple: false
