@@ -11,6 +11,14 @@ on:
         description: Number of read-only artifact inspectors
         required: true
         default: '256'
+      slice_index:
+        description: Zero-based manifest slice for rate-limit-safe auditing
+        required: true
+        default: '0'
+      slice_count:
+        description: Number of sequential manifest slices
+        required: true
+        default: '1'
 
 permissions:
   actions: read
@@ -18,10 +26,12 @@ permissions:
 
 env:
   # The private token is required for the cross-run artifact API.  Downloads
-  # use `gh run download`, which handles the artifact-service redirect.
+  # The inspector uses one direct archive request per artifact.
   GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
   SINCE: ${{ inputs.since }}
   SHARD_COUNT: ${{ inputs.shard_count }}
+  SLICE_INDEX: ${{ inputs.slice_index }}
+  SLICE_COUNT: ${{ inputs.slice_count }}
 
 jobs:
   manifest:
@@ -43,19 +53,28 @@ jobs:
           from pathlib import Path
 
           source = json.loads(Path('audit_manifests/research_matchup_artifact_manifest_20260809.json').read_text())
-          items = source['artifacts']
+          all_items = source['artifacts']
+          all_ids = [int(item['artifact_id']) for item in all_items]
+          if len(all_items) != 9479 or len(set(all_ids)) != len(all_ids):
+              raise SystemExit(f"exact artifact manifest invalid: count={len(all_items)} unique={len(set(all_ids))}")
+          slice_index = int(os.environ['SLICE_INDEX'])
+          slice_count = int(os.environ['SLICE_COUNT'])
+          if not 0 <= slice_index < slice_count:
+              raise SystemExit(f"invalid slice {slice_index}/{slice_count}")
+          items = [item for item in all_items if int(item['artifact_id']) % slice_count == slice_index]
           ids = [int(item['artifact_id']) for item in items]
-          if len(items) != 9479 or len(set(ids)) != len(ids):
-              raise SystemExit(f"exact artifact manifest invalid: count={len(items)} unique={len(set(ids))}")
           manifest = {
               **source,
               'repo': '${{ github.repository }}',
               'since': os.environ['SINCE'],
               'shard_count': int(os.environ['SHARD_COUNT']),
               'artifact_count': len(items),
+              'full_manifest_artifact_count': len(all_items),
+              'slice_index': slice_index,
+              'slice_count': slice_count,
           }
           Path('out/artifact_manifest.json').write_text(json.dumps(manifest, indent=2, sort_keys=True) + '\n')
-          print(f'manifest artifacts={len(items)} bytes={sum(x["size_in_bytes"] for x in items)} exact_attachment_scope=true')
+          print(f'manifest artifacts={len(items)} bytes={sum(x["size_in_bytes"] for x in items)} exact_attachment_scope=true slice={slice_index}/{slice_count}')
           print(f"name=research-artifact-manifest-${{ github.run_id }}")
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
               out.write(f"name=research-artifact-manifest-${{ github.run_id }}\n")
@@ -178,7 +197,7 @@ jobs:
           set -euo pipefail
           mkdir -p out
           python - <<'PY'
-          import csv, json, os, shutil, subprocess, tempfile
+          import csv, json, os, shutil, tempfile, urllib.request, zipfile
           from pathlib import Path
           import duckdb
 
@@ -205,13 +224,20 @@ jobs:
               try:
                   target = root / str(item['artifact_id'])
                   target.mkdir(parents=True, exist_ok=True)
-                  subprocess.run(
-                      [
-                          'gh', 'run', 'download', str(item['workflow_run_id']),
-                          '--repo', os.environ['GITHUB_REPOSITORY'],
-                          '--name', item['artifact'], '--dir', str(target),
-                      ], check=True, timeout=300,
+                  request = urllib.request.Request(
+                      item['archive_download_url'],
+                      headers={
+                          'Authorization': f"Bearer {os.environ['GH_TOKEN']}",
+                          'Accept': 'application/vnd.github+json',
+                          'X-GitHub-Api-Version': '2022-11-28',
+                      },
                   )
+                  archive = target / 'artifact.zip'
+                  with urllib.request.urlopen(request, timeout=300) as response, archive.open('wb') as handle:
+                      shutil.copyfileobj(response, handle)
+                  with zipfile.ZipFile(archive) as bundle:
+                      bundle.extractall(target / 'unzipped')
+                  archive.unlink()
                   downloaded_files = [path for path in target.rglob('*') if path.is_file()]
                   rec['download_bytes'] = sum(path.stat().st_size for path in downloaded_files)
                   files = []
