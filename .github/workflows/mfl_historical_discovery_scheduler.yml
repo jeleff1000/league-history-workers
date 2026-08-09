@@ -1,6 +1,13 @@
 name: MFL Historical Discovery Scheduler
 
 on:
+  workflow_dispatch:
+    inputs:
+      bootstrap_end_year:
+        description: "Last already-completed season; use 2006 to start the next missing window"
+        required: false
+        default: "2006"
+        type: string
   workflow_run:
     workflows:
       - MFL Historical Discovery (250 contiguous ID shards)
@@ -18,21 +25,22 @@ concurrency:
 
 jobs:
   read-window:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     outputs:
       continue: ${{ steps.next.outputs.continue }}
       start_year: ${{ steps.next.outputs.start_year }}
       end_year: ${{ steps.next.outputs.end_year }}
-      shard_count: ${{ steps.manifest.outputs.shard_count }}
-      max_parallel: ${{ steps.manifest.outputs.max_parallel }}
-      id_bands: ${{ steps.manifest.outputs.id_bands }}
-      request_sleep: ${{ steps.manifest.outputs.request_sleep }}
-      id_start: ${{ steps.manifest.outputs.id_start }}
-      id_end: ${{ steps.manifest.outputs.id_end }}
-      yahoo_oauth_ref: ${{ steps.manifest.outputs.yahoo_oauth_ref }}
+      shard_count: ${{ steps.resolve.outputs.shard_count }}
+      max_parallel: ${{ steps.resolve.outputs.max_parallel }}
+      id_bands: ${{ steps.resolve.outputs.id_bands }}
+      request_sleep: ${{ steps.resolve.outputs.request_sleep }}
+      id_start: ${{ steps.resolve.outputs.id_start }}
+      id_end: ${{ steps.resolve.outputs.id_end }}
+      yahoo_oauth_ref: ${{ steps.resolve.outputs.yahoo_oauth_ref }}
     steps:
       - name: Download completed-window manifest
+        if: ${{ github.event_name == 'workflow_run' }}
         uses: actions/download-artifact@v5
         with:
           name: mfl-window-manifest-${{ github.event.workflow_run.id }}
@@ -40,11 +48,27 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: window
 
-      - name: Read manifest and compute next window
-        id: manifest
+      - name: Resolve completed-window parameters
+        id: resolve
         shell: bash
+        env:
+          BOOTSTRAP_END_YEAR: ${{ inputs.bootstrap_end_year || '2006' }}
         run: |
           set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            cat >> "$GITHUB_OUTPUT" <<EOF
+          shard_count=250
+          max_parallel=15
+          id_bands=1-9999,10000-29999,30000-59999,60000-80000
+          request_sleep=5.0
+          id_start=0
+          id_end=10000
+          yahoo_oauth_ref=main
+          completed_start_year=$((BOOTSTRAP_END_YEAR - 1))
+          completed_end_year=${BOOTSTRAP_END_YEAR}
+          EOF
+            exit 0
+          fi
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           from pathlib import Path
@@ -57,7 +81,7 @@ jobs:
               raise SystemExit("directory-only runs cannot advance the historical window")
           if str(data.get("shard_indices", "")):
               raise SystemExit("partial-shard runs cannot advance the historical window")
-
+  
           for key in (
               "shard_count", "max_parallel", "id_bands", "request_sleep",
               "id_start", "id_end", "yahoo_oauth_ref",
@@ -71,7 +95,7 @@ jobs:
         id: next
         shell: bash
         env:
-          COMPLETED_END: ${{ steps.manifest.outputs.completed_end_year }}
+          COMPLETED_END: ${{ steps.resolve.outputs.completed_end_year }}
         run: |
           set -euo pipefail
           next_start=$((COMPLETED_END + 1))
