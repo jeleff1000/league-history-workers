@@ -79,7 +79,18 @@ jobs:
               if len(resume_ids) != 5671:
                   raise SystemExit(f"unverified resume manifest invalid: {len(resume_ids)}")
               all_items = [item for item in all_items if int(item['artifact_id']) in resume_ids]
-          items = [item for item in all_items if int(item['artifact_id']) % slice_count == slice_index]
+          # Balance by compressed artifact size rather than artifact-id modulo.
+          # Modulo assignment can strand multi-GB snapshots in a few shards and
+          # leave the exact-manifest audit appearing stalled.  This remains
+          # deterministic and lossless: every manifest artifact is assigned to
+          # exactly one bucket.
+          buckets = [[] for _ in range(slice_count)]
+          bucket_bytes = [0] * slice_count
+          for item in sorted(all_items, key=lambda x: (-int(x.get('size_in_bytes', 0)), int(x['artifact_id']))):
+              target = min(range(slice_count), key=lambda i: (bucket_bytes[i], len(buckets[i]), i))
+              buckets[target].append(item)
+              bucket_bytes[target] += int(item.get('size_in_bytes', 0))
+          items = buckets[slice_index]
           ids = [int(item['artifact_id']) for item in items]
           manifest = {
               **source,
