@@ -112,9 +112,11 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-          import csv, json
+          import csv, json, os
           from pathlib import Path
-          parts = [json.loads(path.read_text()) for path in sorted(Path('audit_parts').glob('artifact_audit.json'))]
+          parts = [json.loads(path.read_text()) for path in sorted(Path('audit_parts').rglob('artifact_audit.json'))]
+          if len(parts) != int(os.environ.get('SHARD_COUNT', '0')):
+              raise SystemExit(f'expected {os.environ.get("SHARD_COUNT")} inspector result files, found {len(parts)}')
           manifest_count = parts[0]['manifest_artifacts'] if parts else 0
           records = [record for part in parts for record in part['results']]
           ids = [record['artifact_id'] for record in records]
