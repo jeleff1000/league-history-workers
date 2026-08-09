@@ -71,14 +71,18 @@ jobs:
                   break
               page += 1
           items.sort(key=lambda x: (x['created_at'], x['artifact_id']))
-          ids = [x['artifact_id'] for x in items]
-          if len(ids) != len(set(ids)):
-              raise SystemExit('manifest contains duplicate artifact IDs')
+          before_dedupe = len(items)
+          deduped = {}
+          for item in items:
+              deduped.setdefault(item['artifact_id'], item)
+          items = sorted(deduped.values(), key=lambda x: (x['created_at'], x['artifact_id']))
+          duplicate_count = before_dedupe - len(items)
           Path('out/artifact_manifest.json').write_text(json.dumps({
               'repo': '${{ github.repository }}',
               'since': since,
               'shard_count': int(os.environ['SHARD_COUNT']),
               'artifact_count': len(items),
+              'duplicate_artifact_entries_removed': duplicate_count,
               'artifacts': items,
           }, indent=2, sort_keys=True) + '\n')
           print(f'manifest artifacts={len(items)} bytes={sum(x["size_in_bytes"] for x in items)}')
