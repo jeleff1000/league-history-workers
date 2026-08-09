@@ -19,6 +19,10 @@ on:
         description: Number of sequential manifest slices
         required: true
         default: '1'
+      resume_only_unverified:
+        description: Audit only artifacts not verified by the prior exact audit
+        required: true
+        default: 'false'
 
 permissions:
   actions: read
@@ -32,6 +36,7 @@ env:
   SHARD_COUNT: ${{ inputs.shard_count }}
   SLICE_INDEX: ${{ inputs.slice_index }}
   SLICE_COUNT: ${{ inputs.slice_count }}
+  RESUME_ONLY_UNVERIFIED: ${{ inputs.resume_only_unverified }}
 
 jobs:
   manifest:
@@ -61,6 +66,12 @@ jobs:
           slice_count = int(os.environ['SLICE_COUNT'])
           if not 0 <= slice_index < slice_count:
               raise SystemExit(f"invalid slice {slice_index}/{slice_count}")
+          if os.environ['RESUME_ONLY_UNVERIFIED'].lower() == 'true':
+              resume = json.loads(Path('audit_manifests/research_matchup_artifact_unverified_20260809.json').read_text())
+              resume_ids = {int(item['artifact_id']) for item in resume['artifacts']}
+              if len(resume_ids) != 5671:
+                  raise SystemExit(f"unverified resume manifest invalid: {len(resume_ids)}")
+              all_items = [item for item in all_items if int(item['artifact_id']) in resume_ids]
           items = [item for item in all_items if int(item['artifact_id']) % slice_count == slice_index]
           ids = [int(item['artifact_id']) for item in items]
           manifest = {
