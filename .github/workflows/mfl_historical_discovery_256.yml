@@ -235,20 +235,28 @@ jobs:
           next_start=$((CURRENT_END + 1))
           next_end=$((next_start + 1))
           if [ "$next_end" -gt 2025 ]; then next_end=2025; fi
-          gh api --method POST \
-            -H "Accept: application/vnd.github+json" \
-            "/repos/${REPOSITORY}/actions/workflows/${WORKFLOW}/dispatches" \
-            -f ref=main \
-            -f "inputs[shard_count]=${SHARDS}" \
-            -f "inputs[max_parallel]=${MAX_PARALLEL}" \
-            -f "inputs[start_year]=${next_start}" \
-            -f "inputs[end_year]=${next_end}" \
-            -f "inputs[id_bands]=${ID_BANDS}" \
-            -f "inputs[request_sleep]=${SLEEP}" \
-            -f "inputs[id_start]=${ID_START}" \
-            -f "inputs[id_end]=${ID_END}" \
-            -f "inputs[yahoo_oauth_ref]=${CODE_REF}"
-          echo "Dispatched MFL window ${next_start}-${next_end}"
+          for delay in 30 60 120 240 300; do
+            if gh api --method POST \
+              -H "Accept: application/vnd.github+json" \
+              "/repos/${REPOSITORY}/actions/workflows/${WORKFLOW}/dispatches" \
+              -f ref=main \
+              -f "inputs[shard_count]=${SHARDS}" \
+              -f "inputs[max_parallel]=${MAX_PARALLEL}" \
+              -f "inputs[start_year]=${next_start}" \
+              -f "inputs[end_year]=${next_end}" \
+              -f "inputs[id_bands]=${ID_BANDS}" \
+              -f "inputs[request_sleep]=${SLEEP}" \
+              -f "inputs[id_start]=${ID_START}" \
+              -f "inputs[id_end]=${ID_END}" \
+              -f "inputs[yahoo_oauth_ref]=${CODE_REF}"; then
+              echo "Dispatched MFL window ${next_start}-${next_end}"
+              exit 0
+            fi
+            echo "MFL window dispatch rate-limited; retrying in ${delay}s" >&2
+            sleep "$delay"
+          done
+          echo "Unable to dispatch MFL window ${next_start}-${next_end} after retries" >&2
+          exit 1
 
   merge:
     if: ${{ always() && needs.discover.result != 'cancelled' && needs.directory.result != 'cancelled' }}
