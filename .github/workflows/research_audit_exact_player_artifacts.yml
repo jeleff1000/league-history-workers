@@ -176,7 +176,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: exact-player-audit-${{ github.run_id }}-${{ matrix.shard_index }}
-          path: out/*
+          path: |
+            out/*
+            deduped_exact_player.parquet
           if-no-files-found: error
           retention-days: 30
 
