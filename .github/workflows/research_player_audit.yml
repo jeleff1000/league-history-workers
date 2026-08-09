@@ -51,6 +51,13 @@ jobs:
           selected = [c for c in wanted if c in available]
           q = 'SELECT ' + ', '.join('"'+c+'"' for c in selected) + ' FROM lake.public.player_fantasy WHERE year = ? AND (lower(player) = lower(?) OR NFL_player_id = ?) ORDER BY db_name, week, manager'
           rows = con.execute(q, [int(os.environ['YEAR']), os.environ['PLAYER'], os.environ['NFL_ID']]).fetchdf().to_dict('records')
+          for label, subset in (
+              ('null_roster', [r for r in rows if r.get('is_rostered') is None]),
+              ('zero_roster', [r for r in rows if r.get('is_rostered') == 0]),
+          ):
+              print(label, 'sample_count=', len(subset[:5]))
+              for row in subset[:5]:
+                  print(label, {k: v for k, v in row.items() if v is not None})
           started = [r for r in rows if int(r.get('is_started') or 0) == 1]
           def truthy(value):
               return str(value).lower() in {'1', '1.0', 'true', 't', 'yes', 'starter'}
