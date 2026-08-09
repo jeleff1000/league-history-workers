@@ -1,6 +1,9 @@
 name: MFL Historical Discovery Scheduler
 
 on:
+  push:
+    paths:
+      - .github/mfl_historical_discovery_bootstrap_2006
   workflow_dispatch:
     inputs:
       bootstrap_end_year:
@@ -25,7 +28,7 @@ concurrency:
 
 jobs:
   read-window:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     outputs:
       continue: ${{ steps.next.outputs.continue }}
@@ -55,7 +58,7 @@ jobs:
           BOOTSTRAP_END_YEAR: ${{ inputs.bootstrap_end_year || '2006' }}
         run: |
           set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+          if [ "$GITHUB_EVENT_NAME" != "workflow_run" ]; then
             cat >> "$GITHUB_OUTPUT" <<EOF
           shard_count=250
           max_parallel=15
