@@ -147,4 +147,3 @@ jobs:
               raise SystemExit('artifact audit incomplete')
           print('verified_complete=true')
           PY
-          PY
