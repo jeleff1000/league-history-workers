@@ -81,6 +81,7 @@ jobs:
               raise SystemExit(f"exact artifact manifest invalid: count={len(all_items)} unique={len(set(all_ids))}")
           slice_index = int(os.environ['SLICE_INDEX'])
           slice_count = int(os.environ['SLICE_COUNT'])
+          retry_base_run_id = ''
           if os.environ['EVENT_NAME'] == 'push':
               slice_index = int(Path('audit_manifests/exact-audit-trigger.txt').read_text().strip())
               retry_config_path = Path('audit_manifests/exact-audit-retry.json')
@@ -89,6 +90,8 @@ jobs:
                   os.environ['RETRY_ARTIFACT_IDS'] = ','.join(str(value) for value in retry_config.get('artifact_ids', []))
                   os.environ['SHARD_COUNT'] = str(retry_config.get('shard_count', 1))
                   os.environ['SLICE_COUNT'] = str(retry_config.get('slice_count', 1))
+                  slice_count = int(retry_config.get('slice_count', 1))
+                  retry_base_run_id = str(retry_config.get('base_run_id', ''))
           if not 0 <= slice_index < slice_count:
               raise SystemExit(f"invalid slice {slice_index}/{slice_count}")
           retry_ids = {int(value.strip()) for value in os.environ['RETRY_ARTIFACT_IDS'].split(',') if value.strip()}
@@ -131,7 +134,7 @@ jobs:
               out.write(f"name=research-artifact-manifest-${{ github.run_id }}\n")
               out.write(f"count={len(items)}\n")
               out.write(f"matrix={json.dumps(list(range(int(os.environ['SHARD_COUNT']))), separators=(',', ':'))}\n")
-              out.write(f"base_run_id={retry_config.get('base_run_id', '') if 'retry_config' in locals() else ''}\n")
+              out.write(f"base_run_id={retry_base_run_id}\n")
           PY
       - uses: actions/upload-artifact@v4
         with:
@@ -159,7 +162,7 @@ jobs:
       - uses: actions/download-artifact@v5
         if: ${{ needs.manifest.outputs.base_run_id != '' }}
         with:
-          name: research-artifact-audit-complete-${{ inputs.base_run_id }}
+          name: research-artifact-audit-complete-${{ needs.manifest.outputs.base_run_id }}
           path: base_audit
           repository: ${{ github.repository }}
           run-id: ${{ needs.manifest.outputs.base_run_id }}
