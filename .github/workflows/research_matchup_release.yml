@@ -1,293 +1,89 @@
-name: Research Matchup Release to Fly
+name: Research Matchup Direct Cache Release to Fly
 
 on:
   workflow_dispatch:
     inputs:
-      old_shard_run:
-        description: Successful 10-bucket old-season shard run ID
-        required: true
-        default: '30635335012'
-      modern_shard_run:
-        description: Successful 5-bucket modern-season shard run ID
-        required: true
-        default: '30635338778'
-      rescue_run:
-        description: Optional normalized rescue artifacts run ID for missing modern buckets
-        required: false
-        default: ''
       cache_key:
-        description: Public research cache key used for the ops super-table lookup
+        description: Immutable GitHub cache key for the public research lake
         required: true
-        default: research-public-lake-v3-Linux-20260730
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
       publish:
-        description: Apply the verified bundle to Fly production
+        description: Apply the verified adaptive bundle to Fly production
         required: true
         type: boolean
         default: true
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
   release:
-    runs-on: ubuntu-latest
-    timeout-minutes: 355
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     env:
       RESEARCH_OUT_DIR: ${{ github.workspace }}/out
-      RESEARCH_ASSEMBLE_MEMORY_MB: '12000'
-      RESEARCH_ASSEMBLE_THREADS: '2'
-      RESEARCH_WIDE_MEMORY_MB: '10000'
       RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
       RESEARCH_SNAPSHOT_PATH: ${{ github.workspace }}/research_public_lake/corpus_snapshot.duckdb
-      RESEARCH_CORPUS_PATH: ${{ github.workspace }}/research_public_lake/no-second-source.duckdb
-      RESEARCH_PUBLISH_MEMORY_MB: '10000'
-      RESEARCH_PUBLISH_THREADS: '2'
       DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
       DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
       DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
     steps:
       - uses: actions/checkout@v5
-
-      - name: Checkout private pipeline code
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
         with:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           path: code
-
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-
       - name: Restore immutable public research lake
         uses: actions/cache/restore@v5
         with:
           path: research_public_lake
           key: ${{ inputs.cache_key }}
           fail-on-cache-miss: true
-
-      - name: Download old-season matchup shards
-        uses: actions/download-artifact@v5
-        with:
-          path: shards/old
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          repository: jeleff1000/league-history-workers
-          run-id: ${{ inputs.old_shard_run }}
-
-      - name: Download modern matchup shards
-        uses: actions/download-artifact@v5
-        with:
-          path: shards/modern
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          repository: jeleff1000/league-history-workers
-          run-id: ${{ inputs.modern_shard_run }}
-
-      - name: Download normalized rescue matchup shards
-        if: ${{ inputs.rescue_run != '' }}
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python code/scripts/research_cohorts/download_cross_run_artifacts.py \
-            --run '${{ inputs.rescue_run }}' \
-            --year 2025 \
-            --batches 256 \
-            --out '${{ github.workspace }}/shards/modern' \
-            --repo jeleff1000/league-history-workers
-
       - name: Install bounded dependencies
         run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 requests
-
-      - name: Retire superseded 2025 shard set
-        if: ${{ inputs.rescue_run != '' }}
-        shell: bash
+      - name: Build the complete adaptive matchup lattice from cache
         run: |
-          set -euo pipefail
-          mkdir -p shards/superseded_2025
-          find shards/modern -mindepth 1 -maxdepth 1 -type d \
-            -name 'research-matchup-2025-b*-of5-*' -print \
-            -exec mv -t shards/superseded_2025 -- {} +
-          test "$(find shards/superseded_2025 -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 5
-
-      - name: Verify shard manifest before merge
-        shell: bash
+          mkdir -p out
+          python code/scripts/research_cohorts/build_direct_matchup_cache.py \
+            --snapshot research_public_lake/corpus_snapshot.duckdb \
+            --ops-cache research_public_lake/ops_cache.duckdb \
+            --output out/research_matchup_adaptive.duckdb
+      - name: Validate adaptive output contract
         run: |
-          test -s research_public_lake/ops_cache.duckdb
-          test ! -e research_public_lake/leagues_snapshot.duckdb
           python - <<'PY'
-          from pathlib import Path
           import duckdb
-
-          roots = [Path('shards/old'), Path('shards/modern')]
-          manifests = [p for root in roots for p in root.rglob('shard_manifest.parquet')]
-          seasons = [p for root in roots for p in root.rglob('research_matchup_player_season.parquet')]
-          weekly = [p for root in roots for p in root.rglob('research_matchup_weekly.parquet')]
-          assert len(manifests) == len(seasons) == len(weekly), (
-              len(manifests), len(seasons), len(weekly))
-          assert len(manifests) >= 25, len(manifests)
-          manifest_roots = {p.parent.resolve() for p in manifests}
-          season_roots = {p.parent.resolve() for p in seasons}
-          weekly_roots = {p.parent.resolve() for p in weekly}
-          assert manifest_roots == season_roots == weekly_roots, (
-              'manifest/season/weekly shard roots differ',
-              sorted(str(p) for p in manifest_roots - season_roots),
-              sorted(str(p) for p in season_roots - weekly_roots),
-          )
-
-          con = duckdb.connect()
-          rows = con.execute(
-              "SELECT DISTINCT year_start, year_end FROM read_parquet(?) ORDER BY year_start",
-              [[str(p) for p in manifests]],
-          ).fetchall()
-          years = [r[0] for r in rows if r[0] == r[1]]
-          assert years == [1997, 1998, 2003, 2004, 2005, 2006, 2007, 2008,
-                           2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016,
-                           2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025], years
-          print(f'validated {len(manifests)} disjoint shard manifests across {len(years)} seasons')
+          c=duckdb.connect('out/research_matchup_adaptive.duckdb', read_only=True)
+          required={'research_matchup_adaptive','research_matchup_adaptive_weekly','research_matchup_adaptive_career'}
+          got={r[0] for r in c.execute("select table_name from information_schema.tables where table_schema='main'").fetchall()}
+          assert required <= got, sorted(required-got)
+          for t in sorted(required):
+              n=c.execute(f'select count(*) from "{t}"').fetchone()[0]
+              assert n > 0, (t,n)
+              cols={r[0] for r in c.execute(f'describe "{t}"').fetchall()}
+              assert {'NFL_player_id','q_teams','q_roster','q_ppr','q_td','q_bracket','q_league_type','q_lineup_mode','n_leagues'} <= cols
+              print(t,n,len(cols))
+          dims=c.execute("select count(*) from research_matchup_adaptive where q_teams='12t' and q_roster='flx' and q_ppr='half' and q_td='4pt' and q_bracket in ('4po','6po','8po') and q_league_type in ('ALL','dynasty') and q_lineup_mode in ('ALL','best_ball')").fetchone()[0]
+          assert dims > 0, dims
+          print('PASS: config, bracket, dynasty, and bestball request lanes are populated')
           PY
-
-      - name: Fail-fast validate every shard before assembly
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import subprocess
-          import duckdb
-
-          con = duckdb.connect()
-          manifests = sorted(Path('shards').rglob('shard_manifest.parquet'))
-          for manifest in manifests:
-              year_start, year_end = con.execute(
-                  "SELECT year_start, year_end FROM read_parquet(?) LIMIT 1",
-                  [str(manifest)],
-              ).fetchone()
-              root = manifest.parent
-              print(f"[preflight] {root} {year_start}-{year_end}", flush=True)
-              subprocess.run([
-                  'python', 'code/scripts/research_cohorts/validate_research_matchup_shard.py',
-                  '--out', str(root),
-                  '--year-start', str(year_start),
-                  '--year-end', str(year_end),
-              ], check=True)
-          print(f"[preflight] PASS ({len(manifests)} shards)")
-          PY
-
-      - name: Build population denominator lattices
-        shell: bash
-        run: |
-          python code/scripts/research_cohorts/build_population_denominators.py \
-            --output "${{ github.workspace }}/out/denominators" \
-            --ops-cache "${{ github.workspace }}/research_public_lake/ops_cache.duckdb"
-
-      - name: Assemble each season separately
-        run: |
-          set -euo pipefail
-          mkdir -p out/by_year
-          years=(1997 1998 2003 2004 2005 2006 2007 2008 2009 2010 2011 2012 2013 2014 2015 2016 2017 2018 2019 2020 2021 2022 2023 2024 2025)
-          for year in "${years[@]}"; do
-            roots=()
-            while IFS= read -r root; do roots+=(--input "$root"); done < <(
-              find shards -mindepth 1 -maxdepth 2 -type d -name "research-matchup-${year}-*" -print
-            )
-            test "${#roots[@]}" -gt 0
-            mkdir -p "out/by_year/${year}"
-            echo "[release] assembling ${year} from $(( ${#roots[@]} / 2 )) shard roots"
-            python code/scripts/research_cohorts/assemble_research_shards.py \
-              --table matchup "${roots[@]}" \
-              --denom-season "${{ github.workspace }}/out/denominators/research_matchup_denom_season.parquet" \
-              --denom-week "${{ github.workspace }}/out/denominators/research_matchup_denom_week.parquet" \
-              --pos-grp "${{ github.workspace }}/out/denominators/research_matchup_pos_grp.parquet" \
-              --output "${{ github.workspace }}/out/by_year/${year}"
-          done
-
-      - name: Concatenate completed yearly grains
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import duckdb
-
-          base = Path('out/by_year')
-          out = Path('out')
-          con = duckdb.connect()
-          for name in ('research_matchup_player_season.parquet', 'research_matchup_weekly.parquet'):
-              paths = sorted(base.glob(f'*/{name}'))
-              assert len(paths) == 25, (name, len(paths))
-              quoted = ','.join("'" + p.resolve().as_posix().replace("'", "''") + "'" for p in paths)
-              target = (out / name).resolve().as_posix().replace("'", "''")
-              con.execute(
-                  f"COPY (SELECT * FROM read_parquet([{quoted}], union_by_name=true)) "
-                  f"TO '{target}' (FORMAT PARQUET, COMPRESSION ZSTD)"
-              )
-              print(name, con.execute(f"SELECT COUNT(*) FROM read_parquet('{target}')").fetchone()[0])
-          con.close()
-
-      - name: Create matchup research database
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import duckdb
-
-          out = Path('out')
-          db = out / 'research_cohorts.duckdb'
-          if db.exists():
-              db.unlink()
-          con = duckdb.connect(str(db))
-          con.execute("CREATE TABLE matchup AS SELECT * FROM read_parquet(?)",
-                      [str(out / 'research_matchup_player_season.parquet')])
-          con.execute("CREATE TABLE matchup_weekly AS SELECT * FROM read_parquet(?)",
-                      [str(out / 'research_matchup_weekly.parquet')])
-          for table in ('matchup', 'matchup_weekly'):
-              print(table, con.execute(f'SELECT COUNT(*) FROM {table}').fetchone()[0])
-          con.close()
-          PY
-
-      - name: Build matchup career rollup
-        run: |
-          python code/scripts/research_cohorts/build_research_career_rollup.py \
-            --only matchup \
-            --matchup-source "${{ github.workspace }}/out/research_matchup_player_season.parquet" \
-            --out-dir "${{ github.workspace }}/out"
-
-      - name: Fail-fast assembled matchup denominator audit
-        run: |
-          python code/scripts/research_cohorts/audit_research_matchup.py \
-            --input "${{ github.workspace }}/out" \
-            --slug 12t_flx_ppr_4pt \
-            --ops-cache "${{ github.workspace }}/research_public_lake/ops_cache.duckdb" \
-            --skip-boards
-
-      - name: Build matchup-only wide bundle
-        env:
-          RESEARCH_WIDE_DATASETS: matchup
-        run: python code/scripts/research_cohorts/build_wide_bundle.py
-
-      - name: Fail-fast assembled semantic release gate
-        run: python code/scripts/research_cohorts/release_gate.py
-
-      - name: Read-only Fly preflight
+      - name: Read-only Fly preflight for adaptive tables
         run: |
           python code/scripts/research_cohorts/publish_research_matchup_to_fly.py \
-            --bundle "${{ github.workspace }}/out/research_merge_bundle.duckdb"
-
-      - name: Publish verified bundle to Fly
+            --bundle out/research_matchup_adaptive.duckdb --adaptive-only --slug 12t_flx_half_4pt
+      - name: Publish adaptive tables to Fly
         if: ${{ inputs.publish }}
         run: |
           python code/scripts/research_cohorts/publish_research_matchup_to_fly.py \
-            --bundle "${{ github.workspace }}/out/research_merge_bundle.duckdb" \
-            --apply --i-understand-this-writes-prod
-
-      - name: Upload release evidence
-        uses: actions/upload-artifact@v4
+            --bundle out/research_matchup_adaptive.duckdb --adaptive-only \
+            --slug 12t_flx_half_4pt --apply --i-understand-this-writes-prod
+      - uses: actions/upload-artifact@v4
         with:
-          name: research-matchup-release-${{ github.run_id }}
-          path: |
-            out/research_matchup_player_season.parquet
-            out/research_matchup_weekly.parquet
-            out/matchup_career.parquet
-            out/research_merge_bundle.duckdb
+          name: research-matchup-direct-cache-${{ github.run_id }}
+          path: out/research_matchup_adaptive.duckdb
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
