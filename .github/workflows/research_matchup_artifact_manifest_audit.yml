@@ -124,7 +124,7 @@ jobs:
           set -euo pipefail
           mkdir -p out
           python - <<'PY'
-          import csv, hashlib, io, json, os, shutil, urllib.request, zipfile
+          import csv, hashlib, io, json, os, shutil, subprocess, tempfile, zipfile
           from pathlib import Path
           import duckdb
 
@@ -141,7 +141,6 @@ jobs:
               'mfl_player_id','made_playoffs',
           ]
           forbidden = {'loss','tie','opponent_points','is_championship','is_active','is_playoffs_bf','made_po_bf'}
-          headers = {'Authorization': f"Bearer {os.environ['GH_TOKEN']}", 'Accept': 'application/vnd.github+json'}
           selected = [a for a in manifest['artifacts'] if int(a['artifact_id']) % count == shard]
           root = Path('work'); root.mkdir(exist_ok=True)
           results = []
@@ -150,9 +149,23 @@ jobs:
               rec = {k: item.get(k) for k in ('artifact_id','artifact','created_at','size_in_bytes','workflow_run_id')}
               rec['shard_index'] = shard
               try:
-                  req = urllib.request.Request(item['archive_download_url'], headers=headers)
-                  with urllib.request.urlopen(req, timeout=600) as response:
-                      data = response.read()
+                  with tempfile.NamedTemporaryFile(prefix='artifact-', suffix='.zip', delete=False) as fh:
+                      zip_path = fh.name
+                  try:
+                      command = [
+                          'curl', '--fail-with-body', '--silent', '--show-error', '--location',
+                          '--max-time', '900', '--retry', '4', '--retry-all-errors',
+                          '-H', f"Authorization: Bearer {os.environ['GH_TOKEN']}",
+                          '-H', 'Accept: application/vnd.github+json',
+                          '--output', zip_path, item['archive_download_url'],
+                      ]
+                      completed = subprocess.run(command, capture_output=True, text=True)
+                      if completed.returncode:
+                          detail = (completed.stderr or completed.stdout or '').strip()[-1000:]
+                          raise RuntimeError(f'curl artifact download failed rc={completed.returncode}: {detail}')
+                      data = Path(zip_path).read_bytes()
+                  finally:
+                      Path(zip_path).unlink(missing_ok=True)
                   rec['download_bytes'] = len(data)
                   rec['download_sha256'] = hashlib.sha256(data).hexdigest()
                   target = root / str(item['artifact_id'])
