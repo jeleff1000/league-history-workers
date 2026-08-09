@@ -135,6 +135,7 @@ jobs:
           r=json.loads(Path('completed/artifact_audit_complete.json').read_text())
           print(f"duplicate_ids={len(r['duplicate_artifact_ids'])}")
           raise SystemExit(0 if not r['duplicate_artifact_ids'] else 1)
+          PY
       - name: Enforce complete audit
         if: always()
         shell: bash
