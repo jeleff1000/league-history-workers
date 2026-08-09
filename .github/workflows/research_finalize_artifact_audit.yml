@@ -1,0 +1,88 @@
+name: Finalize research artifact audit from completed inspectors
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Completed artifact-manifest audit run whose inspector artifacts should be consolidated
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Download every inspector result without merging same-named files
+        uses: actions/download-artifact@v5
+        with:
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ secrets.PRIVATE_REPO_PAT }}
+          pattern: research-artifact-audit-${{ inputs.source_run_id }}-*
+          path: audit_parts
+          merge-multiple: false
+      - name: Consolidate and validate complete artifact audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv, json
+          from pathlib import Path
+          parts = [json.loads(path.read_text()) for path in sorted(Path('audit_parts').glob('*/artifact_audit.json'))]
+          if not parts:
+              raise SystemExit('no inspector artifacts downloaded')
+          manifest_count = parts[0]['manifest_artifacts']
+          records = [record for part in parts for record in part['results']]
+          ids = [record['artifact_id'] for record in records]
+          errors = [record for record in records if record.get('status') != 'inspected']
+          duplicate_ids = sorted({artifact_id for artifact_id in ids if ids.count(artifact_id) > 1})
+          report = {
+              'source_run_id': '${{ inputs.source_run_id }}',
+              'manifest_artifacts': manifest_count,
+              'inspected_records': len(records),
+              'inspection_errors': len(errors),
+              'duplicate_artifact_ids': duplicate_ids,
+              'complete': len(records) == manifest_count and not errors and not duplicate_ids,
+              'records': sorted(records, key=lambda record: (record['artifact_id'], record.get('artifact', ''))),
+          }
+          Path('artifact_audit_complete.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\\n')
+          with Path('artifact_checklist.csv').open('w', newline='', encoding='utf-8') as handle:
+              fields = ['artifact_id','artifact','workflow_run_id','created_at','artifact_status','file','file_type','kind','rows','column_count','columns','missing_canonical','forbidden_columns']
+              writer = csv.DictWriter(handle, fieldnames=fields)
+              writer.writeheader()
+              for record in report['records']:
+                  for file_record in record.get('files') or [{}]:
+                      writer.writerow({
+                          'artifact_id': record.get('artifact_id'),
+                          'artifact': record.get('artifact'),
+                          'workflow_run_id': record.get('workflow_run_id'),
+                          'created_at': record.get('created_at'),
+                          'artifact_status': record.get('status'),
+                          'file': file_record.get('file'),
+                          'file_type': file_record.get('type'),
+                          'kind': file_record.get('kind'),
+                          'rows': file_record.get('rows'),
+                          'column_count': file_record.get('column_count'),
+                          'columns': json.dumps(file_record.get('columns', []), separators=(',', ':')),
+                          'missing_canonical': json.dumps(file_record.get('missing_canonical', []), separators=(',', ':')),
+                          'forbidden_columns': json.dumps(file_record.get('forbidden_columns', []), separators=(',', ':')),
+                      })
+          print(json.dumps({k: report[k] for k in ('source_run_id','manifest_artifacts','inspected_records','inspection_errors','complete')}))
+          if not report['complete']:
+              raise SystemExit('complete artifact audit failed')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: research-artifact-audit-complete-${{ inputs.source_run_id }}
+          path: |
+            artifact_audit_complete.json
+            artifact_checklist.csv
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
