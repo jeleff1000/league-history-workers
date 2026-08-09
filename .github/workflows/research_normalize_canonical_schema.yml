@@ -6,9 +6,6 @@ on:
       base_cache_key:
         required: true
         default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
-      canonical_cache_key:
-        required: true
-        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
 
 permissions:
   contents: read
@@ -72,7 +69,7 @@ jobs:
       - name: Save validated canonical cache generation
         env:
           GH_TOKEN: ${{ github.token }}
-          CACHE_KEY: ${{ inputs.canonical_cache_key }}
+          CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
         run: |
           set -euo pipefail
           gh api --method DELETE "/repos/${GITHUB_REPOSITORY}/actions/caches?key=${CACHE_KEY}"
@@ -91,7 +88,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: research_public_lake
-          key: ${{ inputs.canonical_cache_key }}
+          key: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
       - uses: actions/upload-artifact@v4
         with:
           name: canonical-schema-manifest-${{ github.run_id }}
