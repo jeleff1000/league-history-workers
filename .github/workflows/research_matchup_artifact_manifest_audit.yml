@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'audit_manifests/exact-audit-trigger.txt'
+      - 'audit_manifests/exact-audit-retry.json'
   workflow_dispatch:
     inputs:
       since:
@@ -61,6 +62,7 @@ jobs:
       manifest_artifact: ${{ steps.manifest.outputs.name }}
       manifest_count: ${{ steps.manifest.outputs.count }}
       matrix: ${{ steps.manifest.outputs.matrix }}
+      base_run_id: ${{ steps.manifest.outputs.base_run_id }}
     steps:
       - uses: actions/checkout@v4
       - id: manifest
@@ -81,17 +83,21 @@ jobs:
           slice_count = int(os.environ['SLICE_COUNT'])
           if os.environ['EVENT_NAME'] == 'push':
               slice_index = int(Path('audit_manifests/exact-audit-trigger.txt').read_text().strip())
+              retry_config_path = Path('audit_manifests/exact-audit-retry.json')
+              if retry_config_path.exists():
+                  retry_config = json.loads(retry_config_path.read_text())
+                  os.environ['RETRY_ARTIFACT_IDS'] = ','.join(str(value) for value in retry_config.get('artifact_ids', []))
           if not 0 <= slice_index < slice_count:
               raise SystemExit(f"invalid slice {slice_index}/{slice_count}")
-          if os.environ['RESUME_ONLY_UNVERIFIED'].lower() == 'true':
+          retry_ids = {int(value.strip()) for value in os.environ['RETRY_ARTIFACT_IDS'].split(',') if value.strip()}
+          if retry_ids:
+              all_items = [item for item in all_items if int(item['artifact_id']) in retry_ids]
+          elif os.environ['RESUME_ONLY_UNVERIFIED'].lower() == 'true':
               resume = json.loads(Path('audit_manifests/research_matchup_artifact_unverified_20260809.json').read_text())
               resume_ids = {int(item['artifact_id']) for item in resume['artifacts']}
               if len(resume_ids) != 5671:
                   raise SystemExit(f"unverified resume manifest invalid: {len(resume_ids)}")
               all_items = [item for item in all_items if int(item['artifact_id']) in resume_ids]
-          retry_ids = {int(value.strip()) for value in os.environ['RETRY_ARTIFACT_IDS'].split(',') if value.strip()}
-          if retry_ids:
-              all_items = [item for item in all_items if int(item['artifact_id']) in retry_ids]
           # Balance by compressed artifact size rather than artifact-id modulo.
           # Modulo assignment can strand multi-GB snapshots in a few shards and
           # leave the exact-manifest audit appearing stalled.  This remains
@@ -122,6 +128,7 @@ jobs:
               out.write(f"name=research-artifact-manifest-${{ github.run_id }}\n")
               out.write(f"count={len(items)}\n")
               out.write(f"matrix={json.dumps(list(range(int(os.environ['SHARD_COUNT']))), separators=(',', ':'))}\n")
+              out.write(f"base_run_id={retry_config.get('base_run_id', '') if 'retry_config' in locals() else ''}\n")
           PY
       - uses: actions/upload-artifact@v4
         with:
@@ -147,12 +154,12 @@ jobs:
           merge-multiple: false
           github-token: ${{ secrets.PRIVATE_REPO_PAT || github.token }}
       - uses: actions/download-artifact@v5
-        if: ${{ inputs.base_run_id != '' }}
+        if: ${{ needs.manifest.outputs.base_run_id != '' }}
         with:
           name: research-artifact-audit-complete-${{ inputs.base_run_id }}
           path: base_audit
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.base_run_id }}
+          run-id: ${{ needs.manifest.outputs.base_run_id }}
           github-token: ${{ secrets.PRIVATE_REPO_PAT || github.token }}
       - uses: actions/download-artifact@v5
         with:
