@@ -1,0 +1,105 @@
+name: MFL Historical Discovery Scheduler
+
+on:
+  workflow_run:
+    workflows:
+      - MFL Historical Discovery (250 contiguous ID shards)
+      - MFL Historical Discovery Scheduler
+    types: [completed]
+    branches: [main]
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: mfl-historical-discovery-scheduler
+  cancel-in-progress: false
+
+jobs:
+  read-window:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      continue: ${{ steps.next.outputs.continue }}
+      start_year: ${{ steps.next.outputs.start_year }}
+      end_year: ${{ steps.next.outputs.end_year }}
+      shard_count: ${{ steps.manifest.outputs.shard_count }}
+      max_parallel: ${{ steps.manifest.outputs.max_parallel }}
+      id_bands: ${{ steps.manifest.outputs.id_bands }}
+      request_sleep: ${{ steps.manifest.outputs.request_sleep }}
+      id_start: ${{ steps.manifest.outputs.id_start }}
+      id_end: ${{ steps.manifest.outputs.id_end }}
+      yahoo_oauth_ref: ${{ steps.manifest.outputs.yahoo_oauth_ref }}
+    steps:
+      - name: Download completed-window manifest
+        uses: actions/download-artifact@v5
+        with:
+          name: mfl-window-manifest-${{ github.event.workflow_run.id }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: window
+
+      - name: Read manifest and compute next window
+        id: manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+
+          path = Path("window/mfl_window_manifest.json")
+          data = json.loads(path.read_text(encoding="utf-8"))
+          if data.get("platform") != "mfl":
+              raise SystemExit("manifest platform is not mfl")
+          if str(data.get("directory_only", "false")).lower() == "true":
+              raise SystemExit("directory-only runs cannot advance the historical window")
+          if str(data.get("shard_indices", "")):
+              raise SystemExit("partial-shard runs cannot advance the historical window")
+
+          for key in (
+              "shard_count", "max_parallel", "id_bands", "request_sleep",
+              "id_start", "id_end", "yahoo_oauth_ref",
+          ):
+              print(f"{key}={data[key]}")
+          print(f"completed_start_year={int(data['start_year'])}")
+          print(f"completed_end_year={int(data['end_year'])}")
+          PY
+
+      - name: Compute next contiguous window
+        id: next
+        shell: bash
+        env:
+          COMPLETED_END: ${{ steps.manifest.outputs.completed_end_year }}
+        run: |
+          set -euo pipefail
+          next_start=$((COMPLETED_END + 1))
+          if [ "$next_start" -gt 2025 ]; then
+            echo "continue=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          next_end=$((next_start + 1))
+          if [ "$next_end" -gt 2025 ]; then next_end=2025; fi
+          echo "continue=true" >> "$GITHUB_OUTPUT"
+          echo "start_year=${next_start}" >> "$GITHUB_OUTPUT"
+          echo "end_year=${next_end}" >> "$GITHUB_OUTPUT"
+
+  next-window:
+    needs: read-window
+    if: ${{ needs.read-window.outputs.continue == 'true' }}
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: ${{ needs.read-window.outputs.shard_count }}
+      max_parallel: ${{ needs.read-window.outputs.max_parallel }}
+      start_year: ${{ needs.read-window.outputs.start_year }}
+      end_year: ${{ needs.read-window.outputs.end_year }}
+      chain_next_window: "false"
+      shard_indices: ""
+      directory_only: "false"
+      id_bands: ${{ needs.read-window.outputs.id_bands }}
+      request_sleep: ${{ needs.read-window.outputs.request_sleep }}
+      id_start: ${{ needs.read-window.outputs.id_start }}
+      id_end: ${{ needs.read-window.outputs.id_end }}
+      yahoo_oauth_ref: ${{ needs.read-window.outputs.yahoo_oauth_ref }}
+    secrets: inherit

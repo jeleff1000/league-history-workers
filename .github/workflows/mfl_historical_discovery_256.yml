@@ -63,6 +63,56 @@ on:
         required: false
         default: "main"
         type: string
+  workflow_call:
+    inputs:
+      shard_count:
+        required: false
+        default: "250"
+        type: string
+      max_parallel:
+        required: false
+        default: "15"
+        type: string
+      start_year:
+        required: false
+        default: "1997"
+        type: string
+      end_year:
+        required: false
+        default: "1998"
+        type: string
+      chain_next_window:
+        required: false
+        default: "false"
+        type: string
+      shard_indices:
+        required: false
+        default: ""
+        type: string
+      directory_only:
+        required: false
+        default: "false"
+        type: string
+      id_bands:
+        required: false
+        default: "1-9999,10000-29999,30000-59999,60000-80000"
+        type: string
+      request_sleep:
+        required: false
+        default: "5.0"
+        type: string
+      id_start:
+        required: false
+        default: "0"
+        type: string
+      id_end:
+        required: false
+        default: "10000"
+        type: string
+      yahoo_oauth_ref:
+        required: false
+        default: "main"
+        type: string
 
 permissions:
   actions: write
@@ -208,60 +258,6 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  chain-next-window:
-    if: ${{ needs.merge.result == 'success' && (inputs.directory_only || 'false') != 'true' && (inputs.chain_next_window || 'true') == 'true' && fromJSON(inputs.end_year || '1998') < 2025 }}
-    needs: [merge]
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - name: Dispatch next two-season window
-        shell: bash
-        env:
-          # The Actions installation token is rate-limited independently and
-          # has repeatedly exhausted its dispatch quota.  Prefer the PAT
-          # already required for the private pipeline checkout; retain the
-          # built-in token as a fallback for installations without that secret.
-          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT || github.token }}
-          REPOSITORY: ${{ github.repository }}
-          WORKFLOW: mfl_historical_discovery_256.yml
-          CURRENT_END: ${{ inputs.end_year || '1998' }}
-          SHARDS: ${{ inputs.shard_count || '250' }}
-          MAX_PARALLEL: ${{ inputs.max_parallel || '15' }}
-          ID_BANDS: ${{ inputs.id_bands || '1-9999,10000-29999,30000-59999,60000-80000' }}
-          SLEEP: ${{ inputs.request_sleep || '5.0' }}
-          ID_START: ${{ inputs.id_start || '0' }}
-          ID_END: ${{ inputs.id_end || '10000' }}
-          CODE_REF: ${{ inputs.yahoo_oauth_ref || 'main' }}
-        run: |
-          set -euo pipefail
-          next_start=$((CURRENT_END + 1))
-          next_end=$((next_start + 1))
-          if [ "$next_end" -gt 2025 ]; then next_end=2025; fi
-          for delay in 30 60 120 240 300; do
-            if gh api --method POST \
-              -H "Accept: application/vnd.github+json" \
-              "/repos/${REPOSITORY}/actions/workflows/${WORKFLOW}/dispatches" \
-              -f ref=main \
-              -f "inputs[shard_count]=${SHARDS}" \
-              -f "inputs[max_parallel]=${MAX_PARALLEL}" \
-              -f "inputs[start_year]=${next_start}" \
-              -f "inputs[end_year]=${next_end}" \
-              -f "inputs[id_bands]=${ID_BANDS}" \
-              -f "inputs[request_sleep]=${SLEEP}" \
-              -f "inputs[id_start]=${ID_START}" \
-              -f "inputs[id_end]=${ID_END}" \
-              -f "inputs[yahoo_oauth_ref]=${CODE_REF}"; then
-              echo "Dispatched MFL window ${next_start}-${next_end}"
-              exit 0
-            fi
-            echo "MFL window dispatch rate-limited; retrying in ${delay}s" >&2
-            sleep "$delay"
-          done
-          echo "Unable to dispatch MFL window ${next_start}-${next_end} after retries" >&2
-          exit 1
-
   merge:
     if: ${{ always() && needs.discover.result != 'cancelled' && needs.directory.result != 'cancelled' }}
     needs: [prepare, discover, directory]
@@ -321,6 +317,51 @@ jobs:
           print(f"lineages={d['lineage_count']}")
           PY
 
+      - name: Write completed-window manifest
+        env:
+          MFL_START_YEAR: ${{ inputs.start_year || '1997' }}
+          MFL_END_YEAR: ${{ inputs.end_year || '1998' }}
+          MFL_SHARD_COUNT: ${{ inputs.shard_count || '250' }}
+          MFL_MAX_PARALLEL: ${{ inputs.max_parallel || '15' }}
+          MFL_ID_BANDS: ${{ inputs.id_bands || '1-9999,10000-29999,30000-59999,60000-80000' }}
+          MFL_REQUEST_SLEEP: ${{ inputs.request_sleep || '5.0' }}
+          MFL_ID_START: ${{ inputs.id_start || '0' }}
+          MFL_ID_END: ${{ inputs.id_end || '10000' }}
+          MFL_SHARD_INDICES: ${{ inputs.shard_indices || '' }}
+          MFL_DIRECTORY_ONLY: ${{ inputs.directory_only || 'false' }}
+          MFL_PIPELINE_REF: ${{ inputs.yahoo_oauth_ref || 'main' }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+
+          manifest = {
+              "platform": "mfl",
+              "source_run_id": os.environ["GITHUB_RUN_ID"],
+              "start_year": os.environ["MFL_START_YEAR"],
+              "end_year": os.environ["MFL_END_YEAR"],
+              "shard_count": os.environ["MFL_SHARD_COUNT"],
+              "max_parallel": os.environ["MFL_MAX_PARALLEL"],
+              "id_bands": os.environ["MFL_ID_BANDS"],
+              "request_sleep": os.environ["MFL_REQUEST_SLEEP"],
+              "id_start": os.environ["MFL_ID_START"],
+              "id_end": os.environ["MFL_ID_END"],
+              "shard_indices": os.environ["MFL_SHARD_INDICES"],
+              "directory_only": os.environ["MFL_DIRECTORY_ONLY"],
+              "yahoo_oauth_ref": os.environ["MFL_PIPELINE_REF"],
+          }
+          with open("out/mfl_window_manifest.json", "w", encoding="utf-8") as handle:
+              json.dump(manifest, handle, indent=2, sort_keys=True)
+          PY
+
+      - name: Upload completed-window manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-window-manifest-${{ github.run_id }}
+          path: out/mfl_window_manifest.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Upload merged inventory
         uses: actions/upload-artifact@v4
         with:
@@ -328,4 +369,3 @@ jobs:
           path: out/mfl_discovery_merged.json
           if-no-files-found: error
           retention-days: 30
-
