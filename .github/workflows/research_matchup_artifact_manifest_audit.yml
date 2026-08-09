@@ -109,7 +109,10 @@ jobs:
         with:
           pattern: research-artifact-audit-${{ github.run_id }}-*
           path: audit_parts
-          merge-multiple: true
+          # Preserve one directory per shard.  Flattening overwrites the
+          # identically named artifact_audit.json files and corrupts the
+          # aggregate audit.
+          merge-multiple: false
       - name: Consolidate and validate complete artifact audit
         shell: bash
         run: |
@@ -117,7 +120,7 @@ jobs:
           python - <<'PY'
           import csv, json
           from pathlib import Path
-          parts = [json.loads(path.read_text()) for path in sorted(Path('audit_parts').glob('artifact_audit.json'))]
+          parts = [json.loads(path.read_text()) for path in sorted(Path('audit_parts').rglob('artifact_audit.json'))]
           manifest_count = parts[0]['manifest_artifacts'] if parts else 0
           records = [record for part in parts for record in part['results']]
           ids = [record['artifact_id'] for record in records]
