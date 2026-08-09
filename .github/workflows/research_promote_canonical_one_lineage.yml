@@ -74,16 +74,32 @@ jobs:
           c=duckdb.connect('overlay_source_matchup_rescue.duckdb'); c.execute('create schema public'); c.execute('create table public.source_matchup_rescue as select * from read_parquet(?)',[source]); c.close()
           c=duckdb.connect('overlay_outcome_targets.duckdb'); c.execute('create schema public'); c.execute('''create table public.outcome_targets (db_name varchar, year integer, week integer, NFL_player_id varchar, win integer, team_points double)'''); c.close()
           PY
-      - name: Apply exact player deltas
+      - name: Validate all player delta artifacts without a giant base join
         shell: bash
         run: |
           set -euo pipefail
-          python code/scripts/research_cohorts/apply_player_sidecar_delta.py --base research_public_lake/corpus_snapshot.duckdb --sidecars player_deltas --pattern 'promotable_delta.parquet' --out player_delta_candidate.duckdb
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import duckdb
+          expected=['db_name','year','week','NFL_player_id','is_started','is_rostered','fantasy_points','win','champion','clutch_equity','manager_lamar','manager','team_points','final_playoff_seed','is_playoffs','has_po_signal','player','position','fantasy_position','platform','team_key','team_name','nfl_team_api','yahoo_player_id','sleeper_player_id','espn_player_id','fleaflicker_player_id','mfl_player_id','made_playoffs']
+          files=sorted(Path('player_deltas').rglob('promotable_delta.parquet')); reports=sorted(Path('player_deltas').rglob('promotion_delta_report.json'))
+          if len(files)!=15 or len(reports)!=15: raise SystemExit(f'expected 15 artifacts and reports, got {len(files)} and {len(reports)}')
+          total={k:0 for k in ('source_rows_in_shard','player_delta_rows','matched_player_rows')}
+          for path in files:
+            c=duckdb.connect(); cols=[r[0] for r in c.execute('describe select * from read_parquet(?)',[str(path)]).fetchall()]; rows=c.execute('select count(*) from read_parquet(?)',[str(path)]).fetchone()[0]; c.close()
+            if cols != expected or not rows: raise SystemExit(f'bad player artifact {path}: rows={rows}, cols={cols}')
+          for path in reports:
+            data=json.loads(path.read_text())
+            if data.get('validation_status')!='clean' or data.get('canonical_schema_unchanged') is not True or data.get('cache_mutated') is not False or data.get('new_lineage') is not False or data.get('conflict_rows')!=0: raise SystemExit(f'unsafe report {path}')
+            for key in total: total[key]+=int(data.get(key,0))
+          json.dump({'artifact_count':15,'reports':15,'aggregate':total,'schema':expected,'read_only':True,'new_lineage':False,'cache_mutated':False}, open('validated_player_delta_summary.json','w'), indent=2)
+          PY
       - name: Apply corrected source team-week fan-out
         shell: bash
         run: |
           set -euo pipefail
-          python code/scripts/research_cohorts/merge_research_sidecars.py --base player_delta_candidate.duckdb --out merged_corpus_snapshot.duckdb --outcomes overlay_outcome_targets.duckdb --matchups overlay_source_matchup_rescue.duckdb
+          python code/scripts/research_cohorts/merge_research_sidecars.py --base research_public_lake/corpus_snapshot.duckdb --out merged_corpus_snapshot.duckdb --outcomes overlay_outcome_targets.duckdb --matchups overlay_source_matchup_rescue.duckdb
           cp merged_corpus_snapshot.duckdb research_public_lake/corpus_snapshot.duckdb
       - name: Fail-closed final validation
         shell: bash
@@ -108,7 +124,7 @@ jobs:
             pre_promotion.json
             post_promotion.json
             ops_before.sha256
-            player_delta_candidate.json
+            validated_player_delta_summary.json
             merged_corpus_snapshot.duckdb
           if-no-files-found: error
           retention-days: 90
