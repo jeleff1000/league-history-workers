@@ -186,6 +186,21 @@ def main() -> None:
     """)
     matched = con.execute("SELECT COUNT(*) FROM player_matches").fetchone()[0]
 
+    diagnostic = {}
+    diagnostic_exprs = {
+        "source_keys": "COUNT(*)",
+        "league_week_overlap": "COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM public.player_fantasy p WHERE p.db_name=s.db_name AND CAST(p.year AS INTEGER)=s.year AND CAST(p.week AS INTEGER)=s.week))",
+        "raw_team_key_overlap": "COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM public.player_fantasy p WHERE p.db_name=s.db_name AND CAST(p.year AS INTEGER)=s.year AND CAST(p.week AS INTEGER)=s.week AND s.team_key IS NOT NULL AND s.team_key=NULLIF(TRIM(CAST(p.team_key AS VARCHAR)),'')))",
+        "normalized_team_key_overlap": f"COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM public.player_fantasy p WHERE p.db_name=s.db_name AND CAST(p.year AS INTEGER)=s.year AND CAST(p.week AS INTEGER)=s.week AND s.team_key_norm IS NOT NULL AND s.team_key_norm={p_key_expr('p.team_key')}))",
+        "manager_name_overlap": f"COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM public.player_fantasy p WHERE p.db_name=s.db_name AND CAST(p.year AS INTEGER)=s.year AND CAST(p.week AS INTEGER)=s.week AND s.manager_key IS NOT NULL AND s.team_name_key IS NOT NULL AND s.manager_key={p_label_expr('p.manager')} AND s.team_name_key={p_label_expr('p.team_name')}))",
+    }
+    diagnostic_sql = ','.join(f"{expr} AS {name}" for name,expr in diagnostic_exprs.items())
+    diagnostic.update(dict(zip(diagnostic_exprs, con.execute(f"SELECT {diagnostic_sql} FROM source_signals s").fetchone())))
+    diagnostic["examples"] = [
+        dict(zip([r[0] for r in con.execute("DESCRIBE SELECT * FROM source_signals").fetchall()], row))
+        for row in con.execute("SELECT * FROM source_signals WHERE team_key IS NOT NULL LIMIT 3").fetchall()
+    ]
+
     fields = {
         "win": "source_win",
         "loss": "source_loss",
@@ -250,6 +265,7 @@ def main() -> None:
                                     AND s.team_name_key={p_label_expr('p.team_name')})))
         """).fetchone()[0]),
         "improvements_by_field": {k: int(v) for k,v in improvements.items()},
+        "join_diagnostic": diagnostic,
         "positive_mismatches_not_auto_promoted": {k: int(v) for k,v in positive_mismatches.items()},
         "output": "team_promotable_player_delta.parquet",
         "policy": "NULL fills only; positive signal mismatches and source conflicts remain quarantined",
