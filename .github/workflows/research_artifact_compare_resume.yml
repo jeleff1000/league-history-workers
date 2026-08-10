@@ -25,7 +25,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 355
     outputs:
-      extract_ids: ${{ steps.source_extracts.outputs.ids }}
+      extract_ids_a: ${{ steps.source_extracts.outputs.ids_a }}
+      extract_ids_b: ${{ steps.source_extracts.outputs.ids_b }}
     steps:
       - uses: actions/checkout@v4
       - name: Reuse frozen manifest from extraction run
@@ -52,12 +53,25 @@ jobs:
             if (matches.length !== 256) {
               throw new Error(`expected 256 extraction artifacts for run ${runId}; found ${matches.length}`);
             }
-            core.setOutput('ids', matches.map(a => String(a.id)).join(','));
+            const ids = matches.map(a => String(a.id));
+            // download-artifact accepts at most 200 artifact IDs per call.
+            // Split explicitly so every one of the 256 extraction shards is
+            // reused; a single call silently truncates the source set.
+            core.setOutput('ids_a', ids.slice(0, 200).join(','));
+            core.setOutput('ids_b', ids.slice(200).join(','));
             core.info(`verified ${matches.length} extraction artifacts`);
-      - name: Reuse all extracted candidate shards
+      - name: Reuse extracted candidate shards 1-200
         uses: actions/download-artifact@v5
         with:
-          artifact-ids: ${{ steps.source_extracts.outputs.ids }}
+          artifact-ids: ${{ steps.source_extracts.outputs.ids_a }}
+          path: candidates
+          merge-multiple: false
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: Reuse extracted candidate shards 201-256
+        uses: actions/download-artifact@v5
+        with:
+          artifact-ids: ${{ steps.source_extracts.outputs.ids_b }}
           path: candidates
           merge-multiple: false
           run-id: ${{ inputs.source_run_id }}
@@ -168,7 +182,15 @@ jobs:
       - name: Reuse extraction ledgers
         uses: actions/download-artifact@v5
         with:
-          artifact-ids: ${{ needs.compare.outputs.extract_ids }}
+          artifact-ids: ${{ needs.compare.outputs.extract_ids_a }}
+          path: extracts
+          merge-multiple: false
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: Reuse extraction ledgers 201-256
+        uses: actions/download-artifact@v5
+        with:
+          artifact-ids: ${{ needs.compare.outputs.extract_ids_b }}
           path: extracts
           merge-multiple: false
           run-id: ${{ inputs.source_run_id }}

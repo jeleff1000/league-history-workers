@@ -33,9 +33,15 @@ def main() -> None:
     def key(row: dict) -> tuple[int, str]:
         return int(row["artifact_id"]), str(row["file"])
 
-    expected = {key(row): row for row in files}
-    if len(expected) != EXPECTED_FILES:
-        raise SystemExit("manifest contains duplicate artifact/file keys")
+    # The manifest is file-level, and some non-candidate aggregate artifacts
+    # legitimately contain repeated basenames inside one artifact.  Candidate
+    # files are required to have unique keys because they are the files that
+    # must be extracted and compared.  Do not collapse non-candidate rows: the
+    # final ledger must retain one disposition for every manifest file record.
+    candidate_files = [row for row in files if row.get("candidate")]
+    expected = {key(row): row for row in candidate_files}
+    if len(expected) != len(candidate_files):
+        raise SystemExit("manifest contains duplicate candidate artifact/file keys")
     extracted = []
     for path in args.extract_ledger:
         extracted.extend(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
@@ -47,7 +53,7 @@ def main() -> None:
             duplicate_keys.add(k)
         else:
             by_key[k] = row
-    selected = {k for k, row in expected.items() if row.get("candidate")}
+    selected = set(expected)
     actual = set(by_key)
     missing_selected = sorted(selected - actual)
     out_of_scope = sorted(actual - set(expected))

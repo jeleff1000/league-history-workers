@@ -26,7 +26,13 @@ def main() -> None:
 
     manifest = read_json(args.manifest)
     files = manifest.get("files", [])
-    expected = {(int(r["artifact_id"]), str(r["file"])): r for r in files}
+    # Preserve every manifest file row.  Repeated basenames occur in several
+    # non-candidate aggregate artifacts; only candidate rows participate in
+    # extraction-key uniqueness checks.
+    candidate_rows = [r for r in files if r.get("candidate")]
+    expected = {(int(r["artifact_id"]), str(r["file"])): r for r in candidate_rows}
+    if len(expected) != len(candidate_rows):
+        raise SystemExit("manifest contains duplicate candidate artifact/file keys")
     extracted: dict[tuple[int, str], dict] = {}
     duplicate_extracts: set[tuple[int, str]] = set()
     for path in args.extract_ledger:
@@ -52,7 +58,8 @@ def main() -> None:
             structured[Path(str(row.get("file", ""))).name] = row
 
     rows = []
-    for key, expected_row in sorted(expected.items()):
+    for expected_row in files:
+        key = (int(expected_row["artifact_id"]), str(expected_row["file"]))
         artifact_id, file_name = key
         row = dict(expected_row)
         row["artifact_file_key"] = f"{artifact_id}:{file_name}"
