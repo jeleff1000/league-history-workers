@@ -124,6 +124,42 @@ jobs:
             'rb_null_eligibility_leagues': inventory[6],
             'cmc_rows_present': cmc_week1_present,
           })
+          missing_rb = c.execute("""
+            WITH week1 AS (
+              SELECT *
+              FROM lake.public.player_fantasy
+              WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1
+            ),
+            leagues AS (
+              SELECT db_name,
+                     ANY_VALUE(cohort_teams) AS teams,
+                     ANY_VALUE(cohort_roster) AS roster,
+                     ANY_VALUE(cohort_scoring) AS scoring,
+                     ANY_VALUE(cohort_pass_td) AS pass_td,
+                     ANY_VALUE(cohort_playoff_teams) AS playoff_teams
+              FROM week1
+              GROUP BY db_name
+            ),
+            positions AS (
+              SELECT db_name,
+                     STRING_AGG(DISTINCT COALESCE(NULLIF(TRIM(CAST(position AS VARCHAR)),''),'NULL'), ',' ORDER BY COALESCE(NULLIF(TRIM(CAST(position AS VARCHAR)),''),'NULL')) AS positions
+              FROM week1
+              GROUP BY db_name
+            )
+            SELECT l.teams, l.roster, l.scoring, l.pass_td, l.playoff_teams,
+                   COUNT(*) AS leagues,
+                   STRING_AGG(p.positions, ' | ' ORDER BY p.positions LIMIT 5) AS sample_position_sets
+            FROM leagues l
+            JOIN positions p USING (db_name)
+            WHERE NOT EXISTS (
+              SELECT 1 FROM week1 r
+              WHERE r.db_name=l.db_name
+                AND UPPER(TRIM(CAST(r.position AS VARCHAR)))='RB'
+            )
+            GROUP BY 1,2,3,4,5
+            ORDER BY leagues DESC
+          """).fetchall()
+          print('week1_leagues_without_rb_rows=', missing_rb)
           assert inventory[3] >= 10000, {'full_week1_rb_eligible': inventory[3]}
           print('cmc_2025_gate=', {'rows': cmc_total, 'position_null': cmc_position_null})
           print('cached_cmc_week1_target_counts=', c.execute("""
