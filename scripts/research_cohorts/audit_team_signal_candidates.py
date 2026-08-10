@@ -80,9 +80,16 @@ def main() -> None:
         MAX({flag_expr('loss')}) FILTER (WHERE {flag_expr('loss')} IS NOT NULL) source_loss,
         MAX({flag_expr('tie')}) FILTER (WHERE {flag_expr('tie')} IS NOT NULL) source_tie,
         MAX({expr('team_points','DOUBLE')}) FILTER (WHERE {expr('team_points','DOUBLE')} IS NOT NULL) source_team_points,
-        MAX(CASE WHEN COALESCE({flag_expr('is_playoffs')},0)=1 THEN 1 ELSE 0 END) source_playoffs,
-        MAX(CASE WHEN COALESCE({flag_expr('is_championship')},0)=1
-                      AND COALESCE({flag_expr('champion')},0)=1 THEN 1 ELSE 0 END) source_champion,
+        {(
+            f"MAX({flag_expr('is_playoffs')}) FILTER (WHERE {flag_expr('is_playoffs')} IS NOT NULL)"
+            if 'is_playoffs' in cols else
+            "CAST(NULL AS INTEGER)"
+        )} source_playoffs,
+        {(
+            f"MAX(CASE WHEN {flag_expr('is_championship')}=1 AND {flag_expr('champion')}=1 THEN 1 ELSE 0 END)"
+            if 'is_championship' in cols and 'champion' in cols else
+            "CAST(NULL AS INTEGER)"
+        )} source_champion,
         MAX({expr('final_playoff_seed','INTEGER')}) FILTER (WHERE {expr('final_playoff_seed','INTEGER')} IS NOT NULL) source_final_playoff_seed,
         STRING_AGG(DISTINCT CAST(filename AS VARCHAR), '|') source_files,
         COUNT(*) source_rows
@@ -92,8 +99,11 @@ def main() -> None:
     source_keys = con.execute("SELECT COUNT(*) FROM source_signals").fetchone()[0]
     source_duplicate_rows = con.execute("SELECT COALESCE(SUM(source_rows-1),0) FROM source_signals").fetchone()[0]
 
-    # A team-key match is authoritative.  Manager/team-name is only a fallback
-    # for source rows that genuinely lack team_key, and must be unique.
+    # A team-key match is authoritative when it exists in the canonical table.
+    # Some source APIs emit a different representation of the same team key
+    # (notably MFL's short franchise number).  In that case the scoped
+    # manager/team-name identity is the next valid key, but only when it maps
+    # to exactly one source team signal for that canonical player row.
     delta_filters = [
         "(p.win IS NULL AND m.source_win IS NOT NULL)",
         "(p.team_points IS NULL AND m.source_team_points IS NOT NULL)",
@@ -107,19 +117,42 @@ def main() -> None:
     if "tie" in pcols:
         delta_filters.insert(2 if "loss" in pcols else 1, "(p.tie IS NULL AND m.source_tie IS NOT NULL)")
 
-    con.execute(f"""
-      CREATE OR REPLACE TEMP TABLE player_matches AS
-      SELECT p.rowid player_rowid, s.source_win, s.source_loss, s.source_tie, s.source_team_points,
-             s.source_playoffs, s.source_champion, s.source_final_playoff_seed,
-             s.source_files,
-             CASE WHEN s.team_key IS NOT NULL THEN 'team_key' ELSE 'manager_team' END join_method
+    con.execute("""
+      CREATE OR REPLACE TEMP TABLE player_match_candidates AS
+      SELECT
+        p.rowid AS player_rowid,
+        s.*,
+        CASE
+          WHEN s.team_key IS NOT NULL
+           AND s.team_key=NULLIF(TRIM(CAST(p.team_key AS VARCHAR)),'')
+            THEN 'team_key'
+          ELSE 'manager_team'
+        END AS join_method,
+        COUNT(*) OVER (PARTITION BY p.rowid) AS candidate_count,
+        MAX(CASE WHEN s.team_key IS NOT NULL
+                       AND s.team_key=NULLIF(TRIM(CAST(p.team_key AS VARCHAR)),'')
+                 THEN 1 ELSE 0 END)
+          OVER (PARTITION BY p.rowid) AS has_exact_key
       FROM public.player_fantasy p
       JOIN source_signals s
-        ON s.db_name=p.db_name AND s.year=CAST(p.year AS INTEGER)
+        ON s.db_name=p.db_name
+       AND s.year=CAST(p.year AS INTEGER)
        AND s.week=CAST(p.week AS INTEGER)
-       AND ((s.team_key IS NOT NULL AND s.team_key=NULLIF(TRIM(CAST(p.team_key AS VARCHAR)),''))
-         OR (s.team_key IS NULL AND s.manager_key=LOWER(NULLIF(TRIM(CAST(p.manager AS VARCHAR)),''))
-             AND s.team_name_key=LOWER(NULLIF(TRIM(CAST(p.team_name AS VARCHAR)),''))))
+       AND (
+         (s.team_key IS NOT NULL
+          AND s.team_key=NULLIF(TRIM(CAST(p.team_key AS VARCHAR)),''))
+         OR
+         (s.manager_key IS NOT NULL
+          AND s.team_name_key IS NOT NULL
+          AND s.manager_key=LOWER(NULLIF(TRIM(CAST(p.manager AS VARCHAR)),''))
+          AND s.team_name_key=LOWER(NULLIF(TRIM(CAST(p.team_name AS VARCHAR)),'')))
+       )
+    """)
+    con.execute("""
+      CREATE OR REPLACE TEMP TABLE player_matches AS
+      SELECT * EXCLUDE (candidate_count, has_exact_key)
+      FROM player_match_candidates
+      WHERE has_exact_key=1 OR candidate_count=1
     """)
     matched = con.execute("SELECT COUNT(*) FROM player_matches").fetchone()[0]
 
@@ -180,7 +213,8 @@ def main() -> None:
                             WHERE p.db_name=s.db_name AND CAST(p.year AS INTEGER)=s.year
                               AND CAST(p.week AS INTEGER)=s.week
                               AND ((s.team_key IS NOT NULL AND s.team_key=NULLIF(TRIM(CAST(p.team_key AS VARCHAR)),''))
-                                OR (s.team_key IS NULL AND s.manager_key=LOWER(NULLIF(TRIM(CAST(p.manager AS VARCHAR)),''))
+                                OR (s.manager_key IS NOT NULL AND s.team_name_key IS NOT NULL
+                                    AND s.manager_key=LOWER(NULLIF(TRIM(CAST(p.manager AS VARCHAR)),''))
                                     AND s.team_name_key=LOWER(NULLIF(TRIM(CAST(p.team_name AS VARCHAR)),'')))))
         """).fetchone()[0]),
         "improvements_by_field": {k: int(v) for k,v in improvements.items()},
