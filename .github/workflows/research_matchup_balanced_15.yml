@@ -1,0 +1,210 @@
+name: Research Matchup 15-Runner Balanced Rollup
+
+on:
+  workflow_dispatch:
+    inputs:
+      pilot:
+        description: "Run the 2025 pilot only (required before full run)"
+        required: true
+        type: boolean
+        default: true
+      publish:
+        description: "Publish the validated full bundle to Fly"
+        required: true
+        type: boolean
+        default: false
+      cache_key:
+        description: "Immutable research cache key"
+        required: true
+        type: string
+        default: "research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      year_start: ${{ steps.years.outputs.year_start }}
+      year_end: ${{ steps.years.outputs.year_end }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - id: years
+        shell: bash
+        run: |
+          if [[ "${{ inputs.pilot }}" == "true" ]]; then
+            echo "year_start=2025" >> "$GITHUB_OUTPUT"
+            echo "year_end=2025" >> "$GITHUB_OUTPUT"
+          else
+            echo "year_start=1997" >> "$GITHUB_OUTPUT"
+            echo "year_end=2025" >> "$GITHUB_OUTPUT"
+          fi
+      - id: plan
+        shell: bash
+        run: |
+          mkdir -p plan
+          python code/scripts/research_cohorts/plan_balanced_matchup_tasks.py             --snapshot research_public_lake/corpus_snapshot.duckdb             --year-start "${{ steps.years.outputs.year_start }}"             --year-end "${{ steps.years.outputs.year_end }}"             --runners 15             --output plan/matrix.json
+          printf 'matrix=' >> "$GITHUB_OUTPUT"
+          tr -d '\n' < plan/matrix.json >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    strategy:
+      fail-fast: true
+      max-parallel: 15
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PYTHONUNBUFFERED: "1"
+      TASKS: ${{ toJSON(matrix.tasks) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 requests
+      - name: Run assigned duration-balanced tasks
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/parts
+          python - <<'PY'
+          import json, os, subprocess, sys
+          from pathlib import Path
+          tasks=json.loads(os.environ["TASKS"])
+          root=Path("out/parts")
+          for i,t in enumerate(tasks):
+              label=f"{t['year']}_{t['position'] or 'ALL'}_{t['player_bucket'] if t['player_bucket'] is not None else 0}"
+              output=root/f"part_{label}.duckdb"
+              cmd=[
+                sys.executable, "code/scripts/research_cohorts/build_direct_matchup_cache.py",
+                "--snapshot", "research_public_lake/corpus_snapshot.duckdb",
+                "--ops-cache", "research_public_lake/ops_cache.duckdb",
+                "--output", str(output),
+                "--year-start", str(t["year"]), "--year-end", str(t["year"]),
+                "--threads", "2", "--memory-limit-mb", "6000",
+              ]
+              if t["position"]:
+                  cmd += ["--position-group", t["position"]]
+              if t["player_buckets"] > 1:
+                  cmd += ["--player-buckets", str(t["player_buckets"]),
+                          "--player-bucket", str(t["player_bucket"])]
+              print("RUN", json.dumps(t), flush=True)
+              subprocess.run(cmd, check=True)
+          PY
+          python code/scripts/research_cohorts/merge_matchup_parts.py             --output out/bucket.duckdb --parts out/parts/*.duckdb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-balanced-bucket-${{ matrix.bucket }}-${{ github.run_id }}
+          path: out/bucket.duckdb
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  merge:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: research-matchup-balanced-bucket-*-${{ github.run_id }}
+          path: parts
+          merge-multiple: false
+      - name: Merge and validate complete adaptive bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          mapfile -t PARTS < <(find parts -type f -name bucket.duckdb | sort)
+          test "${#PARTS[@]}" -eq 15
+          python code/scripts/research_cohorts/merge_matchup_parts.py             --output out/research_matchup_adaptive.duckdb --parts "${PARTS[@]}"
+          python - <<'PY'
+          import duckdb
+          source=duckdb.connect("research_public_lake/corpus_snapshot.duckdb", read_only=True)
+          league_years=source.execute("""
+            select count(*) from (
+              select distinct db_name, cast(year as integer) year
+              from public.player_fantasy where year is not null
+            )
+          """).fetchone()[0]
+          source.close()
+          c=duckdb.connect("out/research_matchup_adaptive.duckdb", read_only=True)
+          required={"research_matchup_adaptive","research_matchup_adaptive_weekly","research_matchup_adaptive_career"}
+          got={r[0] for r in c.execute("select table_name from information_schema.tables where table_schema='main'").fetchall()}
+          assert required <= got, sorted(required-got)
+          counts={t:c.execute(f'select count(*) from "{t}"').fetchone()[0] for t in required}
+          assert all(n > 0 for n in counts.values()), counts
+          years=c.execute("select min(year),max(year),count(distinct year) from research_matchup_adaptive").fetchone()
+          cmc=c.execute("""
+            select count(*),min(year),max(year),count(distinct year)
+            from research_matchup_adaptive where NFL_player_id='00-0033280'
+          """).fetchone()
+          cmc_weekly=c.execute("""
+            select count(*) from research_matchup_adaptive_weekly
+            where NFL_player_id='00-0033280'
+          """).fetchone()[0]
+          print({"league_years":league_years,"counts":counts,"years":years,
+                 "cmc_seasons":cmc,"cmc_weekly_rows":cmc_weekly})
+          if ${{ inputs.pilot }}:
+              assert years == (2025,2025,1), years
+              assert cmc_weekly >= 5000, cmc_weekly
+          else:
+              assert league_years >= 60000, league_years
+              assert years[0] <= 1997 and years[1] >= 2025 and years[2] >= 29, years
+              assert cmc[3] >= 9 and cmc_weekly >= 5000, (cmc,cmc_weekly)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-balanced-final-${{ github.run_id }}
+          path: out/research_matchup_adaptive.duckdb
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - name: Publish validated full bundle to Fly
+        if: ${{ inputs.publish && !inputs.pilot }}
+        run: |
+          python code/scripts/research_cohorts/publish_research_matchup_to_fly.py             --bundle out/research_matchup_adaptive.duckdb --adaptive-only             --slug 12t_flx_half_4pt --apply --i-understand-this-writes-prod
