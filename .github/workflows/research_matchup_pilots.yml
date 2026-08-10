@@ -1,6 +1,9 @@
 name: Research Matchup Rollup Pilots
 
 on:
+  push:
+    paths:
+      - ".pilot_dispatch_once"
   workflow_dispatch:
     inputs:
       cache_key:
