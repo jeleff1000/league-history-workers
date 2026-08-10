@@ -249,14 +249,14 @@ jobs:
           # Keep the named-directory pass within the same ~10-minute runner
           # budget as the numeric shards: 120 requests at the configured 5s
           # throttle, with validation consuming the final 40%.
-          MFL_YEARS="$YEARS" \
-          MFL_REQ_CAP=120 \
-          MFL_TARGET=200 \
-          MFL_ALLOW_EXPIRED_CERT=1 \
-          MFL_HTTP_TIMEOUT=8 \
-          MFL_SLEEP="${{ inputs.request_sleep || '5.0' }}" \
-          MFL_SEED_OUT="$PWD/out/mfl_directory_seed.json" \
-          MFL_DISCOVERY_PROGRESS="$PWD/out/mfl_directory_progress.txt" \
+          export MFL_YEARS="$YEARS"
+          export MFL_REQ_CAP=120
+          export MFL_TARGET=200
+          export MFL_ALLOW_EXPIRED_CERT=1
+          export MFL_HTTP_TIMEOUT=8
+          export MFL_SLEEP="${{ inputs.request_sleep || '5.0' }}"
+          export MFL_SEED_OUT="$PWD/out/mfl_directory_seed.json"
+          export MFL_DISCOVERY_PROGRESS="$PWD/out/mfl_directory_progress.txt"
           set +e
           timeout --foreground 900s \
             python -u code/scripts/extraplatform_corpus/discover_mfl_leagues.py
@@ -309,9 +309,18 @@ jobs:
 
       - name: Download named directory artifact
         uses: actions/download-artifact@v5
+        continue-on-error: true
         with:
           name: mfl-directory-discovery-${{ github.run_id }}${{ inputs.artifact_namespace && format('-{0}', inputs.artifact_namespace) || '' }}
           path: directory
+
+      - name: Ensure directory input exists
+        if: ${{ always() }}
+        run: |
+          mkdir -p directory
+          if [ ! -f directory/mfl_directory_seed.json ]; then
+            printf '%s\n' '{"schema_version":"mfl_directory_seed_v1","rows":[],"directory_unavailable":true}' > directory/mfl_directory_seed.json
+          fi
 
       - name: Merge season records and lineages
         run: |
