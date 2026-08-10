@@ -229,6 +229,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 355
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v5
         with:
           pattern: research-artifact-candidate-extract-${{ github.run_id }}-*
@@ -239,7 +240,6 @@ jobs:
           path: research_public_lake
           key: ${{ env.BASE_CACHE_KEY }}
           fail-on-cache-miss: true
-      - uses: actions/checkout@v4
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -338,6 +338,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v5
         with:
           name: research-artifact-candidate-manifest-${{ github.run_id }}
@@ -351,7 +352,6 @@ jobs:
         with:
           name: research-artifact-cache-comparison-${{ github.run_id }}
           path: comparison
-      - uses: actions/checkout@v4
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -380,6 +380,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 355
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v5
         with:
           name: research-artifact-cache-comparison-${{ github.run_id }}
@@ -393,7 +394,6 @@ jobs:
           path: research_public_lake
           key: ${{ env.BASE_CACHE_KEY }}
           fail-on-cache-miss: true
-      - uses: actions/checkout@v4
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
