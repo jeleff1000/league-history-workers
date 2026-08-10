@@ -178,8 +178,8 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t ledgers < <(find extracts -name file_candidate_ledger.jsonl -type f | sort)
-          python scripts/research_cohorts/reconcile_artifact_cache_audit.py --manifest manifest/file_candidate_ledger.json --extract-ledgers "${ledgers[@]}" --comparison comparison/cache_candidate_comparison.json --structured-audit comparison/structured_evidence_audit.json --out comparison/complete_artifact_cache_audit.json
-          python scripts/research_cohorts/audit_artifact_promotion_ledger.py --manifest manifest/file_candidate_ledger.json --extract-ledgers "${ledgers[@]}" --comparison comparison --out comparison/file_promotion_ledger.json
+          python scripts/research_cohorts/reconcile_artifact_cache_audit.py --manifest manifest/file_candidate_ledger.json --extract-ledger "${ledgers[@]}" --comparison comparison/cache_candidate_comparison.json --structured-audit comparison/structured_evidence_audit.json --out comparison/complete_artifact_cache_audit.json
+          python scripts/research_cohorts/audit_artifact_promotion_ledger.py --manifest manifest/file_candidate_ledger.json --extract-ledger "${ledgers[@]}" --comparison comparison --out comparison/file_promotion_ledger.json
       - uses: actions/upload-artifact@v4
         with:
           name: research-artifact-complete-audit-${{ github.run_id }}
