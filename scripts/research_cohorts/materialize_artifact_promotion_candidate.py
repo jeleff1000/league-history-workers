@@ -37,6 +37,12 @@ EXACT_FIELDS = {
     "final_playoff_seed": "source_final_playoff_seed", "made_playoffs": "source_made_playoffs",
     "clutch_equity": "source_clutch_equity",
 }
+STRUCTURED_FIELDS = {
+    "win": "source_win", "loss": "source_loss", "tie": "source_tie",
+    "team_points": "source_team_points", "is_playoffs": "source_is_playoffs",
+    "champion": "source_champion", "final_playoff_seed": "source_final_playoff_seed",
+    "made_playoffs": "source_made_playoffs", "clutch_equity": "source_clutch_equity",
+}
 KEY = ["db_name", "year", "week", "NFL_player_id", "platform", "manager", "team_key", "team_name"]
 
 
@@ -65,6 +71,7 @@ def main() -> None:
     ap.add_argument("--base", type=Path, required=True)
     ap.add_argument("--team-delta", type=Path, required=True)
     ap.add_argument("--exact-delta", type=Path, required=True)
+    ap.add_argument("--structured-delta", type=Path, required=True)
     ap.add_argument("--ops", type=Path, required=True)
     ap.add_argument("--report", type=Path, required=True)
     args = ap.parse_args()
@@ -145,6 +152,42 @@ def main() -> None:
     else:
         exact_unmatched_keys = 0
 
+    structured_path = args.structured_delta
+    structured_rows = 0
+    structured_matched = 0
+    structured_cols: list[str] = []
+    structured_unmatched_keys = 0
+    if structured_path.exists() and structured_path.stat().st_size > 0:
+        structured_path_sql = str(structured_path.resolve()).replace("'", "''")
+        con.execute(f"CREATE OR REPLACE TEMP VIEW structured_delta AS SELECT * FROM read_parquet('{structured_path_sql}')")
+        structured_cols = relation_columns(con, "structured_delta")
+        required_structured = {"db_name", "year", "week", "manager"}
+        missing_structured = sorted(required_structured - set(structured_cols))
+        if missing_structured:
+            raise SystemExit(f"structured delta schema missing: {missing_structured}")
+        structured_rows = con.execute("SELECT COUNT(*) FROM structured_delta").fetchone()[0]
+        structured_dupes = con.execute("SELECT COUNT(*) FROM (SELECT db_name,year,week,manager FROM structured_delta GROUP BY ALL HAVING COUNT(*)>1)").fetchone()[0]
+        if structured_dupes:
+            raise SystemExit(f"duplicate structured delta keys: {structured_dupes}")
+        con.execute("""
+          CREATE OR REPLACE TEMP TABLE structured_matches AS
+          SELECT p.rowid player_rowid, d.*
+          FROM public.player_fantasy p JOIN structured_delta d
+            ON d.db_name=p.db_name AND CAST(d.year AS INTEGER)=CAST(p.year AS INTEGER)
+           AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER)
+           AND lower(trim(cast(d.manager AS VARCHAR)))=lower(trim(cast(p.manager AS VARCHAR)))
+        """)
+        structured_matched = con.execute("SELECT COUNT(*) FROM structured_matches").fetchone()[0]
+        structured_unmatched_keys = con.execute("""
+          SELECT COUNT(*) FROM structured_delta d
+          WHERE NOT EXISTS (SELECT 1 FROM public.player_fantasy p
+            WHERE d.db_name=p.db_name AND CAST(d.year AS INTEGER)=CAST(p.year AS INTEGER)
+              AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER)
+              AND lower(trim(cast(d.manager AS VARCHAR)))=lower(trim(cast(p.manager AS VARCHAR))))
+        """).fetchone()[0]
+        if structured_unmatched_keys:
+            raise SystemExit(f"unmatched structured delta keys: {structured_unmatched_keys}")
+
     improvements: dict[str, int] = {}
     for field, source in TEAM_FIELDS.items():
         if field not in pcols or source not in team_cols:
@@ -159,6 +202,13 @@ def main() -> None:
             count = con.execute(f"SELECT COUNT(*) FROM public.player_fantasy p JOIN exact_matches m ON p.rowid=m.player_rowid WHERE p.{q(field)} IS NULL AND m.{q(source)} IS NOT NULL").fetchone()[0]
             if count:
                 improvements[f"exact_{field}"] = count
+    if structured_rows:
+        for field, source in STRUCTURED_FIELDS.items():
+            if field not in pcols or source not in structured_cols:
+                continue
+            count = con.execute(f"SELECT COUNT(*) FROM public.player_fantasy p JOIN structured_matches m ON p.rowid=m.player_rowid WHERE p.{q(field)} IS NULL AND m.{q(source)} IS NOT NULL").fetchone()[0]
+            if count:
+                improvements[f"structured_{field}"] = count
 
     con.execute("BEGIN")
     try:
@@ -168,6 +218,10 @@ def main() -> None:
                 assignments.append(f"{q(field)}=CASE WHEN p.{q(field)} IS NULL THEN m.{q(source)} ELSE p.{q(field)} END")
         if assignments:
             con.execute(f"UPDATE public.player_fantasy p SET {', '.join(assignments)} FROM team_matches m WHERE p.rowid=m.player_rowid")
+        if structured_rows:
+            structured_assignments = [f"{q(field)}=CASE WHEN p.{q(field)} IS NULL THEN m.{q(source)} ELSE p.{q(field)} END" for field, source in STRUCTURED_FIELDS.items() if field in pcols and source in structured_cols]
+            if structured_assignments:
+                con.execute(f"UPDATE public.player_fantasy p SET {', '.join(structured_assignments)} FROM structured_matches m WHERE p.rowid=m.player_rowid")
         if exact_rows:
             exact_assignments = [f"{q(field)}=CASE WHEN p.{q(field)} IS NULL THEN e.{q(source)} ELSE p.{q(field)} END" for field, source in EXACT_FIELDS.items() if field in pcols and source in exact_cols]
             con.execute(f"UPDATE public.player_fantasy p SET {', '.join(exact_assignments)} FROM exact_matches e WHERE p.rowid=e.player_rowid")
@@ -192,6 +246,13 @@ def main() -> None:
             ).fetchone()[0]
             if readback[f"exact_{field}"] != 0:
                 raise SystemExit(f"exact readback failed for {field}: {readback[f'exact_{field}']} source cells still null")
+    for field, source in STRUCTURED_FIELDS.items():
+        if structured_rows and field in pcols and source in structured_cols:
+            readback[f"structured_{field}"] = con.execute(
+                f"SELECT COUNT(*) FROM structured_matches m JOIN public.player_fantasy p ON p.rowid=m.player_rowid WHERE m.{q(source)} IS NOT NULL AND p.{q(field)} IS NULL"
+            ).fetchone()[0]
+            if readback[f"structured_{field}"] != 0:
+                raise SystemExit(f"structured readback failed for {field}: {readback[f'structured_{field}']} source cells still null")
     after_rows = con.execute("SELECT COUNT(*) FROM public.player_fantasy").fetchone()[0]
     after_schema = relation_columns(con, "public.player_fantasy")
     after_ops = hash_file(args.ops)
@@ -207,6 +268,8 @@ def main() -> None:
         "team_unmatched_keys": team_unmatched_keys,
         "exact_delta_rows": exact_rows, "exact_matched_player_rows": exact_matched,
         "exact_unmatched_keys": exact_unmatched_keys,
+        "structured_delta_rows": structured_rows, "structured_matched_player_rows": structured_matched,
+        "structured_unmatched_keys": structured_unmatched_keys,
         "improvements_by_field": improvements, "readback_remaining_nulls": readback,
         "cache_key_replacement_performed": False,
     }

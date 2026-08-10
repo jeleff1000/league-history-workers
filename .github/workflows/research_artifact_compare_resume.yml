@@ -145,6 +145,10 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/research_cohorts/audit_structured_candidate_files.py --candidates candidates --out out/structured_evidence_audit.json
+          python scripts/research_cohorts/build_structured_signal_delta.py \
+            --candidates candidates \
+            --out out/structured_promotable_delta.parquet \
+            --report out/structured_signal_delta_report.json
       - name: Build exact player delta
         shell: bash
         run: |

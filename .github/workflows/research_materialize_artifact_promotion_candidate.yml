@@ -48,10 +48,12 @@ jobs:
           set -euo pipefail
           TEAM=$(find comparison -name team_promotable_player_delta.parquet -print -quit)
           EXACT=$(find comparison -name exact_promotable_player_delta.parquet -print -quit)
+          STRUCTURED=$(find comparison -name structured_promotable_delta.parquet -print -quit)
           python scripts/research_cohorts/materialize_artifact_promotion_candidate.py \
             --base research_public_lake/corpus_snapshot.duckdb \
             --team-delta "$TEAM" \
             --exact-delta "$EXACT" \
+            --structured-delta "$STRUCTURED" \
             --ops research_public_lake/ops_cache.duckdb \
             --report promotion_candidate_report.json
       - name: Upload verified working-copy candidate
