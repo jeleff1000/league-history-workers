@@ -4,3 +4,4 @@ player-id-fallback-fixed
 source-conflicts-quarantined
 fieldwise-merge-fixed
 conflict-report-only
+clutch-ledger-emitted
