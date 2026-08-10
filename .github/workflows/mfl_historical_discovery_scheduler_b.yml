@@ -93,7 +93,7 @@ jobs:
           COMPLETED_ID_END: ${{ steps.resolve.outputs.id_end }}
         run: |
           set -euo pipefail
-          if [ "$COMPLETED_ID_START" -eq 0 ] && [ "$COMPLETED_ID_END" -gt 999 ] && [ "$COMPLETED_ID_END" -lt 80000 ]; then
+          if { [ "$COMPLETED_ID_START" -eq 0 ] && [ "$COMPLETED_ID_END" -gt 999 ] && [ "$COMPLETED_ID_END" -lt 80000 ]; } || { [ "$COMPLETED_ID_START" -eq 10001 ] && [ "$COMPLETED_ID_END" -eq 11000 ]; }; then
             next_start_year=$COMPLETED_START
             next_end_year=$COMPLETED_END
             next_id_start=1000
