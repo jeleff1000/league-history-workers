@@ -77,7 +77,21 @@ jobs:
           """).fetchone()
           if cmc_total < 5000 or cmc_position_null:
               raise SystemExit(f'CMC cache gate failed: total_2025={cmc_total} position_null={cmc_position_null}')
-          print('cmc_2025_gate=', {'rows': cmc_total, 'position_null': cmc_position_null})
+          full_week1_rb_eligible = c.execute("""
+            SELECT COUNT(DISTINCT db_name)
+            FROM lake.public.player_fantasy
+            WHERE year=2025 AND week=1
+              AND UPPER(TRIM(CAST(position AS VARCHAR)))='RB'
+              AND CAST(cohort_position_eligible AS INTEGER)=1
+          """).fetchone()[0]
+          cmc_week1_present = c.execute("""
+            SELECT COUNT(DISTINCT db_name)
+            FROM lake.public.player_fantasy
+            WHERE NFL_player_id='00-0033280' AND year=2025 AND week=1
+          """).fetchone()[0]
+          assert full_week1_rb_eligible >= 10000, {'full_week1_rb_eligible': full_week1_rb_eligible}
+          print('full_cmc_week1_population=', {'rb_eligible_leagues':full_week1_rb_eligible,'cmc_rows_present':cmc_week1_present})
+                    print('cmc_2025_gate=', {'rows': cmc_total, 'position_null': cmc_position_null})
           print('cached_cmc_week1_target_counts=', c.execute("""
             WITH target AS (
               SELECT DISTINCT db_name, CAST(year AS INTEGER) AS year
