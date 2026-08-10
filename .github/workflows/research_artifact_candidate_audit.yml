@@ -193,7 +193,12 @@ jobs:
               # of the repeated rate-limit failures in the prior implementation.
               for item in package['artifacts']:
                   archive=Path('raw')/f"{item['artifact_id']}.zip"
-                  download_artifact(int(item['artifact_id']),archive)
+                  try:
+                      download_artifact(int(item['artifact_id']),archive)
+                  except Exception as exc:
+                      for meta in item['files']:
+                          ledger.append({**meta,'status':'archive_download_failed','error':repr(exc),'artifact_id':item['artifact_id']})
+                      continue
                   target=run_root/item['artifact']; target.mkdir(parents=True,exist_ok=True)
                   with zipfile.ZipFile(archive) as z: z.extractall(target)
                   archive.unlink()

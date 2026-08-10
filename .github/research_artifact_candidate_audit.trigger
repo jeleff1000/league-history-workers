@@ -1,1 +1,1 @@
-manifest-id-only-download-v17-exact-union-safe-reconcile
+record-per-artifact-failures-v18-exact-union-safe-reconcile
