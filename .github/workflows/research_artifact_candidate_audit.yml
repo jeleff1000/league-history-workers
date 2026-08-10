@@ -1,6 +1,9 @@
 name: Audit research artifacts for canonical cache improvements
 
 on:
+  push:
+    paths:
+      - .github/research_artifact_candidate_audit.trigger
   workflow_dispatch:
     inputs:
       audit_run_id:
@@ -24,12 +27,16 @@ permissions:
   actions: read
   contents: read
 
+concurrency:
+  group: research-artifact-candidate-audit
+  cancel-in-progress: true
+
 env:
   GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT || github.token }}
-  AUDIT_RUN_ID: ${{ inputs.audit_run_id }}
-  BASE_CACHE_KEY: ${{ inputs.base_cache_key }}
-  SHARD_COUNT: ${{ inputs.shard_count }}
-  APPLY: ${{ inputs.apply }}
+  AUDIT_RUN_ID: ${{ inputs.audit_run_id || '31337901490' }}
+  BASE_CACHE_KEY: ${{ inputs.base_cache_key || 'research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613' }}
+  SHARD_COUNT: ${{ inputs.shard_count || '256' }}
+  APPLY: ${{ inputs.apply || 'false' }}
 
 jobs:
   manifest:
