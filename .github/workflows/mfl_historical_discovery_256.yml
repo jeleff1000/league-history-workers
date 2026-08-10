@@ -56,7 +56,7 @@ on:
       id_end:
         description: "Last inclusive MFL ID"
         required: false
-        default: "10000"
+        default: "80000"
         type: string
       yahoo_oauth_ref:
         description: "Pipeline code ref"
@@ -107,7 +107,7 @@ on:
         type: string
       id_end:
         required: false
-        default: "10000"
+        default: "80000"
         type: string
       yahoo_oauth_ref:
         required: false
@@ -190,7 +190,7 @@ jobs:
             --start-year "${{ inputs.start_year || '1997' }}" \
             --end-year "${{ inputs.end_year || '1998' }}" \
             --id-start "${{ inputs.id_start || '0' }}" \
-            --id-end "${{ inputs.id_end || '10000' }}" \
+            --id-end "${{ inputs.id_end || '80000' }}" \
             --id-bands "${{ inputs.id_bands || '1-9999,10000-29999,30000-59999,60000-80000' }}" \
             --sleep "${{ inputs.request_sleep || '5.0' }}" \
             --out "out/mfl_shard_${{ matrix.shard }}.json"
@@ -304,9 +304,28 @@ jobs:
           # Feed named-directory results through the same season/id dedupe and
           # lineage merge as numeric shards.
           mkdir -p shards
+          MFL_EXPECTED_SHARDS="${{ inputs.shard_count || '250' }}" \
+          MFL_SHARD_INDICES="${{ inputs.shard_indices || '' }}" \
+          MFL_DIRECTORY_ONLY="${{ inputs.directory_only || 'false' }}" \
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          if os.environ.get("MFL_DIRECTORY_ONLY", "false").lower() != "true":
+              raw = os.environ.get("MFL_SHARD_INDICES", "").strip()
+              expected = len([part for part in raw.split(",") if part.strip()]) if raw else int(os.environ["MFL_EXPECTED_SHARDS"])
+              received = len([
+                  path for path in Path("shards").glob("mfl_shard_*.json")
+                  if re.fullmatch(r"mfl_shard_\d+\.json", path.name)
+              ])
+              print(f"shard_coverage expected={expected} received={received}")
+              if received != expected:
+                  raise SystemExit(f"refusing silent partial merge: expected {expected} numeric shards, received {received}")
+          PY
           cp directory/mfl_directory_seed.json shards/mfl_shard_directory.json
           python code/scripts/extraplatform_corpus/merge_mfl_shards.py \
-            --input-glob "shards/**/mfl_shard_*.json" \
+            --input-glob "shards/mfl_shard_*.json" \
             $SEED \
             --out out/mfl_discovery_merged.json
           python3 - <<'PY'
@@ -326,7 +345,7 @@ jobs:
           MFL_ID_BANDS: ${{ inputs.id_bands || '1-9999,10000-29999,30000-59999,60000-80000' }}
           MFL_REQUEST_SLEEP: ${{ inputs.request_sleep || '5.0' }}
           MFL_ID_START: ${{ inputs.id_start || '0' }}
-          MFL_ID_END: ${{ inputs.id_end || '10000' }}
+          MFL_ID_END: ${{ inputs.id_end || '80000' }}
           MFL_SHARD_INDICES: ${{ inputs.shard_indices || '' }}
           MFL_DIRECTORY_ONLY: ${{ inputs.directory_only || 'false' }}
           MFL_PIPELINE_REF: ${{ inputs.yahoo_oauth_ref || 'main' }}
