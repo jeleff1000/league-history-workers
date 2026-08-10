@@ -321,6 +321,7 @@ jobs:
               --base research_public_lake/corpus_snapshot.duckdb \
               --sources "${exact_sources[@]}" \
               --out out/exact_promotable_player_delta.parquet \
+              --insert-out out/exact_new_player_rows.parquet \
               --report out/exact_player_delta_report.json
           else
             printf '%s\n' '{"source_files":0,"delta_rows":0,"cache_mutated":false,"new_lineage":false}' > out/exact_player_delta_report.json
@@ -418,9 +419,14 @@ jobs:
           test "${#deltas[@]}" -gt 0
           i=0
           for delta in "${deltas[@]}"; do
+            new_rows_arg=()
+            if [[ -f comparison/exact_new_player_rows.parquet ]]; then
+              new_rows_arg=(--new-rows comparison/exact_new_player_rows.parquet)
+            fi
             python scripts/research_cohorts/apply_team_signal_delta_in_place.py \
               --base research_public_lake/corpus_snapshot.duckdb \
               --delta "$delta" \
+              "${new_rows_arg[@]}" \
               --report "comparison/player_delta_apply_${i}.json"
             i=$((i + 1))
           done
@@ -432,24 +438,15 @@ jobs:
             comparison/player_delta_apply_*.json
           retention-days: 90
           compression-level: 0
-      - name: Replace only the exact canonical cache key
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Refuse destructive Actions-cache replacement
         shell: bash
         run: |
           set -euo pipefail
-          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${BASE_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
-          test "${#ids[@]}" -eq 1
-          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${ids[0]}"
-      - uses: actions/cache/save@v5
-        with:
-          path: research_public_lake
-          key: ${{ env.BASE_CACHE_KEY }}
-      - name: Verify exactly one canonical cache remains
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${BASE_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
-          test "${#ids[@]}" -eq 1
+          cat >&2 <<'EOF'
+          REFUSING PROMOTION: GitHub Actions caches are immutable. Replacing the
+          canonical cache requires deleting its existing cache entry first. This
+          workflow is forbidden from deleting the one approved research cache.
+          The validated database remains in this run's workspace/artifact until an
+          approved mutable canonical-storage promotion path is supplied.
+          EOF
+          exit 1

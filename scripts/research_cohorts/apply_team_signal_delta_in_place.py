@@ -27,6 +27,7 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", type=Path, required=True)
     ap.add_argument("--delta", type=Path, required=True)
+    ap.add_argument("--new-rows", type=Path, default=None)
     ap.add_argument("--report", type=Path, required=True)
     args = ap.parse_args()
 
@@ -48,6 +49,30 @@ def main() -> None:
     required |= {"source_win", "source_team_points", "source_playoffs", "source_champion", "source_final_playoff_seed"}
     if not required <= dcols:
         raise SystemExit(f"delta schema missing: {sorted(required-dcols)}")
+    new_count = 0
+    if args.new_rows is not None:
+        npath = str(args.new_rows.resolve()).replace("'", "''")
+        con.execute(f"CREATE OR REPLACE TEMP VIEW new_rows_raw AS SELECT * FROM read_parquet('{npath}')")
+        ncols = [r[0] for r in con.execute("DESCRIBE new_rows_raw").fetchall()]
+        if ncols != canonical_columns_before:
+            raise SystemExit(f"new-row schema must exactly equal canonical player schema: {ncols} != {canonical_columns_before}")
+        new_count = con.execute("SELECT COUNT(*) FROM new_rows_raw").fetchone()[0]
+        new_dup = con.execute("SELECT COUNT(*) FROM (SELECT db_name,year,week,NFL_player_id,manager,team_key,team_name,platform FROM new_rows_raw GROUP BY ALL HAVING COUNT(*)>1)").fetchone()[0]
+        if new_dup:
+            raise SystemExit(f"duplicate new-row keys: {new_dup}")
+        existing_new = con.execute("""
+          SELECT COUNT(*) FROM new_rows_raw n JOIN public.player_fantasy p
+            ON n.db_name IS NOT DISTINCT FROM p.db_name
+           AND CAST(n.year AS INTEGER) IS NOT DISTINCT FROM CAST(p.year AS INTEGER)
+           AND CAST(n.week AS INTEGER) IS NOT DISTINCT FROM CAST(p.week AS INTEGER)
+           AND n.NFL_player_id IS NOT DISTINCT FROM p.NFL_player_id
+           AND n.manager IS NOT DISTINCT FROM p.manager
+           AND n.team_key IS NOT DISTINCT FROM p.team_key
+           AND n.team_name IS NOT DISTINCT FROM p.team_name
+           AND LOWER(n.platform) IS NOT DISTINCT FROM LOWER(p.platform)
+        """).fetchone()[0]
+        if existing_new:
+            raise SystemExit(f"new-row candidates already present in canonical table: {existing_new}")
     key = "db_name,year,week,NFL_player_id,manager,team_key,team_name,platform"
     dup = con.execute(f"SELECT COUNT(*) FROM (SELECT {key} FROM delta_raw GROUP BY ALL HAVING COUNT(*)>1)").fetchone()[0]
     if dup:
@@ -121,8 +146,12 @@ def main() -> None:
             {update_sql}
           FROM matched m WHERE p.rowid=m.player_rowid
         """)
-        if con.execute("SELECT COUNT(*) FROM public.player_fantasy").fetchone()[0] != before_rows:
-            raise SystemExit("player row count changed")
+        if args.new_rows is not None and new_count:
+            quoted = ",".join('"' + c.replace('"','""') + '"' for c in canonical_columns_before)
+            con.execute(f"INSERT INTO public.player_fantasy ({quoted}) SELECT {quoted} FROM new_rows_raw")
+        expected_rows = before_rows + int(new_count)
+        if con.execute("SELECT COUNT(*) FROM public.player_fantasy").fetchone()[0] != expected_rows:
+            raise SystemExit("unexpected player row count after update/insert")
         if [r[0] for r in con.execute("DESCRIBE public.player_fantasy").fetchall()] != canonical_columns_before:
             raise SystemExit("player schema changed")
         con.execute("COMMIT")
@@ -134,6 +163,7 @@ def main() -> None:
         "ops_untouched": True, "schema_unchanged": True,
         "delta_rows": int(con.execute("SELECT COUNT(*) FROM delta_raw").fetchone()[0]),
         "matched_rows": int(matched),
+        "inserted_rows": int(new_count),
         "improvements_by_field": {k:int(v) for k,v in improvements.items()},
     }
     args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
