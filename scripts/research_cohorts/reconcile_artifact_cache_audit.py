@@ -49,6 +49,11 @@ def main() -> None:
     duplicate_keys = set()
     for row in extracted:
         k = key(row)
+        # Extraction ledgers also record non-candidate files from the parent
+        # source artifacts.  They are intentionally not part of this
+        # candidate reconciliation and may repeat aggregate basenames.
+        if k not in selected:
+            continue
         if k in by_key:
             duplicate_keys.add(k)
         else:

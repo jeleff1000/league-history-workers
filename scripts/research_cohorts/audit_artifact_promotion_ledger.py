@@ -35,12 +35,18 @@ def main() -> None:
         raise SystemExit("manifest contains duplicate candidate artifact/file keys")
     extracted: dict[tuple[int, str], dict] = {}
     duplicate_extracts: set[tuple[int, str]] = set()
+    candidate_keys = set(expected)
     for path in args.extract_ledger:
         for line in path.read_text(encoding="utf-8").splitlines():
             if not line.strip():
                 continue
             row = json.loads(line)
             key = (int(row["artifact_id"]), str(row["file"]))
+            # Parent extraction ledgers include non-candidate files too.  Do
+            # not let their repeated aggregate basenames contaminate the
+            # candidate promotion ledger.
+            if key not in candidate_keys:
+                continue
             if key in extracted:
                 duplicate_extracts.add(key)
             else:
