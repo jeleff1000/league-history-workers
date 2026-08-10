@@ -1,0 +1,167 @@
+name: Resume research artifact cache comparison
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Completed extraction run whose manifest and candidate artifacts will be reused
+        required: true
+        default: '31408418532'
+      base_cache_key:
+        description: Frozen canonical research cache key
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+  BASE_CACHE_KEY: ${{ inputs.base_cache_key }}
+
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reuse frozen manifest from extraction run
+        uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-candidate-manifest-${{ inputs.source_run_id }}
+          path: manifest
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: Reuse all extracted candidate shards
+        uses: actions/download-artifact@v5
+        with:
+          pattern: research-artifact-candidate-extract-${{ inputs.source_run_id }}-*
+          path: candidates
+          merge-multiple: false
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.BASE_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Compare reused candidates against canonical cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import duckdb
+          from scripts.research_cohorts.canonical_player_schema import BASE_PLAYER_COLUMNS, validate_player_schema
+
+          base=Path('research_public_lake/corpus_snapshot.duckdb')
+          con=duckdb.connect(str(base), read_only=True)
+          pcols=[r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()]
+          cohorts, optional=validate_player_schema(pcols)
+          files=sorted(Path('candidates').rglob('*.parquet'))
+          by=[]
+          for f in files:
+              q="'" + str(f.resolve()).replace("'", "''") + "'"
+              cols={r[0] for r in con.execute(f'DESCRIBE SELECT * FROM read_parquet({q})').fetchall()}
+              by.append((str(f),cols))
+          base_cols=BASE_PLAYER_COLUMNS
+          exact=[f for f,c in by if set(base_cols)<=c]
+          team=[f for f,c in by if {'db_name','year','week','team_key'}<=c and (c & {'win','loss','tie','team_points','is_playoffs','champion','has_po_signal','made_playoffs'}) and f not in exact]
+          player=[f for f,c in by if {'db_name','year','week','NFL_player_id'}<=c and (c & {'win','loss','tie','team_points','is_playoffs','champion'}) and f not in exact]
+          out=Path('out'); out.mkdir()
+          summary={'cache_mutated':False,'new_lineage':False,'canonical_schema_unchanged':True,'cache_player_columns':pcols,'cohort_dimension_columns':cohorts,'optional_player_columns':optional,'candidate_parquet_files':len(files),'exact_files':len(exact),'team_signal_files':len(team),'player_signal_files':len(player),'settings_files':sum(1 for f,c in by if {'db_name','year'}<=c and (c & {'pass_td_fill','playoff_teams_fill','roster_FLX_fill','roster_SUPER_FLEX_fill','roster_IDP_fill','best_ball_fill'}))}
+          if exact:
+              paths='['+','.join("'"+str(Path(f).resolve()).replace("'","''")+"'" for f in exact)+']'
+              con.execute(f'CREATE OR REPLACE TEMP VIEW exact_source AS SELECT * FROM read_parquet({paths}, union_by_name=true)')
+              def ident(a):
+                  fb='COALESCE('+','.join(f'NULLIF(TRIM(CAST({a}."{c}" AS VARCHAR)), \'\')' for c in ['NFL_player_id','sleeper_player_id','fleaflicker_player_id','mfl_player_id','espn_player_id','yahoo_player_id'])+')'
+                  return f"CASE LOWER(NULLIF(TRIM(CAST({a}.\"platform\" AS VARCHAR)),'')) WHEN 'sleeper' THEN COALESCE(NULLIF(TRIM(CAST({a}.\"sleeper_player_id\" AS VARCHAR)),''),{fb}) WHEN 'fleaflicker' THEN COALESCE(NULLIF(TRIM(CAST({a}.\"fleaflicker_player_id\" AS VARCHAR)),''),{fb}) WHEN 'mfl' THEN COALESCE(NULLIF(TRIM(CAST({a}.\"mfl_player_id\" AS VARCHAR)),''),{fb}) ELSE {fb} END"
+              def join_key(a):
+                  return f"CONCAT_WS('|',CAST({a}.\"db_name\" AS VARCHAR),CAST({a}.\"year\" AS VARCHAR),CAST({a}.\"week\" AS VARCHAR),CAST({a}.\"platform\" AS VARCHAR),CAST({a}.\"manager\" AS VARCHAR),CAST({a}.\"team_name\" AS VARCHAR),CAST({a}.\"team_key\" AS VARCHAR),CAST({a}.\"fantasy_position\" AS VARCHAR),{ident(a)})"
+              con.execute(f'CREATE OR REPLACE TEMP VIEW exact_keyed AS SELECT s.*,{join_key("s")} AS join_key FROM exact_source s')
+              con.execute(f'CREATE OR REPLACE TEMP VIEW player_keyed AS SELECT p.*,{join_key("p")} AS join_key FROM public.player_fantasy p')
+              for col in base_cols+optional:
+                  n=con.execute(f'SELECT COUNT(*) FROM exact_keyed s JOIN player_keyed p USING(join_key) WHERE p."{col}" IS NULL AND s."{col}" IS NOT NULL').fetchone()[0]
+                  x=con.execute(f'SELECT COUNT(*) FROM exact_keyed s JOIN player_keyed p USING(join_key) WHERE p."{col}" IS NOT NULL AND s."{col}" IS NOT NULL AND CAST(p."{col}" AS VARCHAR)<>CAST(s."{col}" AS VARCHAR)').fetchone()[0]
+                  summary.setdefault('exact_null_fills',{})[col]=int(n); summary.setdefault('exact_conflicts',{})[col]=int(x)
+              con.execute("COPY (SELECT s.db_name,s.year,s.week,s.platform,s.manager,s.team_name,s.team_key,s.fantasy_position,s.NFL_player_id,s.clutch_equity source_clutch_equity,p.clutch_equity canonical_clutch_equity FROM exact_keyed s JOIN player_keyed p USING(join_key) WHERE p.clutch_equity IS NULL AND s.clutch_equity IS NOT NULL) TO 'out/exact_clutch_null_fill_candidates.parquet' (FORMAT PARQUET)")
+          else: summary['exact_null_fills']={}; summary['exact_conflicts']={}
+          Path('out/exact_source_files.txt').write_text('\n'.join(exact)+('\n' if exact else ''))
+          summary['team_sources_note']='team/week sources require the fieldwise fan-out audit before promotion'; summary['candidate_files_for_comparison']=len(files)
+          (out/'cache_candidate_comparison.json').write_text(json.dumps(summary,indent=2,sort_keys=True)+'\n')
+          con.close(); print(json.dumps(summary,sort_keys=True))
+          PY
+      - name: Compare team/week signals
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/team_signal
+          python scripts/research_cohorts/audit_team_signal_candidates.py --base research_public_lake/corpus_snapshot.duckdb --candidates candidates --out out/team_signal
+      - name: Audit structured evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/audit_structured_candidate_files.py --candidates candidates --out out/structured_evidence_audit.json
+      - name: Build exact player delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -s out/exact_source_files.txt ]]; then
+            mapfile -t exact_sources < out/exact_source_files.txt
+            python scripts/research_cohorts/build_exact_player_delta.py --base research_public_lake/corpus_snapshot.duckdb --sources "${exact_sources[@]}" --out out/exact_promotable_player_delta.parquet --insert-out out/exact_new_player_rows.parquet --report out/exact_player_delta_report.json
+          else
+            printf '%s\n' '{"source_files":0,"delta_rows":0,"cache_mutated":false,"new_lineage":false}' > out/exact_player_delta_report.json
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-artifact-cache-comparison-${{ github.run_id }}
+          path: out/*
+          retention-days: 90
+          compression-level: 0
+
+  reconcile:
+    needs: compare
+    if: ${{ needs.compare.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reuse manifest and extraction ledgers
+        uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-candidate-manifest-${{ inputs.source_run_id }}
+          path: manifest
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: Reuse comparison outputs
+        uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-cache-comparison-${{ github.run_id }}
+          path: comparison
+      - name: Reuse extraction ledgers
+        uses: actions/download-artifact@v5
+        with:
+          pattern: research-artifact-candidate-extract-${{ inputs.source_run_id }}-*
+          path: extracts
+          merge-multiple: false
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: Reconcile every artifact and file
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ledgers < <(find extracts -name file_candidate_ledger.jsonl -type f | sort)
+          python scripts/research_cohorts/reconcile_artifact_cache_audit.py --manifest manifest/file_candidate_ledger.json --extract-ledgers "${ledgers[@]}" --comparison comparison/cache_candidate_comparison.json --structured-audit comparison/structured_evidence_audit.json --out comparison/complete_artifact_cache_audit.json
+          python scripts/research_cohorts/audit_artifact_promotion_ledger.py --manifest manifest/file_candidate_ledger.json --extract-ledgers "${ledgers[@]}" --comparison comparison --out comparison/file_promotion_ledger.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-artifact-complete-audit-${{ github.run_id }}
+          path: comparison/*
+          retention-days: 90
+          compression-level: 0
