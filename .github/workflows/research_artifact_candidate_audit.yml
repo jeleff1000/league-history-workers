@@ -24,7 +24,7 @@ on:
         default: 'false'
 
 permissions:
-  actions: read
+  actions: write
   contents: read
 
 concurrency:
@@ -219,7 +219,8 @@ jobs:
           pcols=[r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()]
           base_canonical=['db_name','year','week','NFL_player_id','is_started','is_rostered','fantasy_points','win','champion','clutch_equity','manager_lamar','manager','team_points','final_playoff_seed','is_playoffs','has_po_signal','player','position','fantasy_position','platform','team_key','team_name','nfl_team_api','yahoo_player_id','sleeper_player_id','espn_player_id','fleaflicker_player_id','mfl_player_id','made_playoffs']
           missing=set(base_canonical)-set(pcols); cohort_columns=[c for c in pcols if c not in base_canonical]
-          if missing or len(cohort_columns)!=7: raise SystemExit(f'canonical player schema mismatch: missing={sorted(missing)} cohort_columns={cohort_columns}')
+          forbidden={'loss','tie','opponent_points','is_championship','is_active','is_playoffs_bf','made_po_bf','made_po'} & set(pcols)
+          if missing or len(cohort_columns)!=7 or forbidden: raise SystemExit(f'canonical player schema mismatch: missing={sorted(missing)} cohort_columns={cohort_columns} forbidden={sorted(forbidden)}')
           files=sorted(Path('candidates').rglob('*.parquet'))
           by=[]
           for f in files:

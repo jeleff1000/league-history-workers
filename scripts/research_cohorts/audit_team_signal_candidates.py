@@ -35,8 +35,9 @@ def main() -> None:
     pcols = [r[0] for r in con.execute("DESCRIBE public.player_fantasy").fetchall()]
     missing = set(BASE_PLAYER_COLUMNS) - set(pcols)
     extra = [c for c in pcols if c not in BASE_PLAYER_COLUMNS]
-    if missing or len(extra) != 7:
-        raise SystemExit(f"canonical player schema mismatch: missing={sorted(missing)} extra={extra}")
+    forbidden = {'loss','tie','opponent_points','is_championship','is_active','is_playoffs_bf','made_po_bf','made_po'} & set(pcols)
+    if missing or len(extra) != 7 or forbidden:
+        raise SystemExit(f"canonical player schema mismatch: missing={sorted(missing)} extra={extra} forbidden={sorted(forbidden)}")
     all_files = sorted(args.candidates.rglob("*.parquet"))
     files = []
     for path in all_files:
