@@ -252,13 +252,12 @@ jobs:
           import csv, json, os, re
           from pathlib import Path
           import duckdb
+          from scripts.research_cohorts.canonical_player_schema import BASE_PLAYER_COLUMNS, OPTIONAL_PLAYER_COLUMNS, validate_player_schema
           base=Path('research_public_lake/corpus_snapshot.duckdb')
           con=duckdb.connect(str(base),read_only=True)
           pcols=[r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()]
-          base_canonical=['db_name','year','week','NFL_player_id','is_started','is_rostered','fantasy_points','win','champion','clutch_equity','manager_lamar','manager','team_points','final_playoff_seed','is_playoffs','has_po_signal','player','position','fantasy_position','platform','team_key','team_name','nfl_team_api','yahoo_player_id','sleeper_player_id','espn_player_id','fleaflicker_player_id','mfl_player_id','made_playoffs']
-          missing=set(base_canonical)-set(pcols); optional_present=[c for c in pcols if c in {'loss','tie'}]; cohort_columns=[c for c in pcols if c not in base_canonical and c not in {'loss','tie'}]
-          forbidden={'opponent_points','is_championship','is_active','is_playoffs_bf','made_po_bf','made_po'} & set(pcols)
-          if missing or len(cohort_columns)!=7 or forbidden: raise SystemExit(f'canonical player schema mismatch: missing={sorted(missing)} cohort_columns={cohort_columns} optional={optional_present} forbidden={sorted(forbidden)}')
+          base_canonical=BASE_PLAYER_COLUMNS
+          cohort_columns, optional_present = validate_player_schema(pcols)
           files=sorted(Path('candidates').rglob('*.parquet'))
           by=[]
           for f in files:

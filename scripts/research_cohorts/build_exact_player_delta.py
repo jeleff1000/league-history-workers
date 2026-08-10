@@ -14,17 +14,13 @@ from typing import Iterable
 
 import duckdb
 
+try:
+    from .canonical_player_schema import BASE_PLAYER_COLUMNS, OPTIONAL_PLAYER_COLUMNS, validate_player_schema
+except ImportError:  # direct script execution in Actions
+    from canonical_player_schema import BASE_PLAYER_COLUMNS, OPTIONAL_PLAYER_COLUMNS, validate_player_schema
 
-BASE_PLAYER_COLUMNS = [
-    "db_name", "year", "week", "NFL_player_id", "is_started", "is_rostered",
-    "fantasy_points", "win", "champion", "clutch_equity", "manager_lamar",
-    "manager", "team_points", "final_playoff_seed", "is_playoffs",
-    "has_po_signal", "player", "position", "fantasy_position", "platform",
-    "team_key", "team_name", "nfl_team_api", "yahoo_player_id",
-    "sleeper_player_id", "espn_player_id", "fleaflicker_player_id",
-    "mfl_player_id", "made_playoffs",
-]
-OPTIONAL = {"loss", "tie"}
+
+OPTIONAL = OPTIONAL_PLAYER_COLUMNS
 SIGNAL_TYPES = {
     "win": "INTEGER",
     "loss": "INTEGER",
@@ -59,11 +55,7 @@ def _read_union(con: duckdb.DuckDBPyConnection, paths: Iterable[Path]) -> None:
 def build_delta(base: Path, sources: list[Path], out: Path, insert_out: Path | None = None) -> dict:
     con = duckdb.connect(str(base), read_only=True)
     pcols = [r[0] for r in con.execute("DESCRIBE public.player_fantasy").fetchall()]
-    missing = sorted(set(BASE_PLAYER_COLUMNS) - set(pcols))
-    cohorts = [c for c in pcols if c not in BASE_PLAYER_COLUMNS and c not in OPTIONAL]
-    forbidden = sorted({"opponent_points", "is_championship", "is_active", "is_playoffs_bf", "made_po_bf", "made_po"} & set(pcols))
-    if missing or len(cohorts) != 7 or forbidden:
-        raise ValueError(f"canonical schema mismatch: missing={missing} cohorts={cohorts} forbidden={forbidden}")
+    cohorts, _ = validate_player_schema(pcols, allow_test_fixture=True)
     if not sources:
         con.close()
         return {"source_files": 0, "source_rows": 0, "matched_rows": 0, "unmatched_rows": 0,

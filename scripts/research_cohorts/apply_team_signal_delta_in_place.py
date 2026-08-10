@@ -11,16 +11,12 @@ from pathlib import Path
 
 import duckdb
 
+try:
+    from .canonical_player_schema import BASE_PLAYER_COLUMNS, OPTIONAL_PLAYER_COLUMNS, validate_player_schema
+except ImportError:  # direct script execution in Actions
+    from canonical_player_schema import BASE_PLAYER_COLUMNS, OPTIONAL_PLAYER_COLUMNS, validate_player_schema
 
-BASE_PLAYER_COLUMNS = [
-    "db_name", "year", "week", "NFL_player_id", "is_started", "is_rostered",
-    "fantasy_points", "win", "champion", "clutch_equity", "manager_lamar",
-    "manager", "team_points", "final_playoff_seed", "is_playoffs",
-    "has_po_signal", "player", "position", "fantasy_position", "platform",
-    "team_key", "team_name", "nfl_team_api", "yahoo_player_id",
-    "sleeper_player_id", "espn_player_id", "fleaflicker_player_id",
-    "mfl_player_id", "made_playoffs",
-]
+
 
 
 def main() -> None:
@@ -33,12 +29,7 @@ def main() -> None:
 
     con = duckdb.connect(str(args.base))
     pcols = [r[0] for r in con.execute("DESCRIBE public.player_fantasy").fetchall()]
-    missing = set(BASE_PLAYER_COLUMNS) - set(pcols)
-    optional = {'loss', 'tie'}
-    cohort_columns = [c for c in pcols if c not in BASE_PLAYER_COLUMNS and c not in optional]
-    forbidden = {'opponent_points','is_championship','is_active','is_playoffs_bf','made_po_bf','made_po'} & set(pcols)
-    if missing or len(cohort_columns) != 7 or forbidden:
-        raise SystemExit(f"canonical player schema mismatch: missing={sorted(missing)} cohort_columns={cohort_columns} optional={[c for c in pcols if c in optional]} forbidden={sorted(forbidden)}")
+    cohort_columns, optional = validate_player_schema(pcols)
     loss_expr = "p.loss" if "loss" in pcols else "CAST(NULL AS INTEGER)"
     tie_expr = "p.tie" if "tie" in pcols else "CAST(NULL AS INTEGER)"
     canonical_columns_before = list(pcols)
