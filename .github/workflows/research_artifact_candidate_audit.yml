@@ -1,9 +1,6 @@
 name: Audit research artifacts for canonical cache improvements
 
 on:
-  push:
-    paths:
-      - .github/research_artifact_candidate_audit.trigger
   workflow_dispatch:
     inputs:
       audit_run_id:
@@ -24,15 +21,15 @@ on:
         default: 'false'
 
 permissions:
-  actions: write
+  actions: read
   contents: read
 
 env:
   GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT || github.token }}
-  AUDIT_RUN_ID: ${{ inputs.audit_run_id || '31337901490' }}
-  BASE_CACHE_KEY: ${{ inputs.base_cache_key || 'research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613' }}
-  SHARD_COUNT: ${{ inputs.shard_count || '256' }}
-  APPLY: ${{ inputs.apply || 'false' }}
+  AUDIT_RUN_ID: ${{ inputs.audit_run_id }}
+  BASE_CACHE_KEY: ${{ inputs.base_cache_key }}
+  SHARD_COUNT: ${{ inputs.shard_count }}
+  APPLY: ${{ inputs.apply }}
 
 jobs:
   manifest:
@@ -44,13 +41,13 @@ jobs:
       file_count: ${{ steps.make.outputs.file_count }}
     steps:
       - uses: actions/checkout@v4
-      - name: Load the frozen complete artifact inventory
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p audit
-          unzip -p research_artifact_inventory_31337901490.json.zip \
-            > audit/artifact_audit_complete.json
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-audit-complete-${{ inputs.audit_run_id }}
+          path: audit
+          run-id: ${{ inputs.audit_run_id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ secrets.PRIVATE_REPO_PAT || github.token }}
       - id: make
         shell: bash
         run: |
@@ -98,13 +95,20 @@ jobs:
               a['files']=[f for f in a['files'] if f['candidate']]
               if a['files']:
                   a['candidate_bytes']=a['size_in_bytes']; selected.append(a)
-          # Deterministic size-balanced artifact assignment. Each archive is
-          # downloaded at most once; the canonical cache is not restored here.
+          # Keep all artifacts from one source run together. Otherwise the
+          # 256 shards repeatedly query/download the same source run and hit
+          # GitHub's API limit. Each source run is downloaded exactly once.
+          grouped={}
+          for a in selected:
+              grouped.setdefault(int(a['workflow_run_id']), []).append(a)
+          packages=[{'workflow_run_id':rid,'artifacts':sorted(items,key=lambda x:x['artifact_id']),
+                     'size_in_bytes':sum(int(x.get('size_in_bytes',0)) for x in items)}
+                    for rid,items in grouped.items()]
           n=int(os.environ['SHARD_COUNT']); buckets=[[] for _ in range(n)]; loads=[0]*n
-          for a in sorted(selected,key=lambda x:(-x['candidate_bytes'],x['artifact_id'])):
-              i=min(range(n),key=lambda j:(loads[j],len(buckets[j]),j)); buckets[i].append(a); loads[i]+=a['candidate_bytes']
+          for package in sorted(packages,key=lambda x:(-x['size_in_bytes'],x['workflow_run_id'])):
+              i=min(range(n),key=lambda j:(loads[j],len(buckets[j]),j)); buckets[i].append(package); loads[i]+=package['size_in_bytes']
           Path('out/candidate_artifact_shards.json').write_text(json.dumps(buckets,indent=2,sort_keys=True)+'\n')
-          print(json.dumps({'artifacts':9479,'files':len(rows),'candidate_files':sum(len(a['files']) for a in selected),'candidate_artifacts':len(selected),'shards':n,'nonempty_shards':sum(bool(x) for x in buckets)}))
+          print(json.dumps({'artifacts':9479,'files':len(rows),'candidate_files':sum(len(a['files']) for a in selected),'candidate_artifacts':len(selected),'source_runs':len(packages),'shards':n,'nonempty_shards':sum(bool(x) for x in buckets)}))
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
               out.write('matrix='+json.dumps(list(range(n)),separators=(',',':'))+'\n')
               out.write(f'candidate_artifact_count={len(selected)}\nfile_count={len(rows)}\n')
@@ -143,25 +147,30 @@ jobs:
           import json, os, shutil, subprocess, sys, zipfile
           from pathlib import Path
           import duckdb
-          shard=int(sys.argv[1]); buckets=json.loads(Path('manifest/candidate_artifact_shards.json').read_text()); items=buckets[shard]
+          shard=int(sys.argv[1]); buckets=json.loads(Path('manifest/candidate_artifact_shards.json').read_text()); packages=buckets[shard]
           ledger=[]
-          for item in items:
-              target=Path('raw')/str(item['artifact_id']); target.mkdir(parents=True,exist_ok=True)
-              subprocess.run(['gh','run','download',str(item['workflow_run_id']),'--repo',os.environ['GITHUB_REPOSITORY'],'--name',item['artifact'],'--dir',str(target)],check=True)
-              for meta in item['files']:
-                  matches=sorted(target.rglob(meta['file']))
-                  if len(matches)!=1:
+          for package in packages:
+              run_id=int(package['workflow_run_id']); run_root=Path('raw')/str(run_id); run_root.mkdir(parents=True,exist_ok=True)
+              names=sorted({item['artifact'] for item in package['artifacts']})
+              cmd=['gh','run','download',str(run_id),'--repo',os.environ['GITHUB_REPOSITORY'],'--dir',str(run_root)]
+              for name in names: cmd.extend(['--name',name])
+              subprocess.run(cmd,check=True)
+              for item in package['artifacts']:
+                  target=run_root/item['artifact']
+                  for meta in item['files']:
+                    matches=sorted(target.rglob(meta['file']))
+                    if len(matches)!=1:
                       ledger.append({**meta,'status':'candidate_file_missing_or_ambiguous','matches':len(matches)}); continue
-                  path=matches[0]
-                  if meta['type']=='parquet':
+                    path=matches[0]
+                    if meta['type']=='parquet':
                       con=duckdb.connect(); cols=[r[0] for r in con.execute('DESCRIBE SELECT * FROM read_parquet(?)',[str(path)]).fetchall()]; rows=con.execute('SELECT COUNT(*) FROM read_parquet(?)',[str(path)]).fetchone()[0]; con.close()
                       dest=Path('out/candidates')/(f"{item['artifact_id']}__{path.name}"); shutil.copy2(path,dest)
                       ledger.append({**meta,'status':'candidate_extracted','extracted_file':str(dest),'actual_rows':int(rows),'actual_columns':cols})
-                  else:
+                    else:
                       ledger.append({**meta,'status':'structured_evidence_ledgered','bytes':path.stat().st_size})
-              shutil.rmtree(target,ignore_errors=True)
+              shutil.rmtree(run_root,ignore_errors=True)
           Path('out/file_candidate_ledger.jsonl').write_text('\n'.join(json.dumps(x,sort_keys=True) for x in ledger)+'\n')
-          print(f'shard={shard} artifacts={len(items)} candidate_files={len(ledger)} parquet={sum(x.get("status")=="candidate_extracted" for x in ledger)}')
+          print(f'shard={shard} source_runs={len(packages)} artifacts={sum(len(p["artifacts"]) for p in packages)} candidate_files={len(ledger)} parquet={sum(x.get("status")=="candidate_extracted" for x in ledger)}')
           PY
       - uses: actions/upload-artifact@v4
         with:
@@ -238,79 +247,9 @@ jobs:
           Path('out/cache_candidate_comparison.json').write_text(json.dumps(summary,indent=2,sort_keys=True)+'\n')
           con.close(); print(json.dumps(summary,sort_keys=True))
           PY
-      - name: Compare team/week signals with canonical player rows
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p out/team_signal
-          python scripts/research_cohorts/audit_team_signal_candidates.py \
-            --base research_public_lake/corpus_snapshot.duckdb \
-            --candidates candidates \
-            --out out/team_signal
       - uses: actions/upload-artifact@v4
         with:
           name: research-artifact-cache-comparison-${{ github.run_id }}
           path: out/*
           retention-days: 90
           compression-level: 0
-
-  apply:
-    needs: compare
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.apply == 'true' && needs.compare.result == 'success' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 355
-    steps:
-      - uses: actions/download-artifact@v5
-        with:
-          name: research-artifact-cache-comparison-${{ github.run_id }}
-          path: comparison
-      - uses: actions/cache/restore@v5
-        with:
-          path: research_public_lake
-          key: ${{ env.BASE_CACHE_KEY }}
-          fail-on-cache-miss: true
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
-      - name: Apply only the validated player delta in place
-        shell: bash
-        run: |
-          set -euo pipefail
-          delta=$(find comparison -name team_promotable_player_delta.parquet -print -quit)
-          test -n "$delta"
-          python scripts/research_cohorts/apply_team_signal_delta_in_place.py \
-            --base research_public_lake/corpus_snapshot.duckdb \
-            --delta "$delta" \
-            --report comparison/team_signal_apply_report.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: research-team-signal-apply-${{ github.run_id }}
-          path: comparison/team_signal_apply_report.json
-          retention-days: 90
-      - name: Replace only the exact canonical cache key
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t ids < <(gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/actions/caches?key=${BASE_CACHE_KEY}&ref=refs/heads/main" \
-            --jq '.actions_caches[].id')
-          test "${#ids[@]}" -eq 1
-          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${ids[0]}"
-      - uses: actions/cache/save@v5
-        with:
-          path: research_public_lake
-          key: ${{ env.BASE_CACHE_KEY }}
-      - name: Verify exactly one canonical cache remains
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t ids < <(gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/actions/caches?key=${BASE_CACHE_KEY}&ref=refs/heads/main" \
-            --jq '.actions_caches[].id')
-          test "${#ids[@]}" -eq 1
