@@ -116,6 +116,10 @@ def main() -> None:
         fields = sorted({k for row in rows for k in row if k.startswith("source_") and k not in {"source_file", "source_is_championship"}})
         bad = False
         result = {"db_name": key[0], "year": key[1], "week": key[2], "manager": key[3]}
+        # Preserve source provenance in the sidecar.  This is not a canonical
+        # player-table column; it is required for the file-by-file promotion
+        # ledger and is ignored by the player materializer.
+        result["source_files"] = "|".join(sorted({str(row.get("source_file")) for row in rows if row.get("source_file")}))
         for field in fields:
             vals = {value_key(row.get(field)) for row in rows}
             if len(vals) > 1:
@@ -133,7 +137,7 @@ def main() -> None:
         import pyarrow as pa
         import pyarrow.parquet as pq
         keys = ["db_name", "year", "week", "manager"]
-        fields = sorted({k for row in out_rows for k in row if k.startswith("source_")})
+        fields = sorted({k for row in out_rows for k in row if k.startswith("source_") or k == "source_files"})
         table = pa.Table.from_pylist([{k: row.get(k) for k in keys + fields} for row in out_rows])
         pq.write_table(table, args.out)
     else:
