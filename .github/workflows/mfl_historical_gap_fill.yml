@@ -16,6 +16,11 @@ on:
         required: false
         default: "999"
         type: string
+      resume_year:
+        description: "First season window to run (1997, 1999, 2001, 2003, or 2005)"
+        required: false
+        default: "1997"
+        type: string
   workflow_call:
     inputs:
       id_start:
@@ -25,6 +30,10 @@ on:
       id_end:
         required: false
         default: "999"
+        type: string
+      resume_year:
+        required: false
+        default: "1997"
         type: string
 
 permissions:
@@ -37,6 +46,7 @@ concurrency:
 
 jobs:
   window-1997-1998:
+    if: ${{ inputs.resume_year == '1997' }}
     uses: ./.github/workflows/mfl_historical_discovery_256.yml
     with:
       shard_count: "250"
@@ -56,6 +66,7 @@ jobs:
 
   window-1999-2000:
     needs: window-1997-1998
+    if: ${{ always() && (needs.window-1997-1998.result == 'success' || needs.window-1997-1998.result == 'skipped') && (inputs.resume_year == '1997' || inputs.resume_year == '1999') }}
     uses: ./.github/workflows/mfl_historical_discovery_256.yml
     with:
       shard_count: "250"
@@ -75,6 +86,7 @@ jobs:
 
   window-2001-2002:
     needs: window-1999-2000
+    if: ${{ always() && (needs.window-1999-2000.result == 'success' || needs.window-1999-2000.result == 'skipped') && (inputs.resume_year == '1997' || inputs.resume_year == '1999' || inputs.resume_year == '2001') }}
     uses: ./.github/workflows/mfl_historical_discovery_256.yml
     with:
       shard_count: "250"
@@ -94,6 +106,7 @@ jobs:
 
   window-2003-2004:
     needs: window-2001-2002
+    if: ${{ always() && (needs.window-2001-2002.result == 'success' || needs.window-2001-2002.result == 'skipped') && (inputs.resume_year == '1997' || inputs.resume_year == '1999' || inputs.resume_year == '2001' || inputs.resume_year == '2003') }}
     uses: ./.github/workflows/mfl_historical_discovery_256.yml
     with:
       shard_count: "250"
@@ -113,6 +126,7 @@ jobs:
 
   window-2005-2006:
     needs: window-2003-2004
+    if: ${{ always() && (needs.window-2003-2004.result == 'success' || needs.window-2003-2004.result == 'skipped') && (inputs.resume_year == '1997' || inputs.resume_year == '1999' || inputs.resume_year == '2001' || inputs.resume_year == '2003' || inputs.resume_year == '2005') }}
     uses: ./.github/workflows/mfl_historical_discovery_256.yml
     with:
       shard_count: "250"
@@ -132,7 +146,7 @@ jobs:
 
   finalize:
     needs: window-2005-2006
-    if: ${{ needs.window-2005-2006.result == 'success' }}
+    if: ${{ always() && (needs.window-1997-1998.result == 'success' || needs.window-1997-1998.result == 'skipped') && (needs.window-1999-2000.result == 'success' || needs.window-1999-2000.result == 'skipped') && (needs.window-2001-2002.result == 'success' || needs.window-2001-2002.result == 'skipped') && (needs.window-2003-2004.result == 'success' || needs.window-2003-2004.result == 'skipped') && needs.window-2005-2006.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Write completed gap-fill band manifest
