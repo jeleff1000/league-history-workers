@@ -13,7 +13,7 @@ from pathlib import Path
 import duckdb
 
 
-PLAYER_COLUMNS = [
+BASE_PLAYER_COLUMNS = [
     "db_name", "year", "week", "NFL_player_id", "is_started", "is_rostered",
     "fantasy_points", "win", "champion", "clutch_equity", "manager_lamar",
     "manager", "team_points", "final_playoff_seed", "is_playoffs",
@@ -33,8 +33,10 @@ def main() -> None:
 
     con = duckdb.connect(str(args.base), read_only=True)
     pcols = [r[0] for r in con.execute("DESCRIBE public.player_fantasy").fetchall()]
-    if pcols != PLAYER_COLUMNS:
-        raise SystemExit("canonical player schema changed")
+    missing = set(BASE_PLAYER_COLUMNS) - set(pcols)
+    extra = [c for c in pcols if c not in BASE_PLAYER_COLUMNS]
+    if missing or len(extra) != 7:
+        raise SystemExit(f"canonical player schema mismatch: missing={sorted(missing)} extra={extra}")
     all_files = sorted(args.candidates.rglob("*.parquet"))
     files = []
     for path in all_files:

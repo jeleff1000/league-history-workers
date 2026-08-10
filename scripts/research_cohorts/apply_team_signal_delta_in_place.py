@@ -12,7 +12,7 @@ from pathlib import Path
 import duckdb
 
 
-PLAYER_COLUMNS = [
+BASE_PLAYER_COLUMNS = [
     "db_name", "year", "week", "NFL_player_id", "is_started", "is_rostered",
     "fantasy_points", "win", "champion", "clutch_equity", "manager_lamar",
     "manager", "team_points", "final_playoff_seed", "is_playoffs",
@@ -32,8 +32,11 @@ def main() -> None:
 
     con = duckdb.connect(str(args.base))
     pcols = [r[0] for r in con.execute("DESCRIBE public.player_fantasy").fetchall()]
-    if pcols != PLAYER_COLUMNS:
-        raise SystemExit("canonical player schema mismatch")
+    missing = set(BASE_PLAYER_COLUMNS) - set(pcols)
+    cohort_columns = [c for c in pcols if c not in BASE_PLAYER_COLUMNS]
+    if missing or len(cohort_columns) != 7:
+        raise SystemExit(f"canonical player schema mismatch: missing={sorted(missing)} cohort_columns={cohort_columns}")
+    canonical_columns_before = list(pcols)
     dpath = str(args.delta.resolve()).replace("'", "''")
     con.execute("CREATE OR REPLACE TEMP VIEW delta_raw AS SELECT * FROM read_parquet(?)", [dpath])
     dcols = {r[0] for r in con.execute("DESCRIBE delta_raw").fetchall()}
@@ -88,7 +91,7 @@ def main() -> None:
         """)
         if con.execute("SELECT COUNT(*) FROM public.player_fantasy").fetchone()[0] != before_rows:
             raise SystemExit("player row count changed")
-        if [r[0] for r in con.execute("DESCRIBE public.player_fantasy").fetchall()] != PLAYER_COLUMNS:
+        if [r[0] for r in con.execute("DESCRIBE public.player_fantasy").fetchall()] != canonical_columns_before:
             raise SystemExit("player schema changed")
         con.execute("COMMIT")
     except Exception:

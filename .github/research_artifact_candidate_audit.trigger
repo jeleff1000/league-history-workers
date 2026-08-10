@@ -1,1 +1,1 @@
-read-only-team-signal-audit-v5-frozen-inventory
+read-only-team-signal-audit-v6-cohort-schema-aware

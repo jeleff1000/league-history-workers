@@ -217,18 +217,19 @@ jobs:
           base=Path('research_public_lake/corpus_snapshot.duckdb')
           con=duckdb.connect(str(base),read_only=True)
           pcols=[r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()]
-          canonical=['db_name','year','week','NFL_player_id','is_started','is_rostered','fantasy_points','win','champion','clutch_equity','manager_lamar','manager','team_points','final_playoff_seed','is_playoffs','has_po_signal','player','position','fantasy_position','platform','team_key','team_name','nfl_team_api','yahoo_player_id','sleeper_player_id','espn_player_id','fleaflicker_player_id','mfl_player_id','made_playoffs']
-          if pcols!=canonical: raise SystemExit('canonical player schema changed')
+          base_canonical=['db_name','year','week','NFL_player_id','is_started','is_rostered','fantasy_points','win','champion','clutch_equity','manager_lamar','manager','team_points','final_playoff_seed','is_playoffs','has_po_signal','player','position','fantasy_position','platform','team_key','team_name','nfl_team_api','yahoo_player_id','sleeper_player_id','espn_player_id','fleaflicker_player_id','mfl_player_id','made_playoffs']
+          missing=set(base_canonical)-set(pcols); cohort_columns=[c for c in pcols if c not in base_canonical]
+          if missing or len(cohort_columns)!=7: raise SystemExit(f'canonical player schema mismatch: missing={sorted(missing)} cohort_columns={cohort_columns}')
           files=sorted(Path('candidates').rglob('*.parquet'))
           by=[]
           for f in files:
               cols=[r[0] for r in con.execute('DESCRIBE SELECT * FROM read_parquet(?)',[str(f)]).fetchall()]
               by.append((str(f),set(cols)))
-          exact=[f for f,c in by if set(c)==set(canonical) and len(c)==29]
+          exact=[f for f,c in by if set(base_canonical)<=c and len(c)==len(base_canonical)]
           team=[f for f,c in by if {'db_name','year','week','team_key'}<=c and (c & {'win','team_points','is_playoffs','champion','has_po_signal','made_playoffs'}) and f not in exact]
           player=[f for f,c in by if {'db_name','year','week','NFL_player_id'}<=c and (c & {'win','source_team_points','is_playoffs','champion'}) and f not in exact]
           Path('out').mkdir()
-          summary={'cache_mutated':False,'new_lineage':False,'canonical_schema_unchanged':True,'candidate_parquet_files':len(files),'exact_files':len(exact),'team_signal_files':len(team),'player_signal_files':len(player),'settings_files':sum(1 for f,c in by if {'db_name','year'}<=c and (c & {'pass_td_fill','playoff_teams_fill','roster_FLX_fill','roster_SUPER_FLEX_fill','roster_IDP_fill','best_ball_fill'}))}
+          summary={'cache_mutated':False,'new_lineage':False,'canonical_schema_unchanged':True,'cache_player_columns':pcols,'cohort_dimension_columns':cohort_columns,'candidate_parquet_files':len(files),'exact_files':len(exact),'team_signal_files':len(team),'player_signal_files':len(player),'settings_files':sum(1 for f,c in by if {'db_name','year'}<=c and (c & {'pass_td_fill','playoff_teams_fill','roster_FLX_fill','roster_SUPER_FLEX_fill','roster_IDP_fill','best_ball_fill'}))}
           # Exact player comparison. Null fills are the only automatic promotion class.
           if exact:
               con.execute('CREATE OR REPLACE TEMP VIEW exact_source AS SELECT * FROM read_parquet(?)',[exact])
@@ -240,7 +241,7 @@ jobs:
               ppid=f"CASE LOWER(NULLIF(TRIM(CAST(p.\"platform\" AS VARCHAR)),'')) WHEN 'sleeper' THEN COALESCE(NULLIF(TRIM(CAST(p.\"sleeper_player_id\" AS VARCHAR)),''),{pfallback}) WHEN 'fleaflicker' THEN COALESCE(NULLIF(TRIM(CAST(p.\"fleaflicker_player_id\" AS VARCHAR)),''),{pfallback}) WHEN 'mfl' THEN COALESCE(NULLIF(TRIM(CAST(p.\"mfl_player_id\" AS VARCHAR)),''),{pfallback}) ELSE {pfallback} END"
               pkey=f"CONCAT_WS('|',CAST(p.\"db_name\" AS VARCHAR),CAST(p.\"year\" AS VARCHAR),CAST(p.\"week\" AS VARCHAR),CAST(p.\"platform\" AS VARCHAR),CAST(p.\"manager\" AS VARCHAR),CAST(p.\"team_name\" AS VARCHAR),CAST(p.\"team_key\" AS VARCHAR),CAST(p.\"fantasy_position\" AS VARCHAR),{ppid})"
               con.execute(f'CREATE OR REPLACE TEMP VIEW player_keyed AS SELECT p.*,{pkey} AS join_key FROM public.player_fantasy p')
-              for col in canonical:
+              for col in base_canonical:
                   n=con.execute(f'SELECT COUNT(*) FROM exact_keyed s JOIN player_keyed p USING(join_key) WHERE p."{col}" IS NULL AND s."{col}" IS NOT NULL').fetchone()[0]
                   x=con.execute(f'SELECT COUNT(*) FROM exact_keyed s JOIN player_keyed p USING(join_key) WHERE p."{col}" IS NOT NULL AND s."{col}" IS NOT NULL AND CAST(p."{col}" AS VARCHAR)<>CAST(s."{col}" AS VARCHAR)').fetchone()[0]
                   summary.setdefault('exact_null_fills',{})[col]=int(n); summary.setdefault('exact_conflicts',{})[col]=int(x)
