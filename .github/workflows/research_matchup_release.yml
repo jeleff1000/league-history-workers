@@ -15,13 +15,19 @@ on:
   workflow_run:
     workflows: ["Normalize canonical research schema in place"]
     types: [completed]
+  push:
+    branches: [main]
 
 permissions:
   contents: read
 
+concurrency:
+  group: research-matchup-direct-release
+  cancel-in-progress: true
+
 jobs:
   release:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
