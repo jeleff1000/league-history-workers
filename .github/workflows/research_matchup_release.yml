@@ -20,7 +20,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: research-matchup-direct-release
+  group: research-matchup-direct-release-career-v2
   cancel-in-progress: true
 
 jobs:
