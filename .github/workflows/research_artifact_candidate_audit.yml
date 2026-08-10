@@ -1,0 +1,243 @@
+name: Audit research artifacts for canonical cache improvements
+
+on:
+  workflow_dispatch:
+    inputs:
+      audit_run_id:
+        description: Completed 9,479-artifact audit run
+        required: true
+        default: '31337901490'
+      base_cache_key:
+        description: Frozen canonical research cache key
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+      shard_count:
+        description: Candidate extraction shards; runners remain capped at 15
+        required: true
+        default: '256'
+      apply:
+        description: Apply only validated NULL-fill candidates to the same cache key
+        required: true
+        default: 'false'
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT || github.token }}
+  AUDIT_RUN_ID: ${{ inputs.audit_run_id }}
+  BASE_CACHE_KEY: ${{ inputs.base_cache_key }}
+  SHARD_COUNT: ${{ inputs.shard_count }}
+  APPLY: ${{ inputs.apply }}
+
+jobs:
+  manifest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      matrix: ${{ steps.make.outputs.matrix }}
+      candidate_artifact_count: ${{ steps.make.outputs.candidate_artifact_count }}
+      file_count: ${{ steps.make.outputs.file_count }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-audit-complete-${{ inputs.audit_run_id }}
+          path: audit
+          run-id: ${{ inputs.audit_run_id }}
+          repository: ${{ github.repository }}
+          github-token: ${{ secrets.PRIVATE_REPO_PAT || github.token }}
+      - id: make
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv, json, os
+          from pathlib import Path
+
+          report = json.loads(Path('audit/artifact_audit_complete.json').read_text())
+          if not report.get('complete') or int(report.get('manifest_artifacts', 0)) != 9479:
+              raise SystemExit('the 9,479-artifact audit is not complete')
+          signal = {'win','team_points','is_playoffs','champion','has_po_signal','made_playoffs'}
+          settings = {'pass_td_fill','playoff_teams_fill','roster_FLX_fill','roster_SUPER_FLEX_fill','roster_IDP_fill','best_ball_fill'}
+          player_signal = {'win','is_playoffs','champion','team_points','source_team_points','source_opponent_points'}
+          rows=[]; artifacts={}
+          for rec in report['records']:
+              aid=int(rec['artifact_id'])
+              artifacts.setdefault(aid, {'artifact_id':aid,'artifact':rec['artifact'],'workflow_run_id':int(rec['workflow_run_id']),'size_in_bytes':int(rec.get('size_in_bytes',0)),'files':[]})
+              for f in rec.get('files',[]):
+                  cols=set(f.get('columns',[])); kind=f.get('kind'); name=f.get('file','')
+                  disposition='metadata_or_validation'
+                  reason='No direct row identity and no canonical player-field payload.'
+                  candidate=False
+                  if kind=='exact_canonical_player':
+                      disposition='direct_player_candidate'; reason='Exact fixed 29-column player row.'; candidate=True
+                  elif f.get('type')=='parquet' and {'db_name','year'} <= cols and ({'team_key','week'} <= cols) and (cols & signal):
+                      disposition='team_week_signal_candidate'; reason='Team/week signals can fan out to existing player rows.'; candidate=True
+                  elif f.get('type')=='parquet' and {'db_name','year','week','NFL_player_id'} <= cols and (cols & player_signal):
+                      disposition='player_signal_candidate'; reason='Player/week signal can join by canonical player identity.'; candidate=True
+                  elif f.get('type')=='parquet' and {'db_name','year'} <= cols and (cols & settings):
+                      disposition='settings_candidate'; reason='League-year settings evidence; not a player-row update.'; candidate=True
+                  elif f.get('type')=='parquet' and ('clutch' in ''.join(cols).lower() or 'lamar' in ''.join(cols).lower()):
+                      disposition='aggregate_clutch_evidence'; reason='Clutch/LAMAR payload lacks canonical player-week identity or is aggregate grain; audit only.'
+                  elif f.get('type')!='parquet' and any(x in name.lower() for x in ('source','outcome','setting','delta','candidate','rescue')):
+                      disposition='structured_evidence_non_parquet'; reason='Structured evidence file requires an explicit parser before promotion.'
+                  item={'artifact_id':aid,'artifact':rec['artifact'],'workflow_run_id':int(rec['workflow_run_id']),'file':name,'type':f.get('type'),'kind':kind,'rows':int(f.get('rows',0) or 0),'columns':f.get('columns',[]),'disposition':disposition,'reason':reason,'candidate':candidate}
+                  rows.append(item); artifacts[aid]['files'].append(item)
+          Path('out').mkdir()
+          Path('out/file_candidate_ledger.json').write_text(json.dumps({'complete_artifact_audit_run':int(os.environ['AUDIT_RUN_ID']),'artifact_count':9479,'file_count':len(rows),'files':rows},indent=2,sort_keys=True)+'\n')
+          with Path('out/file_candidate_ledger.csv').open('w',newline='',encoding='utf-8') as fh:
+              w=csv.DictWriter(fh,fieldnames=['artifact_id','artifact','workflow_run_id','file','type','kind','rows','disposition','reason','candidate']); w.writeheader()
+              for r in rows: w.writerow({k:r.get(k,'') for k in w.fieldnames})
+          selected=[]
+          for a in artifacts.values():
+              a['files']=[f for f in a['files'] if f['candidate']]
+              if a['files']:
+                  a['candidate_bytes']=a['size_in_bytes']; selected.append(a)
+          # Deterministic size-balanced artifact assignment. Each archive is
+          # downloaded at most once; the canonical cache is not restored here.
+          n=int(os.environ['SHARD_COUNT']); buckets=[[] for _ in range(n)]; loads=[0]*n
+          for a in sorted(selected,key=lambda x:(-x['candidate_bytes'],x['artifact_id'])):
+              i=min(range(n),key=lambda j:(loads[j],len(buckets[j]),j)); buckets[i].append(a); loads[i]+=a['candidate_bytes']
+          Path('out/candidate_artifact_shards.json').write_text(json.dumps(buckets,indent=2,sort_keys=True)+'\n')
+          print(json.dumps({'artifacts':9479,'files':len(rows),'candidate_files':sum(len(a['files']) for a in selected),'candidate_artifacts':len(selected),'shards':n,'nonempty_shards':sum(bool(x) for x in buckets)}))
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+              out.write('matrix='+json.dumps(list(range(n)),separators=(',',':'))+'\n')
+              out.write(f'candidate_artifact_count={len(selected)}\nfile_count={len(rows)}\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-artifact-candidate-manifest-${{ github.run_id }}
+          path: out/*
+          retention-days: 90
+          compression-level: 0
+
+  extract:
+    needs: manifest
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        shard: ${{ fromJSON(needs.manifest.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-candidate-manifest-${{ github.run_id }}
+          path: manifest
+      - name: Download assigned candidate archives and emit file ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/candidates raw
+          python - '${{ matrix.shard }}' <<'PY'
+          import json, os, shutil, subprocess, sys, zipfile
+          from pathlib import Path
+          import duckdb
+          shard=int(sys.argv[1]); buckets=json.loads(Path('manifest/candidate_artifact_shards.json').read_text()); items=buckets[shard]
+          ledger=[]
+          for item in items:
+              target=Path('raw')/str(item['artifact_id']); target.mkdir(parents=True,exist_ok=True)
+              subprocess.run(['gh','run','download',str(item['workflow_run_id']),'--repo',os.environ['GITHUB_REPOSITORY'],'--name',item['artifact'],'--dir',str(target)],check=True)
+              for meta in item['files']:
+                  matches=sorted(target.rglob(meta['file']))
+                  if len(matches)!=1:
+                      ledger.append({**meta,'status':'candidate_file_missing_or_ambiguous','matches':len(matches)}); continue
+                  path=matches[0]
+                  if meta['type']=='parquet':
+                      con=duckdb.connect(); cols=[r[0] for r in con.execute('DESCRIBE SELECT * FROM read_parquet(?)',[str(path)]).fetchall()]; rows=con.execute('SELECT COUNT(*) FROM read_parquet(?)',[str(path)]).fetchone()[0]; con.close()
+                      dest=Path('out/candidates')/(f"{item['artifact_id']}__{path.name}"); shutil.copy2(path,dest)
+                      ledger.append({**meta,'status':'candidate_extracted','extracted_file':str(dest),'actual_rows':int(rows),'actual_columns':cols})
+                  else:
+                      ledger.append({**meta,'status':'structured_evidence_ledgered','bytes':path.stat().st_size})
+              shutil.rmtree(target,ignore_errors=True)
+          Path('out/file_candidate_ledger.jsonl').write_text('\n'.join(json.dumps(x,sort_keys=True) for x in ledger)+'\n')
+          print(f'shard={shard} artifacts={len(items)} candidate_files={len(ledger)} parquet={sum(x.get("status")=="candidate_extracted" for x in ledger)}')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-artifact-candidate-extract-${{ github.run_id }}-${{ matrix.shard }}
+          path: out/*
+          retention-days: 90
+          compression-level: 0
+
+  compare:
+    needs: [manifest, extract]
+    if: ${{ always() && needs.extract.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: research-artifact-candidate-extract-${{ github.run_id }}-*
+          path: candidates
+          merge-multiple: false
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.BASE_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Compare candidates against canonical cache without mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv, json, os, re
+          from pathlib import Path
+          import duckdb
+          base=Path('research_public_lake/corpus_snapshot.duckdb')
+          con=duckdb.connect(str(base),read_only=True)
+          pcols=[r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()]
+          canonical=['db_name','year','week','NFL_player_id','is_started','is_rostered','fantasy_points','win','champion','clutch_equity','manager_lamar','manager','team_points','final_playoff_seed','is_playoffs','has_po_signal','player','position','fantasy_position','platform','team_key','team_name','nfl_team_api','yahoo_player_id','sleeper_player_id','espn_player_id','fleaflicker_player_id','mfl_player_id','made_playoffs']
+          if pcols!=canonical: raise SystemExit('canonical player schema changed')
+          files=sorted(Path('candidates').rglob('*.parquet'))
+          by=[]
+          for f in files:
+              cols=[r[0] for r in con.execute('DESCRIBE SELECT * FROM read_parquet(?)',[str(f)]).fetchall()]
+              by.append((str(f),set(cols)))
+          exact=[f for f,c in by if set(c)==set(canonical) and len(c)==29]
+          team=[f for f,c in by if {'db_name','year','week','team_key'}<=c and (c & {'win','team_points','is_playoffs','champion','has_po_signal','made_playoffs'}) and f not in exact]
+          player=[f for f,c in by if {'db_name','year','week','NFL_player_id'}<=c and (c & {'win','source_team_points','is_playoffs','champion'}) and f not in exact]
+          Path('out').mkdir()
+          summary={'cache_mutated':False,'new_lineage':False,'canonical_schema_unchanged':True,'candidate_parquet_files':len(files),'exact_files':len(exact),'team_signal_files':len(team),'player_signal_files':len(player),'settings_files':sum(1 for f,c in by if {'db_name','year'}<=c and (c & {'pass_td_fill','playoff_teams_fill','roster_FLX_fill','roster_SUPER_FLEX_fill','roster_IDP_fill','best_ball_fill'}))}
+          # Exact player comparison. Null fills are the only automatic promotion class.
+          if exact:
+              con.execute('CREATE OR REPLACE TEMP VIEW exact_source AS SELECT * FROM read_parquet(?)',[exact])
+              fallback='COALESCE('+','.join(f"NULLIF(TRIM(CAST(s.\"{c}\" AS VARCHAR)), '')" for c in ['NFL_player_id','sleeper_player_id','fleaflicker_player_id','mfl_player_id','espn_player_id','yahoo_player_id'])+')'
+              pid=f"CASE LOWER(NULLIF(TRIM(CAST(s.\"platform\" AS VARCHAR)),'')) WHEN 'sleeper' THEN COALESCE(NULLIF(TRIM(CAST(s.\"sleeper_player_id\" AS VARCHAR)),''),{fallback}) WHEN 'fleaflicker' THEN COALESCE(NULLIF(TRIM(CAST(s.\"fleaflicker_player_id\" AS VARCHAR)),''),{fallback}) WHEN 'mfl' THEN COALESCE(NULLIF(TRIM(CAST(s.\"mfl_player_id\" AS VARCHAR)),''),{fallback}) ELSE {fallback} END"
+              key=f"CONCAT_WS('|',CAST(s.\"db_name\" AS VARCHAR),CAST(s.\"year\" AS VARCHAR),CAST(s.\"week\" AS VARCHAR),CAST(s.\"platform\" AS VARCHAR),CAST(s.\"manager\" AS VARCHAR),CAST(s.\"team_name\" AS VARCHAR),CAST(s.\"team_key\" AS VARCHAR),CAST(s.\"fantasy_position\" AS VARCHAR),{pid})"
+              con.execute(f'CREATE OR REPLACE TEMP VIEW exact_keyed AS SELECT *,{key} AS join_key FROM exact_source')
+              pfallback='COALESCE('+','.join(f"NULLIF(TRIM(CAST(p.\"{c}\" AS VARCHAR)), '')" for c in ['NFL_player_id','sleeper_player_id','fleaflicker_player_id','mfl_player_id','espn_player_id','yahoo_player_id'])+')'
+              ppid=f"CASE LOWER(NULLIF(TRIM(CAST(p.\"platform\" AS VARCHAR)),'')) WHEN 'sleeper' THEN COALESCE(NULLIF(TRIM(CAST(p.\"sleeper_player_id\" AS VARCHAR)),''),{pfallback}) WHEN 'fleaflicker' THEN COALESCE(NULLIF(TRIM(CAST(p.\"fleaflicker_player_id\" AS VARCHAR)),''),{pfallback}) WHEN 'mfl' THEN COALESCE(NULLIF(TRIM(CAST(p.\"mfl_player_id\" AS VARCHAR)),''),{pfallback}) ELSE {pfallback} END"
+              pkey=f"CONCAT_WS('|',CAST(p.\"db_name\" AS VARCHAR),CAST(p.\"year\" AS VARCHAR),CAST(p.\"week\" AS VARCHAR),CAST(p.\"platform\" AS VARCHAR),CAST(p.\"manager\" AS VARCHAR),CAST(p.\"team_name\" AS VARCHAR),CAST(p.\"team_key\" AS VARCHAR),CAST(p.\"fantasy_position\" AS VARCHAR),{ppid})"
+              con.execute(f'CREATE OR REPLACE TEMP VIEW player_keyed AS SELECT p.*,{pkey} AS join_key FROM public.player_fantasy p')
+              for col in canonical:
+                  n=con.execute(f'SELECT COUNT(*) FROM exact_keyed s JOIN player_keyed p USING(join_key) WHERE p."{col}" IS NULL AND s."{col}" IS NOT NULL').fetchone()[0]
+                  x=con.execute(f'SELECT COUNT(*) FROM exact_keyed s JOIN player_keyed p USING(join_key) WHERE p."{col}" IS NOT NULL AND s."{col}" IS NOT NULL AND CAST(p."{col}" AS VARCHAR)<>CAST(s."{col}" AS VARCHAR)').fetchone()[0]
+                  summary.setdefault('exact_null_fills',{})[col]=int(n); summary.setdefault('exact_conflicts',{})[col]=int(x)
+              con.execute("COPY (SELECT s.db_name,s.year,s.week,s.platform,s.manager,s.team_name,s.team_key,s.fantasy_position,s.NFL_player_id,s.clutch_equity source_clutch_equity,p.clutch_equity canonical_clutch_equity FROM exact_keyed s JOIN player_keyed p USING(join_key) WHERE p.clutch_equity IS NULL AND s.clutch_equity IS NOT NULL) TO 'out/exact_clutch_null_fill_candidates.parquet' (FORMAT PARQUET)")
+          else:
+              summary['exact_null_fills']={};summary['exact_conflicts']={}
+          # Team candidates are inventoried here; promotion is emitted only after a
+          # second, fieldwise fan-out gate. Clutch is intentionally excluded from
+          # team-level sources because it is player-specific.
+          summary['team_sources_note']='team-level sources are not yet promoted in this read-only pass; only canonical player rows can supply clutch_equity'
+          Path('out/cache_candidate_comparison.json').write_text(json.dumps(summary,indent=2,sort_keys=True)+'\n')
+          con.close(); print(json.dumps(summary,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-artifact-cache-comparison-${{ github.run_id }}
+          path: out/*
+          retention-days: 90
+          compression-level: 0
