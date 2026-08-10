@@ -27,8 +27,8 @@ jobs:
       max_parallel: ${{ steps.resolve.outputs.max_parallel }}
       id_bands: ${{ steps.resolve.outputs.id_bands }}
       request_sleep: ${{ steps.resolve.outputs.request_sleep }}
-      id_start: ${{ steps.resolve.outputs.id_start }}
-      id_end: ${{ steps.resolve.outputs.id_end }}
+      id_start: ${{ steps.next.outputs.id_start }}
+      id_end: ${{ steps.next.outputs.id_end }}
       yahoo_oauth_ref: ${{ steps.resolve.outputs.yahoo_oauth_ref }}
     steps:
       - name: Download completed-window manifest
@@ -54,7 +54,7 @@ jobs:
           id_bands=1-9999,10000-29999,30000-59999,60000-80000
           request_sleep=5.0
           id_start=0
-          id_end=80000
+          id_end=999
           yahoo_oauth_ref=main
           completed_start_year=$((BOOTSTRAP_END_YEAR - 1))
           completed_end_year=${BOOTSTRAP_END_YEAR}
@@ -83,23 +83,41 @@ jobs:
           print(f"completed_end_year={int(data['end_year'])}")
           PY
 
-      - name: Compute next contiguous window
+      - name: Compute next ID band and season window
         id: next
         shell: bash
         env:
+          COMPLETED_START: ${{ steps.resolve.outputs.completed_start_year }}
           COMPLETED_END: ${{ steps.resolve.outputs.completed_end_year }}
+          COMPLETED_ID_END: ${{ steps.resolve.outputs.id_end }}
         run: |
           set -euo pipefail
-          next_start=$((COMPLETED_END + 1))
-          if [ "$next_start" -gt 2025 ]; then
+          if [ "$COMPLETED_ID_END" -lt 80000 ]; then
+            next_start_year=$COMPLETED_START
+            next_end_year=$COMPLETED_END
+            next_id_start=$((COMPLETED_ID_END + 1))
+            next_id_end=$((next_id_start + 999))
+            if [ "$next_id_end" -gt 80000 ]; then next_id_end=80000; fi
+          else
+            next_start_year=$((COMPLETED_END + 1))
+            if [ "$next_start_year" -gt 2025 ]; then
+              echo "continue=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            next_end_year=$((next_start_year + 1))
+            if [ "$next_end_year" -gt 2025 ]; then next_end_year=2025; fi
+            next_id_start=0
+            next_id_end=999
+          fi
+          if [ "$next_start_year" -gt 2025 ]; then
             echo "continue=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          next_end=$((next_start + 1))
-          if [ "$next_end" -gt 2025 ]; then next_end=2025; fi
           echo "continue=true" >> "$GITHUB_OUTPUT"
-          echo "start_year=${next_start}" >> "$GITHUB_OUTPUT"
-          echo "end_year=${next_end}" >> "$GITHUB_OUTPUT"
+          echo "start_year=${next_start_year}" >> "$GITHUB_OUTPUT"
+          echo "end_year=${next_end_year}" >> "$GITHUB_OUTPUT"
+          echo "id_start=${next_id_start}" >> "$GITHUB_OUTPUT"
+          echo "id_end=${next_id_end}" >> "$GITHUB_OUTPUT"
 
   next-window:
     needs: read-window

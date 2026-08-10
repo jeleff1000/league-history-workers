@@ -28,7 +28,7 @@ jobs:
       id_bands: "1-9999,10000-29999,30000-59999,60000-80000"
       request_sleep: "5.0"
       id_start: "0"
-      id_end: "80000"
+      id_end: "999"
       yahoo_oauth_ref: "main"
     secrets: inherit
 
@@ -46,7 +46,7 @@ jobs:
       id_bands: "1-9999,10000-29999,30000-59999,60000-80000"
       request_sleep: "5.0"
       id_start: "0"
-      id_end: "80000"
+      id_end: "999"
       yahoo_oauth_ref: "main"
     secrets: inherit
 
@@ -64,7 +64,7 @@ jobs:
       id_bands: "1-9999,10000-29999,30000-59999,60000-80000"
       request_sleep: "5.0"
       id_start: "0"
-      id_end: "80000"
+      id_end: "999"
       yahoo_oauth_ref: "main"
     secrets: inherit
 
@@ -82,7 +82,7 @@ jobs:
       id_bands: "1-9999,10000-29999,30000-59999,60000-80000"
       request_sleep: "5.0"
       id_start: "0"
-      id_end: "80000"
+      id_end: "999"
       yahoo_oauth_ref: "main"
     secrets: inherit
 
@@ -100,6 +100,6 @@ jobs:
       id_bands: "1-9999,10000-29999,30000-59999,60000-80000"
       request_sleep: "5.0"
       id_start: "0"
-      id_end: "80000"
+      id_end: "999"
       yahoo_oauth_ref: "main"
     secrets: inherit
