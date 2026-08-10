@@ -344,7 +344,7 @@ jobs:
           PY
           cp directory/mfl_directory_seed.json shards/mfl_shard_directory.json
           python code/scripts/extraplatform_corpus/merge_mfl_shards.py \
-            --input-glob "shards/mfl_shard_*.json" \
+            --input-glob "shards/mfl_shard_[0-9]*.json" \
             $SEED \
             --out out/mfl_discovery_merged.json
           python3 - <<'PY'
