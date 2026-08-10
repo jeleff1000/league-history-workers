@@ -256,7 +256,7 @@ jobs:
 
   apply:
     needs: compare
-    if: ${{ env.APPLY == 'true' && needs.compare.result == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.apply == 'true' && needs.compare.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 355
     steps:
