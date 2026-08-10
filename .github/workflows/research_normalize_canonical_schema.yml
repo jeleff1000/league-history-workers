@@ -73,9 +73,16 @@ jobs:
           cohort_null=c.execute("SELECT COUNT(*) FROM public.player_fantasy WHERE " + ' OR '.join(f'{x} IS NULL' for x in sorted({'cohort_teams','cohort_roster','cohort_scoring','cohort_pass_td','cohort_playoff_teams','cohort_dynasty','cohort_best_ball','cohort_position_eligible'}))).fetchone()[0]
           cmc_rows=c.execute("SELECT COUNT(*) FROM public.player_fantasy WHERE CAST(NFL_player_id AS VARCHAR)='00-0033280' AND CAST(year AS INTEGER)=2025").fetchone()[0]
           cmc_position_null=c.execute("SELECT COUNT(*) FROM public.player_fantasy WHERE CAST(NFL_player_id AS VARCHAR)='00-0033280' AND CAST(year AS INTEGER)=2025 AND position IS NULL").fetchone()[0]
+          cmc_week1_eligible=c.execute("""
+            SELECT COUNT(DISTINCT db_name) FROM public.player_fantasy
+            WHERE CAST(NFL_player_id AS VARCHAR)='00-0033280' AND CAST(year AS INTEGER)=2025 AND week=1
+              AND cohort_teams='12t' AND cohort_roster='flx' AND cohort_scoring='half'
+              AND cohort_pass_td='4pt' AND cohort_playoff_teams='6po'
+              AND CAST(cohort_position_eligible AS INTEGER)=1
+          """).fetchone()[0]
           league_years=c.execute("SELECT COUNT(*) FROM (SELECT DISTINCT db_name, CAST(year AS INTEGER) AS year FROM public.player_fantasy)").fetchone()[0]
-          if forbidden or required or platform_null or cohort_null or cmc_rows < 5000 or cmc_position_null or league_years < 50000: raise SystemExit(f'bad canonical schema forbidden={forbidden} missing={required} platform_null={platform_null} cohort_null={cohort_null} cmc_rows={cmc_rows} cmc_position_null={cmc_position_null} league_years={league_years}')
-          print({'player_columns':len(p),'player_rows':c.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0],'platform_null':platform_null,'cohort_null':cohort_null,'cmc_rows_2025':cmc_rows,'cmc_position_null':cmc_position_null,'league_years':league_years})
+          if forbidden or required or platform_null or cohort_null or cmc_rows < 5000 or cmc_position_null or cmc_week1_eligible < 300 or league_years < 50000: raise SystemExit(f'bad canonical schema forbidden={forbidden} missing={required} platform_null={platform_null} cohort_null={cohort_null} cmc_rows={cmc_rows} cmc_position_null={cmc_position_null} cmc_week1_eligible={cmc_week1_eligible} league_years={league_years}')
+          print({'player_columns':len(p),'player_rows':c.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0],'platform_null':platform_null,'cohort_null':cohort_null,'cmc_rows_2025':cmc_rows,'cmc_position_null':cmc_position_null,'cmc_week1_eligible':cmc_week1_eligible,'league_years':league_years})
           PY
           python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
       - name: Save validated canonical cache generation
