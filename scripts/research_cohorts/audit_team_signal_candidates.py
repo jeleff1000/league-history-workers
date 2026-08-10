@@ -73,8 +73,8 @@ def main() -> None:
       CREATE OR REPLACE TEMP TABLE source_signals AS
       SELECT
         CAST(db_name AS VARCHAR) db_name,
-        CAST(year AS INTEGER) year,
-        CAST(week AS INTEGER) week,
+        CAST("year" AS INTEGER) AS year,
+        CAST("week" AS INTEGER) AS week,
         NULLIF(TRIM(CAST(team_key AS VARCHAR)), '') team_key,
         NULLIF(LOWER(TRIM(CAST(manager AS VARCHAR))), '') manager_key,
         NULLIF(LOWER(TRIM(CAST(team_name AS VARCHAR))), '') team_name_key,
@@ -148,7 +148,7 @@ def main() -> None:
           WHERE CAST(p.{field} AS VARCHAR)='0' AND CAST(m.{src} AS VARCHAR)='1'
         """).fetchone()[0]
 
-    con.execute("""
+    con.execute(f"""
       COPY (
         SELECT p.db_name,p.year,p.week,p.NFL_player_id,p.manager,p.team_key,p.team_name,
                p.platform,p.win canonical_win,m.source_win,{canonical_loss} canonical_loss,m.source_loss,

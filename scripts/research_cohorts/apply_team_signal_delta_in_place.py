@@ -38,9 +38,11 @@ def main() -> None:
     forbidden = {'opponent_points','is_championship','is_active','is_playoffs_bf','made_po_bf','made_po'} & set(pcols)
     if missing or len(cohort_columns) != 7 or forbidden:
         raise SystemExit(f"canonical player schema mismatch: missing={sorted(missing)} cohort_columns={cohort_columns} optional={[c for c in pcols if c in optional]} forbidden={sorted(forbidden)}")
+    loss_expr = "p.loss" if "loss" in pcols else "CAST(NULL AS INTEGER)"
+    tie_expr = "p.tie" if "tie" in pcols else "CAST(NULL AS INTEGER)"
     canonical_columns_before = list(pcols)
     dpath = str(args.delta.resolve()).replace("'", "''")
-    con.execute("CREATE OR REPLACE TEMP VIEW delta_raw AS SELECT * FROM read_parquet(?)", [dpath])
+    con.execute(f"CREATE OR REPLACE TEMP VIEW delta_raw AS SELECT * FROM read_parquet('{dpath}')")
     dcols = {r[0] for r in con.execute("DESCRIBE delta_raw").fetchall()}
     required = {"db_name", "year", "week", "NFL_player_id", "manager", "team_key", "team_name", "platform"}
     required |= {"source_win", "source_team_points", "source_playoffs", "source_champion", "source_final_playoff_seed"}
@@ -51,9 +53,18 @@ def main() -> None:
     if dup:
         raise SystemExit(f"duplicate delta keys: {dup}")
     before_rows = con.execute("SELECT COUNT(*) FROM public.player_fantasy").fetchone()[0]
-    con.execute("""
+    con.execute(f"""
       CREATE OR REPLACE TEMP TABLE matched AS
-      SELECT p.rowid player_rowid, d.*
+      SELECT p.rowid player_rowid,
+             p.win canonical_win,
+             {loss_expr} canonical_loss,
+             {tie_expr} canonical_tie,
+             p.team_points canonical_team_points,
+             p.is_playoffs canonical_is_playoffs,
+             p.champion canonical_champion,
+             p.final_playoff_seed canonical_final_playoff_seed,
+             p.made_playoffs canonical_made_playoffs,
+             d.*
       FROM public.player_fantasy p JOIN delta_raw d
         ON d.db_name=p.db_name AND CAST(d.year AS INTEGER)=CAST(p.year AS INTEGER)
        AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER)
@@ -80,7 +91,8 @@ def main() -> None:
     for field, src in fields.items():
         if src not in dcols:
             continue
-        improvements[field] = con.execute(f"SELECT COUNT(*) FROM matched WHERE {field} IS NULL AND {src} IS NOT NULL").fetchone()[0]
+        canonical = f"canonical_{field}"
+        improvements[field] = con.execute(f"SELECT COUNT(*) FROM matched WHERE {canonical} IS NULL AND {src} IS NOT NULL").fetchone()[0]
     update_assignments = [
         "win=CASE WHEN p.win IS NULL THEN m.source_win ELSE p.win END",
         "team_points=CASE WHEN p.team_points IS NULL THEN m.source_team_points ELSE p.team_points END",
