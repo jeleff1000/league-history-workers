@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - ".balanced_15_pilot_dispatch_once"
+      - ".balanced_15_full_dispatch_once"
   workflow_dispatch:
     inputs:
       pilot:
@@ -29,6 +30,8 @@ permissions:
 jobs:
   plan:
     runs-on: ubuntu-24.04
+    env:
+      PILOT_MODE: ${{ github.event_name == 'push' && !contains(github.event.head_commit.message, 'full') || (github.event_name == 'workflow_dispatch' && inputs.pilot) }}
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       year_start: ${{ steps.years.outputs.year_start }}
@@ -52,7 +55,7 @@ jobs:
       - id: years
         shell: bash
         run: |
-          if [[ "${{ github.event_name }}" == "push" || "${{ inputs.pilot }}" == "true" ]]; then
+          if [[ "$PILOT_MODE" == "true" ]]; then
             echo "year_start=2025" >> "$GITHUB_OUTPUT"
             echo "year_end=2025" >> "$GITHUB_OUTPUT"
           else
@@ -159,7 +162,7 @@ jobs:
           merge-multiple: false
       - name: Merge and validate complete adaptive bundle
         env:
-          PILOT: ${{ github.event_name == 'push' || inputs.pilot }}
+          PILOT: ${{ github.event_name == 'push' && !contains(github.event.head_commit.message, 'full') || (github.event_name == 'workflow_dispatch' && inputs.pilot) }}
         shell: bash
         run: |
           set -euo pipefail
