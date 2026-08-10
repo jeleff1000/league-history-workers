@@ -337,6 +337,7 @@ jobs:
           import os
           import re
           import urllib.request
+          import urllib.error
           import zipfile
 
           token = os.environ["GH_TOKEN"]
@@ -345,6 +346,28 @@ jobs:
           suffix = f"-{namespace}" if namespace else ""
           expected_names = re.compile(rf"mfl-discovery-shard-\d+-{re.escape(run_id)}{re.escape(suffix)}$")
           headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          api_opener = urllib.request.build_opener(NoRedirect)
+
+          def download_archive(artifact_id):
+              req = urllib.request.Request(
+                  f"https://api.github.com/repos/jeleff1000/league-history-workers/actions/artifacts/{artifact_id}/zip",
+                  headers=headers,
+              )
+              try:
+                  return api_opener.open(req).read()
+              except urllib.error.HTTPError as exc:
+                  if exc.code not in (301, 302, 303, 307, 308):
+                      raise
+                  signed_url = exc.headers["Location"]
+                  # The signed artifact URL is already authorized.  Do not
+                  # forward the GitHub API bearer token to blob storage.
+                  with urllib.request.urlopen(urllib.request.Request(signed_url)) as response:
+                      return response.read()
 
           artifacts = []
           for page in range(1, 100):
@@ -365,12 +388,7 @@ jobs:
               raise SystemExit("no matching shard artifacts found")
 
           for artifact in selected:
-              req = urllib.request.Request(
-                  f"https://api.github.com/repos/jeleff1000/league-history-workers/actions/artifacts/{artifact['id']}/zip",
-                  headers=headers,
-              )
-              with urllib.request.urlopen(req) as response:
-                  archive = response.read()
+              archive = download_archive(artifact["id"])
               with zipfile.ZipFile(io.BytesIO(archive)) as zf:
                   for member in zf.infolist():
                       if re.fullmatch(r"mfl_shard_\d+\.json", os.path.basename(member.filename)):
