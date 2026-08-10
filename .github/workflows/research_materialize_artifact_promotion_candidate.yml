@@ -1,0 +1,66 @@
+name: Materialize audited artifact promotion candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      comparison_run_id:
+        description: Completed full artifact comparison run
+        required: true
+      base_cache_key:
+        description: Frozen canonical research cache key
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  materialize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.base_cache_key }}
+          fail-on-cache-miss: true
+      - name: Download audited candidate deltas
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p comparison
+          gh run download '${{ inputs.comparison_run_id }}' \
+            --repo '${{ github.repository }}' \
+            --name 'research-artifact-complete-audit-${{ inputs.comparison_run_id }}' \
+            --dir comparison
+          test -s "$(find comparison -name team_promotable_player_delta.parquet -print -quit)"
+          test -s "$(find comparison -name exact_promotable_player_delta.parquet -print -quit)"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Materialize and read back every promoted cell
+        shell: bash
+        run: |
+          set -euo pipefail
+          TEAM=$(find comparison -name team_promotable_player_delta.parquet -print -quit)
+          EXACT=$(find comparison -name exact_promotable_player_delta.parquet -print -quit)
+          python scripts/research_cohorts/materialize_artifact_promotion_candidate.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --team-delta "$TEAM" \
+            --exact-delta "$EXACT" \
+            --ops research_public_lake/ops_cache.duckdb \
+            --report promotion_candidate_report.json
+      - name: Upload verified working-copy candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-artifact-promotion-candidate-${{ github.run_id }}
+          path: |
+            research_public_lake/corpus_snapshot.duckdb
+            promotion_candidate_report.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
