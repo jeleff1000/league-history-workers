@@ -386,7 +386,7 @@ jobs:
       - uses: actions/cache/save@v5
         with:
           path: research_public_lake
-          key: ${{ env.BASE_CACHE_KEY }}
+          key: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
       - name: Verify exactly one canonical cache remains
         env:
           GH_TOKEN: ${{ github.token }}
