@@ -33,6 +33,7 @@ jobs:
       continue: ${{ steps.next.outputs.continue }}
       id_start: ${{ steps.next.outputs.id_start }}
       id_end: ${{ steps.next.outputs.id_end }}
+      resume_year: ${{ steps.next.outputs.resume_year }}
     steps:
       - name: Download completed gap-fill manifest
         if: ${{ github.event_name == 'workflow_run' }}
@@ -73,6 +74,11 @@ jobs:
           echo "continue=true" >> "$GITHUB_OUTPUT"
           echo "id_start=${next_start}" >> "$GITHUB_OUTPUT"
           echo "id_end=${next_end}" >> "$GITHUB_OUTPUT"
+          if [ "$next_start" -ge 2000 ]; then
+            echo "resume_year=1999" >> "$GITHUB_OUTPUT"
+          else
+            echo "resume_year=1997" >> "$GITHUB_OUTPUT"
+          fi
 
   next-band:
     needs: read-band
@@ -81,4 +87,5 @@ jobs:
     with:
       id_start: ${{ needs.read-band.outputs.id_start }}
       id_end: ${{ needs.read-band.outputs.id_end }}
+      resume_year: ${{ needs.read-band.outputs.resume_year }}
     secrets: inherit
