@@ -68,6 +68,16 @@ on:
         required: false
         default: ""
         type: string
+      merge_only:
+        description: "Merge artifacts from source_run_id without running discovery shards"
+        required: false
+        default: "false"
+        type: string
+      source_run_id:
+        description: "Completed run whose shard artifacts should be merged"
+        required: false
+        default: ""
+        type: string
   workflow_call:
     inputs:
       shard_count:
@@ -122,6 +132,14 @@ on:
         required: false
         default: ""
         type: string
+      merge_only:
+        required: false
+        default: "false"
+        type: string
+      source_run_id:
+        required: false
+        default: ""
+        type: string
 
 permissions:
   actions: write
@@ -163,7 +181,7 @@ jobs:
           PY
 
   discover:
-    if: ${{ (inputs.directory_only || 'false') != 'true' }}
+    if: ${{ (inputs.directory_only || 'false') != 'true' && (inputs.merge_only || 'false') != 'true' }}
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -225,7 +243,7 @@ jobs:
     # Named-directory discovery is supplemental.  Keep it out of the numeric
     # sweep's critical path; invoke this workflow with directory_only=true when
     # we explicitly want a directory crawl.
-    if: ${{ always() && (inputs.directory_only || 'false') == 'true' }}
+    if: ${{ always() && (inputs.directory_only || 'false') == 'true' && (inputs.merge_only || 'false') != 'true' }}
     needs: [prepare, discover]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -312,9 +330,11 @@ jobs:
           # A reusable gap-fill run contains multiple season windows.  Limit
           # the download to this run/window or merge-multiple would concatenate
           # same-named shard files from earlier windows.
-          pattern: mfl-discovery-shard-*-${{ github.run_id }}${{ inputs.artifact_namespace && format('-{0}', inputs.artifact_namespace) || '' }}
+          pattern: mfl-discovery-shard-*-${{ inputs.source_run_id || github.run_id }}${{ inputs.artifact_namespace && format('-{0}', inputs.artifact_namespace) || '' }}
           path: shards
           merge-multiple: true
+          run-id: ${{ inputs.source_run_id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Retry shard artifact download
         if: ${{ (inputs.directory_only || 'false') != 'true' }}
@@ -323,9 +343,11 @@ jobs:
           # The artifact service can return a partial successful download.
           # A second pass fills transiently missed shard archives before the
           # exact-coverage gate runs.
-          pattern: mfl-discovery-shard-*-${{ github.run_id }}${{ inputs.artifact_namespace && format('-{0}', inputs.artifact_namespace) || '' }}
+          pattern: mfl-discovery-shard-*-${{ inputs.source_run_id || github.run_id }}${{ inputs.artifact_namespace && format('-{0}', inputs.artifact_namespace) || '' }}
           path: shards
           merge-multiple: true
+          run-id: ${{ inputs.source_run_id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download named directory artifact
         uses: actions/download-artifact@v5
@@ -333,6 +355,8 @@ jobs:
         with:
           name: mfl-directory-discovery-${{ github.run_id }}${{ inputs.artifact_namespace && format('-{0}', inputs.artifact_namespace) || '' }}
           path: directory
+          run-id: ${{ inputs.source_run_id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Ensure directory input exists
         if: ${{ always() }}
