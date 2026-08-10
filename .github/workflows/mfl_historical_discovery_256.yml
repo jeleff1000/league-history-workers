@@ -316,6 +316,17 @@ jobs:
           path: shards
           merge-multiple: true
 
+      - name: Retry shard artifact download
+        if: ${{ (inputs.directory_only || 'false') != 'true' }}
+        uses: actions/download-artifact@v5
+        with:
+          # The artifact service can return a partial successful download.
+          # A second pass fills transiently missed shard archives before the
+          # exact-coverage gate runs.
+          pattern: mfl-discovery-shard-*-${{ github.run_id }}${{ inputs.artifact_namespace && format('-{0}', inputs.artifact_namespace) || '' }}
+          path: shards
+          merge-multiple: true
+
       - name: Download named directory artifact
         uses: actions/download-artifact@v5
         continue-on-error: true
