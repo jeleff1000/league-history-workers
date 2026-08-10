@@ -141,7 +141,27 @@ jobs:
           assert format_lanes >= 6, format_lanes
           dims=c.execute("select count(*) from research_matchup_adaptive where q_teams='12t' and q_roster='flx' and q_ppr='half' and q_td='4pt' and q_bracket in ('ALL','4po','6po','8po') and q_league_type in ('ALL','dynasty') and q_lineup_mode in ('ALL','best_ball')").fetchone()[0]
           assert dims > 0, dims
-          print({'ppr_lanes':sorted(ppr_lanes),'td_lanes':sorted(td_lanes),'format_lanes':format_lanes,'request_lane_rows':dims})
+          # Output gate: the source-cache gate above does not prove the rollup
+          # preserved CMC's full population.
+          cmc_weekly = c.execute("""
+            SELECT COUNT(*) FROM research_matchup_adaptive_weekly
+            WHERE NFL_player_id='00-0033280' AND year=2025
+          """).fetchone()[0]
+          cmc_season = c.execute("""
+            SELECT COUNT(*) FROM research_matchup_adaptive
+            WHERE NFL_player_id='00-0033280' AND year=2025
+          """).fetchone()[0]
+          cmc_wk1 = c.execute("""
+            SELECT n_leagues FROM research_matchup_adaptive_weekly
+            WHERE NFL_player_id='00-0033280' AND year=2025 AND week=1
+              AND q_teams='12t' AND q_roster='flx' AND q_ppr='half'
+              AND q_td='4pt' AND q_bracket='6po'
+              AND q_league_type='ALL' AND q_lineup_mode='ALL'
+          """).fetchone()
+          assert cmc_weekly >= 5000, {'cmc_weekly_rows': cmc_weekly}
+          assert cmc_season >= 300, {'cmc_season_rows': cmc_season}
+          assert cmc_wk1 and cmc_wk1[0] >= 300, {'cmc_week1_n_leagues': cmc_wk1}
+          print({'ppr_lanes':sorted(ppr_lanes),'td_lanes':sorted(td_lanes),'format_lanes':format_lanes,'request_lane_rows':dims,'cmc_weekly_rows':cmc_weekly,'cmc_season_rows':cmc_season,'cmc_week1_n_leagues':cmc_wk1[0]})
           PY
       - name: Publish adaptive tables to Fly
         if: ${{ github.event_name == 'workflow_run' || inputs.publish }}
