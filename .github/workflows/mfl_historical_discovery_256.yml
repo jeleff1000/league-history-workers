@@ -219,7 +219,10 @@ jobs:
   # keyword crawl.  It starts only after the matrix, keeping total concurrency
   # at the requested maximum of 15 runners.
   directory:
-    if: ${{ always() && needs.discover.result != 'cancelled' }}
+    # Named-directory discovery is supplemental.  Keep it out of the numeric
+    # sweep's critical path; invoke this workflow with directory_only=true when
+    # we explicitly want a directory crawl.
+    if: ${{ always() && (inputs.directory_only || 'false') == 'true' }}
     needs: [prepare, discover]
     runs-on: ubuntu-latest
     timeout-minutes: 20
