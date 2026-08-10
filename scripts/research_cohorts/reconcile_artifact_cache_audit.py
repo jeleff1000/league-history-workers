@@ -54,6 +54,8 @@ def main() -> None:
     extraction_failures = sorted(k for k in selected if by_key.get(k, {}).get("status") not in {"candidate_extracted", "structured_evidence_extracted"})
     comparison = read_json(args.comparison)
     structured = read_json(args.structured_audit)
+    exact_report_path = args.comparison.parent / "exact_player_delta_report.json"
+    exact_report = read_json(exact_report_path) if exact_report_path.exists() else {}
     cache_invariants = {
         "cache_mutated": bool(comparison.get("cache_mutated")),
         "new_lineage": bool(comparison.get("new_lineage")),
@@ -61,7 +63,8 @@ def main() -> None:
     }
     complete = not missing_selected and not duplicate_keys and not out_of_scope and not extraction_failures
     unresolved_structured_payloads = int(structured.get("promotable_structured_rows", 0)) + int(structured.get("settings_rows", 0))
-    promotion_ready = complete and unresolved_structured_payloads == 0 and not cache_invariants["cache_mutated"] and not cache_invariants["new_lineage"] and cache_invariants["canonical_schema_unchanged"]
+    unresolved_exact_rows = int(exact_report.get("unresolved_unmatched_rows", 0))
+    promotion_ready = complete and unresolved_structured_payloads == 0 and unresolved_exact_rows == 0 and not cache_invariants["cache_mutated"] and not cache_invariants["new_lineage"] and cache_invariants["canonical_schema_unchanged"]
     report = {
         "complete_artifact_audit_run": manifest.get("complete_artifact_audit_run"),
         "manifest_artifacts": EXPECTED_ARTIFACTS, "manifest_files": EXPECTED_FILES,
@@ -72,6 +75,13 @@ def main() -> None:
         "extraction_status_counts": dict(sorted(Counter(row.get("status", "missing") for row in by_key.values()).items())),
         "cache_invariants": cache_invariants, "complete_file_reconciliation": complete,
         "promotion_ready": promotion_ready,
+        "exact_delta": {
+            "matched_rows": exact_report.get("matched_rows", 0),
+            "delta_rows": exact_report.get("delta_rows", 0),
+            "insert_candidate_rows": exact_report.get("insert_candidate_rows", 0),
+            "unresolved_unmatched_rows": unresolved_exact_rows,
+            "insertion_schema_complete": exact_report.get("insertion_schema_complete", False),
+        },
         "structured_audit": {k: structured.get(k) for k in ("files", "direct_signal_files", "settings_payload_files", "promotable_structured_rows", "settings_rows")},
         "unresolved_structured_payloads": unresolved_structured_payloads,
         "missing_candidate_keys": [list(k) for k in missing_selected[:100]],
