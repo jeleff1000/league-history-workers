@@ -41,7 +41,9 @@ permissions:
   contents: write
 
 concurrency:
-  group: mfl-historical-gap-fill
+  # Different ID bands are independent; do not let optional cleanup in an
+  # older band hold the next numeric sweep.
+  group: mfl-historical-gap-fill-${{ inputs.id_start || '0' }}-${{ inputs.id_end || '999' }}
   cancel-in-progress: false
 
 jobs:
