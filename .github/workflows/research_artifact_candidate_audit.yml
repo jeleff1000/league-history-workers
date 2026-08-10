@@ -426,7 +426,7 @@ jobs:
           i=0
           for delta in "${deltas[@]}"; do
             new_rows_arg=()
-            if [[ -f comparison/exact_new_player_rows.parquet ]]; then
+            if [[ "$delta" == *exact_promotable_player_delta.parquet && -f comparison/exact_new_player_rows.parquet ]]; then
               new_rows_arg=(--new-rows comparison/exact_new_player_rows.parquet)
             fi
             python scripts/research_cohorts/apply_team_signal_delta_in_place.py \
@@ -436,12 +436,24 @@ jobs:
               --report "comparison/player_delta_apply_${i}.json"
             i=$((i + 1))
           done
+      - name: Verify every promoted source value in the updated cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t deltas < <(find comparison -type f -name '*promotable_player_delta.parquet' | sort)
+          test "${#deltas[@]}" -gt 0
+          python scripts/research_cohorts/audit_promoted_deltas.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --deltas "${deltas[@]}" \
+            --new-rows comparison/exact_new_player_rows.parquet \
+            --out comparison/promoted_cache_audit.json
       - uses: actions/upload-artifact@v4
         with:
           name: research-team-signal-apply-${{ github.run_id }}
           path: |
             comparison/team_signal_apply_report.json
             comparison/player_delta_apply_*.json
+            comparison/promoted_cache_audit.json
           retention-days: 90
           compression-level: 0
       - name: Refuse destructive Actions-cache replacement
