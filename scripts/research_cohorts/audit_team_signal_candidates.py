@@ -42,7 +42,12 @@ def main() -> None:
         # this pass must consume only team/week-grain sources.
         if {"db_name", "year", "week", "team_key"}.issubset(cols) and "NFL_player_id" not in cols:
             files.append(path)
-        if {"db_name", "year", "week", "NFL_player_id", "team_key", "manager", "team_name"}.issubset(cols):
+        # Player-grain evidence is a valid bridge even when the source did not
+        # expose a team_key.  Manager/team identity plus NFL_player_id is enough
+        # to fan a team signal out to the canonical player rows.  Requiring
+        # team_key here silently discarded the player artifacts that carried
+        # the usable identity.
+        if {"db_name", "year", "week", "NFL_player_id", "manager", "team_name"}.issubset(cols):
             bridge_files.append(path)
     if not files:
         raise SystemExit("no team candidate parquet files")
