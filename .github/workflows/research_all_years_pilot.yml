@@ -68,7 +68,7 @@ jobs:
             select count(*) from research_matchup_adaptive_weekly
             where NFL_player_id='00-0033280'
           """).fetchone()[0]
-          print({'league_years':league_years,'counts':counts,'years':years,'cmc_seasons':cmc,'cmc_weekly_rows':cmc_weekly,'seconds':elapsed})
+          print({'league_years':league_years,'counts':counts,'years':years,'cmc_seasons':cmc,'cmc_weekly_rows':cmc_weekly})
           assert league_years >= 60000
           assert years[0] <= 1997 and years[1] >= 2025 and years[2] >= 29
           assert cmc[0] > 0 and cmc[3] >= 9 and cmc_weekly >= 5000
