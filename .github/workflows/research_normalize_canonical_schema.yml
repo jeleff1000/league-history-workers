@@ -48,7 +48,8 @@ jobs:
         run: |
           python code/scripts/research_cohorts/normalize_canonical_research_schema.py \
             --base research_public_lake/corpus_snapshot.duckdb \
-            --out research_public_lake/corpus_snapshot.normalized.duckdb
+            --out research_public_lake/corpus_snapshot.normalized.duckdb \
+            --ops-cache research_public_lake/ops_cache.duckdb
           mv -f research_public_lake/corpus_snapshot.normalized.duckdb research_public_lake/corpus_snapshot.duckdb
       - name: Fail-fast ops cache preservation gate
         run: |
