@@ -1,0 +1,75 @@
+name: Audit settings candidates against canonical cache
+
+on:
+  workflow_dispatch:
+    inputs:
+      comparison_run_id:
+        description: Completed full artifact comparison run containing the file ledger
+        required: true
+        default: '31441478179'
+      base_cache_key:
+        description: Frozen canonical research cache key
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.base_cache_key }}
+          fail-on-cache-miss: true
+      - name: Download file-level manifest evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p audit
+          gh run download '${{ inputs.comparison_run_id }}' \
+            --repo '${{ github.repository }}' \
+            --name 'research-artifact-complete-audit-${{ inputs.comparison_run_id }}' \
+            --dir audit
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Download only the 1,633 settings artifacts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          ledger=json.loads(Path('audit/file_promotion_ledger.json').read_text())
+          ids=sorted({str(row['artifact_id']) for row in ledger['files'] if row.get('disposition')=='settings_candidate'})
+          if len(ids) != 1633:
+              raise SystemExit(f'expected 1633 settings artifacts, found {len(ids)}')
+          Path('settings_ids.txt').write_text(','.join(ids)+'\n')
+          print(f'settings_artifacts={len(ids)}')
+          PY
+          python scripts/research_cohorts/download_workflow_artifacts.py \
+            --repo "$GITHUB_REPOSITORY" --run-id 0 --ids "$(cat settings_ids.txt)" \
+            --out settings_candidates --workers 8
+      - name: Audit settings fields and target tables
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/audit_settings_dimension_candidates.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --candidates settings_candidates \
+            --out settings_dimension_audit.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-settings-dimension-audit-${{ github.run_id }}
+          path: settings_dimension_audit.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
