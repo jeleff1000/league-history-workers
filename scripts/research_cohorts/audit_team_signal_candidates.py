@@ -34,6 +34,7 @@ def main() -> None:
     canonical_tie = "p.tie" if "tie" in pcols else "CAST(NULL AS INTEGER)"
     all_files = sorted(args.candidates.rglob("*.parquet"))
     files = []
+    bridge_files = []
     for path in all_files:
         parquet_path = "'" + str(path.resolve()).replace("'", "''") + "'"
         cols = {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet({parquet_path})").fetchall()}
@@ -41,6 +42,8 @@ def main() -> None:
         # this pass must consume only team/week-grain sources.
         if {"db_name", "year", "week", "team_key"}.issubset(cols) and "NFL_player_id" not in cols:
             files.append(path)
+        if {"db_name", "year", "week", "NFL_player_id", "team_key", "manager", "team_name"}.issubset(cols):
+            bridge_files.append(path)
     if not files:
         raise SystemExit("no team candidate parquet files")
 
@@ -124,6 +127,44 @@ def main() -> None:
     source_keys = con.execute("SELECT COUNT(*) FROM source_signals").fetchone()[0]
     source_duplicate_rows = con.execute("SELECT COALESCE(SUM(source_rows-1),0) FROM source_signals").fetchone()[0]
 
+    # Some canonical rows have no manager/team identity at all.  A team/week
+    # signal can still be safely fanned out when an artifact player row bridges
+    # that same NFL_player_id to the source team.  Require a unique bridge per
+    # player-week so a player traded/duplicated across source teams is not
+    # guessed into one team.
+    if bridge_files:
+        bridge_paths = [str(p.resolve()).replace("'", "''") for p in bridge_files]
+        con.execute(
+            "CREATE OR REPLACE TEMP VIEW source_player_bridge_raw AS "
+            "SELECT db_name,\"year\" AS season_year,week,NFL_player_id,team_key,manager,team_name "
+            "FROM read_parquet([" + ",".join("'" + p + "'" for p in bridge_paths) + "], union_by_name=true)"
+        )
+        con.execute("""
+          CREATE OR REPLACE TEMP TABLE source_player_bridge AS
+          SELECT DISTINCT
+            CAST(db_name AS VARCHAR) db_name,
+            CAST(season_year AS INTEGER) bridge_year,
+            CAST(week AS INTEGER) bridge_week,
+            CAST(NFL_player_id AS VARCHAR) NFL_player_id,
+            NULLIF(TRIM(CAST(team_key AS VARCHAR)), '') team_key,
+            NULLIF(CASE WHEN INSTR(LOWER(TRIM(CAST(team_key AS VARCHAR))), '_') > 0
+                        THEN REGEXP_EXTRACT(LOWER(TRIM(CAST(team_key AS VARCHAR))), '([^_]+)$', 1)
+                        ELSE LOWER(TRIM(CAST(team_key AS VARCHAR))) END, '') team_key_norm,
+            NULLIF(REGEXP_REPLACE(TRIM(REGEXP_REPLACE(REPLACE(LOWER(TRIM(CAST(manager AS VARCHAR))), '&nbsp;', ' '), '<[^>]*>', '', 'g')), '\\s+', ' ', 'g'), '') manager_key,
+            NULLIF(REGEXP_REPLACE(TRIM(REGEXP_REPLACE(REPLACE(LOWER(TRIM(CAST(team_name AS VARCHAR))), '&nbsp;', ' '), '<[^>]*>', '', 'g')), '\\s+', ' ', 'g'), '') team_name_key
+          FROM source_player_bridge_raw
+          WHERE NFL_player_id IS NOT NULL
+        """)
+    else:
+        con.execute("""
+          CREATE OR REPLACE TEMP TABLE source_player_bridge AS
+          SELECT CAST(NULL AS VARCHAR) db_name, CAST(NULL AS INTEGER) bridge_year,
+                 CAST(NULL AS INTEGER) bridge_week, CAST(NULL AS VARCHAR) NFL_player_id,
+                 CAST(NULL AS VARCHAR) team_key, CAST(NULL AS VARCHAR) team_key_norm,
+                 CAST(NULL AS VARCHAR) manager_key, CAST(NULL AS VARCHAR) team_name_key
+          WHERE FALSE
+        """)
+
     # A team-key match is authoritative when it exists in the canonical table.
     # Some source APIs emit a different representation of the same team key
     # (notably MFL's short franchise number).  In that case the scoped
@@ -183,6 +224,30 @@ def main() -> None:
       SELECT * EXCLUDE (candidate_count, has_exact_key)
       FROM player_match_candidates
       WHERE has_exact_key=1 OR candidate_count=1
+    """)
+    con.execute(f"""
+      CREATE OR REPLACE TEMP TABLE bridge_matches AS
+      SELECT
+        p.rowid AS player_rowid,
+        s.*,
+        'player_bridge' AS join_method
+      FROM public.player_fantasy p
+      JOIN source_player_bridge b
+        ON b.db_name=p.db_name AND b.bridge_year=CAST(p.year AS INTEGER)
+       AND b.bridge_week=CAST(p.week AS INTEGER)
+       AND b.NFL_player_id=CAST(p.NFL_player_id AS VARCHAR)
+      JOIN source_signals s
+        ON s.db_name=b.db_name AND s.year=b.bridge_year AND s.week=b.bridge_week
+       AND (((s.team_key IS NOT NULL AND b.team_key IS NOT NULL AND s.team_key=b.team_key)
+          OR (s.team_key_norm IS NOT NULL AND b.team_key_norm IS NOT NULL AND s.team_key_norm=b.team_key_norm))
+        OR (s.manager_key IS NOT NULL AND s.team_name_key IS NOT NULL
+            AND s.manager_key=b.manager_key AND s.team_name_key=b.team_name_key))
+      WHERE NOT EXISTS (SELECT 1 FROM player_matches direct WHERE direct.player_rowid=p.rowid)
+      QUALIFY COUNT(*) OVER (PARTITION BY p.rowid)=1
+    """)
+    con.execute("""
+      INSERT INTO player_matches
+      SELECT * FROM bridge_matches
     """)
     matched = con.execute("SELECT COUNT(*) FROM player_matches").fetchone()[0]
 
@@ -258,10 +323,12 @@ def main() -> None:
         "new_lineage": False,
         "canonical_schema_unchanged": True,
         "candidate_files": len(files),
+        "bridge_files": len(bridge_files),
         "source_rows": int(con.execute("SELECT COUNT(*) FROM source_raw").fetchone()[0]),
         "source_team_keys": int(source_keys),
         "duplicate_source_rows_collapsed": int(source_duplicate_rows),
         "matched_player_rows": int(matched),
+        "bridge_matched_player_rows": int(con.execute("SELECT COUNT(*) FROM bridge_matches").fetchone()[0]),
         "unmatched_source_team_keys": int(con.execute(f"""
           SELECT COUNT(*) FROM source_signals s
           WHERE NOT EXISTS (SELECT 1 FROM player_matches m
@@ -274,6 +341,10 @@ def main() -> None:
                                 OR (s.manager_key IS NOT NULL AND s.team_name_key IS NOT NULL
                                     AND s.manager_key={p_label_expr('p.manager')}
                                     AND s.team_name_key={p_label_expr('p.team_name')})))
+                            OR EXISTS (SELECT 1 FROM bridge_matches bm
+                                       WHERE bm.db_name=s.db_name
+                                         AND bm.year=s.year AND bm.week=s.week
+                                         AND bm.team_key IS NOT DISTINCT FROM s.team_key)
         """).fetchone()[0]),
         "improvements_by_field": {k: int(v) for k,v in improvements.items()},
         "join_diagnostic": diagnostic,
