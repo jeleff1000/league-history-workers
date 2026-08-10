@@ -55,7 +55,7 @@ jobs:
           c.close()
           c=duckdb.connect('out/all_years.duckdb', read_only=True)
           required={'research_matchup_adaptive','research_matchup_adaptive_weekly','research_matchup_adaptive_career'}
-          got={r[0] for r in c.execute("select table_name from information_schema.tables where table_schema='main').fetchall()}
+          got={r[0] for r in c.execute("select table_name from information_schema.tables where table_schema='main'").fetchall()}
           assert required <= got, required-got
           counts={t:c.execute(f'select count(*) from "{t}"').fetchone()[0] for t in required}
           assert all(v > 0 for v in counts.values()), counts
