@@ -1,4 +1,5 @@
 name: Research Matchup Direct Cache Release to Fly
+# Direct run after canonical cache replacement; all lookup data is in GitHub cache.
 
 on:
   workflow_dispatch:
