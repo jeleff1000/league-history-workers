@@ -42,6 +42,7 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: band
+          continue-on-error: true
 
       - name: Resolve next ID band
         id: next
@@ -50,7 +51,7 @@ jobs:
           COMPLETED_END: ${{ inputs.completed_id_end || '999' }}
         run: |
           set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = "workflow_run" ]; then
+          if [ "$GITHUB_EVENT_NAME" = "workflow_run" ] && [ -f band/mfl_gap_fill_manifest.json ]; then
             COMPLETED_END=$(python3 - <<'PY'
           import json
           from pathlib import Path
@@ -58,6 +59,9 @@ jobs:
           print(int(data["id_end"]))
           PY
             )
+          elif [ "$GITHUB_EVENT_NAME" = "workflow_run" ]; then
+            echo "completed gap-fill run has no band manifest; treating it as the bootstrap 0-999 band"
+            COMPLETED_END=999
           fi
           next_start=$((COMPLETED_END + 1))
           if [ "$next_start" -gt 80000 ]; then
