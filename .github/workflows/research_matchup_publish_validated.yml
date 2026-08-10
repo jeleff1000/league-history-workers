@@ -1,0 +1,43 @@
+name: Publish Validated Balanced Matchup Bundle
+
+on:
+  push:
+    paths:
+      - ".publish_balanced_full_dispatch_once"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  publish:
+    if: ${{ github.event.head_commit.message != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Read validated rollup run id
+        id: source
+        shell: bash
+        run: |
+          run_id=$(tr -d '[:space:]' < .publish_balanced_full_dispatch_once)
+          [[ "$run_id" =~ ^[0-9]+$ ]]
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-matchup-balanced-final-${{ steps.source.outputs.run_id }}
+          run-id: ${{ steps.source.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: out
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 requests
+      - name: Read-only preflight and publish to Fly
+        run: |
+          python code/scripts/research_cohorts/publish_research_matchup_to_fly.py             --bundle out/research_matchup_adaptive.duckdb --adaptive-only             --slug 12t_flx_half_4pt --apply --i-understand-this-writes-prod
