@@ -11,6 +11,26 @@ on:
         required: false
         default: "2006"
         type: string
+      completed_start_year:
+        description: "Override: completed window start season"
+        required: false
+        default: ""
+        type: string
+      completed_end_year:
+        description: "Override: completed window end season"
+        required: false
+        default: ""
+        type: string
+      completed_id_start:
+        description: "Override: completed ID band start"
+        required: false
+        default: ""
+        type: string
+      completed_id_end:
+        description: "Override: completed ID band end"
+        required: false
+        default: ""
+        type: string
   workflow_run:
     workflows:
       - MFL Historical Gap Fill (1997-2006)
@@ -55,6 +75,10 @@ jobs:
         shell: bash
         env:
           BOOTSTRAP_END_YEAR: ${{ inputs.bootstrap_end_year || '2006' }}
+          OVERRIDE_COMPLETED_START_YEAR: ${{ inputs.completed_start_year || '' }}
+          OVERRIDE_COMPLETED_END_YEAR: ${{ inputs.completed_end_year || '' }}
+          OVERRIDE_COMPLETED_ID_START: ${{ inputs.completed_id_start || '' }}
+          OVERRIDE_COMPLETED_ID_END: ${{ inputs.completed_id_end || '' }}
         run: |
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" != "workflow_run" ]; then
@@ -63,11 +87,11 @@ jobs:
           max_parallel=15
           id_bands=1-9999,10000-29999,30000-59999,60000-80000
           request_sleep=5.0
-          id_start=0
-          id_end=999
+          id_start=${OVERRIDE_COMPLETED_ID_START:-0}
+          id_end=${OVERRIDE_COMPLETED_ID_END:-999}
           yahoo_oauth_ref=main
-          completed_start_year=$((BOOTSTRAP_END_YEAR - 1))
-          completed_end_year=${BOOTSTRAP_END_YEAR}
+          completed_start_year=${OVERRIDE_COMPLETED_START_YEAR:-$((BOOTSTRAP_END_YEAR - 1))}
+          completed_end_year=${OVERRIDE_COMPLETED_END_YEAR:-${BOOTSTRAP_END_YEAR}}
           EOF
             exit 0
           fi
