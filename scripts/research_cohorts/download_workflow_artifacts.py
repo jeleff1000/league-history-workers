@@ -7,8 +7,22 @@ import os
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 import zipfile
 from pathlib import Path
+
+
+class _BlobRedirectWithoutBearer(urllib.request.HTTPRedirectHandler):
+    """Do not forward the GitHub API bearer token to Azure blob storage."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is not None and urlparse(newurl).netloc != "api.github.com":
+            redirected.headers.pop("Authorization", None)
+        return redirected
+
+
+_OPENER = urllib.request.build_opener(_BlobRedirectWithoutBearer)
 
 
 def download(repo: str, artifact_id: str, out: Path, token: str) -> None:
@@ -24,7 +38,7 @@ def download(repo: str, artifact_id: str, out: Path, token: str) -> None:
     last: Exception | None = None
     for attempt in range(6):
         try:
-            with urllib.request.urlopen(request, timeout=180) as response:
+            with _OPENER.open(request, timeout=180) as response:
                 payload = response.read()
             target = out / str(artifact_id)
             target.mkdir(parents=True, exist_ok=True)
