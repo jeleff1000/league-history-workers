@@ -196,10 +196,21 @@ def main() -> None:
     }
     diagnostic_sql = ','.join(f"{expr} AS {name}" for name,expr in diagnostic_exprs.items())
     diagnostic.update(dict(zip(diagnostic_exprs, con.execute(f"SELECT {diagnostic_sql} FROM source_signals s").fetchone())))
-    diagnostic["examples"] = [
-        dict(zip([r[0] for r in con.execute("DESCRIBE SELECT * FROM source_signals").fetchall()], row))
-        for row in con.execute("SELECT * FROM source_signals WHERE team_key IS NOT NULL LIMIT 3").fetchall()
-    ]
+    source_example_columns = [r[0] for r in con.execute("DESCRIBE SELECT * FROM source_signals").fetchall()]
+    diagnostic["examples"] = []
+    for row in con.execute("SELECT * FROM source_signals WHERE team_key IS NOT NULL LIMIT 3").fetchall():
+        item = dict(zip(source_example_columns, row))
+        item["canonical_identity_samples"] = [
+            dict(zip(("manager", "team_key", "team_name", "platform"), candidate))
+            for candidate in con.execute(f"""
+              SELECT DISTINCT CAST(manager AS VARCHAR), CAST(team_key AS VARCHAR),
+                              CAST(team_name AS VARCHAR), CAST(platform AS VARCHAR)
+              FROM public.player_fantasy
+              WHERE db_name=? AND CAST(year AS INTEGER)=? AND CAST(week AS INTEGER)=?
+              LIMIT 20
+            """, [item["db_name"], item["year"], item["week"]]).fetchall()
+        ]
+        diagnostic["examples"].append(item)
 
     fields = {
         "win": "source_win",
