@@ -1,11 +1,7 @@
 name: MFL Historical Discovery Scheduler B
 
 on:
-  workflow_run:
-    workflows:
-      - MFL Historical Discovery Scheduler A
-    types: [completed]
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   actions: write

@@ -11,13 +11,6 @@ on:
         required: false
         default: "2006"
         type: string
-  workflow_run:
-    workflows:
-      - MFL Historical Discovery (250 contiguous ID shards)
-      - MFL Historical Discovery Scheduler B
-    types: [completed]
-    branches: [main]
-
 permissions:
   actions: write
   contents: read
