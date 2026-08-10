@@ -1,0 +1,105 @@
+name: MFL Historical Gap Fill (1997-2006)
+
+on:
+  push:
+    paths:
+      - .github/mfl_gap_fill_bootstrap_1997
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: mfl-historical-gap-fill
+  cancel-in-progress: false
+
+jobs:
+  window-1997-1998:
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "250"
+      max_parallel: "15"
+      start_year: "1997"
+      end_year: "1998"
+      chain_next_window: "false"
+      shard_indices: ""
+      directory_only: "false"
+      id_bands: "1-9999,10000-29999,30000-59999,60000-80000"
+      request_sleep: "5.0"
+      id_start: "0"
+      id_end: "10000"
+      yahoo_oauth_ref: "main"
+    secrets: inherit
+
+  window-1999-2000:
+    needs: window-1997-1998
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "250"
+      max_parallel: "15"
+      start_year: "1999"
+      end_year: "2000"
+      chain_next_window: "false"
+      shard_indices: ""
+      directory_only: "false"
+      id_bands: "1-9999,10000-29999,30000-59999,60000-80000"
+      request_sleep: "5.0"
+      id_start: "0"
+      id_end: "10000"
+      yahoo_oauth_ref: "main"
+    secrets: inherit
+
+  window-2001-2002:
+    needs: window-1999-2000
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "250"
+      max_parallel: "15"
+      start_year: "2001"
+      end_year: "2002"
+      chain_next_window: "false"
+      shard_indices: ""
+      directory_only: "false"
+      id_bands: "1-9999,10000-29999,30000-59999,60000-80000"
+      request_sleep: "5.0"
+      id_start: "0"
+      id_end: "10000"
+      yahoo_oauth_ref: "main"
+    secrets: inherit
+
+  window-2003-2004:
+    needs: window-2001-2002
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "250"
+      max_parallel: "15"
+      start_year: "2003"
+      end_year: "2004"
+      chain_next_window: "false"
+      shard_indices: ""
+      directory_only: "false"
+      id_bands: "1-9999,10000-29999,30000-59999,60000-80000"
+      request_sleep: "5.0"
+      id_start: "0"
+      id_end: "10000"
+      yahoo_oauth_ref: "main"
+    secrets: inherit
+
+  window-2005-2006:
+    needs: window-2003-2004
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "250"
+      max_parallel: "15"
+      start_year: "2005"
+      end_year: "2006"
+      chain_next_window: "false"
+      shard_indices: ""
+      directory_only: "false"
+      id_bands: "1-9999,10000-29999,30000-59999,60000-80000"
+      request_sleep: "5.0"
+      id_start: "0"
+      id_end: "10000"
+      yahoo_oauth_ref: "main"
+    secrets: inherit
