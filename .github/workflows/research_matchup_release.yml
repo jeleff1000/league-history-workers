@@ -122,9 +122,21 @@ jobs:
               cols={r[0] for r in c.execute(f'describe "{t}"').fetchall()}
               assert {'NFL_player_id','q_teams','q_roster','q_ppr','q_td','q_bracket','q_league_type','q_lineup_mode','n_leagues'} <= cols
               print(t,n,len(cols))
-          dims=c.execute("select count(*) from research_matchup_adaptive where q_teams='12t' and q_roster='flx' and q_ppr='half' and q_td='4pt' and q_bracket in ('4po','6po','8po') and q_league_type in ('ALL','dynasty') and q_lineup_mode in ('ALL','best_ball')").fetchone()[0]
+          ppr_lanes={r[0] for r in c.execute("SELECT DISTINCT q_ppr FROM research_matchup_adaptive").fetchall()}
+          td_lanes={r[0] for r in c.execute("SELECT DISTINCT q_td FROM research_matchup_adaptive").fetchall()}
+          assert {'std','half','ppr'} <= ppr_lanes, sorted(ppr_lanes)
+          assert {'4pt','6pt'} <= td_lanes, sorted(td_lanes)
+          format_lanes=c.execute("""
+            SELECT COUNT(*) FROM (
+              SELECT q_teams,q_roster,q_ppr,q_td
+              FROM research_matchup_adaptive
+              GROUP BY 1,2,3,4
+            )
+          """).fetchone()[0]
+          assert format_lanes >= 6, format_lanes
+          dims=c.execute("select count(*) from research_matchup_adaptive where q_teams='12t' and q_roster='flx' and q_ppr='half' and q_td='4pt' and q_bracket in ('ALL','4po','6po','8po') and q_league_type in ('ALL','dynasty') and q_lineup_mode in ('ALL','best_ball')").fetchone()[0]
           assert dims > 0, dims
-          print('PASS: config, bracket, dynasty, and bestball request lanes are populated')
+          print({'ppr_lanes':sorted(ppr_lanes),'td_lanes':sorted(td_lanes),'format_lanes':format_lanes,'request_lane_rows':dims})
           PY
       - name: Publish adaptive tables to Fly
         if: ${{ github.event_name == 'workflow_run' || inputs.publish }}
