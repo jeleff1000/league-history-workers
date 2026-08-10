@@ -1,0 +1,80 @@
+name: Research Matchup Rollup Pilots
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        description: Immutable GitHub cache key for the public research lake
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  contents: read
+
+jobs:
+  pilots:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+          fail-on-cache-miss: true
+      - name: Install bounded dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 requests
+      - name: Run rollup ladder
+        run: |
+          set -euo pipefail
+          mkdir -p out/pilots
+          run_pilot() {
+            name="$1"; shift
+            output="out/pilots/${name}.duckdb"
+            echo "=== START ${name} ==="
+            started=$(date +%s)
+            python code/scripts/research_cohorts/build_bounded_matchup_cache.py \
+              --snapshot research_public_lake/corpus_snapshot.duckdb \
+              --ops-cache research_public_lake/ops_cache.duckdb \
+              --output "$output" "$@"
+            elapsed=$(( $(date +%s) - started ))
+            python - "$name" "$output" <<'PY'
+          import duckdb, sys
+          name, path = sys.argv[1:]
+          c=duckdb.connect(path, read_only=True)
+          tables={r[0] for r in c.execute("select table_name from information_schema.tables where table_schema='main'").fetchall()}
+          required={'research_matchup_adaptive','research_matchup_adaptive_weekly','research_matchup_adaptive_career'}
+          assert required <= tables, (name, required-tables)
+          counts={t:c.execute(f'select count(*) from "{t}"').fetchone()[0] for t in required}
+          assert all(v > 0 for v in counts.values()), (name, counts)
+          cmc_week1 = c.execute("""
+            select count(*), coalesce(max(n_leagues),0)
+            from research_matchup_adaptive_weekly
+            where NFL_player_id='00-0033280' and year=2025 and week=1
+          """).fetchone()
+          cmc_2025 = c.execute("""
+            select count(*) from research_matchup_adaptive
+            where NFL_player_id='00-0033280' and year=2025
+          """).fetchone()[0]
+          print({'pilot':name,'tables':counts,'cmc_week1_rows':cmc_week1[0],'cmc_week1_max_n_leagues':cmc_week1[1],'cmc_2025_rows':cmc_2025})
+          assert name != 'cmc_week1_2025' or cmc_week1[1] >= 10000, {'cmc_week1_max_n_leagues':cmc_week1[1]}
+          assert name != 'cmc_2025' or cmc_2025 >= 300, {'cmc_2025_rows':cmc_2025}
+          PY
+            echo "=== PASS ${name} seconds=${elapsed} ==="
+          }
+          run_pilot cmc_week1_2025 --year-start 2025 --year-end 2025 --position-group RB --player-id 00-0033280 --week 1
+          run_pilot cmc_2025 --year-start 2025 --year-end 2025 --position-group RB --player-id 00-0033280
+          run_pilot rb_2025 --year-start 2025 --year-end 2025 --position-group RB
+          run_pilot all_2025 --year-start 2025 --year-end 2025
+          run_pilot all_2020_2025 --year-start 2020 --year-end 2025
+          run_pilot all_years --year-start 1997 --year-end 2025
