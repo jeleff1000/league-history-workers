@@ -27,7 +27,7 @@ jobs:
   release:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 355
     env:
       RESEARCH_OUT_DIR: ${{ github.workspace }}/out
       RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
@@ -268,7 +268,7 @@ jobs:
           print({'ppr_lanes':sorted(ppr_lanes),'td_lanes':sorted(td_lanes),'format_lanes':format_lanes,'request_lane_rows':dims,'cmc_weekly_rows':cmc_weekly,'cmc_season_rows':cmc_season,'cmc_week1_n_leagues':cmc_wk1[0],'cmc_career':cmc_career})
           PY
       - name: Publish adaptive tables to Fly
-        if: ${{ github.event_name == 'workflow_run' || github.event_name == 'push' || inputs.publish }}
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
         run: |
           python code/scripts/research_cohorts/publish_research_matchup_to_fly.py \
             --bundle out/research_matchup_adaptive.duckdb --adaptive-only \
