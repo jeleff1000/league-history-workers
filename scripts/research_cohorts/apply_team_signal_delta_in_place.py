@@ -33,10 +33,11 @@ def main() -> None:
     con = duckdb.connect(str(args.base))
     pcols = [r[0] for r in con.execute("DESCRIBE public.player_fantasy").fetchall()]
     missing = set(BASE_PLAYER_COLUMNS) - set(pcols)
-    cohort_columns = [c for c in pcols if c not in BASE_PLAYER_COLUMNS]
-    forbidden = {'loss','tie','opponent_points','is_championship','is_active','is_playoffs_bf','made_po_bf','made_po'} & set(pcols)
+    optional = {'loss', 'tie'}
+    cohort_columns = [c for c in pcols if c not in BASE_PLAYER_COLUMNS and c not in optional]
+    forbidden = {'opponent_points','is_championship','is_active','is_playoffs_bf','made_po_bf','made_po'} & set(pcols)
     if missing or len(cohort_columns) != 7 or forbidden:
-        raise SystemExit(f"canonical player schema mismatch: missing={sorted(missing)} cohort_columns={cohort_columns} forbidden={sorted(forbidden)}")
+        raise SystemExit(f"canonical player schema mismatch: missing={sorted(missing)} cohort_columns={cohort_columns} optional={[c for c in pcols if c in optional]} forbidden={sorted(forbidden)}")
     canonical_columns_before = list(pcols)
     dpath = str(args.delta.resolve()).replace("'", "''")
     con.execute("CREATE OR REPLACE TEMP VIEW delta_raw AS SELECT * FROM read_parquet(?)", [dpath])
