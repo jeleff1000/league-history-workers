@@ -1,0 +1,173 @@
+name: Recover retained MFL discovery artifacts
+
+on:
+  push:
+    paths:
+      - .github/mfl_artifact_recovery_bootstrap
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: mfl-artifact-recovery
+  cancel-in-progress: false
+
+jobs:
+  download:
+    name: Download run ${{ matrix.run_id }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Runs 1-2 retained no artifacts. These are the artifact-bearing runs
+        # among the original six reconnaissance runs.
+        run_id:
+          - 31274996399
+          - 31275534353
+          - 31280096593
+          - 31280140957
+    steps:
+      - name: Download retained shard artifacts
+        uses: actions/download-artifact@v5
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ matrix.run_id }}
+          pattern: mfl-discovery-shard-*
+          path: recovered/${{ matrix.run_id }}
+          merge-multiple: true
+
+      - name: Upload isolated recovery input
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-recovery-input-${{ matrix.run_id }}
+          path: recovered/${{ matrix.run_id }}
+          if-no-files-found: error
+          retention-days: 30
+
+  merge:
+    name: Merge retained MFL artifacts
+    needs: download
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pipeline code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: main
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/extraplatform_corpus/
+
+      - name: Checkout worker seed repository
+        uses: actions/checkout@v5
+        with:
+          path: worker
+
+      - name: Download isolated recovery inputs
+        uses: actions/download-artifact@v5
+        with:
+          pattern: mfl-recovery-input-*
+          path: recovered
+          merge-multiple: false
+
+      - name: Merge all retained shard payloads
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          SEED=""
+          if [ -f worker/corpus_seed/mfl_crawl_seed.json ]; then
+            SEED="--existing-seed worker/corpus_seed/mfl_crawl_seed.json"
+          fi
+          python code/scripts/extraplatform_corpus/merge_mfl_shards.py \
+            --input-glob "recovered/**/mfl_shard_*.json" \
+            $SEED \
+            --out out/mfl_discovery_recovered.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          result = json.loads(Path("out/mfl_discovery_recovered.json").read_text())
+          payloads = []
+          for path in Path("recovered").glob("**/mfl_shard_*.json"):
+              payloads.append(json.loads(path.read_text()))
+          years = sorted({
+              int(row["year"])
+              for row in result.get("records", [])
+              if row.get("year") is not None
+          })
+          complete_shards = sum(bool(p.get("complete")) for p in payloads)
+          partial_shards = sum(not bool(p.get("complete")) for p in payloads)
+          report = {
+              "source_runs": [31274996399, 31275534353, 31280096593, 31280140957],
+              "payload_files": len(payloads),
+              "complete_shards": complete_shards,
+              "partial_shards": partial_shards,
+              "years_present": years,
+              "min_year": min(years) if years else None,
+              "max_year": max(years) if years else None,
+              "unique_season_leagues": result.get("unique_season_leagues"),
+              "records_with_draft": result.get("records_with_draft"),
+              "lineage_count": result.get("lineage_count"),
+          }
+          Path("out/mfl_recovery_report.json").write_text(
+              json.dumps(report, indent=2, sort_keys=True) + "\n"
+          )
+          print(json.dumps(report, sort_keys=True))
+          PY
+
+      - name: Build durable MFL seed from recovered ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          source = json.loads(Path("out/mfl_discovery_recovered.json").read_text())
+          seed = {
+              "platform": "mfl",
+              "generated_probes": sum(
+                  int(payload.get("requests", 0))
+                  for path in Path("recovered").glob("**/mfl_shard_*.json")
+                  for payload in [json.loads(path.read_text())]
+              ),
+              "leagues": source.get("leagues", []),
+          }
+          Path("out/mfl_crawl_seed_recovered.json").write_text(
+              json.dumps(seed, indent=2, ensure_ascii=False) + "\n"
+          )
+          PY
+          cp out/mfl_crawl_seed_recovered.json worker/corpus_seed/mfl_crawl_seed.json
+
+      - name: Publish recovered ledger and report
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-recovered-ledger-${{ github.run_id }}
+          path: |
+            out/mfl_discovery_recovered.json
+            out/mfl_recovery_report.json
+            out/mfl_crawl_seed_recovered.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Commit recovered seed for the continuing campaign
+        shell: bash
+        working-directory: worker
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add corpus_seed/mfl_crawl_seed.json
+          if git diff --cached --quiet; then
+            echo "Recovered seed is unchanged"
+            exit 0
+          fi
+          git commit -m "Recover retained MFL discovery artifacts"
+          git push origin HEAD:main
