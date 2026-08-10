@@ -107,8 +107,11 @@ def main() -> None:
       FROM public.player_fantasy p JOIN team_delta_unique d ON {join_expr('p','d')}
     """)
     team_matched = con.execute("SELECT COUNT(*) FROM team_matches").fetchone()[0]
-    if team_matched != team_rows:
-        raise SystemExit(f"unmatched team delta rows: {team_rows-team_matched}")
+    team_unmatched_keys = con.execute(
+        f"SELECT COUNT(*) FROM team_delta_unique d WHERE NOT EXISTS (SELECT 1 FROM public.player_fantasy p WHERE {join_expr('p','d')})"
+    ).fetchone()[0]
+    if team_unmatched_keys:
+        raise SystemExit(f"unmatched team delta keys: {team_unmatched_keys}")
 
     exact_path_obj = args.exact_delta
     exact_rows = 0
@@ -127,8 +130,13 @@ def main() -> None:
             raise SystemExit(f"duplicate exact delta keys: {exact_dupes}")
         con.execute(f"CREATE OR REPLACE TEMP TABLE exact_matches AS SELECT p.rowid player_rowid, d.* FROM public.player_fantasy p JOIN exact_delta d ON {join_expr('p','d')}")
         exact_matched = con.execute("SELECT COUNT(*) FROM exact_matches").fetchone()[0]
-        if exact_matched != exact_rows:
-            raise SystemExit(f"unmatched exact delta rows: {exact_rows-exact_matched}")
+        exact_unmatched_keys = con.execute(
+            f"SELECT COUNT(*) FROM exact_delta d WHERE NOT EXISTS (SELECT 1 FROM public.player_fantasy p WHERE {join_expr('p','d')})"
+        ).fetchone()[0]
+        if exact_unmatched_keys:
+            raise SystemExit(f"unmatched exact delta keys: {exact_unmatched_keys}")
+    else:
+        exact_unmatched_keys = 0
 
     improvements: dict[str, int] = {}
     for field, source in TEAM_FIELDS.items():
@@ -181,8 +189,10 @@ def main() -> None:
         "schema_unchanged": after_schema == before_schema,
         "player_rows_before": before_rows, "player_rows_after": after_rows,
         "team_delta_rows_raw": raw_team_rows, "team_delta_duplicate_rows_collapsed": raw_team_rows - team_rows,
-        "team_delta_rows": team_rows, "team_matched_rows": team_matched,
-        "exact_delta_rows": exact_rows, "exact_matched_rows": exact_matched,
+        "team_delta_rows": team_rows, "team_matched_player_rows": team_matched,
+        "team_unmatched_keys": team_unmatched_keys,
+        "exact_delta_rows": exact_rows, "exact_matched_player_rows": exact_matched,
+        "exact_unmatched_keys": exact_unmatched_keys,
         "improvements_by_field": improvements, "readback_remaining_nulls": readback,
         "cache_key_replacement_performed": False,
     }
