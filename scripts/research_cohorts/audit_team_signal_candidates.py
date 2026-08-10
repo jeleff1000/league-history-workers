@@ -219,9 +219,9 @@ def main() -> None:
           OR (s.team_key_norm IS NOT NULL AND s.team_key_norm={p_key_expr('p.team_key')}))
          OR
          (s.manager_key IS NOT NULL
-          AND s.team_name_key IS NOT NULL
           AND s.manager_key={p_label_expr('p.manager')}
-          AND s.team_name_key={p_label_expr('p.team_name')})
+          AND (s.team_name_key={p_label_expr('p.team_name')}
+               OR p.team_name IS NULL))
        )
     """)
     con.execute("""
@@ -245,8 +245,8 @@ def main() -> None:
         ON s.db_name=b.db_name AND s.year=b.bridge_year AND s.week=b.bridge_week
        AND (((s.team_key IS NOT NULL AND b.team_key IS NOT NULL AND s.team_key=b.team_key)
           OR (s.team_key_norm IS NOT NULL AND b.team_key_norm IS NOT NULL AND s.team_key_norm=b.team_key_norm))
-        OR (s.manager_key IS NOT NULL AND s.team_name_key IS NOT NULL
-            AND s.manager_key=b.manager_key AND s.team_name_key=b.team_name_key))
+        OR (s.manager_key IS NOT NULL AND s.manager_key=b.manager_key
+            AND (s.team_name_key=b.team_name_key OR b.team_name_key IS NULL)))
       WHERE NOT EXISTS (SELECT 1 FROM player_matches direct WHERE direct.player_rowid=p.rowid)
       QUALIFY COUNT(*) OVER (PARTITION BY p.rowid)=1
     """)
@@ -263,6 +263,7 @@ def main() -> None:
         "raw_team_key_overlap": "COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM public.player_fantasy p WHERE p.db_name=s.db_name AND CAST(p.year AS INTEGER)=s.year AND CAST(p.week AS INTEGER)=s.week AND s.team_key IS NOT NULL AND s.team_key=NULLIF(TRIM(CAST(p.team_key AS VARCHAR)),'')))",
         "normalized_team_key_overlap": f"COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM public.player_fantasy p WHERE p.db_name=s.db_name AND CAST(p.year AS INTEGER)=s.year AND CAST(p.week AS INTEGER)=s.week AND s.team_key_norm IS NOT NULL AND s.team_key_norm={p_key_expr('p.team_key')}))",
         "manager_name_overlap": f"COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM public.player_fantasy p WHERE p.db_name=s.db_name AND CAST(p.year AS INTEGER)=s.year AND CAST(p.week AS INTEGER)=s.week AND s.manager_key IS NOT NULL AND s.team_name_key IS NOT NULL AND s.manager_key={p_label_expr('p.manager')} AND s.team_name_key={p_label_expr('p.team_name')}))",
+        "manager_only_overlap": f"COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM public.player_fantasy p WHERE p.db_name=s.db_name AND CAST(p.year AS INTEGER)=s.year AND CAST(p.week AS INTEGER)=s.week AND s.manager_key IS NOT NULL AND s.manager_key={p_label_expr('p.manager')} AND p.team_name IS NULL))",
     }
     diagnostic_sql = ','.join(f"{expr} AS {name}" for name,expr in diagnostic_exprs.items())
     diagnostic.update(dict(zip(diagnostic_exprs, con.execute(f"SELECT {diagnostic_sql} FROM source_signals s").fetchone())))
