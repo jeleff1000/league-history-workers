@@ -120,12 +120,8 @@ jobs:
           assert dims > 0, dims
           print('PASS: config, bracket, dynasty, and bestball request lanes are populated')
           PY
-      - name: Read-only Fly preflight for adaptive tables
-        run: |
-          python code/scripts/research_cohorts/publish_research_matchup_to_fly.py \
-            --bundle out/research_matchup_adaptive.duckdb --adaptive-only --slug 12t_flx_half_4pt
       - name: Publish adaptive tables to Fly
-        if: ${{ github.event_name == 'workflow_run' || inputs.publish }}
+        if: ${{ github.event_name == 'push' || inputs.publish }}
         run: |
           python code/scripts/research_cohorts/publish_research_matchup_to_fly.py \
             --bundle out/research_matchup_adaptive.duckdb --adaptive-only \
