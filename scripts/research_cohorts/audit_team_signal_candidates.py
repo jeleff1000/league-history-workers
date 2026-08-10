@@ -178,8 +178,8 @@ def main() -> None:
     delta_filters = [
         "(p.win IS NULL AND m.source_win IS NOT NULL)",
         "(p.team_points IS NULL AND m.source_team_points IS NOT NULL)",
-        "(p.is_playoffs IS NULL AND m.source_playoffs=1)",
-        "(p.champion IS NULL AND m.source_champion=1)",
+        "(p.is_playoffs IS NULL AND m.source_playoffs IS NOT NULL)",
+        "(p.champion IS NULL AND m.source_champion IS NOT NULL)",
         "(p.final_playoff_seed IS NULL AND m.source_final_playoff_seed IS NOT NULL)",
         "(p.made_playoffs IS NULL AND m.source_final_playoff_seed IS NOT NULL)",
     ]
@@ -323,6 +323,26 @@ def main() -> None:
         WHERE {" OR ".join(delta_filters)}
       ) TO ? (FORMAT PARQUET)
     """, [str(args.out / "team_promotable_player_delta.parquet")])
+    emitted = con.execute(f"""
+      SELECT
+        COUNT(*) FILTER (WHERE canonical_win IS NULL AND source_win IS NOT NULL),
+        COUNT(*) FILTER (WHERE canonical_team_points IS NULL AND source_team_points IS NOT NULL),
+        COUNT(*) FILTER (WHERE canonical_is_playoffs IS NULL AND source_playoffs IS NOT NULL),
+        COUNT(*) FILTER (WHERE canonical_champion IS NULL AND source_champion IS NOT NULL),
+        COUNT(*) FILTER (WHERE canonical_final_playoff_seed IS NULL AND source_final_playoff_seed IS NOT NULL)
+      FROM read_parquet(?)
+    """, [str(args.out / "team_promotable_player_delta.parquet")]).fetchone()
+    expected_emitted = (
+        improvements.get("win", 0),
+        improvements.get("team_points", 0),
+        improvements.get("is_playoffs", 0),
+        improvements.get("champion", 0),
+        improvements.get("final_playoff_seed", 0),
+    )
+    if tuple(int(v or 0) for v in emitted) != tuple(int(v or 0) for v in expected_emitted):
+        raise SystemExit(
+            f"emitted delta does not prove reported improvements: emitted={emitted} expected={expected_emitted}"
+        )
     report = {
         "read_only": True,
         "cache_mutated": False,
