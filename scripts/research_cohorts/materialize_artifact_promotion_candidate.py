@@ -78,16 +78,33 @@ def main() -> None:
     missing_team = sorted(required_team - set(team_cols))
     if missing_team:
         raise SystemExit(f"team delta schema missing: {missing_team}")
-    team_rows = con.execute("SELECT COUNT(*) FROM team_delta").fetchone()[0]
+    raw_team_rows = con.execute("SELECT COUNT(*) FROM team_delta").fetchone()[0]
     team_dupes = con.execute(
         f"SELECT COUNT(*) FROM (SELECT {','.join(q(c) for c in KEY)} FROM team_delta GROUP BY ALL HAVING COUNT(*)>1)"
     ).fetchone()[0]
     if team_dupes:
-        raise SystemExit(f"duplicate team delta keys: {team_dupes}")
+        # Multiple artifacts can repeat the same source fact.  Collapse only
+        # exact duplicates; a value-versus-NULL or value-versus-value conflict
+        # is still fatal and remains quarantined for adjudication.
+        conflict_terms = ",".join(
+            f"COUNT(DISTINCT COALESCE(CAST({q(c)} AS VARCHAR), '<NULL>'))" for c in TEAM_FIELDS.values()
+        )
+        conflicting_groups = con.execute(
+            f"SELECT COUNT(*) FROM (SELECT {','.join(q(c) for c in KEY)} FROM team_delta GROUP BY ALL HAVING {' OR '.join(f'COUNT(DISTINCT COALESCE(CAST({q(c)} AS VARCHAR), \'<NULL>\'))>1' for c in TEAM_FIELDS.values())})"
+        ).fetchone()[0]
+        if conflicting_groups:
+            raise SystemExit(f"conflicting duplicate team delta keys: {conflicting_groups}")
+        source_select = ", ".join(f"MAX({q(c)}) AS {q(c)}" for c in TEAM_FIELDS.values())
+        con.execute(
+            f"CREATE OR REPLACE TEMP TABLE team_delta_unique AS SELECT {','.join(q(c) for c in KEY)}, {source_select} FROM team_delta GROUP BY ALL"
+        )
+    else:
+        con.execute("CREATE OR REPLACE TEMP TABLE team_delta_unique AS SELECT * FROM team_delta")
+    team_rows = con.execute("SELECT COUNT(*) FROM team_delta_unique").fetchone()[0]
     con.execute(f"""
       CREATE OR REPLACE TEMP TABLE team_matches AS
       SELECT p.rowid player_rowid, d.*
-      FROM public.player_fantasy p JOIN team_delta d ON {join_expr('p','d')}
+      FROM public.player_fantasy p JOIN team_delta_unique d ON {join_expr('p','d')}
     """)
     team_matched = con.execute("SELECT COUNT(*) FROM team_matches").fetchone()[0]
     if team_matched != team_rows:
@@ -163,6 +180,7 @@ def main() -> None:
         "new_lineage": False, "ops_unchanged": after_ops == before_ops,
         "schema_unchanged": after_schema == before_schema,
         "player_rows_before": before_rows, "player_rows_after": after_rows,
+        "team_delta_rows_raw": raw_team_rows, "team_delta_duplicate_rows_collapsed": raw_team_rows - team_rows,
         "team_delta_rows": team_rows, "team_matched_rows": team_matched,
         "exact_delta_rows": exact_rows, "exact_matched_rows": exact_matched,
         "improvements_by_field": improvements, "readback_remaining_nulls": readback,
