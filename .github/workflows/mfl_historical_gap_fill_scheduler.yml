@@ -1,0 +1,80 @@
+name: MFL Historical Gap Fill Scheduler (1997-2006 ID bands)
+
+on:
+  push:
+    paths:
+      - .github/mfl_gap_fill_scheduler_bootstrap
+  workflow_dispatch:
+    inputs:
+      completed_id_end:
+        description: "Last completed inclusive ID; next band starts after it"
+        required: false
+        default: "999"
+        type: string
+  workflow_run:
+    workflows:
+      - MFL Historical Gap Fill (1997-2006)
+    types: [completed]
+    branches: [main]
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: mfl-historical-gap-fill-scheduler
+  cancel-in-progress: false
+
+jobs:
+  read-band:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      continue: ${{ steps.next.outputs.continue }}
+      id_start: ${{ steps.next.outputs.id_start }}
+      id_end: ${{ steps.next.outputs.id_end }}
+    steps:
+      - name: Download completed gap-fill manifest
+        if: ${{ github.event_name == 'workflow_run' }}
+        uses: actions/download-artifact@v5
+        with:
+          name: mfl-gap-fill-manifest-${{ github.event.workflow_run.id }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: band
+
+      - name: Resolve next ID band
+        id: next
+        shell: bash
+        env:
+          COMPLETED_END: ${{ inputs.completed_id_end || '999' }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = "workflow_run" ]; then
+            COMPLETED_END=$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          data=json.loads(Path("band/mfl_gap_fill_manifest.json").read_text(encoding="utf-8"))
+          print(int(data["id_end"]))
+          PY
+            )
+          fi
+          next_start=$((COMPLETED_END + 1))
+          if [ "$next_start" -gt 80000 ]; then
+            echo "continue=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          next_end=$((next_start + 999))
+          if [ "$next_end" -gt 80000 ]; then next_end=80000; fi
+          echo "continue=true" >> "$GITHUB_OUTPUT"
+          echo "id_start=${next_start}" >> "$GITHUB_OUTPUT"
+          echo "id_end=${next_end}" >> "$GITHUB_OUTPUT"
+
+  next-band:
+    needs: read-band
+    if: ${{ needs.read-band.outputs.continue == 'true' }}
+    uses: ./.github/workflows/mfl_historical_gap_fill.yml
+    with:
+      id_start: ${{ needs.read-band.outputs.id_start }}
+      id_end: ${{ needs.read-band.outputs.id_end }}
+    secrets: inherit

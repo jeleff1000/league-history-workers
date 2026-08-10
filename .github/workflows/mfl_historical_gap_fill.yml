@@ -5,6 +5,27 @@ on:
     paths:
       - .github/mfl_gap_fill_bootstrap_1997
   workflow_dispatch:
+    inputs:
+      id_start:
+        description: "First inclusive MFL ID band"
+        required: false
+        default: "0"
+        type: string
+      id_end:
+        description: "Last inclusive MFL ID band"
+        required: false
+        default: "999"
+        type: string
+  workflow_call:
+    inputs:
+      id_start:
+        required: false
+        default: "0"
+        type: string
+      id_end:
+        required: false
+        default: "999"
+        type: string
 
 permissions:
   actions: write
@@ -27,8 +48,9 @@ jobs:
       directory_only: "false"
       id_bands: "1-9999,10000-29999,30000-59999,60000-80000"
       request_sleep: "5.0"
-      id_start: "0"
-      id_end: "999"
+      id_start: ${{ inputs.id_start || '0' }}
+      id_end: ${{ inputs.id_end || '999' }}
+      artifact_namespace: "1997-1998"
       yahoo_oauth_ref: "main"
     secrets: inherit
 
@@ -45,8 +67,9 @@ jobs:
       directory_only: "false"
       id_bands: "1-9999,10000-29999,30000-59999,60000-80000"
       request_sleep: "5.0"
-      id_start: "0"
-      id_end: "999"
+      id_start: ${{ inputs.id_start || '0' }}
+      id_end: ${{ inputs.id_end || '999' }}
+      artifact_namespace: "1999-2000"
       yahoo_oauth_ref: "main"
     secrets: inherit
 
@@ -63,8 +86,9 @@ jobs:
       directory_only: "false"
       id_bands: "1-9999,10000-29999,30000-59999,60000-80000"
       request_sleep: "5.0"
-      id_start: "0"
-      id_end: "999"
+      id_start: ${{ inputs.id_start || '0' }}
+      id_end: ${{ inputs.id_end || '999' }}
+      artifact_namespace: "2001-2002"
       yahoo_oauth_ref: "main"
     secrets: inherit
 
@@ -81,8 +105,9 @@ jobs:
       directory_only: "false"
       id_bands: "1-9999,10000-29999,30000-59999,60000-80000"
       request_sleep: "5.0"
-      id_start: "0"
-      id_end: "999"
+      id_start: ${{ inputs.id_start || '0' }}
+      id_end: ${{ inputs.id_end || '999' }}
+      artifact_namespace: "2003-2004"
       yahoo_oauth_ref: "main"
     secrets: inherit
 
@@ -99,7 +124,41 @@ jobs:
       directory_only: "false"
       id_bands: "1-9999,10000-29999,30000-59999,60000-80000"
       request_sleep: "5.0"
-      id_start: "0"
-      id_end: "999"
+      id_start: ${{ inputs.id_start || '0' }}
+      id_end: ${{ inputs.id_end || '999' }}
+      artifact_namespace: "2005-2006"
       yahoo_oauth_ref: "main"
     secrets: inherit
+
+  finalize:
+    needs: window-2005-2006
+    if: ${{ needs.window-2005-2006.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write completed gap-fill band manifest
+        env:
+          MFL_ID_START: ${{ inputs.id_start || '0' }}
+          MFL_ID_END: ${{ inputs.id_end || '999' }}
+        run: |
+          mkdir -p out
+          python3 - <<'PY'
+          import json, os
+          with open("out/mfl_gap_fill_manifest.json", "w", encoding="utf-8") as handle:
+              json.dump({
+                  "platform": "mfl",
+                  "source_run_id": os.environ["GITHUB_RUN_ID"],
+                  "start_year": "1997",
+                  "end_year": "2006",
+                  "id_start": os.environ["MFL_ID_START"],
+                  "id_end": os.environ["MFL_ID_END"],
+                  "shard_count": "1250",
+                  "max_parallel": "15",
+              }, handle, indent=2, sort_keys=True)
+          PY
+      - name: Upload completed gap-fill band manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-gap-fill-manifest-${{ github.run_id }}
+          path: out/mfl_gap_fill_manifest.json
+          if-no-files-found: error
+          retention-days: 30

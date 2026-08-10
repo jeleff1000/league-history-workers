@@ -63,6 +63,11 @@ on:
         required: false
         default: "main"
         type: string
+      artifact_namespace:
+        description: "Optional namespace for nested windows sharing one workflow run"
+        required: false
+        default: ""
+        type: string
   workflow_call:
     inputs:
       shard_count:
@@ -112,6 +117,10 @@ on:
       yahoo_oauth_ref:
         required: false
         default: "main"
+        type: string
+      artifact_namespace:
+        required: false
+        default: ""
         type: string
 
 permissions:
@@ -199,7 +208,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: mfl-discovery-shard-${{ matrix.shard }}-${{ github.run_id }}
+          name: mfl-discovery-shard-${{ matrix.shard }}-${{ github.run_id }}${{ inputs.artifact_namespace && format('-{0}', inputs.artifact_namespace) || '' }}
           path: out/mfl_shard_${{ matrix.shard }}.json
           if-no-files-found: error
           retention-days: 14
@@ -253,7 +262,7 @@ jobs:
       - name: Upload directory artifact
         uses: actions/upload-artifact@v4
         with:
-          name: mfl-directory-discovery-${{ github.run_id }}
+          name: mfl-directory-discovery-${{ github.run_id }}${{ inputs.artifact_namespace && format('-{0}', inputs.artifact_namespace) || '' }}
           path: out/mfl_directory_seed.json
           if-no-files-found: error
           retention-days: 30
@@ -291,7 +300,7 @@ jobs:
       - name: Download named directory artifact
         uses: actions/download-artifact@v5
         with:
-          name: mfl-directory-discovery-${{ github.run_id }}
+          name: mfl-directory-discovery-${{ github.run_id }}${{ inputs.artifact_namespace && format('-{0}', inputs.artifact_namespace) || '' }}
           path: directory
 
       - name: Merge season records and lineages
@@ -376,7 +385,7 @@ jobs:
       - name: Upload completed-window manifest
         uses: actions/upload-artifact@v4
         with:
-          name: mfl-window-manifest-${{ github.run_id }}
+          name: mfl-window-manifest-${{ github.run_id }}${{ inputs.artifact_namespace && format('-{0}', inputs.artifact_namespace) || '' }}
           path: out/mfl_window_manifest.json
           if-no-files-found: error
           retention-days: 30
@@ -384,7 +393,7 @@ jobs:
       - name: Upload merged inventory
         uses: actions/upload-artifact@v4
         with:
-          name: mfl-discovery-merged-${{ github.run_id }}
+          name: mfl-discovery-merged-${{ github.run_id }}${{ inputs.artifact_namespace && format('-{0}', inputs.artifact_namespace) || '' }}
           path: out/mfl_discovery_merged.json
           if-no-files-found: error
           retention-days: 30
