@@ -1,0 +1,28 @@
+name: MFL Historical Resume 2005-06 (8000-8999)
+
+on:
+  push:
+    paths:
+      - .github/mfl_resume_2005_8000
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  discover:
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "250"
+      max_parallel: "15"
+      start_year: "2005"
+      end_year: "2006"
+      chain_next_window: "false"
+      shard_indices: ""
+      directory_only: "false"
+      id_bands: "1-9999,10000-29999,30000-59999,60000-80000"
+      request_sleep: "5.0"
+      id_start: "8000"
+      id_end: "8999"
+      yahoo_oauth_ref: "main"
+    secrets: inherit

@@ -38,6 +38,7 @@ on:
       - MFL Historical Discovery Scheduler B
       - MFL Historical Resume 2005-06 (6000-6999)
       - MFL Historical Resume 2005-06 (7000-7999)
+      - MFL Historical Resume 2005-06 (8000-8999)
     types: [completed]
 permissions:
   actions: write
