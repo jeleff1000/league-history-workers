@@ -295,7 +295,7 @@ jobs:
         with:
           pattern: research-artifact-candidate-extract-${{ github.run_id }}-*
           path: extracts
-          merge-multiple: true
+          merge-multiple: false
       - uses: actions/download-artifact@v5
         with:
           name: research-artifact-cache-comparison-${{ github.run_id }}
