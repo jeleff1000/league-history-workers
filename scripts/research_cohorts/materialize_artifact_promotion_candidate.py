@@ -150,13 +150,13 @@ def main() -> None:
         if field not in pcols or source not in team_cols:
             continue
         improvements[field] = con.execute(
-            f"SELECT COUNT(*) FROM team_matches WHERE {q(field)} IS NULL AND {q(source)} IS NOT NULL"
+            f"SELECT COUNT(*) FROM public.player_fantasy p JOIN team_matches m ON p.rowid=m.player_rowid WHERE p.{q(field)} IS NULL AND m.{q(source)} IS NOT NULL"
         ).fetchone()[0]
     if exact_rows:
         for field, source in EXACT_FIELDS.items():
             if field not in pcols or source not in exact_cols:
                 continue
-            count = con.execute(f"SELECT COUNT(*) FROM exact_matches WHERE {q(field)} IS NULL AND {q(source)} IS NOT NULL").fetchone()[0]
+            count = con.execute(f"SELECT COUNT(*) FROM public.player_fantasy p JOIN exact_matches m ON p.rowid=m.player_rowid WHERE p.{q(field)} IS NULL AND m.{q(source)} IS NOT NULL").fetchone()[0]
             if count:
                 improvements[f"exact_{field}"] = count
 
