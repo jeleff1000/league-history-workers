@@ -168,7 +168,7 @@ concurrency:
   # The band/window coordinates prevent duplicate campaigns for the same
   # work while allowing non-overlapping bands to advance independently.
   group: mfl-historical-discovery-${{ inputs.artifact_namespace || 'manual' }}-${{ inputs.id_start || '0' }}-${{ inputs.id_end || '999' }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   prepare:
