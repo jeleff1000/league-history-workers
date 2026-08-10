@@ -125,7 +125,7 @@ jobs:
           c=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True); p=[r[0] for r in c.execute('describe public.player_fantasy').fetchall()]; m=[r[0] for r in c.execute('describe public.matchup').fetchall()]
           if p != expected: raise SystemExit({'player_schema':p})
           if len(m) != 59: raise SystemExit({'matchup_column_count':len(m),'matchup_columns':m})
-          if set(p) & {'loss','tie','opponent_points','is_championship','is_active','is_playoffs_bf','made_po_bf','made_po'}: raise SystemExit('forbidden player column')
+            if set(p) & {'opponent_points','is_championship','is_active','is_playoffs_bf','made_po_bf','made_po'}: raise SystemExit('forbidden player column')
           json.dump({'player_rows':c.execute('select count(*) from public.player_fantasy').fetchone()[0], 'matchup_rows':c.execute('select count(*) from public.matchup').fetchone()[0], 'player_columns':p, 'matchup_column_count':len(m)}, open('post_promotion.json','w'), indent=2); c.close()
           PY
           cmp ops_before.sha256 <(sha256sum research_public_lake/ops_cache.duckdb)

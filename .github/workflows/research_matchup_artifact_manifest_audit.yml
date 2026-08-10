@@ -287,7 +287,9 @@ jobs:
               'sleeper_player_id','espn_player_id','fleaflicker_player_id',
               'mfl_player_id','made_playoffs',
           ]
-          forbidden = {'loss','tie','opponent_points','is_championship','is_active','is_playoffs_bf','made_po_bf'}
+          # loss/tie are approved optional canonical player fields.  Keep only
+          # genuinely forbidden source/legacy fields here.
+          forbidden = {'opponent_points','is_championship','is_active','is_playoffs_bf','made_po_bf'}
           selected = [a for a in manifest['artifacts'] if int(a['artifact_id']) % count == shard]
           root = Path('work'); root.mkdir(exist_ok=True)
           results = []
