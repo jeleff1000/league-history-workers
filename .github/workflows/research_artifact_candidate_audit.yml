@@ -329,6 +329,7 @@ jobs:
             --manifest manifest/file_candidate_ledger.json \
             --extract-ledger "${ledgers[@]}" \
             --comparison comparison/cache_candidate_comparison.json \
+            --structured-audit comparison/structured_evidence_audit.json \
             --out out/complete_artifact_cache_audit.json
       - uses: actions/upload-artifact@v4
         with:
