@@ -173,7 +173,22 @@ jobs:
               req=urllib.request.Request(url,headers={'Authorization':f'Bearer {token}','Accept':'application/vnd.github+json','User-Agent':'research-artifact-audit'})
               for attempt in range(6):
                   try:
-                      with opener.open(req,timeout=180) as resp, dest.open('wb') as fh:
+                      # The API returns a signed blob URL. Do not forward the
+                      # GitHub bearer token to that storage host: it causes a
+                      # 401 even though the API request is authorized.
+                      class NoRedirect(urllib.request.HTTPRedirectHandler):
+                          def redirect_request(self, req, fp, code, msg, headers, newurl):
+                              return None
+                      api_opener=urllib.request.build_opener(NoRedirect())
+                      try:
+                          api_opener.open(req,timeout=90)
+                      except urllib.error.HTTPError as redirect:
+                          if redirect.code not in (301,302,303,307,308): raise
+                          blob_url=redirect.headers['Location']
+                      else:
+                          raise SystemExit(f'artifact {artifact_id} did not return a signed download redirect')
+                      blob_req=urllib.request.Request(blob_url,headers={'User-Agent':'research-artifact-audit'})
+                      with urllib.request.urlopen(blob_req,timeout=300) as resp, dest.open('wb') as fh:
                           shutil.copyfileobj(resp,fh)
                       return
                   except (urllib.error.HTTPError, urllib.error.URLError):
