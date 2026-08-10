@@ -1,0 +1,54 @@
+name: Research RB 2025 Rollup Pilot
+
+on:
+  push:
+    paths:
+      - ".rb_2025_pilot_dispatch_once"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rb:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+          fail-on-cache-miss: true
+      - name: Install dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 requests
+      - name: Build and validate RB 2025
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          started=$(date +%s)
+          python code/scripts/research_cohorts/build_bounded_matchup_cache.py \
+            --snapshot research_public_lake/corpus_snapshot.duckdb \
+            --ops-cache research_public_lake/ops_cache.duckdb \
+            --output out/rb_2025.duckdb \
+            --year-start 2025 --year-end 2025 --position-group RB
+          elapsed=$(( $(date +%s) - started ))
+          python - <<'PY'
+          import duckdb
+          c=duckdb.connect('out/rb_2025.duckdb', read_only=True)
+          required={'research_matchup_adaptive','research_matchup_adaptive_weekly','research_matchup_adaptive_career'}
+          got={r[0] for r in c.execute("select table_name from information_schema.tables where table_schema='main'").fetchall()}
+          assert required <= got, required-got
+          counts={t:c.execute(f'select count(*) from "{t}"').fetchone()[0] for t in required}
+          assert all(v > 0 for v in counts.values()), counts
+          print({'counts':counts})
+          PY
+          echo "rb_2025_seconds=$elapsed"
