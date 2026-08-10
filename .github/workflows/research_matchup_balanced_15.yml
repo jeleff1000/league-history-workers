@@ -172,7 +172,7 @@ jobs:
           source=duckdb.connect("research_public_lake/corpus_snapshot.duckdb", read_only=True)
           league_years=source.execute("""
             select count(*) from (
-              select distinct db_name, cast(year as integer) year
+              select distinct db_name, cast(year as integer) AS season_year
               from public.player_fantasy where year is not null
             )
           """).fetchone()[0]
