@@ -81,9 +81,15 @@ def build_delta(base: Path, sources: list[Path], out: Path, insert_out: Path | N
     key_sql = ",".join(_ident(c) for c in KEY_COLUMNS)
     source_rows = int(con.execute("SELECT COUNT(*) FROM source_typed").fetchone()[0])
     conflicting = int(con.execute(f"""
+        SELECT COUNT(*) FROM (
+          SELECT 1 FROM source_typed
+          GROUP BY {key_sql} HAVING COUNT(*) > 1
+        )
+    """).fetchone()[0])
+    conflicting_rows = int(con.execute(f"""
         SELECT COALESCE(SUM(n), 0) FROM (
           SELECT COUNT(*) AS n FROM source_typed
-          GROUP BY ALL HAVING COUNT(*) > 1
+          GROUP BY {key_sql} HAVING COUNT(*) > 1
         )
     """).fetchone()[0])
     con.execute(f"""
@@ -113,7 +119,12 @@ def build_delta(base: Path, sources: list[Path], out: Path, insert_out: Path | N
         FROM public.player_fantasy p JOIN source_unique s ON {base_key}
     """)
     matched = int(con.execute("SELECT COUNT(*) FROM matched").fetchone()[0])
-    unmatched = source_rows - (conflicting + matched)
+    matched_source_keys = int(con.execute(f"SELECT COUNT(*) FROM (SELECT DISTINCT {key_sql} FROM matched)").fetchone()[0])
+    unique_source_rows = int(con.execute("SELECT COUNT(*) FROM source_unique").fetchone()[0])
+    # `matched` is player-row fan-out, while the unmatched inventory is at
+    # source-player-key grain.  Subtracting those different grains produced
+    # the old negative unresolved count.  Use unique source keys here.
+    unmatched = unique_source_rows - matched_source_keys
     filters = []
     improvements: dict[str, int] = {}
     for field in SIGNAL_TYPES:
@@ -189,11 +200,14 @@ def build_delta(base: Path, sources: list[Path], out: Path, insert_out: Path | N
             con.execute("COPY (SELECT " + ",".join(select_cols) + " WHERE FALSE) TO " + _lit(insert_out) + " (FORMAT PARQUET)")
     report = {
         "source_files": len(sources), "source_rows": source_rows,
-        "matched_rows": matched, "unmatched_rows": int(unmatched),
+        "unique_source_rows": unique_source_rows,
+        "matched_rows": matched, "matched_source_keys": matched_source_keys,
+        "unmatched_rows": int(unmatched),
         "insert_candidate_rows": int(insert_candidates),
         "unresolved_unmatched_rows": int(unresolved_unmatched),
         "insertion_schema_complete": bool(insertion_schema_complete),
-        "source_conflicting_keys": conflicting, "delta_rows": delta_rows,
+        "source_conflicting_keys": conflicting,
+        "source_conflicting_rows": conflicting_rows, "delta_rows": delta_rows,
         "improvements_by_field": improvements, "canonical_schema_unchanged": True,
         "cache_mutated": False, "new_lineage": False,
     }
