@@ -22,7 +22,9 @@ permissions:
   contents: write
 
 concurrency:
-  group: mfl-historical-gap-fill-scheduler
+  # A manual rescue for a later completed band must not wait on an obsolete
+  # scheduler run that is still finishing optional directory work.
+  group: mfl-historical-gap-fill-scheduler-${{ inputs.completed_id_end || github.event.workflow_run.id || github.run_id }}
   cancel-in-progress: false
 
 jobs:
