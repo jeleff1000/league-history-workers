@@ -42,6 +42,7 @@ def main() -> None:
     expected = {key(row): row for row in candidate_files}
     if len(expected) != len(candidate_files):
         raise SystemExit("manifest contains duplicate candidate artifact/file keys")
+    selected = set(expected)
     extracted = []
     for path in args.extract_ledger:
         extracted.extend(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
@@ -58,7 +59,6 @@ def main() -> None:
             duplicate_keys.add(k)
         else:
             by_key[k] = row
-    selected = set(expected)
     actual = set(by_key)
     missing_selected = sorted(selected - actual)
     out_of_scope = sorted(actual - set(expected))
