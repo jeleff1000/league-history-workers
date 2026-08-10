@@ -49,6 +49,30 @@ jobs:
           PY
           )
           echo "myles_player_id=$player_id"
+          python - "$player_id" <<'PY'
+          import duckdb, sys
+          player_id=sys.argv[1]
+          c=duckdb.connect()
+          c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          rows=c.execute("""
+            SELECT
+              COUNT(*) AS rows,
+              COUNT(DISTINCT db_name) AS leagues,
+              COUNT(DISTINCT db_name) FILTER (WHERE CAST(week AS INTEGER)=1) AS week1_leagues,
+              COUNT(DISTINCT db_name) FILTER (WHERE LOWER(CAST(position AS VARCHAR)) IN ('dl','de','lb','db','idp')) AS idp_position_leagues,
+              COUNT(DISTINCT db_name) FILTER (WHERE CAST(week AS INTEGER)=1 AND LOWER(CAST(position AS VARCHAR)) IN ('dl','de','lb','db','idp')) AS week1_idp_position_leagues
+            FROM lake.public.player_fantasy
+            WHERE CAST(NFL_player_id AS VARCHAR)=?
+              AND CAST(year AS INTEGER)=2025
+          """,[player_id]).fetchone()
+          positions=c.execute("""
+            SELECT CAST(position AS VARCHAR) AS position, COUNT(*) AS rows, COUNT(DISTINCT db_name) AS leagues
+            FROM lake.public.player_fantasy
+            WHERE CAST(NFL_player_id AS VARCHAR)=? AND CAST(year AS INTEGER)=2025
+            GROUP BY 1 ORDER BY 1
+          """,[player_id]).fetchall()
+          print({'source_player_inventory':rows,'positions':positions})
+          PY
           for scope in week1 season; do
             args=(--year-start 2025 --year-end 2025 --position-group IDP --player-id "$player_id")
             if [ "$scope" = week1 ]; then args+=(--week 1); fi
