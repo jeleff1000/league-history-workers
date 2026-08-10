@@ -75,11 +75,11 @@ jobs:
           if str(data.get("shard_indices", "")):
               raise SystemExit("partial-shard runs cannot advance the historical window")
   
-          for key in (
-              "shard_count", "max_parallel", "id_bands", "request_sleep",
-              "id_start", "id_end", "yahoo_oauth_ref",
-          ):
+          for key in ("shard_count", "id_bands", "request_sleep", "id_start", "id_end", "yahoo_oauth_ref"):
               print(f"{key}={data[key]}")
+          # Recovery/merge manifests may record one merge runner; full
+          # historical discovery always uses the campaign cap of 15.
+          print("max_parallel=15")
           print(f"completed_start_year={int(data['start_year'])}")
           print(f"completed_end_year={int(data['end_year'])}")
           PY
