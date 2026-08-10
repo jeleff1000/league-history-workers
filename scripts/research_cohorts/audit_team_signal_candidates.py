@@ -67,6 +67,30 @@ def main() -> None:
         raw = f"LOWER(TRIM(CAST({col} AS VARCHAR)))"
         return f"CASE WHEN {raw} IN ('1','true','t','yes','y') THEN 1 WHEN {raw} IN ('0','false','f','no','n') THEN 0 ELSE TRY_CAST({col} AS INTEGER) END"
 
+    def label_expr(col: str) -> str:
+        if col not in cols:
+            return "CAST(NULL AS VARCHAR)"
+        raw = f"LOWER(TRIM(CAST({col} AS VARCHAR)))"
+        raw = f"REPLACE({raw}, '&nbsp;', ' ')"
+        raw = f"REGEXP_REPLACE({raw}, '<[^>]*>', '', 'g')"
+        return f"NULLIF(REGEXP_REPLACE(TRIM({raw}), '\\s+', ' ', 'g'), '')"
+
+    def key_expr(col: str) -> str:
+        if col not in cols:
+            return "CAST(NULL AS VARCHAR)"
+        raw = f"LOWER(TRIM(CAST({col} AS VARCHAR)))"
+        return f"NULLIF(CASE WHEN INSTR({raw}, '_') > 0 THEN REGEXP_EXTRACT({raw}, '([^_]+)$', 1) ELSE {raw} END, '')"
+
+    def p_label_expr(col: str) -> str:
+        raw = f"LOWER(TRIM(CAST({col} AS VARCHAR)))"
+        raw = f"REPLACE({raw}, '&nbsp;', ' ')"
+        raw = f"REGEXP_REPLACE({raw}, '<[^>]*>', '', 'g')"
+        return f"NULLIF(REGEXP_REPLACE(TRIM({raw}), '\\s+', ' ', 'g'), '')"
+
+    def p_key_expr(col: str) -> str:
+        raw = f"LOWER(TRIM(CAST({col} AS VARCHAR)))"
+        return f"NULLIF(CASE WHEN INSTR({raw}, '_') > 0 THEN REGEXP_EXTRACT({raw}, '([^_]+)$', 1) ELSE {raw} END, '')"
+
     con.execute(f"""
       CREATE OR REPLACE TEMP TABLE source_signals AS
       SELECT
@@ -74,8 +98,9 @@ def main() -> None:
         CAST("year" AS INTEGER) AS year,
         CAST("week" AS INTEGER) AS week,
         NULLIF(TRIM(CAST(team_key AS VARCHAR)), '') team_key,
-        NULLIF(LOWER(TRIM(CAST(manager AS VARCHAR))), '') manager_key,
-        NULLIF(LOWER(TRIM(CAST(team_name AS VARCHAR))), '') team_name_key,
+        {key_expr('team_key')} team_key_norm,
+        {label_expr('manager')} manager_key,
+        {label_expr('team_name')} team_name_key,
         MAX({flag_expr('win')}) FILTER (WHERE {flag_expr('win')} IS NOT NULL) source_win,
         MAX({flag_expr('loss')}) FILTER (WHERE {flag_expr('loss')} IS NOT NULL) source_loss,
         MAX({flag_expr('tie')}) FILTER (WHERE {flag_expr('tie')} IS NOT NULL) source_tie,
@@ -94,7 +119,7 @@ def main() -> None:
         STRING_AGG(DISTINCT CAST(filename AS VARCHAR), '|') source_files,
         COUNT(*) source_rows
       FROM source_raw
-      GROUP BY 1,2,3,4,5,6
+      GROUP BY 1,2,3,4,5,6,7
     """)
     source_keys = con.execute("SELECT COUNT(*) FROM source_signals").fetchone()[0]
     source_duplicate_rows = con.execute("SELECT COALESCE(SUM(source_rows-1),0) FROM source_signals").fetchone()[0]
@@ -117,7 +142,7 @@ def main() -> None:
     if "tie" in pcols:
         delta_filters.insert(2 if "loss" in pcols else 1, "(p.tie IS NULL AND m.source_tie IS NOT NULL)")
 
-    con.execute("""
+    con.execute(f"""
       CREATE OR REPLACE TEMP TABLE player_match_candidates AS
       SELECT
         p.rowid AS player_rowid,
@@ -126,11 +151,15 @@ def main() -> None:
           WHEN s.team_key IS NOT NULL
            AND s.team_key=NULLIF(TRIM(CAST(p.team_key AS VARCHAR)),'')
             THEN 'team_key'
+          WHEN s.team_key_norm IS NOT NULL
+           AND s.team_key_norm={p_key_expr('p.team_key')}
+            THEN 'team_key_normalized'
           ELSE 'manager_team'
         END AS join_method,
         COUNT(*) OVER (PARTITION BY p.rowid) AS candidate_count,
-        MAX(CASE WHEN s.team_key IS NOT NULL
-                       AND s.team_key=NULLIF(TRIM(CAST(p.team_key AS VARCHAR)),'')
+        MAX(CASE WHEN (s.team_key IS NOT NULL
+                       AND s.team_key=NULLIF(TRIM(CAST(p.team_key AS VARCHAR)),''))
+                       OR (s.team_key_norm IS NOT NULL AND s.team_key_norm={p_key_expr('p.team_key')})
                  THEN 1 ELSE 0 END)
           OVER (PARTITION BY p.rowid) AS has_exact_key
       FROM public.player_fantasy p
@@ -139,13 +168,14 @@ def main() -> None:
        AND s.year=CAST(p.year AS INTEGER)
        AND s.week=CAST(p.week AS INTEGER)
        AND (
-         (s.team_key IS NOT NULL
-          AND s.team_key=NULLIF(TRIM(CAST(p.team_key AS VARCHAR)),''))
+         ((s.team_key IS NOT NULL
+           AND s.team_key=NULLIF(TRIM(CAST(p.team_key AS VARCHAR)),''))
+          OR (s.team_key_norm IS NOT NULL AND s.team_key_norm={p_key_expr('p.team_key')}))
          OR
          (s.manager_key IS NOT NULL
           AND s.team_name_key IS NOT NULL
-          AND s.manager_key=LOWER(NULLIF(TRIM(CAST(p.manager AS VARCHAR)),''))
-          AND s.team_name_key=LOWER(NULLIF(TRIM(CAST(p.team_name AS VARCHAR)),'')))
+          AND s.manager_key={p_label_expr('p.manager')}
+          AND s.team_name_key={p_label_expr('p.team_name')})
        )
     """)
     con.execute("""
@@ -206,16 +236,18 @@ def main() -> None:
         "source_team_keys": int(source_keys),
         "duplicate_source_rows_collapsed": int(source_duplicate_rows),
         "matched_player_rows": int(matched),
-        "unmatched_source_team_keys": int(con.execute("""
+        "unmatched_source_team_keys": int(con.execute(f"""
           SELECT COUNT(*) FROM source_signals s
           WHERE NOT EXISTS (SELECT 1 FROM player_matches m
                             JOIN public.player_fantasy p ON p.rowid=m.player_rowid
                             WHERE p.db_name=s.db_name AND CAST(p.year AS INTEGER)=s.year
                               AND CAST(p.week AS INTEGER)=s.week
-                              AND ((s.team_key IS NOT NULL AND s.team_key=NULLIF(TRIM(CAST(p.team_key AS VARCHAR)),''))
+                              AND (((s.team_key IS NOT NULL AND s.team_key=NULLIF(TRIM(CAST(p.team_key AS VARCHAR)),''))
+                                OR (s.team_key_norm IS NOT NULL AND s.team_key_norm={p_key_expr('p.team_key')})
+                                )
                                 OR (s.manager_key IS NOT NULL AND s.team_name_key IS NOT NULL
-                                    AND s.manager_key=LOWER(NULLIF(TRIM(CAST(p.manager AS VARCHAR)),''))
-                                    AND s.team_name_key=LOWER(NULLIF(TRIM(CAST(p.team_name AS VARCHAR)),'')))))
+                                    AND s.manager_key={p_label_expr('p.manager')}
+                                    AND s.team_name_key={p_label_expr('p.team_name')})))
         """).fetchone()[0]),
         "improvements_by_field": {k: int(v) for k,v in improvements.items()},
         "positive_mismatches_not_auto_promoted": {k: int(v) for k,v in positive_mismatches.items()},
