@@ -78,6 +78,16 @@ on:
         required: false
         default: ""
         type: string
+      additional_source_run_ids:
+        description: "Optional comma-separated recovery run IDs to add during merge"
+        required: false
+        default: ""
+        type: string
+      additional_artifact_namespaces:
+        description: "Optional comma-separated namespaces paired with recovery run IDs"
+        required: false
+        default: ""
+        type: string
   workflow_call:
     inputs:
       shard_count:
@@ -137,6 +147,14 @@ on:
         default: "false"
         type: string
       source_run_id:
+        required: false
+        default: ""
+        type: string
+      additional_source_run_ids:
+        required: false
+        default: ""
+        type: string
+      additional_artifact_namespaces:
         required: false
         default: ""
         type: string
@@ -329,6 +347,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id || github.run_id }}
           ARTIFACT_NAMESPACE: ${{ inputs.artifact_namespace || '' }}
+          ADDITIONAL_SOURCE_RUN_IDS: ${{ inputs.additional_source_run_ids || '' }}
+          ADDITIONAL_ARTIFACT_NAMESPACES: ${{ inputs.additional_artifact_namespaces || '' }}
         run: |
           mkdir -p shards
           python3 - <<'PY'
@@ -341,10 +361,6 @@ jobs:
           import zipfile
 
           token = os.environ["GH_TOKEN"]
-          run_id = os.environ["SOURCE_RUN_ID"]
-          namespace = os.environ.get("ARTIFACT_NAMESPACE", "")
-          suffix = f"-{namespace}" if namespace else ""
-          expected_names = re.compile(rf"mfl-discovery-shard-\d+-{re.escape(run_id)}{re.escape(suffix)}$")
           headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
 
           class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -369,21 +385,34 @@ jobs:
                   with urllib.request.urlopen(urllib.request.Request(signed_url)) as response:
                       return response.read()
 
-          artifacts = []
-          for page in range(1, 100):
-              url = f"https://api.github.com/repos/jeleff1000/league-history-workers/actions/runs/{run_id}/artifacts?per_page=100&page={page}"
-              req = urllib.request.Request(url, headers=headers)
-              with urllib.request.urlopen(req) as response:
-                  payload = json.load(response)
-              artifacts.extend(payload.get("artifacts", []))
-              if len(artifacts) >= payload.get("total_count", len(artifacts)) or not payload.get("artifacts"):
-                  break
-
-          selected = sorted(
-              (a for a in artifacts if expected_names.fullmatch(a["name"])),
-              key=lambda a: int(a["name"].split("-")[3]),
-          )
-          print(f"source_run={run_id} matching_shard_artifacts={len(selected)}")
+          primary_run = os.environ["SOURCE_RUN_ID"]
+          primary_namespace = os.environ.get("ARTIFACT_NAMESPACE", "")
+          extra_runs = [x.strip() for x in os.environ.get("ADDITIONAL_SOURCE_RUN_IDS", "").split(",") if x.strip()]
+          extra_namespaces = [x.strip() for x in os.environ.get("ADDITIONAL_ARTIFACT_NAMESPACES", "").split(",")]
+          if len(extra_namespaces) < len(extra_runs):
+              raise SystemExit("additional_artifact_namespaces must pair with additional_source_run_ids")
+          sources = [(primary_run, primary_namespace)] + list(zip(extra_runs, extra_namespaces))
+          selected = []
+          seen_indices = set()
+          for source_run, namespace in sources:
+              suffix = f"-{namespace}" if namespace else ""
+              expected_names = re.compile(rf"mfl-discovery-shard-\d+-{re.escape(source_run)}{re.escape(suffix)}$")
+              artifacts = []
+              for page in range(1, 100):
+                  url = f"https://api.github.com/repos/jeleff1000/league-history-workers/actions/runs/{source_run}/artifacts?per_page=100&page={page}"
+                  req = urllib.request.Request(url, headers=headers)
+                  with urllib.request.urlopen(req) as response:
+                      payload = json.load(response)
+                  artifacts.extend(payload.get("artifacts", []))
+                  if len(artifacts) >= payload.get("total_count", len(artifacts)) or not payload.get("artifacts"):
+                      break
+              for artifact in sorted((a for a in artifacts if expected_names.fullmatch(a["name"])), key=lambda a: int(a["name"].split("-")[3])):
+                  index = int(artifact["name"].split("-")[3])
+                  if index in seen_indices:
+                      continue
+                  seen_indices.add(index)
+                  selected.append(artifact)
+              print(f"source_run={source_run} matching_shard_artifacts={len(artifacts)} selected_total={len(selected)}")
           if not selected:
               raise SystemExit("no matching shard artifacts found")
 
@@ -468,6 +497,8 @@ jobs:
           MFL_SHARD_INDICES: ${{ inputs.shard_indices || '' }}
           MFL_DIRECTORY_ONLY: ${{ inputs.directory_only || 'false' }}
           MFL_PIPELINE_REF: ${{ inputs.yahoo_oauth_ref || 'main' }}
+          MFL_PRIMARY_SOURCE_RUN_ID: ${{ inputs.source_run_id || github.run_id }}
+          MFL_ADDITIONAL_SOURCE_RUN_IDS: ${{ inputs.additional_source_run_ids || '' }}
         run: |
           python3 - <<'PY'
           import json
@@ -475,7 +506,9 @@ jobs:
 
           manifest = {
               "platform": "mfl",
-              "source_run_id": os.environ["GITHUB_RUN_ID"],
+              "source_run_id": os.environ["MFL_PRIMARY_SOURCE_RUN_ID"],
+              "reconciled_by_run_id": os.environ["GITHUB_RUN_ID"],
+              "additional_source_run_ids": os.environ["MFL_ADDITIONAL_SOURCE_RUN_IDS"],
               "start_year": os.environ["MFL_START_YEAR"],
               "end_year": os.environ["MFL_END_YEAR"],
               "shard_count": os.environ["MFL_SHARD_COUNT"],
