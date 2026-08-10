@@ -309,7 +309,10 @@ jobs:
         if: ${{ (inputs.directory_only || 'false') != 'true' }}
         uses: actions/download-artifact@v5
         with:
-          pattern: mfl-discovery-shard-*
+          # A reusable gap-fill run contains multiple season windows.  Limit
+          # the download to this run/window or merge-multiple would concatenate
+          # same-named shard files from earlier windows.
+          pattern: mfl-discovery-shard-*-${{ github.run_id }}${{ inputs.artifact_namespace && format('-{0}', inputs.artifact_namespace) || '' }}
           path: shards
           merge-multiple: true
 
