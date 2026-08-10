@@ -1,1 +1,1 @@
-read-only-team-signal-audit-v4-source-run-staging
+read-only-team-signal-audit-v5-frozen-inventory
