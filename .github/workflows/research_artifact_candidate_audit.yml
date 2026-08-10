@@ -102,23 +102,19 @@ jobs:
               a['files']=[f for f in a['files'] if f['candidate']]
               if a['files']:
                   a['candidate_bytes']=a['size_in_bytes']; selected.append(a)
-          # Keep all artifacts from one source run together. Otherwise the
-          # 256 shards repeatedly query/download the same source run and hit
-          # GitHub's API limit. Each source run is downloaded exactly once.
-          grouped={}
-          for a in selected:
-              grouped.setdefault(int(a['workflow_run_id']), []).append(a)
-          packages=[{'workflow_run_id':rid,'artifacts':sorted(items,key=lambda x:x['artifact_id']),
-                     'size_in_bytes':sum(int(x.get('size_in_bytes',0)) for x in items)}
-                    for rid,items in grouped.items()]
+          # Downloads use manifest artifact IDs directly, so artifacts can be
+          # balanced independently across all 256 shards. This avoids a few
+          # source runs becoming huge sequential buckets.
+          packages=[{'workflow_run_id':int(a['workflow_run_id']),'artifacts':[a],
+                     'size_in_bytes':int(a.get('size_in_bytes',0))} for a in selected]
           n=int(os.environ['SHARD_COUNT']); buckets=[[] for _ in range(n)]; loads=[0]*n
           for package in sorted(packages,key=lambda x:(-x['size_in_bytes'],x['workflow_run_id'])):
               i=min(range(n),key=lambda j:(loads[j],len(buckets[j]),j)); buckets[i].append(package); loads[i]+=package['size_in_bytes']
-          assigned_runs=[int(p['workflow_run_id']) for bucket in buckets for p in bucket]
-          if len(assigned_runs) != len(set(assigned_runs)):
-              raise SystemExit('manifest invariant failed: a source run was assigned to more than one shard')
+          assigned_artifacts=[int(p['artifacts'][0]['artifact_id']) for bucket in buckets for p in bucket]
+          if len(assigned_artifacts) != len(selected) or len(assigned_artifacts) != len(set(assigned_artifacts)):
+              raise SystemExit('manifest invariant failed: an artifact was assigned more than once or omitted')
           Path('out/candidate_artifact_shards.json').write_text(json.dumps(buckets,indent=2,sort_keys=True)+'\n')
-          print(json.dumps({'artifacts':9479,'files':len(rows),'candidate_files':sum(len(a['files']) for a in selected),'candidate_artifacts':len(selected),'source_runs':len(packages),'assigned_source_runs':len(assigned_runs),'duplicate_source_runs':0,'shards':n,'nonempty_shards':sum(bool(x) for x in buckets)}))
+          print(json.dumps({'artifacts':9479,'files':len(rows),'candidate_files':sum(len(a['files']) for a in selected),'candidate_artifacts':len(selected),'source_runs':len(set(int(a['workflow_run_id']) for a in selected)),'assigned_artifacts':len(assigned_artifacts),'duplicate_artifacts':0,'shards':n,'nonempty_shards':sum(bool(x) for x in buckets)}))
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
               out.write('matrix='+json.dumps(list(range(n)),separators=(',',':'))+'\n')
               out.write(f'candidate_artifact_count={len(selected)}\nfile_count={len(rows)}\n')
