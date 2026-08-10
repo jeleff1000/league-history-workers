@@ -61,7 +61,9 @@ def main() -> None:
              {tie_expr} canonical_tie,
              p.team_points canonical_team_points,
              p.is_playoffs canonical_is_playoffs,
+             p.has_po_signal canonical_has_po_signal,
              p.champion canonical_champion,
+             p.clutch_equity canonical_clutch_equity,
              p.final_playoff_seed canonical_final_playoff_seed,
              p.made_playoffs canonical_made_playoffs,
              d.*
@@ -83,9 +85,11 @@ def main() -> None:
         "tie": "source_tie",
         "team_points": "source_team_points",
         "is_playoffs": "source_playoffs",
+        "has_po_signal": "source_has_po_signal",
         "champion": "source_champion",
         "final_playoff_seed": "source_final_playoff_seed",
         "made_playoffs": "source_made_playoffs",
+        "clutch_equity": "source_clutch_equity",
     }
     improvements = {}
     for field, src in fields.items():
@@ -96,8 +100,8 @@ def main() -> None:
     update_assignments = [
         "win=CASE WHEN p.win IS NULL THEN m.source_win ELSE p.win END",
         "team_points=CASE WHEN p.team_points IS NULL THEN m.source_team_points ELSE p.team_points END",
-        "is_playoffs=CASE WHEN p.is_playoffs IS NULL AND m.source_playoffs=1 THEN 1 ELSE p.is_playoffs END",
-        "champion=CASE WHEN p.champion IS NULL AND m.source_champion=1 THEN 1 ELSE p.champion END",
+        "is_playoffs=CASE WHEN p.is_playoffs IS NULL THEN m.source_playoffs ELSE p.is_playoffs END",
+        "champion=CASE WHEN p.champion IS NULL THEN m.source_champion ELSE p.champion END",
         "final_playoff_seed=CASE WHEN p.final_playoff_seed IS NULL THEN m.source_final_playoff_seed ELSE p.final_playoff_seed END",
         "made_playoffs=CASE WHEN p.made_playoffs IS NULL THEN m.source_made_playoffs ELSE p.made_playoffs END",
     ]
@@ -105,6 +109,10 @@ def main() -> None:
         update_assignments.insert(1, "loss=CASE WHEN p.loss IS NULL THEN m.source_loss ELSE p.loss END")
     if "tie" in pcols and "source_tie" in dcols:
         update_assignments.insert(2 if "loss" in pcols and "source_loss" in dcols else 1, "tie=CASE WHEN p.tie IS NULL THEN m.source_tie ELSE p.tie END")
+    if "source_has_po_signal" in dcols:
+        update_assignments.append("has_po_signal=CASE WHEN p.has_po_signal IS NULL THEN m.source_has_po_signal ELSE p.has_po_signal END")
+    if "source_clutch_equity" in dcols:
+        update_assignments.append("clutch_equity=CASE WHEN p.clutch_equity IS NULL THEN m.source_clutch_equity ELSE p.clutch_equity END")
     update_sql = ",\n            ".join(update_assignments)
     con.execute("BEGIN")
     try:

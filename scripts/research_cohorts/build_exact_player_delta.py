@@ -1,0 +1,169 @@
+"""Build a read-only, null-fill-only delta from exact player artifacts.
+
+The artifact set is treated as evidence, not as a replacement table.  Rows are
+matched at player-week-manager/team grain and only canonical NULL cells are
+eligible for promotion.  Conflicting duplicate source keys are excluded rather
+than arbitrarily resolved.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+from pathlib import Path
+from typing import Iterable
+
+import duckdb
+
+
+BASE_PLAYER_COLUMNS = [
+    "db_name", "year", "week", "NFL_player_id", "is_started", "is_rostered",
+    "fantasy_points", "win", "champion", "clutch_equity", "manager_lamar",
+    "manager", "team_points", "final_playoff_seed", "is_playoffs",
+    "has_po_signal", "player", "position", "fantasy_position", "platform",
+    "team_key", "team_name", "nfl_team_api", "yahoo_player_id",
+    "sleeper_player_id", "espn_player_id", "fleaflicker_player_id",
+    "mfl_player_id", "made_playoffs",
+]
+OPTIONAL = {"loss", "tie"}
+SIGNAL_TYPES = {
+    "win": "INTEGER",
+    "loss": "INTEGER",
+    "tie": "INTEGER",
+    "team_points": "DOUBLE",
+    "is_playoffs": "INTEGER",
+    "has_po_signal": "INTEGER",
+    "champion": "INTEGER",
+    "final_playoff_seed": "INTEGER",
+    "made_playoffs": "INTEGER",
+    "clutch_equity": "DOUBLE",
+}
+KEY_COLUMNS = ["db_name", "year", "week", "NFL_player_id", "manager", "team_key", "team_name", "platform"]
+
+
+def _lit(path: Path) -> str:
+    return "'" + str(path.resolve()).replace("'", "''") + "'"
+
+
+def _ident(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _read_union(con: duckdb.DuckDBPyConnection, paths: Iterable[Path]) -> None:
+    values = ",".join(_lit(p) for p in paths)
+    con.execute(
+        "CREATE OR REPLACE TEMP VIEW source_raw AS "
+        f"SELECT * FROM read_parquet([{values}], union_by_name=true)"
+    )
+
+
+def build_delta(base: Path, sources: list[Path], out: Path) -> dict:
+    con = duckdb.connect(str(base), read_only=True)
+    pcols = [r[0] for r in con.execute("DESCRIBE public.player_fantasy").fetchall()]
+    missing = sorted(set(BASE_PLAYER_COLUMNS) - set(pcols))
+    cohorts = [c for c in pcols if c not in BASE_PLAYER_COLUMNS and c not in OPTIONAL]
+    forbidden = sorted({"opponent_points", "is_championship", "is_active", "is_playoffs_bf", "made_po_bf", "made_po"} & set(pcols))
+    if missing or len(cohorts) != 7 or forbidden:
+        raise ValueError(f"canonical schema mismatch: missing={missing} cohorts={cohorts} forbidden={forbidden}")
+    if not sources:
+        con.close()
+        return {"source_files": 0, "source_rows": 0, "matched_rows": 0, "unmatched_rows": 0,
+                "source_conflicting_keys": 0, "delta_rows": 0,
+                "improvements_by_field": {f: 0 for f in SIGNAL_TYPES}}
+
+    _read_union(con, sources)
+    source_cols = {r[0] for r in con.execute("DESCRIBE source_raw").fetchall()}
+    required = set(KEY_COLUMNS)
+    missing_source = sorted(required - source_cols)
+    if missing_source:
+        raise ValueError(f"exact source schema missing join fields: {missing_source}")
+    source_expr = []
+    for field in KEY_COLUMNS:
+        source_expr.append(f"CAST(s.{_ident(field)} AS VARCHAR) AS {_ident(field)}")
+    for field, typ in SIGNAL_TYPES.items():
+        if field in source_cols:
+            source_expr.append(f"TRY_CAST(s.{_ident(field)} AS {typ}) AS source_{field}")
+        else:
+            source_expr.append(f"CAST(NULL AS {typ}) AS source_{field}")
+    con.execute("CREATE OR REPLACE TEMP VIEW source_typed AS SELECT " + ",".join(source_expr) + " FROM source_raw s")
+    key_sql = ",".join(_ident(c) for c in KEY_COLUMNS)
+    source_rows = int(con.execute("SELECT COUNT(*) FROM source_typed").fetchone()[0])
+    conflicting = int(con.execute(f"""
+        SELECT COALESCE(SUM(n), 0) FROM (
+          SELECT COUNT(*) AS n FROM source_typed
+          GROUP BY ALL HAVING COUNT(*) > 1
+        )
+    """).fetchone()[0])
+    con.execute(f"""
+        CREATE OR REPLACE TEMP VIEW source_unique AS
+        SELECT * FROM source_typed
+        QUALIFY COUNT(*) OVER (PARTITION BY {key_sql}) = 1
+    """)
+    base_key = " AND ".join(
+        [
+            "s.db_name IS NOT DISTINCT FROM CAST(p.db_name AS VARCHAR)",
+            "CAST(s.year AS INTEGER) IS NOT DISTINCT FROM CAST(p.year AS INTEGER)",
+            "CAST(s.week AS INTEGER) IS NOT DISTINCT FROM CAST(p.week AS INTEGER)",
+            "s.NFL_player_id IS NOT DISTINCT FROM CAST(p.NFL_player_id AS VARCHAR)",
+            "s.manager IS NOT DISTINCT FROM CAST(p.manager AS VARCHAR)",
+            "s.team_key IS NOT DISTINCT FROM CAST(p.team_key AS VARCHAR)",
+            "s.team_name IS NOT DISTINCT FROM CAST(p.team_name AS VARCHAR)",
+            "LOWER(s.platform) IS NOT DISTINCT FROM LOWER(CAST(p.platform AS VARCHAR))",
+        ]
+    )
+    con.execute(f"""
+        CREATE OR REPLACE TEMP VIEW matched AS
+        SELECT p.rowid AS player_rowid, p.*,
+               s.source_win, s.source_loss, s.source_tie,
+               s.source_team_points, s.source_is_playoffs, s.source_has_po_signal,
+               s.source_champion, s.source_final_playoff_seed,
+               s.source_made_playoffs, s.source_clutch_equity
+        FROM public.player_fantasy p JOIN source_unique s ON {base_key}
+    """)
+    matched = int(con.execute("SELECT COUNT(*) FROM matched").fetchone()[0])
+    unmatched = source_rows - (conflicting + matched)
+    filters = []
+    improvements: dict[str, int] = {}
+    for field in SIGNAL_TYPES:
+        canonical = f'm.{_ident(field)}' if field in pcols else 'NULL'
+        source = f'm.source_{field}'
+        filters.append(f"({canonical} IS NULL AND {source} IS NOT NULL)")
+        improvements[field] = int(con.execute(f"SELECT COUNT(*) FROM matched m WHERE {canonical} IS NULL AND {source} IS NOT NULL").fetchone()[0])
+    out.parent.mkdir(parents=True, exist_ok=True)
+    con.execute(f"""
+        COPY (
+          SELECT player_rowid, db_name, year, week, NFL_player_id, manager,
+                 team_key, team_name, platform, source_win, source_loss,
+                 source_tie, source_team_points, source_is_playoffs AS source_playoffs,
+                 source_has_po_signal, source_champion, source_final_playoff_seed,
+                 source_made_playoffs, source_clutch_equity
+          FROM matched m
+          WHERE {' OR '.join(filters)}
+        ) TO {_lit(out)} (FORMAT PARQUET)
+    """)
+    delta_rows = int(con.execute(f"SELECT COUNT(*) FROM read_parquet({_lit(out)})").fetchone()[0])
+    report = {
+        "source_files": len(sources), "source_rows": source_rows,
+        "matched_rows": matched, "unmatched_rows": int(unmatched),
+        "source_conflicting_keys": conflicting, "delta_rows": delta_rows,
+        "improvements_by_field": improvements, "canonical_schema_unchanged": True,
+        "cache_mutated": False, "new_lineage": False,
+    }
+    con.close()
+    return report
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--base", type=Path, required=True)
+    ap.add_argument("--sources", nargs="+", type=Path, required=True)
+    ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--report", type=Path, required=True)
+    args = ap.parse_args()
+    report = build_delta(args.base, args.sources, args.out)
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    args.report.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    print(json.dumps(report, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

@@ -251,6 +251,7 @@ jobs:
               con.execute("COPY (SELECT s.db_name,s.year,s.week,s.platform,s.manager,s.team_name,s.team_key,s.fantasy_position,s.NFL_player_id,s.clutch_equity source_clutch_equity,p.clutch_equity canonical_clutch_equity FROM exact_keyed s JOIN player_keyed p USING(join_key) WHERE p.clutch_equity IS NULL AND s.clutch_equity IS NOT NULL) TO 'out/exact_clutch_null_fill_candidates.parquet' (FORMAT PARQUET)")
           else:
               summary['exact_null_fills']={};summary['exact_conflicts']={}
+          Path('out/exact_source_files.txt').write_text('\n'.join(str(f) for f in exact) + ('\n' if exact else ''))
           # Team candidates are inventoried here; promotion is emitted only after a
           # second, fieldwise fan-out gate. Clutch is intentionally excluded from
           # team-level sources because it is player-specific.
@@ -274,6 +275,20 @@ jobs:
           python scripts/research_cohorts/audit_structured_candidate_files.py \
             --candidates candidates \
             --out out/structured_evidence_audit.json
+      - name: Build exact player null-fill delta (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -s out/exact_source_files.txt ]]; then
+            mapfile -t exact_sources < out/exact_source_files.txt
+            python scripts/research_cohorts/build_exact_player_delta.py \
+              --base research_public_lake/corpus_snapshot.duckdb \
+              --sources "${exact_sources[@]}" \
+              --out out/exact_promotable_player_delta.parquet \
+              --report out/exact_player_delta_report.json
+          else
+            printf '%s\n' '{"source_files":0,"delta_rows":0,"cache_mutated":false,"new_lineage":false}' > out/exact_player_delta_report.json
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: research-artifact-cache-comparison-${{ github.run_id }}
@@ -362,12 +377,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          delta=$(find comparison -name team_promotable_player_delta.parquet -print -quit)
-          test -n "$delta"
-          python scripts/research_cohorts/apply_team_signal_delta_in_place.py \
-            --base research_public_lake/corpus_snapshot.duckdb \
-            --delta "$delta" \
-            --report comparison/team_signal_apply_report.json
+          mapfile -t deltas < <(find comparison -type f -name '*promotable_player_delta.parquet' | sort)
+          test "${#deltas[@]}" -gt 0
+          i=0
+          for delta in "${deltas[@]}"; do
+            python scripts/research_cohorts/apply_team_signal_delta_in_place.py \
+              --base research_public_lake/corpus_snapshot.duckdb \
+              --delta "$delta" \
+              --report "comparison/player_delta_apply_${i}.json"
+            i=$((i + 1))
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: research-team-signal-apply-${{ github.run_id }}
