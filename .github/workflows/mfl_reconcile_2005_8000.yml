@@ -4,6 +4,10 @@ on:
   push:
     paths:
       - .github/mfl_reconcile_2005_8000
+  workflow_run:
+    workflows:
+      - MFL Historical Resume 2005-06 (8000-8999)
+    types: [completed]
 
 permissions:
   actions: write
@@ -11,6 +15,7 @@ permissions:
 
 jobs:
   reconcile:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     uses: ./.github/workflows/mfl_historical_discovery_256.yml
     with:
       shard_count: "250"
@@ -27,6 +32,6 @@ jobs:
       yahoo_oauth_ref: "main"
       merge_only: "true"
       source_run_id: "31406871174"
-      additional_source_run_ids: "31408950801"
+      additional_source_run_ids: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || '31408950801' }}
       additional_artifact_namespaces: ""
     secrets: inherit
