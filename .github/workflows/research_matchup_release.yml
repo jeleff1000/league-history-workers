@@ -12,9 +12,6 @@ on:
         required: true
         type: boolean
         default: true
-  workflow_run:
-    workflows: ["Normalize canonical research schema in place"]
-    types: [completed]
   push:
     branches: [main]
 
@@ -27,7 +24,7 @@ concurrency:
 
 jobs:
   release:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
