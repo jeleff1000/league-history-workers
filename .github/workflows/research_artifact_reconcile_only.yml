@@ -55,7 +55,7 @@ jobs:
           set -euo pipefail
           python scripts/research_cohorts/download_workflow_artifacts.py \
             --repo "$GITHUB_REPOSITORY" --run-id "${{ inputs.source_run_id }}" \
-            --ids "${EXTRACT_IDS_A},${EXTRACT_IDS_B}" --out extracts
+            --ids "${EXTRACT_IDS_A},${EXTRACT_IDS_B}" --out extracts --workers 8
       - name: Reuse completed comparison
         uses: actions/download-artifact@v5
         with:

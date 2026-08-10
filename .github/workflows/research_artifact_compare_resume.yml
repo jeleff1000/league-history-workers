@@ -70,7 +70,7 @@ jobs:
           set -euo pipefail
           python scripts/research_cohorts/download_workflow_artifacts.py \
             --repo "$GITHUB_REPOSITORY" --run-id "${{ inputs.source_run_id }}" \
-            --ids "${EXTRACT_IDS_A},${EXTRACT_IDS_B}" --out candidates
+            --ids "${EXTRACT_IDS_A},${EXTRACT_IDS_B}" --out candidates --workers 8
       - uses: actions/cache/restore@v5
         with:
           path: research_public_lake
