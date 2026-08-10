@@ -1,0 +1,29 @@
+name: MFL Recovery Shard 204 (2005-06 7000-7999)
+
+on:
+  push:
+    paths:
+      - .github/mfl_recover_shard_204_20260810
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  recover:
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "250"
+      max_parallel: "1"
+      start_year: "2005"
+      end_year: "2006"
+      chain_next_window: "false"
+      shard_indices: "204"
+      directory_only: "false"
+      id_bands: "1-9999,10000-29999,30000-59999,60000-80000"
+      request_sleep: "5.0"
+      id_start: "7000"
+      id_end: "7999"
+      yahoo_oauth_ref: "main"
+      artifact_namespace: "recovery-204-31398751688"
+    secrets: inherit
