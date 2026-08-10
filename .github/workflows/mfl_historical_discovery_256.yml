@@ -393,8 +393,8 @@ jobs:
               raise SystemExit("additional_artifact_namespaces must pair with additional_source_run_ids")
           sources = [(primary_run, primary_namespace)] + list(zip(extra_runs, extra_namespaces))
           selected = []
-          seen_indices = set()
-          for source_run, namespace in sources:
+          selected_by_index = {}
+          for source_position, (source_run, namespace) in enumerate(sources):
               suffix = f"-{namespace}" if namespace else ""
               expected_names = re.compile(rf"mfl-discovery-shard-\d+-{re.escape(source_run)}{re.escape(suffix)}$")
               artifacts = []
@@ -408,10 +408,13 @@ jobs:
                       break
               for artifact in sorted((a for a in artifacts if expected_names.fullmatch(a["name"])), key=lambda a: int(a["name"].split("-")[3])):
                   index = int(artifact["name"].split("-")[3])
-                  if index in seen_indices:
+                  # A supplemental source is normally a repair run.  Let it
+                  # replace the primary artifact for the same shard instead
+                  # of silently keeping a known incomplete primary copy.
+                  if index in selected_by_index and source_position == 0:
                       continue
-                  seen_indices.add(index)
-                  selected.append(artifact)
+                  selected_by_index[index] = artifact
+              selected = [selected_by_index[index] for index in sorted(selected_by_index)]
               print(f"source_run={source_run} matching_shard_artifacts={len(artifacts)} selected_total={len(selected)}")
           if not selected:
               raise SystemExit("no matching shard artifacts found")
