@@ -77,20 +77,54 @@ jobs:
           """).fetchone()
           if cmc_total < 5000 or cmc_position_null:
               raise SystemExit(f'CMC cache gate failed: total_2025={cmc_total} position_null={cmc_position_null}')
-          full_week1_rb_eligible = c.execute("""
-            SELECT COUNT(DISTINCT db_name)
-            FROM lake.public.player_fantasy
-            WHERE year=2025 AND week=1
-              AND UPPER(TRIM(CAST(position AS VARCHAR)))='RB'
-              AND CAST(cohort_position_eligible AS INTEGER)=1
-          """).fetchone()[0]
+          inventory = c.execute("""
+            WITH week1 AS (
+              SELECT *
+              FROM lake.public.player_fantasy
+              WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1
+            )
+            SELECT
+              COUNT(*) AS week1_rows,
+              COUNT(DISTINCT db_name) AS week1_leagues,
+              COUNT(DISTINCT db_name) FILTER (
+                WHERE UPPER(TRIM(CAST(position AS VARCHAR)))='RB'
+              ) AS rb_position_leagues,
+              COUNT(DISTINCT db_name) FILTER (
+                WHERE UPPER(TRIM(CAST(position AS VARCHAR)))='RB'
+                  AND CAST(cohort_position_eligible AS INTEGER)=1
+              ) AS rb_eligible_leagues,
+              COUNT(DISTINCT db_name) FILTER (
+                WHERE CAST(cohort_position_eligible AS INTEGER)=1
+              ) AS any_position_eligible_leagues,
+              COUNT(DISTINCT db_name) FILTER (
+                WHERE cohort_teams IS NOT NULL
+                   OR cohort_roster IS NOT NULL
+                   OR cohort_scoring IS NOT NULL
+                   OR cohort_pass_td IS NOT NULL
+                   OR cohort_playoff_teams IS NOT NULL
+              ) AS cohort_labeled_leagues,
+              COUNT(DISTINCT db_name) FILTER (
+                WHERE UPPER(TRIM(CAST(position AS VARCHAR)))='RB'
+                  AND cohort_position_eligible IS NULL
+              ) AS rb_null_eligibility_leagues
+            FROM week1
+          """).fetchone()
           cmc_week1_present = c.execute("""
             SELECT COUNT(DISTINCT db_name)
             FROM lake.public.player_fantasy
-            WHERE NFL_player_id='00-0033280' AND year=2025 AND week=1
+            WHERE NFL_player_id='00-0033280' AND CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1
           """).fetchone()[0]
-          assert full_week1_rb_eligible >= 10000, {'full_week1_rb_eligible': full_week1_rb_eligible}
-          print('full_cmc_week1_population=', {'rb_eligible_leagues':full_week1_rb_eligible,'cmc_rows_present':cmc_week1_present})
+          print('full_week1_inventory=', {
+            'week1_rows': inventory[0],
+            'week1_leagues': inventory[1],
+            'rb_position_leagues': inventory[2],
+            'rb_eligible_leagues': inventory[3],
+            'any_position_eligible_leagues': inventory[4],
+            'cohort_labeled_leagues': inventory[5],
+            'rb_null_eligibility_leagues': inventory[6],
+            'cmc_rows_present': cmc_week1_present,
+          })
+          assert inventory[3] >= 10000, {'full_week1_rb_eligible': inventory[3]}
           print('cmc_2025_gate=', {'rows': cmc_total, 'position_null': cmc_position_null})
           print('cached_cmc_week1_target_counts=', c.execute("""
             WITH target AS (
