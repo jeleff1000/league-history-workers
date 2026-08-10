@@ -68,6 +68,15 @@ jobs:
           pcols={r[0] for r in c.execute("DESCRIBE lake.public.player_fantasy").fetchall()}
           selected=[x for x in ('week','is_rostered','is_started','position','fantasy_points','season_games') if x in pcols]
           print('cached_player_columns=', selected)
+          source_league_years = c.execute("""
+            SELECT COUNT(*) FROM (
+              SELECT DISTINCT db_name, CAST(year AS INTEGER) AS year
+              FROM lake.public.player_fantasy
+              WHERE year IS NOT NULL
+            )
+          """).fetchone()[0]
+          print('source_league_years=', source_league_years)
+          assert source_league_years >= 60000, {'source_league_years': source_league_years}
           qcols=','.join('"'+x+'"' for x in selected)
           print(c.execute(f"SELECT {qcols} FROM lake.public.player_fantasy WHERE NFL_player_id='00-0033280' AND year=2025 ORDER BY week LIMIT 30").fetchall())
           cmc_total, cmc_position_null = c.execute("""
