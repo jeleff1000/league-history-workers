@@ -116,10 +116,17 @@ jobs:
                   return f"CONCAT_WS('|',CAST({a}.\"db_name\" AS VARCHAR),CAST({a}.\"year\" AS VARCHAR),CAST({a}.\"week\" AS VARCHAR),CAST({a}.\"platform\" AS VARCHAR),CAST({a}.\"manager\" AS VARCHAR),CAST({a}.\"team_name\" AS VARCHAR),CAST({a}.\"team_key\" AS VARCHAR),CAST({a}.\"fantasy_position\" AS VARCHAR),{ident(a)})"
               con.execute(f'CREATE OR REPLACE TEMP VIEW exact_keyed AS SELECT s.*,{join_key("s")} AS join_key FROM exact_source s')
               con.execute(f'CREATE OR REPLACE TEMP VIEW player_keyed AS SELECT p.*,{join_key("p")} AS join_key FROM public.player_fantasy p')
-              for col in base_cols+optional:
-                  n=con.execute(f'SELECT COUNT(*) FROM exact_keyed s JOIN player_keyed p USING(join_key) WHERE p."{col}" IS NULL AND s."{col}" IS NOT NULL').fetchone()[0]
-                  x=con.execute(f'SELECT COUNT(*) FROM exact_keyed s JOIN player_keyed p USING(join_key) WHERE p."{col}" IS NOT NULL AND s."{col}" IS NOT NULL AND CAST(p."{col}" AS VARCHAR)<>CAST(s."{col}" AS VARCHAR)').fetchone()[0]
-                  summary.setdefault('exact_null_fills',{})[col]=int(n); summary.setdefault('exact_conflicts',{})[col]=int(x)
+              # One hash join and one aggregate.  Re-running a full
+              # 269M-row join once per field made this audit needlessly slow.
+              fields=base_cols+optional
+              metrics=[]
+              for col in fields:
+                  qcol='"'+col.replace('"','""')+'"'
+                  metrics.append(f'COUNT(*) FILTER (WHERE p.{qcol} IS NULL AND s.{qcol} IS NOT NULL) AS fill_{col}')
+                  metrics.append(f'COUNT(*) FILTER (WHERE p.{qcol} IS NOT NULL AND s.{qcol} IS NOT NULL AND CAST(p.{qcol} AS VARCHAR)<>CAST(s.{qcol} AS VARCHAR)) AS conflict_{col}')
+              metric_row=con.execute('SELECT '+','.join(metrics)+' FROM exact_keyed s JOIN player_keyed p USING(join_key)').fetchone()
+              summary['exact_null_fills']={col:int(metric_row[i*2]) for i,col in enumerate(fields)}
+              summary['exact_conflicts']={col:int(metric_row[i*2+1]) for i,col in enumerate(fields)}
               con.execute("COPY (SELECT s.db_name,s.year,s.week,s.platform,s.manager,s.team_name,s.team_key,s.fantasy_position,s.NFL_player_id,s.clutch_equity source_clutch_equity,p.clutch_equity canonical_clutch_equity FROM exact_keyed s JOIN player_keyed p USING(join_key) WHERE p.clutch_equity IS NULL AND s.clutch_equity IS NOT NULL) TO 'out/exact_clutch_null_fill_candidates.parquet' (FORMAT PARQUET)")
           else: summary['exact_null_fills']={}; summary['exact_conflicts']={}
           Path('out/exact_source_files.txt').write_text('\n'.join(exact)+('\n' if exact else ''))
