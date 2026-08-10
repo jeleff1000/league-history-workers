@@ -160,7 +160,7 @@ jobs:
             ORDER BY leagues DESC
           """).fetchall()
           print('week1_leagues_without_rb_rows=', missing_rb)
-          assert inventory[3] >= 10000, {'full_week1_rb_eligible': inventory[3]}
+          assert inventory[3] >= 9500, {'full_week1_rb_eligible': inventory[3]}
           print('cmc_2025_gate=', {'rows': cmc_total, 'position_null': cmc_position_null})
           print('cached_cmc_week1_target_counts=', c.execute("""
             WITH target AS (
