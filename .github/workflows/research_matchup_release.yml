@@ -148,7 +148,7 @@ jobs:
             )
             SELECT l.teams, l.roster, l.scoring, l.pass_td, l.playoff_teams,
                    COUNT(*) AS leagues,
-                   STRING_AGG(p.positions, ' | ' ORDER BY p.positions LIMIT 5) AS sample_position_sets
+                   STRING_AGG(p.positions, ' | ' ORDER BY p.positions) AS position_sets
             FROM leagues l
             JOIN positions p USING (db_name)
             WHERE NOT EXISTS (
