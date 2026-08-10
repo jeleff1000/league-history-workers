@@ -53,13 +53,13 @@ def main() -> None:
     conflict = " OR ".join(f"COUNT(DISTINCT COALESCE(CAST(\"{f}\" AS VARCHAR), '<NULL>')) > 1" for f in present)
     con.execute(f"""
       CREATE OR REPLACE TEMP TABLE settings_unique AS
-      SELECT db_name, CAST(year AS INTEGER) year,
+      SELECT db_name, CAST("year" AS INTEGER) AS "year",
              {', '.join(f'MAX("{f}") AS "{f}"' for f in present)}
-      FROM settings_source GROUP BY db_name, CAST(year AS INTEGER)
+      FROM settings_source GROUP BY db_name, CAST("year" AS INTEGER)
     """)
     report["source_conflicting_keys"] = int(con.execute(f"""
-      SELECT COUNT(*) FROM (SELECT db_name, CAST(year AS INTEGER) year FROM settings_source
-      GROUP BY db_name, CAST(year AS INTEGER) HAVING {conflict})
+      SELECT COUNT(*) FROM (SELECT db_name, CAST("year" AS INTEGER) AS "year" FROM settings_source
+      GROUP BY db_name, CAST("year" AS INTEGER) HAVING {conflict})
     """).fetchone()[0]) if conflict else 0
     report["source_unique_keys"] = int(con.execute("SELECT COUNT(*) FROM settings_unique").fetchone()[0])
 
