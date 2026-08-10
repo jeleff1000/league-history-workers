@@ -46,8 +46,7 @@ def main() -> None:
     extracted = []
     for path in args.extract_ledger:
         extracted.extend(json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
-    by_key = {}
-    duplicate_keys = set()
+    evidence_by_key = {}
     for row in extracted:
         k = key(row)
         # Extraction ledgers also record non-candidate files from the parent
@@ -55,10 +54,18 @@ def main() -> None:
         # candidate reconciliation and may repeat aggregate basenames.
         if k not in selected:
             continue
-        if k in by_key:
-            duplicate_keys.add(k)
-        else:
-            by_key[k] = row
+        evidence_by_key.setdefault(k, []).append(row)
+    status_priority = {
+        "candidate_extracted": 3,
+        "structured_evidence_extracted": 3,
+        "archive_download_failed": 1,
+        "candidate_file_missing_or_ambiguous": 0,
+    }
+    by_key = {
+        k: max(rows, key=lambda row: status_priority.get(row.get("status"), 0))
+        for k, rows in evidence_by_key.items()
+    }
+    duplicate_keys = {k for k, rows in evidence_by_key.items() if len(rows) > 1}
     actual = set(by_key)
     missing_selected = sorted(selected - actual)
     out_of_scope = sorted(actual - set(expected))
@@ -72,10 +79,10 @@ def main() -> None:
         "new_lineage": bool(comparison.get("new_lineage")),
         "canonical_schema_unchanged": bool(comparison.get("canonical_schema_unchanged")),
     }
-    complete = not missing_selected and not duplicate_keys and not out_of_scope and not extraction_failures
+    complete = not missing_selected and not out_of_scope
     unresolved_structured_payloads = int(structured.get("promotable_structured_rows", 0)) + int(structured.get("settings_rows", 0))
     unresolved_exact_rows = int(exact_report.get("unresolved_unmatched_rows", 0))
-    promotion_ready = complete and unresolved_structured_payloads == 0 and unresolved_exact_rows == 0 and not cache_invariants["cache_mutated"] and not cache_invariants["new_lineage"] and cache_invariants["canonical_schema_unchanged"]
+    promotion_ready = complete and not extraction_failures and unresolved_structured_payloads == 0 and unresolved_exact_rows == 0 and not cache_invariants["cache_mutated"] and not cache_invariants["new_lineage"] and cache_invariants["canonical_schema_unchanged"]
     report = {
         "complete_artifact_audit_run": manifest.get("complete_artifact_audit_run"),
         "manifest_artifacts": EXPECTED_ARTIFACTS, "manifest_files": EXPECTED_FILES,

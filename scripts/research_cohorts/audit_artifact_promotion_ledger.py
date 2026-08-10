@@ -33,8 +33,7 @@ def main() -> None:
     expected = {(int(r["artifact_id"]), str(r["file"])): r for r in candidate_rows}
     if len(expected) != len(candidate_rows):
         raise SystemExit("manifest contains duplicate candidate artifact/file keys")
-    extracted: dict[tuple[int, str], dict] = {}
-    duplicate_extracts: set[tuple[int, str]] = set()
+    evidence: dict[tuple[int, str], list[dict]] = {}
     candidate_keys = set(expected)
     for path in args.extract_ledger:
         for line in path.read_text(encoding="utf-8").splitlines():
@@ -47,10 +46,18 @@ def main() -> None:
             # candidate promotion ledger.
             if key not in candidate_keys:
                 continue
-            if key in extracted:
-                duplicate_extracts.add(key)
-            else:
-                extracted[key] = row
+            evidence.setdefault(key, []).append(row)
+    status_priority = {
+        "candidate_extracted": 3,
+        "structured_evidence_extracted": 3,
+        "archive_download_failed": 1,
+        "candidate_file_missing_or_ambiguous": 0,
+    }
+    extracted = {
+        key: max(rows, key=lambda row: status_priority.get(row.get("status"), 0))
+        for key, rows in evidence.items()
+    }
+    duplicate_extracts = {key for key, rows in evidence.items() if len(rows) > 1}
 
     exact_sources = set()
     exact_list = args.comparison / "exact_source_files.txt"
