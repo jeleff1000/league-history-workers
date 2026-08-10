@@ -1,6 +1,9 @@
 name: Audit research artifacts for canonical cache improvements
 
 on:
+  push:
+    paths:
+      - .github/research_artifact_candidate_audit.trigger
   workflow_dispatch:
     inputs:
       audit_run_id:
@@ -26,10 +29,10 @@ permissions:
 
 env:
   GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT || github.token }}
-  AUDIT_RUN_ID: ${{ inputs.audit_run_id }}
-  BASE_CACHE_KEY: ${{ inputs.base_cache_key }}
-  SHARD_COUNT: ${{ inputs.shard_count }}
-  APPLY: ${{ inputs.apply }}
+  AUDIT_RUN_ID: ${{ inputs.audit_run_id || '31337901490' }}
+  BASE_CACHE_KEY: ${{ inputs.base_cache_key || 'research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613' }}
+  SHARD_COUNT: ${{ inputs.shard_count || '256' }}
+  APPLY: ${{ inputs.apply || 'false' }}
 
 jobs:
   manifest:
@@ -43,9 +46,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v5
         with:
-          name: research-artifact-audit-complete-${{ inputs.audit_run_id }}
+          name: research-artifact-audit-complete-${{ env.AUDIT_RUN_ID }}
           path: audit
-          run-id: ${{ inputs.audit_run_id }}
+          run-id: ${{ env.AUDIT_RUN_ID }}
           repository: ${{ github.repository }}
           github-token: ${{ secrets.PRIVATE_REPO_PAT || github.token }}
       - id: make
@@ -253,7 +256,7 @@ jobs:
 
   apply:
     needs: compare
-    if: ${{ inputs.apply == 'true' && needs.compare.result == 'success' }}
+    if: ${{ env.APPLY == 'true' && needs.compare.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 355
     steps:
