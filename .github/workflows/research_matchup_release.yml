@@ -160,7 +160,19 @@ jobs:
           assert cmc_weekly >= 5000, {'cmc_weekly_rows': cmc_weekly}
           assert cmc_season >= 300, {'cmc_season_rows': cmc_season}
           assert cmc_wk1 and cmc_wk1[0] >= 300, {'cmc_week1_n_leagues': cmc_wk1}
-          print({'ppr_lanes':sorted(ppr_lanes),'td_lanes':sorted(td_lanes),'format_lanes':format_lanes,'request_lane_rows':dims,'cmc_weekly_rows':cmc_weekly,'cmc_season_rows':cmc_season,'cmc_week1_n_leagues':cmc_wk1[0]})
+          cmc_career = c.execute("""
+            SELECT n_years, active_weeks, inactive_weeks,
+                   expected_champs, expected_playoffs
+            FROM research_matchup_adaptive_career
+            WHERE NFL_player_id='00-0033280' AND q_teams='12t'
+              AND q_roster='flx' AND q_ppr='half' AND q_td='4pt'
+              AND q_bracket='6po' AND q_league_type='ALL'
+              AND q_lineup_mode='ALL'
+          """).fetchone()
+          assert cmc_career and cmc_career[0] >= 9, {'cmc_career': cmc_career}
+          assert cmc_career[1] >= 100, {'cmc_career': cmc_career}
+          assert cmc_career[3] is not None and cmc_career[4] is not None, {'cmc_career': cmc_career}
+          print({'ppr_lanes':sorted(ppr_lanes),'td_lanes':sorted(td_lanes),'format_lanes':format_lanes,'request_lane_rows':dims,'cmc_weekly_rows':cmc_weekly,'cmc_season_rows':cmc_season,'cmc_week1_n_leagues':cmc_wk1[0],'cmc_career':cmc_career})
           PY
       - name: Publish adaptive tables to Fly
         if: ${{ github.event_name == 'workflow_run' || github.event_name == 'push' || inputs.publish }}
