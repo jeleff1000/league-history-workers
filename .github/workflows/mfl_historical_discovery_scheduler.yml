@@ -100,10 +100,18 @@ jobs:
         env:
           COMPLETED_START: ${{ steps.resolve.outputs.completed_start_year }}
           COMPLETED_END: ${{ steps.resolve.outputs.completed_end_year }}
+          COMPLETED_ID_START: ${{ steps.resolve.outputs.id_start }}
           COMPLETED_ID_END: ${{ steps.resolve.outputs.id_end }}
         run: |
           set -euo pipefail
-          if [ "$COMPLETED_ID_END" -lt 80000 ]; then
+          if [ "$COMPLETED_ID_START" -eq 0 ] && [ "$COMPLETED_ID_END" -gt 999 ] && [ "$COMPLETED_ID_END" -lt 80000 ]; then
+            # Legacy runs scanned 0-10000 in one pass. Resume at 1000 so the
+            # new 1000-ID band campaign fills, rather than skips, the gap.
+            next_start_year=$COMPLETED_START
+            next_end_year=$COMPLETED_END
+            next_id_start=1000
+            next_id_end=1999
+          elif [ "$COMPLETED_ID_END" -lt 80000 ]; then
             next_start_year=$COMPLETED_START
             next_end_year=$COMPLETED_END
             next_id_start=$((COMPLETED_ID_END + 1))
