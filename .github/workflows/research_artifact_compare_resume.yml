@@ -60,22 +60,17 @@ jobs:
             core.setOutput('ids_a', ids.slice(0, 200).join(','));
             core.setOutput('ids_b', ids.slice(200).join(','));
             core.info(`verified ${matches.length} extraction artifacts`);
-      - name: Reuse extracted candidate shards 1-200
-        uses: actions/download-artifact@v5
-        with:
-          artifact-ids: ${{ steps.source_extracts.outputs.ids_a }}
-          path: candidates
-          merge-multiple: false
-          run-id: ${{ inputs.source_run_id }}
-          github-token: ${{ github.token }}
-      - name: Reuse extracted candidate shards 201-256
-        uses: actions/download-artifact@v5
-        with:
-          artifact-ids: ${{ steps.source_extracts.outputs.ids_b }}
-          path: candidates
-          merge-multiple: false
-          run-id: ${{ inputs.source_run_id }}
-          github-token: ${{ github.token }}
+      - name: Reuse all extracted candidate shards by known ID
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EXTRACT_IDS_A: ${{ steps.source_extracts.outputs.ids_a }}
+          EXTRACT_IDS_B: ${{ steps.source_extracts.outputs.ids_b }}
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/download_workflow_artifacts.py \
+            --repo "$GITHUB_REPOSITORY" --run-id "${{ inputs.source_run_id }}" \
+            --ids "${EXTRACT_IDS_A},${EXTRACT_IDS_B}" --out candidates
       - uses: actions/cache/restore@v5
         with:
           path: research_public_lake
@@ -187,14 +182,17 @@ jobs:
           merge-multiple: false
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ github.token }}
-      - name: Reuse extraction ledgers 201-256
-        uses: actions/download-artifact@v5
-        with:
-          artifact-ids: ${{ needs.compare.outputs.extract_ids_b }}
-          path: extracts
-          merge-multiple: false
-          run-id: ${{ inputs.source_run_id }}
-          github-token: ${{ github.token }}
+      - name: Reuse all extraction ledgers by known ID
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EXTRACT_IDS_A: ${{ needs.compare.outputs.extract_ids_a }}
+          EXTRACT_IDS_B: ${{ needs.compare.outputs.extract_ids_b }}
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/download_workflow_artifacts.py \
+            --repo "$GITHUB_REPOSITORY" --run-id "${{ inputs.source_run_id }}" \
+            --ids "${EXTRACT_IDS_A},${EXTRACT_IDS_B}" --out extracts
       - name: Reconcile every artifact and file
         shell: bash
         run: |
