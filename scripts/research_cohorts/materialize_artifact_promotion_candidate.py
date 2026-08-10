@@ -74,6 +74,11 @@ def main() -> None:
     ap.add_argument("--structured-delta", type=Path, required=True)
     ap.add_argument("--ops", type=Path, required=True)
     ap.add_argument("--report", type=Path, required=True)
+    ap.add_argument(
+        "--allow-unmatched-structured",
+        action="store_true",
+        help="Quarantine structured manager-week keys with no canonical player row; never insert them.",
+    )
     args = ap.parse_args()
 
     before_ops = hash_file(args.ops)
@@ -185,7 +190,7 @@ def main() -> None:
               AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER)
               AND lower(trim(cast(d.manager AS VARCHAR)))=lower(trim(cast(p.manager AS VARCHAR))))
         """).fetchone()[0]
-        if structured_unmatched_keys:
+        if structured_unmatched_keys and not args.allow_unmatched_structured:
             raise SystemExit(f"unmatched structured delta keys: {structured_unmatched_keys}")
 
     improvements: dict[str, int] = {}

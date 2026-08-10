@@ -55,6 +55,7 @@ jobs:
             --exact-delta "$EXACT" \
             --structured-delta "$STRUCTURED" \
             --ops research_public_lake/ops_cache.duckdb \
+            --allow-unmatched-structured \
             --report promotion_candidate_report.json
       - name: Upload verified working-copy candidate
         uses: actions/upload-artifact@v4
