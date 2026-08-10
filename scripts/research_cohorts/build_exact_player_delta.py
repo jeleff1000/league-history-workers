@@ -52,7 +52,7 @@ def _read_union(con: duckdb.DuckDBPyConnection, paths: Iterable[Path]) -> None:
     values = ",".join(_lit(p) for p in paths)
     con.execute(
         "CREATE OR REPLACE TEMP VIEW source_raw AS "
-        f"SELECT * FROM read_parquet([{values}], union_by_name=true)"
+        f"SELECT * FROM read_parquet([{values}], union_by_name=true, filename=true)"
     )
 
 
@@ -77,7 +77,7 @@ def build_delta(base: Path, sources: list[Path], out: Path, insert_out: Path | N
     missing_source = sorted(required - source_cols)
     if missing_source:
         raise ValueError(f"exact source schema missing join fields: {missing_source}")
-    source_expr = []
+    source_expr = ["CAST(s.filename AS VARCHAR) AS source_file"] if "filename" in source_cols else ["CAST(NULL AS VARCHAR) AS source_file"]
     for field in KEY_COLUMNS:
         source_expr.append(f"CAST(s.{_ident(field)} AS VARCHAR) AS {_ident(field)}")
     for field, typ in SIGNAL_TYPES.items():
@@ -113,7 +113,7 @@ def build_delta(base: Path, sources: list[Path], out: Path, insert_out: Path | N
     )
     con.execute(f"""
         CREATE OR REPLACE TEMP VIEW matched AS
-        SELECT p.rowid AS player_rowid, p.*,
+        SELECT p.rowid AS player_rowid, s.source_file, p.*,
                s.source_win, s.source_loss, s.source_tie,
                s.source_team_points, s.source_is_playoffs, s.source_has_po_signal,
                s.source_champion, s.source_final_playoff_seed,
@@ -132,7 +132,7 @@ def build_delta(base: Path, sources: list[Path], out: Path, insert_out: Path | N
     out.parent.mkdir(parents=True, exist_ok=True)
     con.execute(f"""
         COPY (
-          SELECT player_rowid, db_name, year, week, NFL_player_id, manager,
+          SELECT player_rowid, source_file, db_name, year, week, NFL_player_id, manager,
                  team_key, team_name, platform, source_win, source_loss,
                  source_tie, source_team_points, source_is_playoffs AS source_playoffs,
                  source_has_po_signal, source_champion, source_final_playoff_seed,

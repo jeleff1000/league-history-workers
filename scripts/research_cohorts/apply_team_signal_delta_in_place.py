@@ -166,6 +166,18 @@ def main() -> None:
         "inserted_rows": int(new_count),
         "improvements_by_field": {k:int(v) for k,v in improvements.items()},
     }
+    if "source_file" in dcols:
+        report["source_file_rows"] = {
+            str(r[0]): int(r[1]) for r in con.execute(
+                "SELECT source_file, COUNT(*) FROM delta_raw GROUP BY 1 ORDER BY 1"
+            ).fetchall()
+        }
+    if "source_files" in dcols:
+        report["source_file_rows"] = {
+            str(r[0]): int(r[1]) for r in con.execute(
+                "SELECT source_files, COUNT(*) FROM delta_raw GROUP BY 1 ORDER BY 1"
+            ).fetchall()
+        }
     args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, sort_keys=True))
 

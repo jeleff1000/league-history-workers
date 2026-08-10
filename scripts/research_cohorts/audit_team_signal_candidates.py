@@ -55,7 +55,7 @@ def main() -> None:
     paths = [str(p.resolve()).replace("'", "''") for p in files]
     con.execute(
         "CREATE OR REPLACE TEMP VIEW source_raw AS "
-        "SELECT * FROM read_parquet([" + ",".join("'" + p + "'" for p in paths) + "], union_by_name=true)"
+        "SELECT * FROM read_parquet([" + ",".join("'" + p + "'" for p in paths) + "], union_by_name=true, filename=true)"
     )
     cols = {r[0] for r in con.execute("DESCRIBE source_raw").fetchall()}
     required = {"db_name", "year", "week", "team_key"}
@@ -86,6 +86,7 @@ def main() -> None:
         MAX(CASE WHEN COALESCE({expr('is_championship','INTEGER')},0)=1
                       AND COALESCE({expr('champion','INTEGER')},0)=1 THEN 1 ELSE 0 END) source_champion,
         MAX({expr('final_playoff_seed','INTEGER')}) FILTER (WHERE {expr('final_playoff_seed','INTEGER')} IS NOT NULL) source_final_playoff_seed,
+        STRING_AGG(DISTINCT CAST(filename AS VARCHAR), '|') source_files,
         COUNT(*) source_rows
       FROM source_raw
       GROUP BY 1,2,3,4,5,6
@@ -112,6 +113,7 @@ def main() -> None:
       CREATE OR REPLACE TEMP TABLE player_matches AS
       SELECT p.rowid player_rowid, s.source_win, s.source_loss, s.source_tie, s.source_team_points,
              s.source_playoffs, s.source_champion, s.source_final_playoff_seed,
+             s.source_files,
              CASE WHEN s.team_key IS NOT NULL THEN 'team_key' ELSE 'manager_team' END join_method
       FROM public.player_fantasy p
       JOIN source_signals s
@@ -158,7 +160,7 @@ def main() -> None:
                p.final_playoff_seed canonical_final_playoff_seed,m.source_final_playoff_seed,
                p.made_playoffs canonical_made_playoffs,
                CASE WHEN m.source_final_playoff_seed IS NOT NULL THEN 1 ELSE NULL END source_made_playoffs,
-               m.join_method
+               m.source_files,m.join_method
         FROM public.player_fantasy p JOIN player_matches m ON p.rowid=m.player_rowid
         WHERE {" OR ".join(delta_filters)}
       ) TO ? (FORMAT PARQUET)
