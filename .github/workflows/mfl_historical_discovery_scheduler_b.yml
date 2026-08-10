@@ -2,6 +2,13 @@ name: MFL Historical Discovery Scheduler B
 
 on:
   workflow_dispatch:
+  workflow_run:
+    workflows:
+      - MFL Historical Discovery Scheduler A
+      - MFL Historical Gap Fill (1997-2006)
+      - MFL Historical Resume 2005-06 (6000-6999)
+      - MFL Historical Resume 2005-06 (7000-7999)
+    types: [completed]
 
 permissions:
   actions: write
