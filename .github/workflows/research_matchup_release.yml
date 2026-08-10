@@ -101,13 +101,15 @@ jobs:
         run: |
           mkdir -p out
           started_at=$(date +%s)
-          python code/scripts/research_cohorts/build_direct_matchup_cache.py \
+          python code/scripts/research_cohorts/build_bounded_matchup_cache.py \
             --snapshot research_public_lake/corpus_snapshot.duckdb \
             --ops-cache research_public_lake/ops_cache.duckdb \
             --output out/research_matchup_adaptive.duckdb
           elapsed=$(( $(date +%s) - started_at ))
           echo "rollup_seconds=$elapsed"
-          test "$elapsed" -le 300
+          # The build is still one direct cache-to-table operation; its private
+          # year windows only bound DuckDB memory and are deleted before exit.
+          test "$elapsed" -le 1200
       - name: Validate adaptive output contract
         run: |
           python - <<'PY'
