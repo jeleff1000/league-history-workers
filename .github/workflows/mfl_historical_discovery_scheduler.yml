@@ -17,7 +17,6 @@ on:
       - MFL Historical Discovery (250 contiguous ID shards)
       - MFL Historical Discovery Scheduler B
     types: [completed]
-    branches: [main]
 permissions:
   actions: write
   contents: read
