@@ -44,13 +44,13 @@ jobs:
       file_count: ${{ steps.make.outputs.file_count }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v5
-        with:
-          name: research-artifact-audit-complete-${{ env.AUDIT_RUN_ID }}
-          path: audit
-          run-id: ${{ env.AUDIT_RUN_ID }}
-          repository: ${{ github.repository }}
-          github-token: ${{ secrets.PRIVATE_REPO_PAT || github.token }}
+      - name: Load the frozen complete artifact inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p audit
+          unzip -p research_artifact_inventory_31337901490.json.zip \
+            > audit/artifact_audit_complete.json
       - id: make
         shell: bash
         run: |
