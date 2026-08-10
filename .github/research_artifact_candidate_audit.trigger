@@ -1,1 +1,1 @@
-api-authenticated-blob-download-v16-exact-union-safe-reconcile
+manifest-id-only-download-v17-exact-union-safe-reconcile

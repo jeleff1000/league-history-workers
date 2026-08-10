@@ -159,15 +159,6 @@ jobs:
           import duckdb
           shard=int(sys.argv[1]); buckets=json.loads(Path('manifest/candidate_artifact_shards.json').read_text()); packages=buckets[shard]
           token=os.environ['GH_TOKEN']; repo=os.environ['GITHUB_REPOSITORY']
-          opener=urllib.request.build_opener()
-          def get_json(url):
-              req=urllib.request.Request(url,headers={'Authorization':f'Bearer {token}','Accept':'application/vnd.github+json','User-Agent':'research-artifact-audit'})
-              for attempt in range(6):
-                  try:
-                      with opener.open(req,timeout=90) as resp: return json.load(resp)
-                  except (urllib.error.HTTPError, urllib.error.URLError):
-                      if attempt == 5: raise
-                      import time; time.sleep(2 ** attempt)
           def download_artifact(artifact_id, dest):
               url=f'https://api.github.com/repos/{repo}/actions/artifacts/{artifact_id}/zip'
               req=urllib.request.Request(url,headers={'Authorization':f'Bearer {token}','Accept':'application/vnd.github+json','User-Agent':'research-artifact-audit'})
@@ -197,20 +188,10 @@ jobs:
           ledger=[]
           for package in packages:
               run_id=int(package['workflow_run_id']); run_root=Path('raw')/str(run_id); run_root.mkdir(parents=True,exist_ok=True)
-              # List this source run once, then download by known artifact ID.
-              # gh run download lists the same run once per --name and caused
-              # the 9,479-artifact audit to hit GitHub's API rate limit.
-              source=[]; page=1
-              while True:
-                  payload=get_json(f'https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100&page={page}')
-                  source.extend(payload.get('artifacts',[]))
-                  if len(source) >= int(payload.get('total_count',len(source))) or not payload.get('artifacts'): break
-                  page += 1
-              by_name={str(a['name']):a for a in source}
+              # The frozen manifest already contains the exact artifact IDs.
+              # Do not enumerate the source run: that API call was the source
+              # of the repeated rate-limit failures in the prior implementation.
               for item in package['artifacts']:
-                  a=by_name.get(str(item['artifact']))
-                  if not a or int(a['id']) != int(item['artifact_id']):
-                      raise SystemExit(f"artifact identity mismatch run={run_id} name={item['artifact']} expected={item['artifact_id']} actual={a and a.get('id')}")
                   archive=Path('raw')/f"{item['artifact_id']}.zip"
                   download_artifact(int(item['artifact_id']),archive)
                   target=run_root/item['artifact']; target.mkdir(parents=True,exist_ok=True)
