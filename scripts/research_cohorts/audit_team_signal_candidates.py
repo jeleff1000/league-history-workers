@@ -59,7 +59,13 @@ def main() -> None:
     # player cells.  Championship credit requires the explicit championship
     # marker; a playoff row alone never becomes a championship.
     def expr(col: str, typ: str = "VARCHAR") -> str:
-        return f"CAST({col} AS {typ})" if col in cols else f"CAST(NULL AS {typ})"
+        return f"TRY_CAST({col} AS {typ})" if col in cols else f"CAST(NULL AS {typ})"
+
+    def flag_expr(col: str) -> str:
+        if col not in cols:
+            return "CAST(NULL AS INTEGER)"
+        raw = f"LOWER(TRIM(CAST({col} AS VARCHAR)))"
+        return f"CASE WHEN {raw} IN ('1','true','t','yes','y') THEN 1 WHEN {raw} IN ('0','false','f','no','n') THEN 0 ELSE TRY_CAST({col} AS INTEGER) END"
 
     con.execute(f"""
       CREATE OR REPLACE TEMP TABLE source_signals AS
@@ -70,13 +76,13 @@ def main() -> None:
         NULLIF(TRIM(CAST(team_key AS VARCHAR)), '') team_key,
         NULLIF(LOWER(TRIM(CAST(manager AS VARCHAR))), '') manager_key,
         NULLIF(LOWER(TRIM(CAST(team_name AS VARCHAR))), '') team_name_key,
-        MAX({expr('win','INTEGER')}) FILTER (WHERE {expr('win','INTEGER')} IS NOT NULL) source_win,
-        MAX({expr('loss','INTEGER')}) FILTER (WHERE {expr('loss','INTEGER')} IS NOT NULL) source_loss,
-        MAX({expr('tie','INTEGER')}) FILTER (WHERE {expr('tie','INTEGER')} IS NOT NULL) source_tie,
+        MAX({flag_expr('win')}) FILTER (WHERE {flag_expr('win')} IS NOT NULL) source_win,
+        MAX({flag_expr('loss')}) FILTER (WHERE {flag_expr('loss')} IS NOT NULL) source_loss,
+        MAX({flag_expr('tie')}) FILTER (WHERE {flag_expr('tie')} IS NOT NULL) source_tie,
         MAX({expr('team_points','DOUBLE')}) FILTER (WHERE {expr('team_points','DOUBLE')} IS NOT NULL) source_team_points,
-        MAX(CASE WHEN COALESCE({expr('is_playoffs','INTEGER')},0)=1 THEN 1 ELSE 0 END) source_playoffs,
-        MAX(CASE WHEN COALESCE({expr('is_championship','INTEGER')},0)=1
-                      AND COALESCE({expr('champion','INTEGER')},0)=1 THEN 1 ELSE 0 END) source_champion,
+        MAX(CASE WHEN COALESCE({flag_expr('is_playoffs')},0)=1 THEN 1 ELSE 0 END) source_playoffs,
+        MAX(CASE WHEN COALESCE({flag_expr('is_championship')},0)=1
+                      AND COALESCE({flag_expr('champion')},0)=1 THEN 1 ELSE 0 END) source_champion,
         MAX({expr('final_playoff_seed','INTEGER')}) FILTER (WHERE {expr('final_playoff_seed','INTEGER')} IS NOT NULL) source_final_playoff_seed,
         STRING_AGG(DISTINCT CAST(filename AS VARCHAR), '|') source_files,
         COUNT(*) source_rows
