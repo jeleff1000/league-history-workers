@@ -24,6 +24,8 @@ jobs:
   compare:
     runs-on: ubuntu-24.04
     timeout-minutes: 355
+    outputs:
+      extract_ids: ${{ steps.source_extracts.outputs.ids }}
     steps:
       - uses: actions/checkout@v4
       - name: Reuse frozen manifest from extraction run
@@ -33,10 +35,29 @@ jobs:
           path: manifest
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ github.token }}
+      - name: Enumerate every extracted shard artifact
+        id: source_extracts
+        uses: actions/github-script@v7
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        with:
+          script: |
+            const runId = Number(process.env.SOURCE_RUN_ID);
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {owner: context.repo.owner, repo: context.repo.repo, run_id: runId, per_page: 100}
+            );
+            const prefix = `research-artifact-candidate-extract-${runId}-`;
+            const matches = artifacts.filter(a => a.name.startsWith(prefix) && !a.expired);
+            if (matches.length !== 256) {
+              throw new Error(`expected 256 extraction artifacts for run ${runId}; found ${matches.length}`);
+            }
+            core.setOutput('ids', matches.map(a => String(a.id)).join(','));
+            core.info(`verified ${matches.length} extraction artifacts`);
       - name: Reuse all extracted candidate shards
         uses: actions/download-artifact@v5
         with:
-          pattern: research-artifact-candidate-extract-${{ inputs.source_run_id }}-*
+          artifact-ids: ${{ steps.source_extracts.outputs.ids }}
           path: candidates
           merge-multiple: false
           run-id: ${{ inputs.source_run_id }}
@@ -147,7 +168,7 @@ jobs:
       - name: Reuse extraction ledgers
         uses: actions/download-artifact@v5
         with:
-          pattern: research-artifact-candidate-extract-${{ inputs.source_run_id }}-*
+          artifact-ids: ${{ needs.compare.outputs.extract_ids }}
           path: extracts
           merge-multiple: false
           run-id: ${{ inputs.source_run_id }}
