@@ -30,6 +30,13 @@ TEAM_FIELDS = {
     "final_playoff_seed": "source_final_playoff_seed", "made_playoffs": "source_made_playoffs",
     "loss": "source_loss", "tie": "source_tie",
 }
+EXACT_FIELDS = {
+    "win": "source_win", "loss": "source_loss", "tie": "source_tie",
+    "team_points": "source_team_points", "is_playoffs": "source_playoffs",
+    "has_po_signal": "source_has_po_signal", "champion": "source_champion",
+    "final_playoff_seed": "source_final_playoff_seed", "made_playoffs": "source_made_playoffs",
+    "clutch_equity": "source_clutch_equity",
+}
 KEY = ["db_name", "year", "week", "NFL_player_id", "platform", "manager", "team_key", "team_name"]
 
 
@@ -119,7 +126,7 @@ def main() -> None:
     if exact_path_obj.exists() and exact_path_obj.stat().st_size > 0:
         con.execute(f"CREATE OR REPLACE TEMP VIEW exact_delta AS SELECT * FROM read_parquet('{exact_path}')")
         exact_cols = relation_columns(con, "exact_delta")
-        missing_exact = sorted(set(BASE_COLUMNS) - set(exact_cols))
+        missing_exact = sorted((set(KEY) | set(EXACT_FIELDS.values())) - set(exact_cols))
         if missing_exact:
             raise SystemExit(f"exact delta schema missing: {missing_exact}")
         exact_rows = con.execute("SELECT COUNT(*) FROM exact_delta").fetchone()[0]
@@ -146,10 +153,10 @@ def main() -> None:
             f"SELECT COUNT(*) FROM team_matches WHERE {q(field)} IS NULL AND {q(source)} IS NOT NULL"
         ).fetchone()[0]
     if exact_rows:
-        for field in BASE_COLUMNS:
-            if field in KEY:
+        for field, source in EXACT_FIELDS.items():
+            if field not in pcols or source not in exact_cols:
                 continue
-            count = con.execute(f"SELECT COUNT(*) FROM exact_matches WHERE {q(field)} IS NULL AND {q(field)} IS NOT NULL").fetchone()[0]
+            count = con.execute(f"SELECT COUNT(*) FROM exact_matches WHERE {q(field)} IS NULL AND {q(source)} IS NOT NULL").fetchone()[0]
             if count:
                 improvements[f"exact_{field}"] = count
 
@@ -162,7 +169,7 @@ def main() -> None:
         if assignments:
             con.execute(f"UPDATE public.player_fantasy p SET {', '.join(assignments)} FROM team_matches m WHERE p.rowid=m.player_rowid")
         if exact_rows:
-            exact_assignments = [f"{q(c)}=CASE WHEN p.{q(c)} IS NULL THEN e.{q(c)} ELSE p.{q(c)} END" for c in BASE_COLUMNS if c not in KEY]
+            exact_assignments = [f"{q(field)}=CASE WHEN p.{q(field)} IS NULL THEN e.{q(source)} ELSE p.{q(field)} END" for field, source in EXACT_FIELDS.items() if field in pcols and source in exact_cols]
             con.execute(f"UPDATE public.player_fantasy p SET {', '.join(exact_assignments)} FROM exact_matches e WHERE p.rowid=e.player_rowid")
         con.execute("COMMIT")
     except Exception:
@@ -178,6 +185,13 @@ def main() -> None:
         ).fetchone()[0]
         if readback[field] != 0:
             raise SystemExit(f"readback failed for {field}: {readback[field]} source cells still null")
+    for field, source in EXACT_FIELDS.items():
+        if exact_rows and field in pcols and source in exact_cols:
+            readback[f"exact_{field}"] = con.execute(
+                f"SELECT COUNT(*) FROM exact_matches m JOIN public.player_fantasy p ON p.rowid=m.player_rowid WHERE m.{q(source)} IS NOT NULL AND p.{q(field)} IS NULL"
+            ).fetchone()[0]
+            if readback[f"exact_{field}"] != 0:
+                raise SystemExit(f"exact readback failed for {field}: {readback[f'exact_{field}']} source cells still null")
     after_rows = con.execute("SELECT COUNT(*) FROM public.player_fantasy").fetchone()[0]
     after_schema = relation_columns(con, "public.player_fantasy")
     after_ops = hash_file(args.ops)
