@@ -206,7 +206,8 @@ jobs:
                       ledger.append({**meta,'status':'candidate_file_missing_or_ambiguous','matches':len(matches)}); continue
                     path=matches[0]
                     if meta['type']=='parquet':
-                      con=duckdb.connect(); cols=[r[0] for r in con.execute('DESCRIBE SELECT * FROM read_parquet(?)',[str(path)]).fetchall()]; rows=con.execute('SELECT COUNT(*) FROM read_parquet(?)',[str(path)]).fetchone()[0]; con.close()
+                      parquet_path="'" + str(path.resolve()).replace("'", "''") + "'"
+                      con=duckdb.connect(); cols=[r[0] for r in con.execute(f'DESCRIBE SELECT * FROM read_parquet({parquet_path})').fetchall()]; rows=con.execute(f'SELECT COUNT(*) FROM read_parquet({parquet_path})').fetchone()[0]; con.close()
                       dest=Path('out/candidates')/(f"{item['artifact_id']}__{path.name}"); shutil.copy2(path,dest)
                       ledger.append({**meta,'status':'candidate_extracted','extracted_file':str(dest),'actual_rows':int(rows),'actual_columns':cols})
                     else:
@@ -261,7 +262,8 @@ jobs:
           files=sorted(Path('candidates').rglob('*.parquet'))
           by=[]
           for f in files:
-              cols=[r[0] for r in con.execute('DESCRIBE SELECT * FROM read_parquet(?)',[str(f)]).fetchall()]
+              parquet_path="'" + str(f.resolve()).replace("'", "''") + "'"
+              cols=[r[0] for r in con.execute(f'DESCRIBE SELECT * FROM read_parquet({parquet_path})').fetchall()]
               by.append((str(f),set(cols)))
           exact=[f for f,c in by if set(base_canonical)<=c and len(c)>=len(base_canonical)]
           team=[f for f,c in by if {'db_name','year','week','team_key'}<=c and (c & {'win','team_points','is_playoffs','champion','has_po_signal','made_playoffs'}) and f not in exact]
@@ -270,7 +272,8 @@ jobs:
           summary={'cache_mutated':False,'new_lineage':False,'canonical_schema_unchanged':True,'cache_player_columns':pcols,'cohort_dimension_columns':cohort_columns,'optional_player_columns':optional_present,'candidate_parquet_files':len(files),'exact_files':len(exact),'team_signal_files':len(team),'player_signal_files':len(player),'settings_files':sum(1 for f,c in by if {'db_name','year'}<=c and (c & {'pass_td_fill','playoff_teams_fill','roster_FLX_fill','roster_SUPER_FLEX_fill','roster_IDP_fill','best_ball_fill'}))}
           # Exact player comparison. Null fills are the only automatic promotion class.
           if exact:
-              con.execute('CREATE OR REPLACE TEMP VIEW exact_source AS SELECT * FROM read_parquet(?, union_by_name=true)',[exact])
+              exact_paths="[" + ",".join("'" + str(Path(f).resolve()).replace("'", "''") + "'" for f in exact) + "]"
+              con.execute(f'CREATE OR REPLACE TEMP VIEW exact_source AS SELECT * FROM read_parquet({exact_paths}, union_by_name=true)')
               fallback='COALESCE('+','.join(f"NULLIF(TRIM(CAST(s.\"{c}\" AS VARCHAR)), '')" for c in ['NFL_player_id','sleeper_player_id','fleaflicker_player_id','mfl_player_id','espn_player_id','yahoo_player_id'])+')'
               pid=f"CASE LOWER(NULLIF(TRIM(CAST(s.\"platform\" AS VARCHAR)),'')) WHEN 'sleeper' THEN COALESCE(NULLIF(TRIM(CAST(s.\"sleeper_player_id\" AS VARCHAR)),''),{fallback}) WHEN 'fleaflicker' THEN COALESCE(NULLIF(TRIM(CAST(s.\"fleaflicker_player_id\" AS VARCHAR)),''),{fallback}) WHEN 'mfl' THEN COALESCE(NULLIF(TRIM(CAST(s.\"mfl_player_id\" AS VARCHAR)),''),{fallback}) ELSE {fallback} END"
               key=f"CONCAT_WS('|',CAST(s.\"db_name\" AS VARCHAR),CAST(s.\"year\" AS VARCHAR),CAST(s.\"week\" AS VARCHAR),CAST(s.\"platform\" AS VARCHAR),CAST(s.\"manager\" AS VARCHAR),CAST(s.\"team_name\" AS VARCHAR),CAST(s.\"team_key\" AS VARCHAR),CAST(s.\"fantasy_position\" AS VARCHAR),{pid})"

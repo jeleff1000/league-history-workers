@@ -35,7 +35,8 @@ def main() -> None:
     all_files = sorted(args.candidates.rglob("*.parquet"))
     files = []
     for path in all_files:
-        cols = {r[0] for r in con.execute("DESCRIBE SELECT * FROM read_parquet(?)", [str(path)]).fetchall()}
+        parquet_path = "'" + str(path.resolve()).replace("'", "''") + "'"
+        cols = {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet({parquet_path})").fetchall()}
         # Exact/player-grain artifacts are audited by the separate player pass;
         # this pass must consume only team/week-grain sources.
         if {"db_name", "year", "week", "team_key"}.issubset(cols) and "NFL_player_id" not in cols:

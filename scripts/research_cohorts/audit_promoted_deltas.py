@@ -33,7 +33,8 @@ def main() -> None:
     total_unmatched = 0
     for delta in sorted(args.deltas):
         path = str(delta.resolve()).replace("'", "''")
-        con.execute("CREATE OR REPLACE TEMP VIEW d AS SELECT * FROM read_parquet(?)", [path])
+        parquet_path = "'" + str(path.resolve()).replace("'", "''") + "'"
+        con.execute(f"CREATE OR REPLACE TEMP VIEW d AS SELECT * FROM read_parquet({parquet_path})")
         dcols = {r[0] for r in con.execute("DESCRIBE d").fetchall()}
         missing_keys = sorted(set(KEYS) - dcols)
         if missing_keys:
@@ -72,7 +73,8 @@ def main() -> None:
     insert_report = None
     if args.new_rows and args.new_rows.exists():
         path = str(args.new_rows.resolve()).replace("'", "''")
-        con.execute("CREATE OR REPLACE TEMP VIEW n AS SELECT * FROM read_parquet(?)", [path])
+        parquet_path = "'" + str(path.resolve()).replace("'", "''") + "'"
+        con.execute(f"CREATE OR REPLACE TEMP VIEW n AS SELECT * FROM read_parquet({parquet_path})")
         ncols = [r[0] for r in con.execute("DESCRIBE n").fetchall()]
         canonical = [r[0] for r in con.execute("DESCRIBE public.player_fantasy").fetchall()]
         if ncols != canonical:
