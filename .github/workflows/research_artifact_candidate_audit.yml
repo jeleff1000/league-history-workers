@@ -235,6 +235,15 @@ jobs:
           Path('out/cache_candidate_comparison.json').write_text(json.dumps(summary,indent=2,sort_keys=True)+'\n')
           con.close(); print(json.dumps(summary,sort_keys=True))
           PY
+      - name: Compare team/week signals with canonical player rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/team_signal
+          python scripts/research_cohorts/audit_team_signal_candidates.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --candidates candidates \
+            --out out/team_signal
       - uses: actions/upload-artifact@v4
         with:
           name: research-artifact-cache-comparison-${{ github.run_id }}
