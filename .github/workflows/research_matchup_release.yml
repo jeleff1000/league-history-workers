@@ -101,6 +101,9 @@ jobs:
         run: |
           mkdir -p out
           started_at=$(date +%s)
+          (while true; do echo "rollup heartbeat $(date -u +%FT%TZ)"; sleep 60; done) &
+          heartbeat_pid=$!
+          trap 'kill "$heartbeat_pid" 2>/dev/null || true' EXIT
           python code/scripts/research_cohorts/build_bounded_matchup_cache.py \
             --snapshot research_public_lake/corpus_snapshot.duckdb \
             --ops-cache research_public_lake/ops_cache.duckdb \
