@@ -39,6 +39,8 @@ def main() -> None:
     forbidden = {'opponent_points','is_championship','is_active','is_playoffs_bf','made_po_bf','made_po'} & set(pcols)
     if missing or len(cohort_columns) != 7 or forbidden:
         raise SystemExit(f"canonical player schema mismatch: missing={sorted(missing)} cohort_columns={cohort_columns} optional={[c for c in pcols if c in optional]} forbidden={sorted(forbidden)}")
+    canonical_loss = "p.loss" if "loss" in pcols else "CAST(NULL AS INTEGER)"
+    canonical_tie = "p.tie" if "tie" in pcols else "CAST(NULL AS INTEGER)"
     all_files = sorted(args.candidates.rglob("*.parquet"))
     files = []
     for path in all_files:
@@ -77,6 +79,8 @@ def main() -> None:
         NULLIF(LOWER(TRIM(CAST(manager AS VARCHAR))), '') manager_key,
         NULLIF(LOWER(TRIM(CAST(team_name AS VARCHAR))), '') team_name_key,
         MAX({expr('win','INTEGER')}) FILTER (WHERE {expr('win','INTEGER')} IS NOT NULL) source_win,
+        MAX({expr('loss','INTEGER')}) FILTER (WHERE {expr('loss','INTEGER')} IS NOT NULL) source_loss,
+        MAX({expr('tie','INTEGER')}) FILTER (WHERE {expr('tie','INTEGER')} IS NOT NULL) source_tie,
         MAX({expr('team_points','DOUBLE')}) FILTER (WHERE {expr('team_points','DOUBLE')} IS NOT NULL) source_team_points,
         MAX(CASE WHEN COALESCE({expr('is_playoffs','INTEGER')},0)=1 THEN 1 ELSE 0 END) source_playoffs,
         MAX(CASE WHEN COALESCE({expr('is_championship','INTEGER')},0)=1
@@ -91,9 +95,22 @@ def main() -> None:
 
     # A team-key match is authoritative.  Manager/team-name is only a fallback
     # for source rows that genuinely lack team_key, and must be unique.
-    con.execute("""
+    delta_filters = [
+        "(p.win IS NULL AND m.source_win IS NOT NULL)",
+        "(p.team_points IS NULL AND m.source_team_points IS NOT NULL)",
+        "(p.is_playoffs IS NULL AND m.source_playoffs=1)",
+        "(p.champion IS NULL AND m.source_champion=1)",
+        "(p.final_playoff_seed IS NULL AND m.source_final_playoff_seed IS NOT NULL)",
+        "(p.made_playoffs IS NULL AND m.source_final_playoff_seed IS NOT NULL)",
+    ]
+    if "loss" in pcols:
+        delta_filters.insert(1, "(p.loss IS NULL AND m.source_loss IS NOT NULL)")
+    if "tie" in pcols:
+        delta_filters.insert(2 if "loss" in pcols else 1, "(p.tie IS NULL AND m.source_tie IS NOT NULL)")
+
+    con.execute(f"""
       CREATE OR REPLACE TEMP TABLE player_matches AS
-      SELECT p.rowid player_rowid, s.source_win, s.source_team_points,
+      SELECT p.rowid player_rowid, s.source_win, s.source_loss, s.source_tie, s.source_team_points,
              s.source_playoffs, s.source_champion, s.source_final_playoff_seed,
              CASE WHEN s.team_key IS NOT NULL THEN 'team_key' ELSE 'manager_team' END join_method
       FROM public.player_fantasy p
@@ -108,6 +125,8 @@ def main() -> None:
 
     fields = {
         "win": "source_win",
+        "loss": "source_loss",
+        "tie": "source_tie",
         "team_points": "source_team_points",
         "is_playoffs": "source_playoffs",
         "champion": "source_champion",
@@ -118,6 +137,8 @@ def main() -> None:
     improvements = {}
     positive_mismatches = {}
     for field, src in fields.items():
+        if field not in pcols:
+            continue
         improvements[field] = con.execute(f"""
           SELECT COUNT(*) FROM public.player_fantasy p JOIN player_matches m ON p.rowid=m.player_rowid
           WHERE p.{field} IS NULL AND m.{src} IS NOT NULL
@@ -130,7 +151,8 @@ def main() -> None:
     con.execute("""
       COPY (
         SELECT p.db_name,p.year,p.week,p.NFL_player_id,p.manager,p.team_key,p.team_name,
-               p.platform,p.win canonical_win,m.source_win,p.team_points canonical_team_points,
+               p.platform,p.win canonical_win,m.source_win,{canonical_loss} canonical_loss,m.source_loss,
+               {canonical_tie} canonical_tie,m.source_tie,p.team_points canonical_team_points,
                m.source_team_points,p.is_playoffs canonical_is_playoffs,m.source_playoffs,
                p.champion canonical_champion,m.source_champion,
                p.final_playoff_seed canonical_final_playoff_seed,m.source_final_playoff_seed,
@@ -138,12 +160,7 @@ def main() -> None:
                CASE WHEN m.source_final_playoff_seed IS NOT NULL THEN 1 ELSE NULL END source_made_playoffs,
                m.join_method
         FROM public.player_fantasy p JOIN player_matches m ON p.rowid=m.player_rowid
-        WHERE (p.win IS NULL AND m.source_win IS NOT NULL)
-           OR (p.team_points IS NULL AND m.source_team_points IS NOT NULL)
-           OR (p.is_playoffs IS NULL AND m.source_playoffs=1)
-           OR (p.champion IS NULL AND m.source_champion=1)
-           OR (p.final_playoff_seed IS NULL AND m.source_final_playoff_seed IS NOT NULL)
-           OR (p.made_playoffs IS NULL AND m.source_final_playoff_seed IS NOT NULL)
+        WHERE {" OR ".join(delta_filters)}
       ) TO ? (FORMAT PARQUET)
     """, [str(args.out / "team_promotable_player_delta.parquet")])
     report = {

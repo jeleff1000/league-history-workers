@@ -263,3 +263,118 @@ jobs:
           path: out/*
           retention-days: 90
           compression-level: 0
+
+  reconcile:
+    needs: [manifest, extract, compare]
+    if: ${{ always() && needs.extract.result == 'success' && needs.compare.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-candidate-manifest-${{ github.run_id }}
+          path: manifest
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: research-artifact-candidate-extract-${{ github.run_id }}-*
+          path: extracts
+          merge-multiple: true
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-cache-comparison-${{ github.run_id }}
+          path: comparison
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Reconcile every manifest file and cache invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ledgers < <(find extracts -name file_candidate_ledger.jsonl -type f | sort)
+          test "${#ledgers[@]}" -gt 0
+          python scripts/research_cohorts/reconcile_artifact_cache_audit.py \
+            --manifest manifest/file_candidate_ledger.json \
+            --extract-ledger "${ledgers[@]}" \
+            --comparison comparison/cache_candidate_comparison.json \
+            --out out/complete_artifact_cache_audit.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-artifact-complete-cache-audit-${{ github.run_id }}
+          path: out/complete_artifact_cache_audit.json
+          retention-days: 90
+          compression-level: 0
+
+  apply:
+    needs: [compare, reconcile]
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.apply == 'true' && needs.compare.result == 'success' && needs.reconcile.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-cache-comparison-${{ github.run_id }}
+          path: comparison
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-complete-cache-audit-${{ github.run_id }}
+          path: reconciliation
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.BASE_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Require the complete audit before applying
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=next(Path('reconciliation').rglob('complete_artifact_cache_audit.json'))
+          r=json.loads(p.read_text())
+          if not r.get('promotion_ready'):
+              raise SystemExit('complete artifact/cache audit did not authorize promotion')
+          PY
+      - name: Apply only the validated player delta in place
+        shell: bash
+        run: |
+          set -euo pipefail
+          delta=$(find comparison -name team_promotable_player_delta.parquet -print -quit)
+          test -n "$delta"
+          python scripts/research_cohorts/apply_team_signal_delta_in_place.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --delta "$delta" \
+            --report comparison/team_signal_apply_report.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-team-signal-apply-${{ github.run_id }}
+          path: comparison/team_signal_apply_report.json
+          retention-days: 90
+          compression-level: 0
+      - name: Replace only the exact canonical cache key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${BASE_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${ids[0]}"
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.BASE_CACHE_KEY }}
+      - name: Verify exactly one canonical cache remains
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${BASE_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1

@@ -68,6 +68,8 @@ def main() -> None:
         raise SystemExit("delta contains unmatched canonical player rows")
     fields = {
         "win": "source_win",
+        "loss": "source_loss",
+        "tie": "source_tie",
         "team_points": "source_team_points",
         "is_playoffs": "source_playoffs",
         "champion": "source_champion",
@@ -79,16 +81,24 @@ def main() -> None:
         if src not in dcols:
             continue
         improvements[field] = con.execute(f"SELECT COUNT(*) FROM matched WHERE {field} IS NULL AND {src} IS NOT NULL").fetchone()[0]
+    update_assignments = [
+        "win=CASE WHEN p.win IS NULL THEN m.source_win ELSE p.win END",
+        "team_points=CASE WHEN p.team_points IS NULL THEN m.source_team_points ELSE p.team_points END",
+        "is_playoffs=CASE WHEN p.is_playoffs IS NULL AND m.source_playoffs=1 THEN 1 ELSE p.is_playoffs END",
+        "champion=CASE WHEN p.champion IS NULL AND m.source_champion=1 THEN 1 ELSE p.champion END",
+        "final_playoff_seed=CASE WHEN p.final_playoff_seed IS NULL THEN m.source_final_playoff_seed ELSE p.final_playoff_seed END",
+        "made_playoffs=CASE WHEN p.made_playoffs IS NULL THEN m.source_made_playoffs ELSE p.made_playoffs END",
+    ]
+    if "loss" in pcols and "source_loss" in dcols:
+        update_assignments.insert(1, "loss=CASE WHEN p.loss IS NULL THEN m.source_loss ELSE p.loss END")
+    if "tie" in pcols and "source_tie" in dcols:
+        update_assignments.insert(2 if "loss" in pcols and "source_loss" in dcols else 1, "tie=CASE WHEN p.tie IS NULL THEN m.source_tie ELSE p.tie END")
+    update_sql = ",\n            ".join(update_assignments)
     con.execute("BEGIN")
     try:
-        con.execute("""
+        con.execute(f"""
           UPDATE public.player_fantasy p SET
-            win=CASE WHEN p.win IS NULL THEN m.source_win ELSE p.win END,
-            team_points=CASE WHEN p.team_points IS NULL THEN m.source_team_points ELSE p.team_points END,
-            is_playoffs=CASE WHEN p.is_playoffs IS NULL AND m.source_playoffs=1 THEN 1 ELSE p.is_playoffs END,
-            champion=CASE WHEN p.champion IS NULL AND m.source_champion=1 THEN 1 ELSE p.champion END,
-            final_playoff_seed=CASE WHEN p.final_playoff_seed IS NULL THEN m.source_final_playoff_seed ELSE p.final_playoff_seed END,
-            made_playoffs=CASE WHEN p.made_playoffs IS NULL THEN m.source_made_playoffs ELSE p.made_playoffs END
+            {update_sql}
           FROM matched m WHERE p.rowid=m.player_rowid
         """)
         if con.execute("SELECT COUNT(*) FROM public.player_fantasy").fetchone()[0] != before_rows:
