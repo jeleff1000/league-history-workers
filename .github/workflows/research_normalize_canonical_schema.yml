@@ -6,6 +6,9 @@ on:
       base_cache_key:
         required: true
         default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+  workflow_run:
+    workflows: ["Research matchup lineage policy"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -17,7 +20,7 @@ concurrency:
 
 jobs:
   normalize:
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:

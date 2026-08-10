@@ -1,6 +1,5 @@
 name: Research Matchup Direct Cache Release to Fly
-# Direct run after canonical cache replacement; all lookup data is in GitHub cache.
-# Preserve the complete legacy serving schema during publication.
+# Release after canonical cache normalization; all lookup data is in GitHub cache.
 
 on:
   workflow_dispatch:
@@ -14,8 +13,9 @@ on:
         required: true
         type: boolean
         default: true
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: ["Normalize canonical research schema in place"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   release:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
@@ -123,7 +123,7 @@ jobs:
           print('PASS: config, bracket, dynasty, and bestball request lanes are populated')
           PY
       - name: Publish adaptive tables to Fly
-        if: ${{ github.event_name == 'push' || inputs.publish }}
+        if: ${{ github.event_name == 'workflow_run' || inputs.publish }}
         run: |
           python code/scripts/research_cohorts/publish_research_matchup_to_fly.py \
             --bundle out/research_matchup_adaptive.duckdb --adaptive-only \
