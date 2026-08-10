@@ -77,6 +77,7 @@ def main() -> None:
         MAX(CASE WHEN COALESCE({expr('is_playoffs','INTEGER')},0)=1 THEN 1 ELSE 0 END) source_playoffs,
         MAX(CASE WHEN COALESCE({expr('is_championship','INTEGER')},0)=1
                       AND COALESCE({expr('champion','INTEGER')},0)=1 THEN 1 ELSE 0 END) source_champion,
+        MAX({expr('final_playoff_seed','INTEGER')}) FILTER (WHERE {expr('final_playoff_seed','INTEGER')} IS NOT NULL) source_final_playoff_seed,
         COUNT(*) source_rows
       FROM source_raw
       GROUP BY 1,2,3,4,5,6
@@ -89,7 +90,7 @@ def main() -> None:
     con.execute("""
       CREATE OR REPLACE TEMP TABLE player_matches AS
       SELECT p.rowid player_rowid, s.source_win, s.source_team_points,
-             s.source_playoffs, s.source_champion,
+             s.source_playoffs, s.source_champion, s.source_final_playoff_seed,
              CASE WHEN s.team_key IS NOT NULL THEN 'team_key' ELSE 'manager_team' END join_method
       FROM public.player_fantasy p
       JOIN source_signals s
@@ -106,6 +107,8 @@ def main() -> None:
         "team_points": "source_team_points",
         "is_playoffs": "source_playoffs",
         "champion": "source_champion",
+        "final_playoff_seed": "source_final_playoff_seed",
+        "made_playoffs": "source_final_playoff_seed",
     }
     args.out.mkdir(parents=True, exist_ok=True)
     improvements = {}
@@ -117,7 +120,7 @@ def main() -> None:
         """).fetchone()[0]
         positive_mismatches[field] = con.execute(f"""
           SELECT COUNT(*) FROM public.player_fantasy p JOIN player_matches m ON p.rowid=m.player_rowid
-          WHERE p.{field}=0 AND m.{src}=1
+          WHERE CAST(p.{field} AS VARCHAR)='0' AND CAST(m.{src} AS VARCHAR)='1'
         """).fetchone()[0]
 
     con.execute("""
@@ -125,12 +128,18 @@ def main() -> None:
         SELECT p.db_name,p.year,p.week,p.NFL_player_id,p.manager,p.team_key,p.team_name,
                p.platform,p.win canonical_win,m.source_win,p.team_points canonical_team_points,
                m.source_team_points,p.is_playoffs canonical_is_playoffs,m.source_playoffs,
-               p.champion canonical_champion,m.source_champion,m.join_method
+               p.champion canonical_champion,m.source_champion,
+               p.final_playoff_seed canonical_final_playoff_seed,m.source_final_playoff_seed,
+               p.made_playoffs canonical_made_playoffs,
+               CASE WHEN m.source_final_playoff_seed IS NOT NULL THEN 1 ELSE NULL END source_made_playoffs,
+               m.join_method
         FROM public.player_fantasy p JOIN player_matches m ON p.rowid=m.player_rowid
         WHERE (p.win IS NULL AND m.source_win IS NOT NULL)
            OR (p.team_points IS NULL AND m.source_team_points IS NOT NULL)
            OR (p.is_playoffs IS NULL AND m.source_playoffs=1)
            OR (p.champion IS NULL AND m.source_champion=1)
+           OR (p.final_playoff_seed IS NULL AND m.source_final_playoff_seed IS NOT NULL)
+           OR (p.made_playoffs IS NULL AND m.source_final_playoff_seed IS NOT NULL)
       ) TO ? (FORMAT PARQUET)
     """, [str(args.out / "team_promotable_player_delta.parquet")])
     report = {

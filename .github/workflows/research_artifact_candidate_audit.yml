@@ -21,7 +21,7 @@ on:
         default: 'false'
 
 permissions:
-  actions: read
+  actions: write
   contents: read
 
 env:
@@ -250,3 +250,64 @@ jobs:
           path: out/*
           retention-days: 90
           compression-level: 0
+
+  apply:
+    needs: compare
+    if: ${{ inputs.apply == 'true' && needs.compare.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-cache-comparison-${{ github.run_id }}
+          path: comparison
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.BASE_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Apply only the validated player delta in place
+        shell: bash
+        run: |
+          set -euo pipefail
+          delta=$(find comparison -name team_promotable_player_delta.parquet -print -quit)
+          test -n "$delta"
+          python scripts/research_cohorts/apply_team_signal_delta_in_place.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --delta "$delta" \
+            --report comparison/team_signal_apply_report.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-team-signal-apply-${{ github.run_id }}
+          path: comparison/team_signal_apply_report.json
+          retention-days: 90
+      - name: Replace only the exact canonical cache key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/caches?key=${BASE_CACHE_KEY}&ref=refs/heads/main" \
+            --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${ids[0]}"
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.BASE_CACHE_KEY }}
+      - name: Verify exactly one canonical cache remains
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/caches?key=${BASE_CACHE_KEY}&ref=refs/heads/main" \
+            --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
