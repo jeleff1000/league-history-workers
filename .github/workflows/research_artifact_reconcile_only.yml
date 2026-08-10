@@ -1,0 +1,87 @@
+name: Reconcile research artifact cache audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Completed extraction run containing the frozen manifest and 256 ledger artifacts
+        required: true
+      comparison_run_id:
+        description: Completed compare run whose comparison artifact will be audited
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reuse frozen manifest
+        uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-candidate-manifest-${{ inputs.source_run_id }}
+          path: manifest
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: Enumerate all extraction ledger artifacts
+        id: source_extracts
+        uses: actions/github-script@v7
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        with:
+          script: |
+            const runId = Number(process.env.SOURCE_RUN_ID);
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              {owner: context.repo.owner, repo: context.repo.repo, run_id: runId, per_page: 100}
+            );
+            const prefix = `research-artifact-candidate-extract-${runId}-`;
+            const matches = artifacts.filter(a => a.name.startsWith(prefix) && !a.expired);
+            if (matches.length !== 256) throw new Error(`expected 256 extraction artifacts; found ${matches.length}`);
+            const ids = matches.map(a => String(a.id));
+            core.setOutput('ids_a', ids.slice(0, 200).join(','));
+            core.setOutput('ids_b', ids.slice(200).join(','));
+      - name: Reuse all extraction ledgers by known ID
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EXTRACT_IDS_A: ${{ steps.source_extracts.outputs.ids_a }}
+          EXTRACT_IDS_B: ${{ steps.source_extracts.outputs.ids_b }}
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/download_workflow_artifacts.py \
+            --repo "$GITHUB_REPOSITORY" --run-id "${{ inputs.source_run_id }}" \
+            --ids "${EXTRACT_IDS_A},${EXTRACT_IDS_B}" --out extracts
+      - name: Reuse completed comparison
+        uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-cache-comparison-${{ inputs.comparison_run_id }}
+          path: comparison
+          run-id: ${{ inputs.comparison_run_id }}
+          github-token: ${{ github.token }}
+      - name: Reconcile every artifact and file
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ledgers < <(find extracts -name file_candidate_ledger.jsonl -type f | sort)
+          python scripts/research_cohorts/reconcile_artifact_cache_audit.py \
+            --manifest manifest/file_candidate_ledger.json \
+            --extract-ledger "${ledgers[@]}" \
+            --comparison comparison/cache_candidate_comparison.json \
+            --structured-audit comparison/structured_evidence_audit.json \
+            --out comparison/complete_artifact_cache_audit.json
+          python scripts/research_cohorts/audit_artifact_promotion_ledger.py \
+            --manifest manifest/file_candidate_ledger.json \
+            --extract-ledger "${ledgers[@]}" \
+            --comparison comparison \
+            --out comparison/file_promotion_ledger.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-artifact-complete-audit-${{ github.run_id }}
+          path: comparison/*
+          retention-days: 90
+          compression-level: 0
