@@ -1,0 +1,89 @@
+name: Research matchup compact RB weekly pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  contents: read
+
+jobs:
+  weekly_batch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - name: Build and gate RB 2025 compact weekly cells
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code
+        run: |
+          python - <<'PY'
+          import duckdb, json
+          from scripts.research_cohorts.compact_matchup_cells import materialize_weekly_core_cohort_position_batch
+
+          c = duckdb.connect()
+          c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          c.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
+          materialize_weekly_core_cohort_position_batch(
+              c, source_table='lake.public.player_fantasy',
+              nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+              output_table='rb_2025_weekly_batch', year=2025, position='RB', split_threshold=150,
+          )
+          duplicate_keys = c.execute("""
+            SELECT COUNT(*) FROM (
+              SELECT NFL_player_id, year, week FROM rb_2025_weekly_batch
+              GROUP BY 1,2,3 HAVING COUNT(*) > 1
+            )
+          """).fetchone()[0]
+          assert duplicate_keys == 0, duplicate_keys
+          cmc_week_1 = c.execute("""
+            SELECT cell.eligible_leagues, cell.rostered_leagues, cell.started_leagues,
+              cell.valid_started_outcomes, cell.win_equivalent,
+              cell.roster_rate_pct, cell.start_rate_pct, cell.win_rate_pct,
+              cell.expected_starts, cell.expected_wins, cell.expected_losses
+            FROM rb_2025_weekly_batch o, UNNEST(o.cohort_cells) AS u(cell)
+            WHERE o.NFL_player_id='00-0033280' AND o.week=1
+              AND cell.q_teams='ALL' AND cell.q_roster='ALL' AND cell.q_scoring='ALL'
+              AND cell.q_pass_td='ALL' AND cell.q_dynasty='ALL' AND cell.q_best_ball='ALL'
+          """).fetchone()
+          expected = (9838, 9768, 9600, 9578, 6019.0,
+                      99.28847326692417, 97.58080910754218, 62.841929421591146,
+                      0.9758080910754219, 0.6132166318837924, 0.3625914591916294)
+          assert cmc_week_1 is not None
+          for actual, want in zip(cmc_week_1, expected, strict=True):
+              assert abs(actual - want) < 1e-9, (actual, want, cmc_week_1)
+          cmc_weeks = c.execute("""
+            SELECT list(week ORDER BY week) FROM rb_2025_weekly_batch
+            WHERE NFL_player_id='00-0033280'
+          """).fetchone()[0]
+          assert cmc_weeks == [1,2,3,4,5,6,7,8,9,10,11,12,13,15,16,17,18], cmc_weeks
+          invalid = c.execute("""
+            SELECT COUNT(*) FROM rb_2025_weekly_batch o, UNNEST(o.cohort_cells) AS u(cell)
+            WHERE cell.started_leagues > cell.rostered_leagues
+               OR cell.rostered_leagues > cell.eligible_leagues
+               OR cell.valid_started_outcomes > cell.started_leagues
+          """).fetchone()[0]
+          assert invalid == 0, invalid
+          print('rb_2025_weekly_batch=' + json.dumps({
+              'outer_rows': c.execute('SELECT COUNT(*) FROM rb_2025_weekly_batch').fetchone()[0],
+              'cmc_week_1': cmc_week_1,
+              'cmc_weeks': cmc_weeks,
+          }))
+          PY
