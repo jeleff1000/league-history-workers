@@ -6,6 +6,11 @@ on:
       cache_key:
         required: true
         default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+      run_career_benchmark:
+        description: Run the intentionally unoptimized all-years CMC benchmark.
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -256,6 +261,7 @@ jobs:
           print('cmc_2025_season_compact_outer=' + json.dumps(row, default=str))
           PY
       - name: Fail fast on one real all-years CMC career record
+        if: ${{ inputs.run_career_benchmark }}
         env:
           PYTHONPATH: ${{ github.workspace }}/code
         run: |
