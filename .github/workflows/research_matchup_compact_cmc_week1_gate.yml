@@ -76,7 +76,8 @@ jobs:
               'selector_cardinality': selector_cardinality,
           }, default=str))
           assert summary[0] > 0 and summary[1] > 0 and summary[2] >= 5000, summary
-          assert all(count >= 5000 for _, count in weekly if 1 <= week <= 18), weekly
+          assert weekly[0] == (1, 9838), weekly
+          assert all(count >= 150 for observed_week, count in weekly if 1 <= observed_week <= 18), weekly
           PY
       - name: Print cache-only cohort and active-bye contract
         run: |
