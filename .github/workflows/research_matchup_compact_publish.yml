@@ -1,0 +1,66 @@
+name: Publish compact research matchup serving tables
+
+on:
+  workflow_dispatch:
+    inputs:
+      compact_run_id:
+        description: 'Completed compact merge replay run containing the final artifact'
+        required: true
+      apply:
+        description: 'Set true only after the preflight run is transfer-safe'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      PYTHONPATH: ${{ github.workspace }}/code
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 requests
+      - uses: actions/download-artifact@v5
+        with:
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.compact_run_id }}
+          github-token: ${{ github.token }}
+          pattern: compact-matchup-final-replay-*-${{ inputs.compact_run_id }}
+          path: compact-artifact
+          merge-multiple: true
+      - name: Locate exactly one compact serving artifact
+        id: bundle
+        run: |
+          mapfile -t BUNDLES < <(find compact-artifact -name research_matchup_compact.duckdb -type f | sort)
+          test "${#BUNDLES[@]}" -eq 1
+          echo "path=${BUNDLES[0]}" >> "$GITHUB_OUTPUT"
+          ls -lh "${BUNDLES[0]}"
+      - name: Preflight and measure compact serving tables
+        if: ${{ !inputs.apply }}
+        run: |
+          python code/scripts/research_cohorts/publish_compact_matchup_to_fly.py \
+            --bundle '${{ steps.bundle.outputs.path }}' \
+            --stage-dir out/compact-matchup-publish \
+            --build-only
+      - name: Publish compact serving tables after preflight
+        if: ${{ inputs.apply }}
+        run: |
+          python code/scripts/research_cohorts/publish_compact_matchup_to_fly.py \
+            --bundle '${{ steps.bundle.outputs.path }}' \
+            --stage-dir out/compact-matchup-publish \
+            --apply --i-understand-this-writes-prod
