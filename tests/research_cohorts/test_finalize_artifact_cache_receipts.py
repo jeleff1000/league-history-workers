@@ -48,6 +48,8 @@ def test_receipt_marks_cache_match_missing_and_non_candidate(tmp_path: Path) -> 
          "settings_fields": ["scoring_pass_td"], "dispositions": ["settings_candidate"]},
         {"artifact_id": 12, "artifact": "report", "candidate_delta_rows": 0,
          "candidate_fields": [], "dispositions": ["report_only"]},
+        {"artifact_id": 13, "artifact": "empty-candidate", "candidate_delta_rows": 0,
+         "candidate_fields": [], "dispositions": ["team_week_signal_candidate"]},
     ]}))
     team = tmp_path / "team.parquet"
     _write_parquet(team, [{
@@ -73,3 +75,4 @@ def test_receipt_marks_cache_match_missing_and_non_candidate(tmp_path: Path) -> 
     assert rows[10]["cache_missing_cells"] == 1
     assert rows[11]["final_status"] == "cache_verified"
     assert rows[12]["final_status"] == "not_data_bearing"
+    assert rows[13]["final_status"] == "no_promotable_candidate_emitted"

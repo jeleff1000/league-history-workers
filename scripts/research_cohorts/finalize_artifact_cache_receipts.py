@@ -46,6 +46,10 @@ SETTINGS_FIELDS = {
     "source_roster_IDP": "roster_IDP",
     "source_sleeper_best_ball": "sleeper_best_ball",
 }
+CANDIDATE_DISPOSITIONS = {
+    "direct_player_candidate", "team_week_signal_candidate", "player_signal_candidate",
+    "settings_candidate", "structured_evidence_candidate",
+}
 
 
 def _source_artifact_id(path: str | None) -> int | None:
@@ -177,6 +181,11 @@ def _final_status(row: dict[str, Any], counts: Counter) -> tuple[str, str]:
     if source_cells == 0:
         if int(row.get("candidate_delta_rows", 0) or 0) or int(row.get("settings_source_reference_rows", 0) or 0):
             return "candidate_provenance_not_found", "Ledger cites candidate evidence but no source-path record was found in supplied deltas."
+        if CANDIDATE_DISPOSITIONS & set(row.get("dispositions", [])):
+            return (
+                "no_promotable_candidate_emitted",
+                "The frozen extraction/comparison ledger emitted no promotable cache cell for this candidate-classified artifact.",
+            )
         return "not_data_bearing", "No candidate data cells were attributed to this artifact."
     if counts["blocked_schema_cells"]:
         return "blocked_schema", "Source has non-null fields absent from the current canonical schema."
