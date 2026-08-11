@@ -1,0 +1,128 @@
+name: Research matchup compact 15-runner rollup
+
+on:
+  workflow_dispatch:
+    inputs:
+      year_start:
+        required: true
+        default: '2025'
+      year_end:
+        required: true
+        default: '2025'
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - id: plan
+        run: |
+          python code/scripts/research_cohorts/plan_balanced_matchup_tasks.py --snapshot research_public_lake/corpus_snapshot.duckdb --year-start '${{ inputs.year_start }}' --year-end '${{ inputs.year_end }}' --runners 15 --output matrix.json
+          echo "matrix=$(tr -d '\n' < matrix.json)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: true
+      max-parallel: 15
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      TASKS: ${{ toJSON(matrix.tasks) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - name: Build assigned compact outer-row tasks
+        run: |
+          mkdir -p out/tasks
+          python - <<'PY'
+          import json,os,subprocess,sys
+          from pathlib import Path
+          for task in json.loads(os.environ['TASKS']):
+              name=f"{task['year']}_{task['position']}_{task['player_bucket'] if task['player_bucket'] is not None else 0}.duckdb"
+              cmd=[sys.executable,'code/scripts/research_cohorts/build_compact_matchup_bundle.py','--snapshot','research_public_lake/corpus_snapshot.duckdb','--ops-cache','research_public_lake/ops_cache.duckdb','--output',str(Path('out/tasks')/name),'--year',str(task['year']),'--position',task['position'],'--player-bucket-count',str(task['player_buckets']),'--player-bucket',str(task['player_bucket'] or 0)]
+              print(json.dumps(task),flush=True)
+              subprocess.run(cmd,check=True)
+          PY
+          python code/scripts/research_cohorts/merge_compact_matchup_parts.py --parts out/tasks/*.duckdb --output out/lane.duckdb --no-career
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compact-matchup-lane-${{ matrix.bucket }}-${{ github.run_id }}
+          path: out/lane.duckdb
+          retention-days: 1
+          compression-level: 0
+
+  merge:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: compact-matchup-lane-*-${{ github.run_id }}
+          path: lanes
+          merge-multiple: false
+      - name: Merge compact lanes and fail fast on golden output
+        run: |
+          mapfile -t LANES < <(find lanes -name lane.duckdb | sort)
+          test "${#LANES[@]}" -eq 15
+          python code/scripts/research_cohorts/merge_compact_matchup_parts.py --parts "${LANES[@]}" --output research_matchup_compact.duckdb
+          python - <<'PY'
+          import duckdb,json
+          c=duckdb.connect('research_matchup_compact.duckdb',read_only=True)
+          tables={x[0] for x in c.execute('SELECT table_name FROM duckdb_tables()').fetchall()}
+          assert tables >= {'research_matchup_compact_weekly','research_matchup_compact_season','research_matchup_compact_career'},tables
+          dupe=c.execute("SELECT COUNT(*) FROM (SELECT NFL_player_id,year,week FROM research_matchup_compact_weekly GROUP BY 1,2,3 HAVING COUNT(*)<>1)").fetchone()[0]
+          cmc=c.execute("SELECT cell.eligible_leagues,cell.rostered_league_weeks,cell.eligible_league_weeks,cell.started_league_weeks,cell.valid_started_outcomes,cell.win_equivalent,cell.active_weeks,cell.inactive_weeks FROM research_matchup_compact_season,UNNEST(cohort_cells) u(cell) WHERE NFL_player_id='00-0033280' AND year=2025 AND cell.q_teams='ALL' AND cell.q_roster='ALL' AND cell.q_scoring='ALL' AND cell.q_pass_td='ALL' AND cell.q_dynasty='ALL' AND cell.q_best_ball='ALL'").fetchone()
+          assert dupe==0 and cmc==(9980,157712,158687,155272,149661,91505.0,17,0),(dupe,cmc)
+          print('compact_rollup='+json.dumps({'weekly':c.execute('SELECT COUNT(*) FROM research_matchup_compact_weekly').fetchone()[0],'season':c.execute('SELECT COUNT(*) FROM research_matchup_compact_season').fetchone()[0],'career':c.execute('SELECT COUNT(*) FROM research_matchup_compact_career').fetchone()[0],'cmc':cmc}))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compact-matchup-final-${{ github.run_id }}
+          path: research_matchup_compact.duckdb
+          retention-days: 1
+          compression-level: 0
