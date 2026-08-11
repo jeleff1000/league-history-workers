@@ -1,4 +1,4 @@
-name: Normalize canonical research schema in place
+name: Retired research cache normalizer (no cache writes)
 
 on:
   workflow_dispatch:
@@ -20,6 +20,10 @@ concurrency:
 
 jobs:
   normalize:
+    # Research rollups consume the established GitHub cache in place.  This
+    # workflow is deliberately disabled: it must never create a new cache
+    # lineage, evict the seed cache, or rewrite the ops cache.
+    if: ${{ false }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
