@@ -1,0 +1,84 @@
+name: Finalize combined artifact promotion evidence
+
+on:
+  workflow_dispatch:
+    inputs:
+      comparison_run_id:
+        required: true
+        default: '31441478179'
+      materialization_run_id:
+        required: true
+        default: '31443201711'
+      settings_audit_run_id:
+        required: true
+        default: '31446334849'
+      settings_materialization_run_id:
+        required: true
+        default: '31446768685'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  evidence:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download comparison evidence
+        uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-complete-audit-${{ inputs.comparison_run_id }}
+          path: comparison
+          run-id: ${{ inputs.comparison_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download player materialization report
+        uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-promotion-report-${{ inputs.materialization_run_id }}
+          path: player_materialization
+          run-id: ${{ inputs.materialization_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download settings audit
+        uses: actions/download-artifact@v5
+        with:
+          name: research-settings-dimension-audit-${{ inputs.settings_audit_run_id }}
+          path: settings_audit
+          run-id: ${{ inputs.settings_audit_run_id }}
+          github-token: ${{ github.token }}
+      - name: Download settings materialization report
+        uses: actions/download-artifact@v5
+        with:
+          name: research-settings-promotion-report-${{ inputs.settings_materialization_run_id }}
+          path: settings_materialization
+          run-id: ${{ inputs.settings_materialization_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Build one 9,479-artifact combined ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/build_artifact_promotion_ledger.py \
+            --file-ledger "$(find comparison -name file_promotion_ledger.json -print -quit)" \
+            --team-delta "$(find comparison -name team_promotable_player_delta.parquet -print -quit)" \
+            --exact-delta "$(find comparison -name exact_promotable_player_delta.parquet -print -quit)" \
+            --structured-delta "$(find comparison -name structured_promotable_delta.parquet -print -quit)" \
+            --cache-comparison "$(find comparison -name cache_candidate_comparison.json -print -quit)" \
+            --materialization-report "$(find player_materialization -name promotion_candidate_report.json -print -quit)" \
+            --settings-delta "$(find settings_audit -name settings_promotable_delta.parquet -print -quit)" \
+            --settings-materialization-report "$(find settings_materialization -name settings_promotion_report.json -print -quit)" \
+            --out-json artifact_promotion_evidence_combined.json \
+            --out-csv artifact_promotion_evidence_combined.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-artifact-combined-promotion-evidence-${{ github.run_id }}
+          path: |
+            artifact_promotion_evidence_combined.json
+            artifact_promotion_evidence_combined.csv
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0

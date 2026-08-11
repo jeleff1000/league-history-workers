@@ -67,6 +67,14 @@ jobs:
           if-no-files-found: error
           retention-days: 90
           compression-level: 0
+      - name: Upload promotion report only
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-artifact-promotion-report-${{ github.run_id }}
+          path: promotion_candidate_report.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
       - name: Build file-by-file promotion evidence
         shell: bash
         run: |
