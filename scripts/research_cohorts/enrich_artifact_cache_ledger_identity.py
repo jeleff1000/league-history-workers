@@ -21,6 +21,10 @@ IDENTITY_COLUMNS = [
     "league_week_overlap_keys",
     "league_week_absent_keys",
     "matched_source_player_rows",
+    "matched_by_mfl_manager_guid",
+    "matched_by_manager_team_name",
+    "matched_by_unique_manager",
+    "cache_join_strategy",
     "identity_bridge_status",
 ]
 
@@ -55,6 +59,20 @@ def _bridge_status(row: dict) -> str:
     if absent:
         return "partial_bridge_with_source_only"
     return "partial_bridge"
+
+
+def _join_strategy(row: dict) -> str:
+    if "source_team_keys" not in row:
+        return "strict_player_key"
+    strategies = {
+        "mfl_manager_guid_team_fanout": int(row.get("matched_by_mfl_manager_guid", 0) or 0),
+        "manager_team_name_fanout": int(row.get("matched_by_manager_team_name", 0) or 0),
+        "manager_week_fanout": int(row.get("matched_by_unique_manager", 0) or 0),
+    }
+    resolved = [name for name, count in strategies.items() if count]
+    if not resolved:
+        return "unresolved_team_identity"
+    return resolved[0] if len(resolved) == 1 else "mixed_resolved_team_identity"
 
 
 def enrich(*, ledger_path: Path, profile_paths: list[Path], out_path: Path) -> dict[str, int]:
@@ -96,9 +114,11 @@ def enrich(*, ledger_path: Path, profile_paths: list[Path], out_path: Path) -> d
         for column in (
             "source_team_keys", "matched_source_team_keys", "unmatched_source_team_keys",
             "league_week_overlap_keys", "league_week_absent_keys", "matched_source_player_rows",
+            "matched_by_mfl_manager_guid", "matched_by_manager_team_name", "matched_by_unique_manager",
         ):
             value = evidence.get(column)
             ledger_row[column] = "" if value is None else str(int(value))
+        ledger_row["cache_join_strategy"] = _join_strategy(evidence)
         ledger_row["identity_bridge_status"] = _bridge_status(evidence)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)

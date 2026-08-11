@@ -34,6 +34,7 @@ def test_enrichment_uses_latest_profile_and_preserves_existing_ledger_fields(tmp
         "artifact_id": 1, "source_team_keys": 5, "matched_source_team_keys": 5,
         "unmatched_source_team_keys": 0, "league_week_overlap_keys": 5,
         "league_week_absent_keys": 0, "matched_source_player_rows": 50,
+        "matched_by_unique_manager": 5,
     }]}))
     out = tmp_path / "out.csv"
 
@@ -45,6 +46,8 @@ def test_enrichment_uses_latest_profile_and_preserves_existing_ledger_fields(tmp
     assert rows["1"]["identity_profile_run_id"] == "31520000000"
     assert rows["1"]["matched_source_team_keys"] == "5"
     assert rows["1"]["unmatched_source_team_keys"] == "0"
+    assert rows["1"]["matched_by_unique_manager"] == "5"
+    assert rows["1"]["cache_join_strategy"] == "manager_week_fanout"
     assert rows["1"]["identity_bridge_status"] == "fully_matched"
     assert rows["2"]["identity_profile_run_id"] == ""
     assert b"\r\n" not in out.read_bytes()

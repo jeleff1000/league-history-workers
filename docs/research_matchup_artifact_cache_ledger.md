@@ -193,6 +193,36 @@ the 77 fully specified duplicates and apply the manager-week evidence only
 where its team identity is independently unambiguous. Loss/tie remain a
 separate frozen-schema decision.
 
+## Verified current cache join contract
+
+The approved-cache read-only audit
+[31547677629](https://github.com/jeleff1000/league-history-workers/actions/runs/31547677629)
+is the current authority for cache-side identity. It verified the cache and
+ops seed were unchanged before and after the read.
+
+| Cache-side candidate | Evidence | Contract decision |
+| --- | ---: | --- |
+| `(db_name, year, week, NFL_player_id)` | 313,086 duplicate key groups | Never a universal player-row key. |
+| `(db_name, year, week, NFL_player_id, normalized manager)` | 44,322,065 joinable rows; 11,731 duplicate groups | Use only when the particular source key resolves to exactly one canonical player row. |
+| `team_key` | 0 populated player rows | Not a cache-side join key. |
+| `team_name` | 0 populated player rows | Not a cache-side join key. |
+| `(db_name, year, week, normalized manager)` | 1,689,546 manager-weeks fanning to 44,707,248 player rows | The only supported team-signal-to-player fan-out. |
+
+The artifact receipts agree. Across the 724 profiled raw team-signal artifacts,
+550,825 source team-weeks resolved only through the unique normalized
+manager-week fan-out. Zero resolved through raw `team_key`, MFL
+manager/franchise GUID, or manager-plus-team-name. The CSV ledger stores this
+per artifact in `cache_join_strategy` and the three matched-strategy count
+columns. Its current open partition is 698 `manager_week_fanout`, 15
+`strict_player_key`, and nine still without a source identity profile.
+
+Therefore no future receipt or promotion may claim a `team_key`,
+`team_name`, MFL GUID, or manager-plus-team-name cache join unless a new
+read-only audit proves that the corresponding cache column is populated and
+the source-to-cache resolution is one-to-many safe. Manager-week fan-out must
+exclude placeholder manager values and require exactly one source team for
+that normalized manager in that league-week.
+
 ## Raw team/week source receipt
 
 The 14 retained `research-source-matchup-rescue-*` artifacts were directly
