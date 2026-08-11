@@ -1,0 +1,64 @@
+name: Replay compact matchup merge from existing lanes
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Completed compact build run whose fifteen lane artifacts should be merged'
+        required: true
+      expected_lanes:
+        description: 'Exact number of lane artifacts expected from the source run'
+        required: false
+        default: '15'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  merge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PYTHONPATH: ${{ github.workspace }}/code
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - uses: actions/download-artifact@v5
+        with:
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          pattern: compact-matchup-lane-*-${{ inputs.source_run_id }}
+          path: lanes
+          merge-multiple: false
+      - name: Merge preserved compact lanes and fail fast on golden output
+        run: |
+          mapfile -t LANES < <(find lanes -name lane.duckdb | sort)
+          test "${#LANES[@]}" -eq ${{ inputs.expected_lanes }}
+          python code/scripts/research_cohorts/merge_compact_matchup_parts.py --parts "${LANES[@]}" --output research_matchup_compact.duckdb
+          python - <<'PY'
+          import duckdb,json
+          c=duckdb.connect('research_matchup_compact.duckdb',read_only=True)
+          tables={x[0] for x in c.execute('SELECT table_name FROM duckdb_tables()').fetchall()}
+          assert tables >= {'research_matchup_compact_weekly','research_matchup_compact_season','research_matchup_compact_career'},tables
+          dupe=c.execute("SELECT COUNT(*) FROM (SELECT NFL_player_id,year,week,position FROM research_matchup_compact_weekly GROUP BY 1,2,3,4 HAVING COUNT(*)<>1)").fetchone()[0]
+          cmc=c.execute("SELECT cell.eligible_leagues,cell.rostered_league_weeks,cell.eligible_league_weeks,cell.started_league_weeks,cell.valid_started_outcomes,cell.win_equivalent,cell.active_weeks,cell.inactive_weeks FROM research_matchup_compact_season,UNNEST(cohort_cells) u(cell) WHERE NFL_player_id='00-0033280' AND year=2025 AND position='RB' AND cell.q_teams='ALL' AND cell.q_roster='ALL' AND cell.q_scoring='ALL' AND cell.q_pass_td='ALL' AND cell.q_dynasty='ALL' AND cell.q_best_ball='ALL'").fetchone()
+          assert cmc==(9980,157712,158687,155272,149661,91505.0,17,0),cmc
+          assert dupe==0,dupe
+          print('compact_rollup='+json.dumps({'weekly':c.execute('SELECT COUNT(*) FROM research_matchup_compact_weekly').fetchone()[0],'season':c.execute('SELECT COUNT(*) FROM research_matchup_compact_season').fetchone()[0],'career':c.execute('SELECT COUNT(*) FROM research_matchup_compact_career').fetchone()[0],'cmc':cmc}))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compact-matchup-final-replay-${{ inputs.source_run_id }}-${{ github.run_id }}
+          path: research_matchup_compact.duckdb
+          retention-days: 1
+          compression-level: 0
