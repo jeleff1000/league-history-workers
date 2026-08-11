@@ -246,6 +246,18 @@ jobs:
           # default.  It must clear the weekly split floor on its own.
           assert len(selected) == 1 and selected[0]['eligible_leagues'] >= 150, selected
           assert 'q_playoff_teams' not in selected[0], selected[0]
+          full_pool = [r for r in records if (
+              r['q_teams'], r['q_roster'], r['q_scoring'], r['q_pass_td'], r['q_dynasty'], r['q_best_ball']
+          ) == ('ALL', 'ALL', 'ALL', 'ALL', 'ALL', 'ALL')]
+          assert len(full_pool) == 1, full_pool
+          full = full_pool[0]
+          assert (
+              full['eligible_leagues'], full['rostered_leagues'], full['started_leagues'],
+              full['valid_started_outcomes'], full['win_equivalent']
+          ) == (9838, 9768, 9600, 9578, 6019.0), full
+          assert abs(full['roster_rate_pct'] - 99.28847326692417) < 1e-9, full
+          assert abs(full['start_rate_pct'] - 97.58080910754218) < 1e-9, full
+          assert abs(full['win_rate_pct'] - 62.841929421591146) < 1e-9, full
           print('cmc_2025_week1_core_cells=' + json.dumps(records, default=str))
           PY
       - name: Materialize one real CMC 2025 season record for cache validation
