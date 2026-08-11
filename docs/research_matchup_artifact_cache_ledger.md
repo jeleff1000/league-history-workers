@@ -50,7 +50,7 @@ Each row has an explicit `final_status` and `next_action`.
 | `not_data_bearing` | 3,927 | Aggregate/validation/metadata artifact; not a canonical-cell source. |
 | `candidate_provenance_not_found` | 709 | 5,504,005 declared candidate rows require direct source-file comparison. |
 | `unmatched_cache_key` | 9 | 1,306 candidate rows / 2,612 cells require team-key-to-player-row reconciliation. |
-| `partial_schema_blocked_cache_updates` | 15 | Direct MFL player-key audit found 82,466 supported null cells still missing, 1,987 conflicts to preserve, and 288,160 loss/tie cells blocked by the current schema. |
+| `partial_schema_blocked_cache_updates` | 15 | Direct MFL audit produced 31,870 safe exact-row candidates; remaining source cells include ambiguous identities, preserved conflicts, and 288,160 loss/tie values blocked by the current schema. |
 
 The receipt workflow is read-only. It asserts, before and after the audit,
 that player schema, player-row count, and the ops-cache hash are unchanged;
@@ -96,9 +96,20 @@ It passed cache-schema, player-row-count, ops-hash, and no-new-lineage gates.
 The former 50,298-row manager-week fanout candidate was incomplete: it was a
 safe lower bound, not the full direct player-key comparison. The ledger now
 marks all 15 artifacts `partial_schema_blocked_cache_updates`. No cache cell
-was changed by this receipt. The next action is to materialize and promote the
-82,466 exact-key, supported null-cell updates, then separately decide whether
-loss/tie belong in the frozen canonical schema and read the cache back.
+was changed by this receipt. The direct candidate build
+[31518641442](https://github.com/jeleff1000/league-history-workers/actions/runs/31518641442)
+produced 31,870 unambiguous canonical player-row candidates: 21,604 with
+win/playoff values and all 31,870 with team points. Its report SHA-256 is
+`a8c9436b559cd1bba7baef092672a7b0178bcc0559032e11066b18d2084444b1`.
+
+The remaining direct-source identities are intentionally not folded into that
+candidate: 55,180 source keys map to more than one canonical row. Of those,
+43,669 have only a null manager, 6,743 only a null NFL player ID, 4,691 have
+both null, and only 77 are fully specified duplicate canonical identities.
+The next action is to promote the 31,870 exact-key candidates, then reconcile
+the 77 fully specified duplicates and apply the manager-week evidence only
+where its team identity is independently unambiguous. Loss/tie remain a
+separate frozen-schema decision.
 
 ## Open source-comparison worklist
 
