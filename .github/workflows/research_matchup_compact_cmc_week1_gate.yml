@@ -30,6 +30,37 @@ jobs:
           key: ${{ inputs.cache_key }}
           fail-on-cache-miss: true
       - run: python -m pip install duckdb==1.5.1
+      - name: Print cache-only cohort and active-bye contract
+        run: |
+          python - <<'PY'
+          import duckdb, json
+          c = duckdb.connect()
+          c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          c.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
+          def emit(name, sql):
+              print(name + '=' + json.dumps(c.execute(sql).fetchall(), default=str))
+          emit('player_fantasy_cohort_contract', """
+            SELECT column_name, data_type
+            FROM information_schema.columns
+            WHERE table_catalog='lake' AND table_schema='public' AND table_name='player_fantasy'
+              AND (column_name LIKE 'cohort\\_%' ESCAPE '\\' OR column_name IN ('position','is_rostered','is_started','win','champion','is_playoffs','made_playoffs','clutch_equity'))
+            ORDER BY ordinal_position
+          """)
+          emit('ops_player_activity_contract', """
+            SELECT column_name, data_type
+            FROM information_schema.columns
+            WHERE table_catalog='ops' AND table_schema='nfl_historical' AND table_name='nfl_player_stats_all'
+              AND (lower(column_name) LIKE '%team%' OR lower(column_name) LIKE '%snap%' OR column_name IN ('NFL_player_id','year','week','position','season_type'))
+            ORDER BY ordinal_position
+          """)
+          emit('ops_bye_contract', """
+            SELECT table_schema, table_name, column_name, data_type
+            FROM information_schema.columns
+            WHERE table_catalog='ops'
+              AND (lower(table_name) LIKE '%bye%' OR lower(column_name) LIKE '%bye%')
+            ORDER BY table_schema, table_name, ordinal_position
+          """)
+          PY
       - name: Run tested compact outer-row primitive against cache
         env:
           PYTHONPATH: ${{ github.workspace }}/code
