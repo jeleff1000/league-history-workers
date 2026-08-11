@@ -108,3 +108,4 @@ def test_audit_treats_position_eligibility_as_a_roster_dependent_fanout(tmp_path
     eligible = result["dimensions"]["roster"]["dependent_columns"]["cohort_position_eligible"]
     assert eligible["base_mismatches"] == 1
     assert eligible["groups"]["cohort_position_eligible_1"]["mismatches_expected"] == 1
+    assert eligible["groups"]["cohort_position_eligible_1"]["position_value_counts"] == {"LB": {"0": 1}}

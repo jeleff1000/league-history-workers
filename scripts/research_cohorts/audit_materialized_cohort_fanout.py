@@ -192,11 +192,21 @@ def audit(base: Path, delta: Path) -> dict[str, Any]:
                 for dependent_base, dependent_expected in dependent_columns.items():
                     dependent_groups: dict[str, dict[str, int]] = {}
                     for group in _groups_for(dependent_base):
+                        position_value_counts: dict[str, dict[str, int]] = {}
+                        for position, value, count in con.execute(f"""
+                          SELECT COALESCE(NULLIF(TRIM(CAST(position AS VARCHAR)), ''), '<NULL>') AS position,
+                                 COALESCE(CAST({_q(group)} AS VARCHAR), '<NULL>') AS value,
+                                 COUNT(*) AS n
+                          FROM {name}_players
+                          GROUP BY 1, 2 ORDER BY 1, 2
+                        """).fetchall():
+                            position_value_counts.setdefault(str(position), {})[str(value)] = int(count)
                         dependent_groups[group] = {
                             "same_as_base": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS NOT DISTINCT FROM {_q(dependent_base)}"),
                             "different_from_base": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS DISTINCT FROM {_q(dependent_base)}"),
                             "matches_expected": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS NOT DISTINCT FROM ({dependent_expected})"),
                             "mismatches_expected": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS DISTINCT FROM ({dependent_expected})"),
+                            "position_value_counts": position_value_counts,
                         }
                     dependent_report[dependent_base] = {
                         "base_matches": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(dependent_base)} IS NOT DISTINCT FROM ({dependent_expected})"),
