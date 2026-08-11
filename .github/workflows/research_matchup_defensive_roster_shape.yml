@@ -1,4 +1,4 @@
-name: Research matchup defensive roster shape
+name: Research matchup rostered output shape
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  defensive-shape:
+  output-shape:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -25,7 +25,7 @@ jobs:
           key: ${{ inputs.cache_key }}
           fail-on-cache-miss: true
       - run: python -m pip install duckdb==1.5.1
-      - name: Inventory canonical defensive output candidates and denominators
+      - name: Inventory cache candidates versus rostered UI candidates
         run: |
           python - <<'PY'
           import duckdb, json
@@ -38,36 +38,40 @@ jobs:
                   WHEN UPPER(TRIM(CAST(position AS VARCHAR))) IN ('CB','DB','FS','S','SAF','SS') THEN 'DB'
                   WHEN UPPER(TRIM(CAST(position AS VARCHAR))) IN ('DE','DL','DT','EDGE','NT') THEN 'DL'
                   WHEN UPPER(TRIM(CAST(position AS VARCHAR))) IN ('ILB','LB','MLB','OLB') THEN 'LB'
+                  WHEN UPPER(TRIM(CAST(position AS VARCHAR)))='PK' THEN 'K'
+                  WHEN UPPER(TRIM(CAST(position AS VARCHAR))) IN ('D/ST','DST') THEN 'DEF'
+                  ELSE UPPER(TRIM(CAST(position AS VARCHAR)))
                 END canonical_position,
                 CAST(NFL_player_id AS VARCHAR) NFL_player_id,
-                CAST(db_name AS VARCHAR) db_name,
-                CAST(cohort_position_eligible AS INTEGER) eligible,
-                is_rostered, is_started, fantasy_points
+                CAST(db_name AS VARCHAR) db_name, CAST(week AS INTEGER) week,
+                is_rostered, is_started
               FROM lake.public.player_fantasy
               WHERE CAST(year AS INTEGER)=2025
             ),
-            defensive AS (SELECT * FROM facts WHERE canonical_position IS NOT NULL),
+            scoped AS (
+              SELECT * FROM facts
+              WHERE canonical_position IN ('QB','RB','WR','TE','K','DEF','DB','DL','LB')
+                AND NFL_player_id IS NOT NULL
+            ),
             player_signals AS (
               SELECT canonical_position, NFL_player_id
                 , MAX(CASE WHEN CAST(is_rostered AS INTEGER)=1 THEN 1 ELSE 0 END) AS explicit_rostered
                 , MAX(CASE WHEN CAST(is_started AS INTEGER)=1 THEN 1 ELSE 0 END) AS ever_started
-                , MAX(CASE WHEN fantasy_points IS NOT NULL THEN 1 ELSE 0 END) AS ever_points
-              FROM defensive
+              FROM scoped
               GROUP BY 1,2
             )
-            SELECT d.canonical_position,
-              list_sort(list_distinct(list(d.raw_position))) AS raw_positions,
-              COUNT(DISTINCT d.NFL_player_id) AS candidate_players,
+            SELECT d.canonical_position AS position,
+              list_sort(list_distinct(list(d.raw_position))) AS source_positions,
+              COUNT(DISTINCT d.NFL_player_id) AS cache_players,
               COUNT(DISTINCT r.NFL_player_id) FILTER (WHERE r.explicit_rostered=1) AS explicit_rostered_players,
               COUNT(DISTINCT r.NFL_player_id) FILTER (WHERE r.ever_started=1) AS started_players,
-              COUNT(DISTINCT r.NFL_player_id) FILTER (WHERE r.ever_points=1) AS points_players,
-              COUNT(DISTINCT d.db_name) FILTER (WHERE d.eligible=1) AS eligible_leagues
-            FROM defensive d
+              COUNT(DISTINCT (d.NFL_player_id, d.db_name, d.week)) FILTER (WHERE CAST(d.is_rostered AS INTEGER)=1) AS explicit_rostered_player_league_weeks
+            FROM scoped d
             LEFT JOIN player_signals r USING(canonical_position,NFL_player_id)
             GROUP BY 1 ORDER BY 1
           """).fetchall()
-          result=[{'position': row[0], 'source_positions': row[1], 'candidate_players': row[2], 'explicit_rostered_players': row[3], 'started_players': row[4], 'points_players': row[5], 'eligible_leagues': row[6]} for row in rows]
-          assert {r['position'] for r in result} == {'DB','DL','LB'}, result
-          assert all(r['explicit_rostered_players'] > 0 and r['eligible_leagues'] > 0 for r in result), result
-          print('defensive_roster_shape_2025=' + json.dumps(result))
+          result=[{'position': row[0], 'source_positions': row[1], 'cache_players': row[2], 'explicit_rostered_players': row[3], 'started_players': row[4], 'explicit_rostered_player_league_weeks': row[5]} for row in rows]
+          assert {r['position'] for r in result} == {'QB','RB','WR','TE','K','DEF','DB','DL','LB'}, result
+          assert all(r['explicit_rostered_players'] > 0 for r in result), result
+          print('rostered_output_shape_2025=' + json.dumps(result))
           PY
