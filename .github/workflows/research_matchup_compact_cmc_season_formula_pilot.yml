@@ -1,0 +1,69 @@
+name: Research matchup compact CMC season formula pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  contents: read
+
+jobs:
+  season_formula:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - name: Build and gate RB 2025 compact season core cells
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code
+        run: |
+          python - <<'PY'
+          import duckdb, json
+          from scripts.research_cohorts.compact_matchup_cells import materialize_season_core_cohort_position_batch
+
+          c = duckdb.connect()
+          c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          c.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
+          materialize_season_core_cohort_position_batch(
+              c, source_table='lake.public.player_fantasy',
+              nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+              output_table='rb_2025_season_core_batch', year=2025, position='RB', split_threshold=50,
+          )
+          assert c.execute('SELECT COUNT(*) FROM rb_2025_season_core_batch').fetchone()[0] == 164
+          cmc = c.execute("""
+            SELECT cell.eligible_leagues, cell.rostered_league_weeks,
+              cell.eligible_league_weeks, cell.started_league_weeks,
+              cell.valid_started_outcomes, cell.win_equivalent,
+              cell.roster_rate_pct, cell.start_rate_pct, cell.healthy_start_rate_pct,
+              cell.win_rate_pct, cell.expected_starts, cell.expected_wins,
+              cell.expected_losses, cell.clutch_season_sum,
+              cell.active_weeks, cell.inactive_weeks
+            FROM rb_2025_season_core_batch o, UNNEST(o.cohort_cells) AS u(cell)
+            WHERE o.NFL_player_id='00-0033280'
+              AND cell.q_teams='ALL' AND cell.q_roster='ALL' AND cell.q_scoring='ALL'
+              AND cell.q_pass_td='ALL' AND cell.q_dynasty='ALL' AND cell.q_best_ball='ALL'
+          """).fetchone()
+          assert cmc is not None
+          assert cmc[:6] == (9980, 157712, 158687, 155272, 149661, 91505.0), cmc
+          assert cmc[14:] == (17, 0), cmc
+          assert abs(cmc[10] - cmc[7] / 100.0 * cmc[14]) < 1e-9, cmc
+          assert abs(cmc[11] + cmc[12] - cmc[10]) < 1e-9, cmc
+          print('cmc_2025_season_core=' + json.dumps(cmc))
+          PY
