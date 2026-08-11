@@ -50,6 +50,7 @@ jobs:
           python scripts/research_cohorts/audit_materialized_cohort_fanout.py \
             --base research_public_lake/corpus_snapshot.duckdb \
             --settings-delta "$SETTINGS_DELTA" \
+            --base-only \
             --out saved_materialized_cohort_fanout.json
           python - <<'PY'
           import json

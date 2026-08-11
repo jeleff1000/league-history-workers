@@ -82,7 +82,7 @@ def _groups_for(base: str) -> list[str]:
     return sorted(column for column in EXPECTED_COHORT_COLUMNS if column.startswith(prefix))
 
 
-def audit(base: Path, delta: Path) -> dict[str, Any]:
+def audit(base: Path, delta: Path, *, include_legacy_groups: bool = True) -> dict[str, Any]:
     con = duckdb.connect(str(base), read_only=True)
     try:
         player_columns = [row[0] for row in con.execute("DESCRIBE public.player_fantasy").fetchall()]
@@ -165,72 +165,77 @@ def audit(base: Path, delta: Path) -> dict[str, Any]:
             base = spec["base"]
             expected = spec["expected"]
             groups: dict[str, dict[str, int]] = {}
-            for group in _groups_for(base):
-                groups[group] = {
-                    "same_as_base": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS NOT DISTINCT FROM {_q(base)}"),
-                    "different_from_base": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS DISTINCT FROM {_q(base)}"),
-                    "matches_expected": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS NOT DISTINCT FROM ({expected})"),
-                    "mismatches_expected": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS DISTINCT FROM ({expected})"),
-                }
+            if include_legacy_groups:
+                for group in _groups_for(base):
+                    groups[group] = {
+                        "same_as_base": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS NOT DISTINCT FROM {_q(base)}"),
+                        "different_from_base": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS DISTINCT FROM {_q(base)}"),
+                        "matches_expected": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS NOT DISTINCT FROM ({expected})"),
+                        "mismatches_expected": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS DISTINCT FROM ({expected})"),
+                    }
             labels = {
                 str(value): int(count)
                 for value, count in con.execute(
                     f"SELECT ({expected}) AS value, COUNT(*) FROM {name}_players GROUP BY 1 ORDER BY 1"
                 ).fetchall()
             }
-            report["dimensions"][name] = {
+            dimension_report = {
                 "base_column": base,
                 "player_rows": _count(con, f"SELECT COUNT(*) FROM {name}_players"),
                 "base_matches": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(base)} IS NOT DISTINCT FROM ({expected})"),
                 "base_mismatches": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(base)} IS DISTINCT FROM ({expected})"),
                 "expected_label_counts": labels,
-                "groups": groups,
             }
+            if include_legacy_groups:
+                dimension_report["groups"] = groups
+            report["dimensions"][name] = dimension_report
             dependent_columns = spec.get("dependent_columns", {})
             if dependent_columns:
                 dependent_report: dict[str, dict[str, Any]] = {}
                 for dependent_base, dependent_expected in dependent_columns.items():
-                    dependent_groups: dict[str, dict[str, int]] = {}
-                    groups = _groups_for(dependent_base)
-                    structs = ", ".join(
-                        f"struct_pack(group_name := '{group}', value := COALESCE(CAST({_q(group)} AS VARCHAR), '<NULL>'))"
-                        for group in groups
-                    )
-                    # One scan of the affected roster rows replaces 13 x 5 repeated
-                    # scans.  Include base/expected in the grouping so Python can derive
-                    # every equality count without reading the cache again.
-                    rows = con.execute(f"""
-                      SELECT item.group_name,
-                             COALESCE(NULLIF(TRIM(CAST(position AS VARCHAR)), ''), '<NULL>') AS position,
-                             item.value,
-                             COALESCE(CAST({_q(dependent_base)} AS VARCHAR), '<NULL>') AS base_value,
-                             COALESCE(CAST(({dependent_expected}) AS VARCHAR), '<NULL>') AS expected_value,
-                             COUNT(*) AS n
-                      FROM {name}_players
-                      CROSS JOIN UNNEST([{structs}]) AS u(item)
-                      GROUP BY 1, 2, 3, 4, 5
-                    """).fetchall()
-                    for group in groups:
-                        dependent_groups[group] = {
-                            "same_as_base": 0,
-                            "different_from_base": 0,
-                            "matches_expected": 0,
-                            "mismatches_expected": 0,
-                            "position_value_counts": {},
-                        }
-                    for group, position, value, base_value, expected_value, count in rows:
-                        entry = dependent_groups[str(group)]
-                        n = int(count)
-                        entry["same_as_base"] += n if value == base_value else 0
-                        entry["different_from_base"] += n if value != base_value else 0
-                        entry["matches_expected"] += n if value == expected_value else 0
-                        entry["mismatches_expected"] += n if value != expected_value else 0
-                        entry["position_value_counts"].setdefault(str(position), {})[str(value)] = n
-                    dependent_report[dependent_base] = {
+                    dependent_entry: dict[str, Any] = {
                         "base_matches": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(dependent_base)} IS NOT DISTINCT FROM ({dependent_expected})"),
                         "base_mismatches": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(dependent_base)} IS DISTINCT FROM ({dependent_expected})"),
-                        "groups": dependent_groups,
                     }
+                    if include_legacy_groups:
+                        dependent_groups: dict[str, dict[str, Any]] = {}
+                        groups = _groups_for(dependent_base)
+                        structs = ", ".join(
+                            f"struct_pack(group_name := '{group}', value := COALESCE(CAST({_q(group)} AS VARCHAR), '<NULL>'))"
+                            for group in groups
+                        )
+                        # One scan of the affected roster rows replaces 13 x 5 repeated
+                        # scans.  Include base/expected in the grouping so Python can derive
+                        # every equality count without reading the cache again.
+                        rows = con.execute(f"""
+                          SELECT item.group_name,
+                                 COALESCE(NULLIF(TRIM(CAST(position AS VARCHAR)), ''), '<NULL>') AS position,
+                                 item.value,
+                                 COALESCE(CAST({_q(dependent_base)} AS VARCHAR), '<NULL>') AS base_value,
+                                 COALESCE(CAST(({dependent_expected}) AS VARCHAR), '<NULL>') AS expected_value,
+                                 COUNT(*) AS n
+                          FROM {name}_players
+                          CROSS JOIN UNNEST([{structs}]) AS u(item)
+                          GROUP BY 1, 2, 3, 4, 5
+                        """).fetchall()
+                        for group in groups:
+                            dependent_groups[group] = {
+                                "same_as_base": 0,
+                                "different_from_base": 0,
+                                "matches_expected": 0,
+                                "mismatches_expected": 0,
+                                "position_value_counts": {},
+                            }
+                        for group, position, value, base_value, expected_value, count in rows:
+                            entry = dependent_groups[str(group)]
+                            n = int(count)
+                            entry["same_as_base"] += n if value == base_value else 0
+                            entry["different_from_base"] += n if value != base_value else 0
+                            entry["matches_expected"] += n if value == expected_value else 0
+                            entry["mismatches_expected"] += n if value != expected_value else 0
+                            entry["position_value_counts"].setdefault(str(position), {})[str(value)] = n
+                        dependent_entry["groups"] = dependent_groups
+                    dependent_report[dependent_base] = dependent_entry
                 report["dimensions"][name]["dependent_columns"] = dependent_report
         return report
     finally:
@@ -242,8 +247,9 @@ def main() -> None:
     parser.add_argument("--base", type=Path, required=True)
     parser.add_argument("--settings-delta", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--base-only", action="store_true")
     args = parser.parse_args()
-    result = audit(args.base, args.settings_delta)
+    result = audit(args.base, args.settings_delta, include_legacy_groups=not args.base_only)
     args.out.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(result, sort_keys=True))
 

@@ -80,6 +80,17 @@ def test_audit_flags_stale_base_cohort_value_and_describes_group_copy(tmp_path: 
     assert result["dimensions"]["pass_td"]["groups"]["cohort_pass_td_1"]["same_as_base"] == 1
 
 
+def test_base_only_audit_avoids_legacy_group_diagnostics(tmp_path: Path) -> None:
+    base = tmp_path / "corpus.duckdb"
+    delta = tmp_path / "settings.parquet"
+    _create_fixture(base, delta)
+
+    result = audit(base, delta, include_legacy_groups=False)
+
+    assert result["dimensions"]["pass_td"]["base_mismatches"] == 1
+    assert "groups" not in result["dimensions"]["pass_td"]
+
+
 def test_audit_treats_position_eligibility_as_a_roster_dependent_fanout(tmp_path: Path) -> None:
     base = tmp_path / "corpus.duckdb"
     delta = tmp_path / "settings.parquet"
