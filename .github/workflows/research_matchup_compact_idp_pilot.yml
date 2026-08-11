@@ -65,6 +65,7 @@ jobs:
               c, source_table='lake.public.player_fantasy',
               nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
               output_table='idp_weekly', year=2025, position='IDP', split_threshold=150,
+              player_id=myles_id,
           )
           materialize_season_core_cohort_position_batch(
               c, source_table='lake.public.player_fantasy',
