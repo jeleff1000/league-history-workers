@@ -206,7 +206,7 @@ def test_receipt_reads_raw_player_outcome_evidence_on_its_exact_key(tmp_path: Pa
         "db_name": "league", "year": 2024, "week": 15,
         "NFL_player_id": "p1", "manager": "mgr",
         "source_win": 1, "source_team_points": 100.0,
-        "source_is_playoffs": 1,
+        "source_is_playoffs": 1, "source_loss": 0, "source_tie": 0,
     }])
     manifest = tmp_path / "mfl-player-manifest.json"
     manifest.write_text(json.dumps([{"artifact_id": 56, "path": str(raw)}]))
@@ -218,7 +218,8 @@ def test_receipt_reads_raw_player_outcome_evidence_on_its_exact_key(tmp_path: Pa
     )
 
     row = result["rows"][0]
-    assert row["final_status"] == "still_missing_cache_cells"
-    assert row["source_cells"] == 3
+    assert row["final_status"] == "partial_schema_blocked_cache_updates"
+    assert row["source_cells"] == 5
     assert row["cache_match_cells"] == 2
     assert row["cache_missing_cells"] == 1
+    assert row["blocked_schema_cells"] == 2

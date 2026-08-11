@@ -424,6 +424,21 @@ def _final_status(row: dict[str, Any], counts: Counter) -> tuple[str, str]:
             )
         return "not_data_bearing", "No candidate data cells were attributed to this artifact."
     if counts["blocked_schema_cells"]:
+        if counts["cache_missing_cells"]:
+            return (
+                "partial_schema_blocked_cache_updates",
+                "Source has safe null-cell repairs, plus non-null fields absent from the current canonical schema.",
+            )
+        if counts["cache_conflict_cells"]:
+            return (
+                "partial_schema_blocked_conflicts",
+                "Source has non-null fields absent from the current canonical schema and differs from existing cache values.",
+            )
+        if counts["unmatched_cache_cells"]:
+            return (
+                "partial_schema_blocked_unmatched",
+                "Source has non-null fields absent from the current canonical schema and source cells with no current canonical row.",
+            )
         return "blocked_schema", "Source has non-null fields absent from the current canonical schema."
     if counts["cache_conflict_cells"]:
         return "cache_conflict_preserved", "Canonical cache has a different non-null value; no overwrite is inferred."
