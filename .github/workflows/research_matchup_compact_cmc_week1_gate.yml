@@ -434,7 +434,16 @@ jobs:
               output_table='rb_2025_season_batch', year=2025, position='RB', split_threshold=50,
           )
           outer_rows = c.execute('SELECT COUNT(*) FROM rb_2025_season_batch').fetchone()[0]
-          assert outer_rows == 540, outer_rows
+          matched_regular_players = c.execute("""
+            SELECT COUNT(DISTINCT CAST(p.NFL_player_id AS VARCHAR))
+            FROM lake.public.player_fantasy p
+            INNER JOIN ops.nfl_historical.nfl_player_stats_all s
+              ON CAST(s.NFL_player_id AS VARCHAR)=CAST(p.NFL_player_id AS VARCHAR)
+             AND CAST(s.year AS INTEGER)=CAST(p.year AS INTEGER)
+             AND COALESCE(s.season_type, 'REG')='REG'
+            WHERE CAST(p.year AS INTEGER)=2025 AND CAST(p.position AS VARCHAR)='RB'
+          """).fetchone()[0]
+          assert outer_rows == matched_regular_players == 164, (outer_rows, matched_regular_players)
           cmc = c.execute("""
             SELECT cell.eligible_leagues, cell.rostered_league_weeks,
               cell.eligible_league_weeks, cell.started_league_weeks,
@@ -447,7 +456,7 @@ jobs:
           """).fetchone()
           assert cmc == (9980, 157712, 158687, 155272, 149661, 91505.0, 17, 0), cmc
           cells = c.execute("SELECT SUM(array_length(cohort_cells)) FROM rb_2025_season_batch").fetchone()[0]
-          print('rb_2025_factorized_batch=' + json.dumps({'outer_rows': outer_rows, 'cells': cells, 'cmc_full_pool': cmc}))
+          print('rb_2025_factorized_batch=' + json.dumps({'outer_rows': outer_rows, 'matched_regular_players': matched_regular_players, 'cells': cells, 'cmc_full_pool': cmc}))
           PY
       - name: Resolve CMC 2025 bracket-grade cells with full denominators
         env:
