@@ -36,7 +36,7 @@ jobs:
       - run: python -m pip install duckdb==1.5.1
       - id: plan
         run: |
-          python code/scripts/research_cohorts/plan_balanced_matchup_tasks.py --snapshot research_public_lake/corpus_snapshot.duckdb --year-start '${{ inputs.year_start }}' --year-end '${{ inputs.year_end }}' --runners 15 --output matrix.json
+          python code/scripts/research_cohorts/plan_balanced_matchup_tasks.py --snapshot research_public_lake/corpus_snapshot.duckdb --ops-cache research_public_lake/ops_cache.duckdb --year-start '${{ inputs.year_start }}' --year-end '${{ inputs.year_end }}' --runners 15 --output matrix.json
           echo "matrix=$(tr -d '\n' < matrix.json)" >> "$GITHUB_OUTPUT"
 
   build:
