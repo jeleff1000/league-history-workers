@@ -225,6 +225,12 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
               SELECT
                 s.artifact_id,
                 COUNT(*) AS source_team_keys,
+                COUNT(*) FILTER (WHERE EXISTS (
+                  SELECT 1 FROM public.player_fantasy p
+                  WHERE p.db_name IS NOT DISTINCT FROM s.db_name
+                    AND p."year" IS NOT DISTINCT FROM s.year
+                    AND p.week IS NOT DISTINCT FROM s.week
+                )) AS league_week_overlap_keys,
                 COALESCE(SUM(CASE WHEN r.artifact_id IS NOT NULL THEN s.source_rows ELSE 0 END), 0) AS matched_source_team_rows,
                 COALESCE(SUM(CASE WHEN r.artifact_id IS NULL THEN s.source_rows ELSE 0 END), 0) AS unmatched_source_team_rows,
                 COUNT(*) FILTER (WHERE r.artifact_id IS NOT NULL) AS matched_source_team_keys,
@@ -249,6 +255,7 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
             )
             SELECT r.artifact_id, r.source_team_rows,
                    COALESCE(k.source_team_keys, 0),
+                   COALESCE(k.league_week_overlap_keys, 0),
                    COALESCE(k.matched_source_team_rows, 0),
                    r.source_team_rows - COALESCE(k.matched_source_team_rows, 0),
                    COALESCE(k.matched_source_team_keys, 0),
@@ -262,6 +269,7 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
         """).fetchall():
             (
                 artifact_id, source_team_rows, source_team_keys,
+                league_week_overlap_keys,
                 matched_source_team_rows, unmatched_source_team_rows,
                 matched_source_team_keys, unmatched_source_team_keys,
                 matched_by_mfl_manager_guid, matched_by_manager_team_name,
@@ -271,6 +279,8 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
                 "artifact_id": int(artifact_id),
                 "source_team_rows": int(source_team_rows),
                 "source_team_keys": int(source_team_keys),
+                "league_week_overlap_keys": int(league_week_overlap_keys),
+                "league_week_absent_keys": int(source_team_keys - league_week_overlap_keys),
                 "matched_source_team_rows": int(matched_source_team_rows),
                 "unmatched_source_team_rows": int(unmatched_source_team_rows),
                 "matched_source_team_keys": int(matched_source_team_keys),

@@ -50,6 +50,8 @@ def test_profile_batches_exact_team_key_checks_without_mutating_cache(tmp_path: 
         "artifact_id": 10,
         "source_team_rows": 1,
         "source_team_keys": 1,
+        "league_week_overlap_keys": 1,
+        "league_week_absent_keys": 0,
         "matched_source_team_rows": 1,
         "unmatched_source_team_rows": 0,
         "matched_source_team_keys": 1,
@@ -140,3 +142,31 @@ def test_profile_uses_unique_manager_and_team_name_when_mfl_keys_are_rewritten(t
     assert row["matched_source_team_rows"] == 1
     assert row["matched_source_player_rows"] == 2
     assert row["matched_by_manager_team_name"] == 1
+
+
+def test_profile_reports_source_league_weeks_present_before_identity_resolution(tmp_path: Path) -> None:
+    """The receipt must distinguish an absent league-week from an unresolved team key."""
+    from scripts.research_cohorts.profile_raw_team_signal_sources import profile
+
+    base = tmp_path / "base.duckdb"
+    con = duckdb.connect(str(base))
+    con.execute("CREATE SCHEMA public")
+    con.execute("""
+        CREATE TABLE public.player_fantasy AS
+        SELECT 'league'::VARCHAR AS db_name, 2024::INTEGER AS year,
+               1::INTEGER AS week, 'cache-team'::VARCHAR AS team_key,
+               'p1'::VARCHAR AS NFL_player_id
+    """)
+    con.close()
+    raw = tmp_path / "raw.parquet"
+    _parquet(raw, [
+        {"db_name": "league", "year": 2024, "week": 1, "team_key": "other"},
+        {"db_name": "missing", "year": 2024, "week": 1, "team_key": "other"},
+    ])
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps([{"artifact_id": 14, "path": str(raw)}]))
+
+    row = profile(base=base, manifest=manifest)["rows"][0]
+
+    assert row["league_week_overlap_keys"] == 1
+    assert row["league_week_absent_keys"] == 1
