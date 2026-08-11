@@ -1,0 +1,62 @@
+name: Research matchup compact RB grade pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  contents: read
+
+jobs:
+  grade_batch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - name: Build and gate RB 2025 compact grade cells
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code
+        run: |
+          python - <<'PY'
+          import duckdb, json
+          from scripts.research_cohorts.compact_matchup_cells import materialize_season_bracket_grade_position_batch
+          c = duckdb.connect()
+          c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          c.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
+          materialize_season_bracket_grade_position_batch(
+              c, source_table='lake.public.player_fantasy',
+              nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+              output_table='rb_2025_grade_batch', year=2025, position='RB', split_threshold=50,
+          )
+          outer_rows = c.execute('SELECT COUNT(*) FROM rb_2025_grade_batch').fetchone()[0]
+          assert outer_rows == 164, outer_rows
+          cmc_all = c.execute("""
+            SELECT cell.eligible_leagues, cell.playoff_leagues, cell.champ_leagues
+            FROM rb_2025_grade_batch o, UNNEST(o.grade_cells) AS u(cell)
+            WHERE o.NFL_player_id='00-0033280' AND cell.q_playoff_teams='ALL'
+          """).fetchone()
+          assert cmc_all == (9980, 6692, 2031), cmc_all
+          invalid = c.execute("""
+            SELECT COUNT(*) FROM rb_2025_grade_batch o, UNNEST(o.grade_cells) AS u(cell)
+            WHERE cell.champ_leagues > cell.playoff_leagues
+          """).fetchone()[0]
+          assert invalid == 0, invalid
+          print('rb_2025_grade_batch=' + json.dumps({'outer_rows': outer_rows, 'cmc_all': cmc_all}))
+          PY
