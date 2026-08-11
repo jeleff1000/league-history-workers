@@ -76,3 +76,78 @@ def test_receipt_marks_cache_match_missing_and_non_candidate(tmp_path: Path) -> 
     assert rows[11]["final_status"] == "cache_verified"
     assert rows[12]["final_status"] == "not_data_bearing"
     assert rows[13]["final_status"] == "no_promotable_candidate_emitted"
+
+
+def test_receipt_fans_raw_team_signal_to_matching_player_rows(tmp_path: Path) -> None:
+    """Removing team-key fanout would leave raw team evidence unaccounted for."""
+    from scripts.research_cohorts.finalize_artifact_cache_receipts import build_receipts
+
+    base = tmp_path / "base.duckdb"
+    _base_cache(base)
+    con = duckdb.connect(str(base))
+    con.execute("UPDATE public.player_fantasy SET is_playoffs = 1")
+    con.close()
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({"rows": [{
+        "artifact_id": 42, "artifact": "raw-team", "candidate_delta_rows": 1,
+        "candidate_fields": ["win", "team_points", "is_playoffs", "champion"],
+        "dispositions": ["team_week_signal_candidate"],
+    }]}))
+    raw = tmp_path / "raw-team.parquet"
+    _write_parquet(raw, [{
+        "db_name": "league", "year": 2024, "week": 15, "team_key": "team",
+        "manager": "mgr", "win": 1, "team_points": 100.0,
+        "is_playoffs": 1, "champion": 1,
+    }])
+    manifest = tmp_path / "raw-team-manifest.json"
+    manifest.write_text(json.dumps([{"artifact_id": 42, "path": str(raw)}]))
+    out = tmp_path / "receipts.json"
+
+    result = build_receipts(
+        ledger_path=ledger, base_path=base, team_delta=None, exact_delta=None,
+        structured_delta=None, settings_delta=None, team_signal_manifest=manifest,
+        out_path=out,
+    )
+
+    row = result["rows"][0]
+    assert row["final_status"] == "still_missing_cache_cells"
+    assert row["source_cells"] == 4
+    assert row["cache_match_cells"] == 3
+    assert row["cache_missing_cells"] == 1
+
+
+def test_receipt_preserves_prior_artifact_readbacks_when_overlaying_raw_signals(tmp_path: Path) -> None:
+    """Removing prior-receipt seeding would regress already-verified artifacts."""
+    from scripts.research_cohorts.finalize_artifact_cache_receipts import build_receipts
+
+    base = tmp_path / "base.duckdb"
+    _base_cache(base)
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({"rows": [
+        {"artifact_id": 42, "artifact": "raw-team", "candidate_delta_rows": 1,
+         "candidate_fields": ["win"], "dispositions": ["team_week_signal_candidate"]},
+        {"artifact_id": 43, "artifact": "already-verified", "candidate_delta_rows": 1,
+         "candidate_fields": ["win"], "dispositions": ["direct_player_candidate"]},
+    ]}))
+    prior = tmp_path / "prior.json"
+    prior.write_text(json.dumps({"rows": [{
+        "artifact_id": 43, "source_cells": 1, "cache_match_cells": 1,
+        "cache_missing_cells": 0, "cache_conflict_cells": 0,
+        "unmatched_cache_cells": 0, "blocked_schema_cells": 0,
+    }]}))
+    raw = tmp_path / "raw-team.parquet"
+    _write_parquet(raw, [{
+        "db_name": "league", "year": 2024, "week": 15, "team_key": "team", "win": 1,
+    }])
+    manifest = tmp_path / "raw-team-manifest.json"
+    manifest.write_text(json.dumps([{"artifact_id": 42, "path": str(raw)}]))
+
+    result = build_receipts(
+        ledger_path=ledger, base_path=base, team_delta=None, exact_delta=None,
+        structured_delta=None, settings_delta=None, team_signal_manifest=manifest,
+        prior_receipts_path=prior, out_path=tmp_path / "receipts.json",
+    )
+
+    rows = {row["artifact_id"]: row for row in result["rows"]}
+    assert rows[43]["final_status"] == "cache_verified"
+    assert rows[43]["cache_match_cells"] == 1

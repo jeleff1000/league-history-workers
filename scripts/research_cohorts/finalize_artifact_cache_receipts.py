@@ -46,6 +46,26 @@ SETTINGS_FIELDS = {
     "source_roster_IDP": "roster_IDP",
     "source_sleeper_best_ball": "sleeper_best_ball",
 }
+RAW_TEAM_SIGNAL_COLUMNS = {
+    "source_win": "win",
+    "source_loss": "loss",
+    "source_tie": "tie",
+    "source_team_points": "team_points",
+    "source_playoffs": "is_playoffs",
+    "source_champion": "champion",
+    "source_final_playoff_seed": "final_playoff_seed",
+    "source_made_playoffs": "made_playoffs",
+}
+RAW_TEAM_SIGNAL_FALLBACK_TYPES = {
+    "source_win": "BIGINT",
+    "source_loss": "BIGINT",
+    "source_tie": "BIGINT",
+    "source_team_points": "DOUBLE",
+    "source_playoffs": "BOOLEAN",
+    "source_champion": "BIGINT",
+    "source_final_playoff_seed": "BIGINT",
+    "source_made_playoffs": "BOOLEAN",
+}
 CANDIDATE_DISPOSITIONS = {
     "direct_player_candidate", "team_week_signal_candidate", "player_signal_candidate",
     "settings_candidate", "structured_evidence_candidate",
@@ -90,6 +110,23 @@ def _add_result(
     counter = totals[artifact_id]
     for key, value in values.items():
         counter[key] += int(value or 0)
+
+
+def _seed_prior_receipts(
+    totals: dict[int, Counter], prior_receipts_path: Path | None,
+) -> None:
+    """Carry earlier evidence forward before adding a new source-family readback."""
+    if prior_receipts_path is None or not prior_receipts_path.exists():
+        return
+    prior = json.loads(prior_receipts_path.read_text(encoding="utf-8"))
+    for row in prior.get("rows", []):
+        _add_result(totals, int(row["artifact_id"]), {
+            key: int(row.get(key, 0) or 0)
+            for key in (
+                "source_cells", "cache_match_cells", "cache_missing_cells",
+                "cache_conflict_cells", "unmatched_cache_cells", "blocked_schema_cells",
+            )
+        })
 
 
 def _audit_delta(
@@ -176,6 +213,102 @@ def _audit_delta(
         _add_result(totals, artifact_id, dict(summary))
 
 
+def _audit_raw_team_signals(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    manifest_path: Path | None,
+    target_relation: str,
+    totals: dict[int, Counter],
+) -> None:
+    """Fan raw team-week artifacts out to all player rows on the same team-week."""
+    if manifest_path is None or not manifest_path.exists():
+        return
+    entries = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(entries, list):
+        raise SystemExit("team-signal manifest must be a JSON list")
+    target_columns = _columns(con, target_relation)
+    target_types = {
+        row[0]: row[1] for row in con.execute(f"DESCRIBE {target_relation}").fetchall()
+    }
+    selects: list[str] = []
+    required_keys = {"db_name", "year", "week", "team_key"}
+    for entry in entries:
+        artifact_id = int(entry["artifact_id"])
+        path = Path(entry["path"])
+        if not path.exists() or path.stat().st_size == 0:
+            continue
+        escaped = str(path.resolve()).replace("'", "''")
+        raw_columns = {
+            row[0] for row in con.execute(
+                f"DESCRIBE SELECT * FROM read_parquet('{escaped}')"
+            ).fetchall()
+        }
+        if not required_keys <= raw_columns:
+            continue
+        terms = [
+            f"{artifact_id}::BIGINT AS artifact_id",
+            *(_quoted(key) for key in ["db_name", "year", "week", "team_key"]),
+        ]
+        for source, raw_column in RAW_TEAM_SIGNAL_COLUMNS.items():
+            target = TEAM_FIELDS[source]
+            cast_type = target_types.get(target, RAW_TEAM_SIGNAL_FALLBACK_TYPES[source])
+            if raw_column in raw_columns:
+                terms.append(f"CAST({_quoted(raw_column)} AS {cast_type}) AS {_quoted(source)}")
+            else:
+                terms.append(f"NULL::{cast_type} AS {_quoted(source)}")
+        selects.append(f"SELECT {', '.join(terms)} FROM read_parquet('{escaped}')")
+    if not selects:
+        return
+    con.execute("CREATE OR REPLACE TEMP TABLE raw_team_signal_evidence AS " + " UNION ALL ".join(selects))
+    evidence_columns = _columns(con, "raw_team_signal_evidence")
+    selected_fields = {source: target for source, target in TEAM_FIELDS.items() if source in evidence_columns}
+    supported = {source: target for source, target in selected_fields.items() if target in target_columns}
+    blocked = {source: target for source, target in selected_fields.items() if target not in target_columns}
+    if blocked:
+        field_sql = ", ".join(
+            f"SUM(CASE WHEN e.{_quoted(source)} IS NOT NULL THEN 1 ELSE 0 END)"
+            for source in blocked
+        )
+        for row in con.execute(
+            f"SELECT e.artifact_id, {field_sql} FROM raw_team_signal_evidence e GROUP BY e.artifact_id"
+        ).fetchall():
+            artifact_id, *counts = row
+            value = sum(int(count or 0) for count in counts)
+            _add_result(totals, artifact_id, {"blocked_schema_cells": value, "source_cells": value})
+    if not supported:
+        return
+    select_terms: list[str] = []
+    for source, target in supported.items():
+        select_terms.extend([
+            f"SUM(CASE WHEN e.{_quoted(source)} IS NOT NULL AND p.rowid IS NULL THEN 1 ELSE 0 END) AS {_quoted('unmatched__' + target)}",
+            f"SUM(CASE WHEN e.{_quoted(source)} IS NOT NULL AND p.rowid IS NOT NULL AND p.{_quoted(target)} IS NULL THEN 1 ELSE 0 END) AS {_quoted('missing__' + target)}",
+            f"SUM(CASE WHEN e.{_quoted(source)} IS NOT NULL AND p.rowid IS NOT NULL AND p.{_quoted(target)} IS NOT NULL AND p.{_quoted(target)} IS NOT DISTINCT FROM e.{_quoted(source)} THEN 1 ELSE 0 END) AS {_quoted('match__' + target)}",
+            f"SUM(CASE WHEN e.{_quoted(source)} IS NOT NULL AND p.rowid IS NOT NULL AND p.{_quoted(target)} IS NOT NULL AND p.{_quoted(target)} IS DISTINCT FROM e.{_quoted(source)} THEN 1 ELSE 0 END) AS {_quoted('conflict__' + target)}",
+        ])
+    query = f"""
+        SELECT e.artifact_id, {', '.join(select_terms)}
+        FROM raw_team_signal_evidence e
+        LEFT JOIN {target_relation} p ON {_join('p', 'e', ['db_name', 'year', 'week', 'team_key'])}
+        GROUP BY e.artifact_id
+    """
+    field_names = [term.rsplit(" AS ", 1)[1].strip('"') for term in select_terms]
+    for row in con.execute(query).fetchall():
+        artifact_id, *counts = row
+        summary = Counter()
+        for field_name, count in zip(field_names, counts):
+            value = int(count or 0)
+            summary["source_cells"] += value
+            if field_name.startswith("match__"):
+                summary["cache_match_cells"] += value
+            elif field_name.startswith("missing__"):
+                summary["cache_missing_cells"] += value
+            elif field_name.startswith("conflict__"):
+                summary["cache_conflict_cells"] += value
+            elif field_name.startswith("unmatched__"):
+                summary["unmatched_cache_cells"] += value
+        _add_result(totals, artifact_id, dict(summary))
+
+
 def _final_status(row: dict[str, Any], counts: Counter) -> tuple[str, str]:
     source_cells = int(counts["source_cells"])
     if source_cells == 0:
@@ -201,7 +334,8 @@ def _final_status(row: dict[str, Any], counts: Counter) -> tuple[str, str]:
 def build_receipts(
     *, ledger_path: Path, base_path: Path, team_delta: Path | None,
     exact_delta: Path | None, structured_delta: Path | None,
-    settings_delta: Path | None, out_path: Path,
+    settings_delta: Path | None, out_path: Path, team_signal_manifest: Path | None = None,
+    prior_receipts_path: Path | None = None,
 ) -> dict[str, Any]:
     ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
     ledger_rows = ledger.get("rows", ledger.get("files", []))
@@ -210,6 +344,7 @@ def build_receipts(
     con = duckdb.connect(str(base_path), read_only=True)
     con.create_function("source_artifact_id", _source_artifact_id, return_type="BIGINT", null_handling="special")
     totals: dict[int, Counter] = defaultdict(Counter)
+    _seed_prior_receipts(totals, prior_receipts_path)
     _audit_delta(con, path=team_delta, view_name="team", source_fields=TEAM_FIELDS,
                  target_relation="public.player_fantasy", join_columns=PLAYER_KEY, totals=totals)
     _audit_delta(con, path=exact_delta, view_name="exact", source_fields=EXACT_FIELDS,
@@ -218,6 +353,9 @@ def build_receipts(
                  target_relation="public.player_fantasy", join_columns=["db_name", "year", "week", "manager"], totals=totals)
     _audit_delta(con, path=settings_delta, view_name="settings", source_fields=SETTINGS_FIELDS,
                  target_relation="public.league_settings", join_columns=["db_name", "year"], totals=totals)
+    _audit_raw_team_signals(
+        con, manifest_path=team_signal_manifest, target_relation="public.player_fantasy", totals=totals,
+    )
     con.close()
 
     rows: list[dict[str, Any]] = []
@@ -264,12 +402,16 @@ def main() -> None:
     ap.add_argument("--exact-delta", type=Path)
     ap.add_argument("--structured-delta", type=Path)
     ap.add_argument("--settings-delta", type=Path)
+    ap.add_argument("--team-signal-manifest", type=Path)
+    ap.add_argument("--prior-receipts", type=Path)
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
     result = build_receipts(
         ledger_path=args.ledger, base_path=args.base, team_delta=args.team_delta,
         exact_delta=args.exact_delta, structured_delta=args.structured_delta,
         settings_delta=args.settings_delta, out_path=args.out,
+        team_signal_manifest=args.team_signal_manifest,
+        prior_receipts_path=args.prior_receipts,
     )
     print(json.dumps(result["summary"], sort_keys=True))
 
