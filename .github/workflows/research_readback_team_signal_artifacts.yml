@@ -111,6 +111,8 @@ jobs:
           done < selected_artifacts.tsv |
             xargs -0 -r -n 3 -P 15 bash -c 'download_one "$@"' _
       - name: Build exact raw-source manifest
+        env:
+          SOURCE_KIND: ${{ inputs.source_kind }}
         shell: bash
         run: |
           set -euo pipefail
@@ -119,12 +121,19 @@ jobs:
           from pathlib import Path
           selected=json.loads(Path('selected_artifacts.json').read_text())
           manifest=[]
+          source_kind=os.environ['SOURCE_KIND']
           for row in selected:
               artifact_id=row['artifact_id']
-              expected=[name for name in row['candidate_files'].split('|') if name.endswith('.parquet')]
-              candidates=[]
-              for name in expected:
-                  candidates.extend(Path('sources', artifact_id).rglob(name))
+              root=Path('sources', artifact_id)
+              if source_kind == 'structured_player':
+                  # Structured-player artifacts predate the later delta ledger
+                  # and their raw filename is not the ledger's delta filename.
+                  candidates=list(root.rglob('*.parquet'))
+              else:
+                  expected=[name for name in row['candidate_files'].split('|') if name.endswith('.parquet')]
+                  candidates=[]
+                  for name in expected:
+                      candidates.extend(root.rglob(name))
               if len(candidates)!=1:
                   raise SystemExit(f"{artifact_id}: expected exactly one raw parquet, found {len(candidates)}")
               manifest.append({'artifact_id':int(artifact_id),'path':str(candidates[0].resolve())})
