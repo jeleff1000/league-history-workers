@@ -76,42 +76,55 @@ def _team_fanout_stats(con: duckdb.DuckDBPyConnection, relation: str) -> dict[st
     }
 
 
-def _manager_bridge_stats(
+def _fanout_stats(
     con: duckdb.DuckDBPyConnection,
     relation: str,
     *,
-    include_team_name: bool,
-) -> dict[str, int]:
-    select_identities = [f"{_normalised_text('manager')} AS manager_key"]
-    fields = ["db_name", '"year"', "week", "manager_key"]
-    if include_team_name:
-        select_identities.append(f"{_normalised_text('team_name')} AS team_name_key")
-        fields.append("team_name_key")
+    columns: list[str],
+    group_label: str,
+) -> dict[str, int | float]:
+    where = _non_null_filter(columns)
     grouped = f"""
-        WITH prepared AS (
-          SELECT db_name, "year", week, team_key, {', '.join(select_identities)}
-          FROM {relation}
-        ), groups AS (
-          SELECT {', '.join(fields)}, COUNT(DISTINCT team_key) AS n_team_keys
-          FROM prepared
-          WHERE manager_key IS NOT NULL AND team_key IS NOT NULL
-          {'AND team_name_key IS NOT NULL' if include_team_name else ''}
-          GROUP BY {', '.join(str(index + 1) for index in range(len(fields)))}
-        )
-        SELECT
-          COUNT(*),
-          COUNT(*) FILTER (WHERE n_team_keys=1),
-          COUNT(*) FILTER (WHERE n_team_keys>1),
-          COALESCE(MAX(n_team_keys), 0)
-        FROM groups
+        SELECT {', '.join(_q(column) for column in columns)}, COUNT(*) AS player_rows
+        FROM {relation}
+        WHERE {where}
+        GROUP BY {', '.join(str(index + 1) for index in range(len(columns)))}
     """
-    total, single, multi, max_teams = con.execute(grouped).fetchone()
+    count, player_rows, min_fanout, max_fanout, avg_fanout = con.execute(f"""
+        SELECT COUNT(*), COALESCE(SUM(player_rows), 0), MIN(player_rows), MAX(player_rows), AVG(player_rows)
+        FROM ({grouped})
+    """).fetchone()
     return {
-        "joinable_groups": int(total or 0),
-        "single_team_groups": int(single or 0),
-        "multi_team_groups": int(multi or 0),
-        "max_team_keys_in_group": int(max_teams or 0),
+        group_label: int(count or 0),
+        "player_rows": int(player_rows or 0),
+        "min_player_fanout": int(min_fanout or 0),
+        "max_player_fanout": int(max_fanout or 0),
+        "avg_player_fanout": float(avg_fanout or 0),
     }
+
+
+def _native_player_id_expression(columns: set[str]) -> str:
+    def source_id(name: str) -> str:
+        return f"NULLIF(TRIM(CAST({_q(name)} AS VARCHAR)), '')" if name in columns else "NULL::VARCHAR"
+    return """
+        COALESCE(
+          CASE LOWER(NULLIF(TRIM(CAST("platform" AS VARCHAR)), ''))
+            WHEN 'sleeper' THEN {sleeper}
+            WHEN 'fleaflicker' THEN {fleaflicker}
+            WHEN 'mfl' THEN {mfl}
+            WHEN 'espn' THEN {espn}
+            WHEN 'yahoo' THEN {yahoo}
+          END,
+          {nfl}
+        )
+    """.format(
+        sleeper=source_id("sleeper_player_id"),
+        fleaflicker=source_id("fleaflicker_player_id"),
+        mfl=source_id("mfl_player_id"),
+        espn=source_id("espn_player_id"),
+        yahoo=source_id("yahoo_player_id"),
+        nfl=source_id("NFL_player_id"),
+    )
 
 
 def profile_relation(con: duckdb.DuckDBPyConnection, relation: str) -> dict[str, Any]:
@@ -120,20 +133,38 @@ def profile_relation(con: duckdb.DuckDBPyConnection, relation: str) -> dict[str,
     missing = sorted(required - columns)
     if missing:
         raise ValueError(f"missing required player columns: {missing}")
+    con.execute(f"""
+        CREATE OR REPLACE TEMP VIEW canonical_join_key_audit AS
+        SELECT *,
+               {_normalised_text('manager')} AS manager_key,
+               {_normalised_text('team_name')} AS team_name_key,
+               {_native_player_id_expression(columns)} AS native_player_id
+        FROM {relation}
+    """)
+    prepared = "canonical_join_key_audit"
     player_keys = {
-        "player_week_nfl": _key_stats(con, relation, ["db_name", "year", "week", "NFL_player_id"]),
-        "player_week_nfl_team_key": _key_stats(con, relation, ["db_name", "year", "week", "NFL_player_id", "team_key"]),
-        "player_week_nfl_manager": _key_stats(con, relation, ["db_name", "year", "week", "NFL_player_id", "manager"]),
-        "player_week_nfl_manager_team_name": _key_stats(con, relation, ["db_name", "year", "week", "NFL_player_id", "manager", "team_name"]),
-        "player_week_platform_nfl_team_key": _key_stats(con, relation, ["db_name", "year", "week", "platform", "NFL_player_id", "team_key"]),
+        "player_week_nfl": _key_stats(con, prepared, ["db_name", "year", "week", "NFL_player_id"]),
+        "player_week_nfl_team_key": _key_stats(con, prepared, ["db_name", "year", "week", "NFL_player_id", "team_key"]),
+        "player_week_nfl_manager": _key_stats(con, prepared, ["db_name", "year", "week", "NFL_player_id", "manager_key"]),
+        "player_week_nfl_manager_team_name": _key_stats(con, prepared, ["db_name", "year", "week", "NFL_player_id", "manager_key", "team_name_key"]),
+        "player_week_platform_native_id_manager": _key_stats(con, prepared, ["db_name", "year", "week", "platform", "native_player_id", "manager_key"]),
+    }
+    component_population = {
+        column: int(con.execute(f"SELECT COUNT(*) FROM {prepared} WHERE {_q(column)} IS NOT NULL").fetchone()[0])
+        for column in ("NFL_player_id", "native_player_id", "manager_key", "team_key", "team_name_key")
     }
     return {
         "rows": int(con.execute(f"SELECT COUNT(*) FROM {relation}").fetchone()[0]),
+        "non_null_component_rows": component_population,
         "player_keys": player_keys,
-        "team_keys": {"team_week_team_key": _team_fanout_stats(con, relation)},
-        "manager_bridges": {
-            "manager_only": _manager_bridge_stats(con, relation, include_team_name=False),
-            "manager_team_name": _manager_bridge_stats(con, relation, include_team_name=True),
+        "team_keys": {"team_week_team_key": _team_fanout_stats(con, prepared)},
+        "manager_fanout": {
+            "manager_week": _fanout_stats(
+                con, prepared, columns=["db_name", "year", "week", "manager_key"], group_label="manager_groups",
+            ),
+            "manager_team_name_week": _fanout_stats(
+                con, prepared, columns=["db_name", "year", "week", "manager_key", "team_name_key"], group_label="manager_groups",
+            ),
         },
     }
 

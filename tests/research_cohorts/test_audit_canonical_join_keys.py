@@ -25,6 +25,7 @@ def test_profiles_player_keys_and_team_fanout_without_treating_manager_as_unique
     assert result["player_keys"]["player_week_nfl_team_key"]["unique"] is True
     assert result["team_keys"]["team_week_team_key"]["team_groups"] == 3
     assert result["team_keys"]["team_week_team_key"]["max_player_fanout"] == 2
-    assert result["manager_bridges"]["manager_only"]["single_team_groups"] == 1
-    assert result["manager_bridges"]["manager_only"]["multi_team_groups"] == 1
-    assert result["manager_bridges"]["manager_team_name"]["single_team_groups"] == 3
+    assert result["manager_fanout"]["manager_week"]["manager_groups"] == 2
+    assert result["manager_fanout"]["manager_week"]["max_player_fanout"] == 3
+    assert result["manager_fanout"]["manager_team_name_week"]["manager_groups"] == 3
+    assert result["player_keys"]["player_week_platform_native_id_manager"]["unique"] is True
