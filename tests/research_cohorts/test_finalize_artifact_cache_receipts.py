@@ -184,3 +184,41 @@ def test_receipt_uses_manager_as_the_canonical_team_identity(tmp_path: Path) -> 
     row = result["rows"][0]
     assert row["final_status"] == "cache_verified"
     assert row["cache_match_cells"] == 1
+
+
+def test_receipt_reads_raw_player_outcome_evidence_on_its_exact_key(tmp_path: Path) -> None:
+    """Raw MFL player evidence must not be treated as a manager-week fan-out."""
+    from scripts.research_cohorts.finalize_artifact_cache_receipts import build_receipts
+
+    base = tmp_path / "base.duckdb"
+    _base_cache(base)
+    con = duckdb.connect(str(base))
+    con.execute("UPDATE public.player_fantasy SET is_playoffs = NULL")
+    con.close()
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({"rows": [{
+        "artifact_id": 56, "artifact": "mfl-player-outcome", "candidate_delta_rows": 1,
+        "candidate_fields": ["win", "team_points", "is_playoffs"],
+        "dispositions": ["direct_player_candidate"],
+    }]}))
+    raw = tmp_path / "mfl-player.parquet"
+    _write_parquet(raw, [{
+        "db_name": "league", "year": 2024, "week": 15,
+        "NFL_player_id": "p1", "manager": "mgr",
+        "source_win": 1, "source_team_points": 100.0,
+        "source_is_playoffs": 1,
+    }])
+    manifest = tmp_path / "mfl-player-manifest.json"
+    manifest.write_text(json.dumps([{"artifact_id": 56, "path": str(raw)}]))
+
+    result = build_receipts(
+        ledger_path=ledger, base_path=base, team_delta=None, exact_delta=None,
+        structured_delta=None, settings_delta=None, structured_player_manifest=manifest,
+        out_path=tmp_path / "receipts.json",
+    )
+
+    row = result["rows"][0]
+    assert row["final_status"] == "still_missing_cache_cells"
+    assert row["source_cells"] == 3
+    assert row["cache_match_cells"] == 2
+    assert row["cache_missing_cells"] == 1

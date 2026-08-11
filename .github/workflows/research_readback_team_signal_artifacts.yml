@@ -1,4 +1,4 @@
-name: Read back retained team-signal artifacts
+name: Read back retained raw signal artifacts
 
 on:
   workflow_dispatch:
@@ -15,6 +15,14 @@ on:
       artifact_prefix:
         required: true
         default: research-source-matchup-rescue-
+      source_kind:
+        description: Raw artifact grain; player evidence is joined on exact player-week identity.
+        required: true
+        type: choice
+        default: team
+        options:
+          - team
+          - structured_player
 
 permissions:
   actions: read
@@ -85,7 +93,7 @@ jobs:
               print(f"{row['workflow_run_id']}\t{row['artifact']}\t{row['artifact_id']}")
           PY
           )
-      - name: Build exact raw-team source manifest
+      - name: Build exact raw-source manifest
         shell: bash
         run: |
           set -euo pipefail
@@ -105,18 +113,21 @@ jobs:
               manifest.append({'artifact_id':int(artifact_id),'path':str(candidates[0].resolve())})
           if len(manifest)!=len(selected):
               raise SystemExit('manifest did not cover every selected artifact')
-          Path('team_signal_manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
+          Path('raw_source_manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
           print(json.dumps({'manifest_rows':len(manifest)}))
           PY
-      - name: Profile raw-team identities against canonical player rows
+      - name: Profile raw-source identities against canonical player rows
+        env:
+          SOURCE_KIND: ${{ inputs.source_kind }}
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
-          import json
+          import json, os
           from pathlib import Path
           import duckdb
-          manifest=json.loads(Path('team_signal_manifest.json').read_text())
+          source_kind=os.environ['SOURCE_KIND']
+          manifest=json.loads(Path('raw_source_manifest.json').read_text())
           con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
           strategies={
             'team_key_to_team_key': 'p.team_key IS NOT DISTINCT FROM r.team_key',
@@ -128,6 +139,25 @@ jobs:
           for item in manifest:
             path=str(Path(item['path']).resolve()).replace("'", "''")
             columns={x[0] for x in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{path}')").fetchall()}
+            if source_kind == 'structured_player':
+              key=['db_name','year','week','NFL_player_id','manager']
+              if not set(key) <= columns:
+                raise SystemExit(f"{item['artifact_id']}: missing exact player key columns")
+              total=int(con.execute(f"SELECT COUNT(*) FROM read_parquet('{path}')").fetchone()[0])
+              matched=int(con.execute(f"""
+                SELECT COUNT(*) FROM read_parquet('{path}') r
+                WHERE EXISTS (
+                  SELECT 1 FROM public.player_fantasy p
+                  WHERE p.db_name IS NOT DISTINCT FROM r.db_name
+                    AND p.year IS NOT DISTINCT FROM r.year
+                    AND p.week IS NOT DISTINCT FROM r.week
+                    AND p.NFL_player_id IS NOT DISTINCT FROM r.NFL_player_id
+                    AND p.manager IS NOT DISTINCT FROM r.manager
+                )
+              """).fetchone()[0])
+              distinct=int(con.execute(f"SELECT COUNT(*) FROM (SELECT DISTINCT {', '.join(key)} FROM read_parquet('{path}'))").fetchone()[0])
+              rows.append({'artifact_id':item['artifact_id'],'source_kind':source_kind,'source_player_rows':total,'distinct_player_keys':distinct,'matched_source_rows':matched})
+              continue
             available={name: clause for name, clause in strategies.items() if (
               (name=='team_key_to_team_key' and {'team_key'} <= columns) or
               (name=='mfl_manager_guid_to_team_key' and {'platform','manager_guid'} <= columns) or
@@ -150,19 +180,29 @@ jobs:
             total=int(con.execute(f"SELECT COUNT(*) FROM read_parquet('{path}')").fetchone()[0])
             rows.append({'artifact_id':item['artifact_id'],'source_team_rows':total,'matched_source_rows':counts})
           con.close()
-          Path('team_signal_join_key_profile.json').write_text(json.dumps(rows, indent=2)+'\n')
+          Path('raw_signal_join_key_profile.json').write_text(json.dumps(rows, indent=2)+'\n')
           print(json.dumps(rows, sort_keys=True))
           PY
-      - name: Read back source cells through canonical team-week fan-out
+      - name: Read back source cells through canonical identity
+        env:
+          SOURCE_KIND: ${{ inputs.source_kind }}
         shell: bash
         run: |
           set -euo pipefail
+          args=()
+          if [ "$SOURCE_KIND" = "team" ]; then
+            args+=(--team-signal-manifest raw_source_manifest.json)
+          elif [ "$SOURCE_KIND" = "structured_player" ]; then
+            args+=(--structured-player-manifest raw_source_manifest.json)
+          else
+            echo "unsupported source kind: $SOURCE_KIND" >&2
+            exit 2
+          fi
           python scripts/research_cohorts/finalize_artifact_cache_receipts.py \
             --ledger "$(find combined -name artifact_promotion_evidence_combined.json -print -quit)" \
             --prior-receipts "$(find prior -name final_artifact_cache_receipts.json -print -quit)" \
-            --team-signal-manifest team_signal_manifest.json \
             --base research_public_lake/corpus_snapshot.duckdb \
-            --out final_artifact_cache_receipts.json
+            --out final_artifact_cache_receipts.json "${args[@]}"
       - name: Fail fast on cache, schema, row, or ops mutation
         shell: bash
         run: |
@@ -187,12 +227,12 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: research-team-signal-cache-readback-${{ github.run_id }}
+          name: research-raw-signal-cache-readback-${{ github.run_id }}
           path: |
             final_artifact_cache_receipts.json
             selected_artifacts.json
-            team_signal_manifest.json
-            team_signal_join_key_profile.json
+            raw_source_manifest.json
+            raw_signal_join_key_profile.json
             prestate.json
             ops_before.sha256
           if-no-files-found: error
