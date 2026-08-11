@@ -16,6 +16,14 @@ SOURCE_FIELDS = (
     "pass_td_fill", "playoff_teams_fill", "roster_FLX_fill",
     "roster_SUPER_FLEX_fill", "roster_IDP_fill", "best_ball_fill",
 )
+SOURCE_ALIASES = {
+    "pass_td_fill": ("pass_td_fill", "scoring_pass_td_fill"),
+    "playoff_teams_fill": ("playoff_teams_fill",),
+    "roster_FLX_fill": ("roster_FLX_fill",),
+    "roster_SUPER_FLEX_fill": ("roster_SUPER_FLEX_fill",),
+    "roster_IDP_fill": ("roster_IDP_fill",),
+    "best_ball_fill": ("best_ball_fill", "sleeper_best_ball_fill"),
+}
 TARGET_FIELDS = {
     "pass_td_fill": "scoring_pass_td",
     "playoff_teams_fill": "playoff_teams",
@@ -42,7 +50,7 @@ def main() -> None:
             cols = {r[0] for r in con.execute("DESCRIBE SELECT * FROM read_parquet(?)", [str(path)]).fetchall()}
         except Exception:
             continue
-        if {"db_name", "year"} <= cols and set(SOURCE_FIELDS) & cols:
+        if {"db_name", "year"} <= cols and any(alias in cols for aliases in SOURCE_ALIASES.values() for alias in aliases):
             source_files.append((path, cols))
 
     report: dict = {
@@ -56,9 +64,20 @@ def main() -> None:
         return
 
     paths = ",".join("'" + str(path.resolve()).replace("'", "''") + "'" for path, _ in source_files)
-    con.execute(f"CREATE OR REPLACE TEMP VIEW settings_source AS SELECT * FROM read_parquet([{paths}], union_by_name=true, filename=true)")
+    con.execute(f"CREATE OR REPLACE TEMP VIEW settings_source_raw AS SELECT * FROM read_parquet([{paths}], union_by_name=true, filename=true)")
+    raw_columns = {r[0] for r in con.execute("DESCRIBE settings_source_raw").fetchall()}
+    normalized = []
+    for field in SOURCE_FIELDS:
+        aliases = [alias for alias in SOURCE_ALIASES[field] if alias in raw_columns]
+        expr = "COALESCE(" + ", ".join(f'"{alias}"' for alias in aliases) + ")" if aliases else "CAST(NULL AS VARCHAR)"
+        normalized.append(f'{expr} AS "{field}"')
+    con.execute(f"""
+      CREATE OR REPLACE TEMP VIEW settings_source AS
+      SELECT db_name, CAST("year" AS INTEGER) AS "year", filename, {', '.join(normalized)}
+      FROM settings_source_raw
+    """)
     report["source_rows"] = int(con.execute("SELECT COUNT(*) FROM settings_source").fetchone()[0])
-    present = [f for f in SOURCE_FIELDS if f in {r[0] for r in con.execute("DESCRIBE settings_source").fetchall()}]
+    present = [f for f in SOURCE_FIELDS if any(alias in raw_columns for alias in SOURCE_ALIASES[f])]
     conflict = " OR ".join(f"COUNT(DISTINCT COALESCE(CAST(\"{f}\" AS VARCHAR), '<NULL>')) > 1" for f in present)
     con.execute(f"""
       CREATE OR REPLACE TEMP TABLE settings_unique AS

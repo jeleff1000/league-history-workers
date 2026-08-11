@@ -85,7 +85,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          count=$(find settings_candidates -type f -name 'league_settings_updates.parquet' | wc -l)
+          count=$(find settings_candidates -type f \( -name 'league_settings_updates.parquet' -o -name 'source_settings_*.parquet' \) | wc -l)
           test "$count" -eq 1633 || { echo "expected 1633 settings files, found $count"; exit 1; }
       - name: Audit settings fields and target tables
         run: |
