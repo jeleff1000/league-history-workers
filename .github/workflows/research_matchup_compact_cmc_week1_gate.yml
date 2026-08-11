@@ -321,6 +321,59 @@ jobs:
           assert 0 <= row['champ_leagues'] <= row['playoff_leagues'] <= row['eligible_leagues'], row
           print('cmc_2025_season_compact_outer=' + json.dumps(row, default=str))
           PY
+      - name: Resolve CMC 2025 season core cohort cells independently
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code
+        run: |
+          python - <<'PY'
+          import duckdb, json
+          from scripts.research_cohorts.compact_matchup_cells import materialize_season_core_cohort_cells
+
+          c = duckdb.connect()
+          c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          c.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
+          materialize_season_core_cohort_cells(
+              c,
+              source_table='lake.public.player_fantasy',
+              nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+              output_table='cmc_2025_season_core_cells',
+              year=2025,
+              player_id='00-0033280',
+              split_threshold=50,
+          )
+          outer_count, cell_count = c.execute("""
+            SELECT COUNT(*), SUM(array_length(cohort_cells))
+            FROM cmc_2025_season_core_cells
+          """).fetchone()
+          assert outer_count == 1 and cell_count > 0, (outer_count, cell_count)
+          row = c.execute("""
+            SELECT
+              cell.eligible_leagues, cell.rostered_league_weeks,
+              cell.eligible_league_weeks, cell.started_league_weeks,
+              cell.healthy_started_league_weeks, cell.healthy_eligible_league_weeks,
+              cell.valid_started_outcomes, cell.win_equivalent,
+              cell.roster_rate_pct, cell.start_rate_pct, cell.healthy_start_rate_pct,
+              cell.win_rate_pct, cell.expected_starts, cell.expected_wins,
+              cell.expected_losses, cell.clutch_season_sum,
+              cell.active_weeks, cell.inactive_weeks
+            FROM cmc_2025_season_core_cells o, UNNEST(o.cohort_cells) AS u(cell)
+            WHERE cell.q_teams = 'ALL' AND cell.q_roster = 'ALL'
+              AND cell.q_scoring = 'ALL' AND cell.q_pass_td = 'ALL'
+              AND cell.q_dynasty = 'ALL' AND cell.q_best_ball = 'ALL'
+          """).fetchone()
+          assert row is not None, row
+          expected = (9980, 157712, 158687, 155272, 155272, 158687, 149661, 91505.0)
+          assert row[:8] == expected, row
+          expected_floats = (99.38558294000138, 97.84796486164588, 97.84796486164588,
+                             61.14151315305925, 16.58647147870992, 10.027170658969757,
+                             6.559300819740163, 10.5456027157515)
+          assert all(abs(actual - expected) < 1e-9 for actual, expected in zip(row[8:16], expected_floats)), row
+          assert row[16:] == (17, 0), row
+          print('cmc_2025_season_core_full_pool=' + json.dumps({
+              'outer_count': outer_count, 'cell_count': cell_count,
+              'full_pool': row,
+          }, default=str))
+          PY
       - name: Resolve CMC 2025 bracket-grade cells with full denominators
         env:
           PYTHONPATH: ${{ github.workspace }}/code
