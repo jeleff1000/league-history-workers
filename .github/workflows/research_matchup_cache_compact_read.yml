@@ -55,9 +55,15 @@ jobs:
               FROM lake.public.matchup
           """)
           emit('describe_ops_player_lookup_inputs', """
-              DESCRIBE SELECT NFL_player_id, year, week, season_type, position,
-                recent_team, team, offensive_snaps, defensive_snaps
+              DESCRIBE SELECT NFL_player_id, year, week, season_type, position
               FROM ops.nfl_historical.nfl_player_stats_all
+          """)
+          emit('ops_player_lookup_team_snap_columns', """
+              SELECT column_name, data_type
+              FROM ops.information_schema.columns
+              WHERE table_schema='nfl_historical' AND table_name='nfl_player_stats_all'
+                AND (lower(column_name) LIKE '%team%' OR lower(column_name) LIKE '%snap%')
+              ORDER BY ordinal_position
           """)
           emit('cohort_fanout_columns', """
               SELECT column_name, data_type
