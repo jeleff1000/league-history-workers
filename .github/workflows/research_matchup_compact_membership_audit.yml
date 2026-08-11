@@ -1,0 +1,113 @@
+name: Research matchup compact membership audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      compact_run_id:
+        description: Successful compact-output run to audit
+        required: true
+        default: '31511256356'
+      year:
+        required: true
+        default: '2025'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: ${{ github.workspace }}/code
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+          fail-on-cache-miss: true
+      - uses: actions/download-artifact@v5
+        with:
+          name: compact-matchup-final-${{ inputs.compact_run_id }}
+          path: compact
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.compact_run_id }}
+          github-token: ${{ github.token }}
+      - run: python -m pip install duckdb==1.5.1
+      - name: Compare every explicit-rostered cache player to compact season output
+        run: |
+          python - <<'PY'
+          import json
+          import duckdb
+          from scripts.research_cohorts.compact_matchup_cells import _research_position_sql
+
+          year = int('${{ inputs.year }}')
+          con = duckdb.connect()
+          con.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          con.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
+          con.execute("ATTACH 'compact/research_matchup_compact.duckdb' AS compact (READ_ONLY)")
+          pos = _research_position_sql('position')
+          con.execute(f'''
+            CREATE TEMP TABLE candidates AS
+            SELECT CAST(NFL_player_id AS VARCHAR) AS NFL_player_id, {pos} AS position
+            FROM lake.public.player_fantasy
+            WHERE CAST(year AS INTEGER)=? AND NFL_player_id IS NOT NULL
+            GROUP BY 1,2
+            HAVING MAX(CASE WHEN CAST(is_rostered AS INTEGER)=1 THEN 1 ELSE 0 END)=1
+          ''', [year])
+          con.execute('''
+            CREATE TEMP TABLE regular_stats AS
+            SELECT DISTINCT CAST(NFL_player_id AS VARCHAR) AS NFL_player_id
+            FROM ops.nfl_historical.nfl_player_stats_all
+            WHERE CAST(year AS INTEGER)=? AND week IS NOT NULL
+              AND COALESCE(season_type,'REG')='REG'
+          ''', [year])
+          con.execute('''
+            CREATE TEMP TABLE output AS
+            SELECT CAST(NFL_player_id AS VARCHAR) AS NFL_player_id, CAST(position AS VARCHAR) AS position
+            FROM compact.research_matchup_compact_season
+            WHERE CAST(year AS INTEGER)=?
+          ''', [year])
+          totals = con.execute('''
+            SELECT
+              (SELECT COUNT(*) FROM candidates),
+              (SELECT COUNT(*) FROM output),
+              (SELECT COUNT(*) FROM candidates c LEFT JOIN output o USING(NFL_player_id) WHERE o.NFL_player_id IS NULL),
+              (SELECT COUNT(*) FROM candidates c LEFT JOIN output o USING(NFL_player_id) LEFT JOIN regular_stats s USING(NFL_player_id) WHERE o.NFL_player_id IS NULL AND s.NFL_player_id IS NOT NULL),
+              (SELECT COUNT(*) FROM output o LEFT JOIN candidates c USING(NFL_player_id) WHERE c.NFL_player_id IS NULL)
+          ''').fetchone()
+          missing_by_position = con.execute('''
+            SELECT c.position,COUNT(*) AS missing,
+              COUNT(*) FILTER(WHERE s.NFL_player_id IS NOT NULL) AS with_regular_stats
+            FROM candidates c
+            LEFT JOIN output o USING(NFL_player_id)
+            LEFT JOIN regular_stats s USING(NFL_player_id)
+            WHERE o.NFL_player_id IS NULL
+            GROUP BY 1 ORDER BY 1
+          ''').fetchall()
+          samples = con.execute('''
+            SELECT c.position,c.NFL_player_id
+            FROM candidates c LEFT JOIN output o USING(NFL_player_id)
+            WHERE o.NFL_player_id IS NULL
+            ORDER BY c.position,c.NFL_player_id LIMIT 50
+          ''').fetchall()
+          evidence = {
+            'year':year,'candidates':totals[0],'output':totals[1],
+            'missing_raw_rostered_ids':totals[2],
+            'missing_with_regular_stats':totals[3],
+            'unexpected_output':totals[4],
+            'missing_by_position':missing_by_position,'samples':samples,
+          }
+          print('compact_membership_audit='+json.dumps(evidence))
+          assert totals[4] == 0, evidence
+          PY
