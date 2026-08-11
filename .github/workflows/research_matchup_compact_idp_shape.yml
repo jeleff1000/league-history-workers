@@ -1,0 +1,91 @@
+name: Research matchup compact IDP shape probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  contents: read
+
+jobs:
+  shape:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - name: Measure 2025 IDP aggregation shape without building cells
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code
+        run: |
+          python - <<'PY'
+          import duckdb, json
+          from scripts.research_cohorts.compact_matchup_cells import _research_position_sql
+
+          c = duckdb.connect()
+          c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          c.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
+          position = _research_position_sql('position')
+          row = c.execute(f"""
+            WITH population AS (
+              SELECT db_name, year, week, NFL_player_id, {position} AS position,
+                cohort_teams, cohort_roster, cohort_scoring, cohort_pass_td,
+                cohort_playoff_teams, cohort_dynasty, cohort_best_ball
+              FROM lake.public.player_fantasy
+              WHERE CAST(year AS INTEGER)=2025 AND {position}='IDP'
+            ),
+            target_players AS (
+              SELECT DISTINCT CAST(NFL_player_id AS VARCHAR) AS id FROM population
+            ),
+            regular_player_weeks AS (
+              SELECT DISTINCT CAST(s.NFL_player_id AS VARCHAR) AS id,
+                CAST(s.year AS INTEGER) AS year, CAST(s.week AS INTEGER) AS week
+              FROM ops.nfl_historical.nfl_player_stats_all s
+              INNER JOIN target_players t ON t.id=CAST(s.NFL_player_id AS VARCHAR)
+              WHERE CAST(s.year AS INTEGER)=2025 AND s.week IS NOT NULL
+                AND COALESCE(s.season_type,'REG')='REG'
+            ),
+            regular_population AS (
+              SELECT p.* FROM population p INNER JOIN regular_player_weeks g
+                ON g.id=CAST(p.NFL_player_id AS VARCHAR)
+               AND g.year=CAST(p.year AS INTEGER) AND g.week=CAST(p.week AS INTEGER)
+            ),
+            per_league AS (
+              SELECT CAST(NFL_player_id AS VARCHAR) AS id, CAST(week AS INTEGER) AS week,
+                CAST(db_name AS VARCHAR) AS db,
+                cohort_teams, cohort_roster, cohort_scoring, cohort_pass_td,
+                cohort_dynasty, cohort_best_ball
+              FROM regular_population
+              GROUP BY 1,2,3,4,5,6,7,8,9
+            )
+            SELECT
+              (SELECT COUNT(*) FROM population) AS population_rows,
+              (SELECT COUNT(DISTINCT NFL_player_id) FROM population) AS players,
+              (SELECT COUNT(*) FROM regular_player_weeks) AS regular_player_weeks,
+              (SELECT COUNT(*) FROM regular_population) AS regular_population_rows,
+              (SELECT COUNT(*) FROM per_league) AS per_league_rows,
+              (SELECT COUNT(DISTINCT (id, week)) FROM per_league) AS output_outer_rows,
+              (SELECT COUNT(DISTINCT (db_name, week, cohort_teams, cohort_roster, cohort_scoring, cohort_pass_td, cohort_playoff_teams, cohort_dynasty, cohort_best_ball)) FROM population) AS inventory_rows
+          """).fetchone()
+          keys=['population_rows','players','regular_player_weeks','regular_population_rows','per_league_rows','output_outer_rows','inventory_rows']
+          result=dict(zip(keys,row))
+          result['cube_upper_bound_cells']=result['output_outer_rows'] * 64
+          assert result['players'] > 0 and result['output_outer_rows'] > 0, result
+          print('idp_shape_2025=' + json.dumps(result))
+          PY
