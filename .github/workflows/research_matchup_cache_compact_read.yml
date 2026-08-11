@@ -1,0 +1,100 @@
+name: Research matchup cache compact read
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  contents: read
+
+jobs:
+  describe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - name: Describe exact rollup inputs and CMC source grain
+        run: |
+          python - <<'PY'
+          import duckdb, json
+
+          c = duckdb.connect()
+          c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          c.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
+
+          def emit(name, sql):
+              print(name + '=' + json.dumps(c.execute(sql).fetchall(), default=str))
+
+          emit('describe_player_fantasy_rollup_inputs', """
+              DESCRIBE SELECT
+                db_name, year, week, NFL_player_id, position,
+                is_rostered, is_started, fantasy_points, win, champion,
+                clutch_equity, manager_lamar, team_points, is_playoffs,
+                made_playoffs, cohort_teams, cohort_roster, cohort_scoring,
+                cohort_pass_td, cohort_playoff_teams, cohort_dynasty,
+                cohort_best_ball, cohort_position_eligible
+              FROM lake.public.player_fantasy
+          """)
+          emit('describe_matchup_rollup_inputs', """
+              DESCRIBE SELECT
+                db_name, year, week, manager, team_points, win, loss, tie,
+                is_playoffs, is_consolation, is_championship, champion,
+                final_playoff_seed
+              FROM lake.public.matchup
+          """)
+          emit('describe_ops_player_lookup_inputs', """
+              DESCRIBE SELECT NFL_player_id, year, week, season_type, position,
+                recent_team, team, offensive_snaps, defensive_snaps
+              FROM ops.nfl_historical.nfl_player_stats_all
+          """)
+          emit('cohort_fanout_columns', """
+              SELECT column_name, data_type
+              FROM lake.information_schema.columns
+              WHERE table_schema='public' AND table_name='player_fantasy'
+                AND (column_name LIKE 'cohort\\_%' ESCAPE '\\' OR column_name='made_playoffs')
+              ORDER BY ordinal_position
+          """)
+          emit('ops_bye_tables', """
+              SELECT table_schema, table_name
+              FROM information_schema.tables
+              WHERE table_catalog='ops' AND lower(table_name) LIKE '%bye%'
+              ORDER BY 1, 2
+          """)
+          emit('cmc_2025_cache_by_week', """
+              SELECT CAST(week AS INTEGER) AS week,
+                COUNT(*) AS source_rows,
+                COUNT(DISTINCT db_name) AS leagues,
+                COUNT(*) FILTER (WHERE is_rostered IS NULL) AS null_roster_rows,
+                COUNT(*) FILTER (WHERE CAST(is_rostered AS INTEGER)=0) AS explicit_unrostered_rows,
+                COUNT(*) FILTER (WHERE CAST(is_started AS INTEGER)=1) AS started_rows,
+                COUNT(*) FILTER (WHERE CAST(cohort_position_eligible AS INTEGER)=1) AS eligible_rows
+              FROM lake.public.player_fantasy
+              WHERE CAST(NFL_player_id AS VARCHAR)='00-0033280' AND CAST(year AS INTEGER)=2025
+              GROUP BY 1 ORDER BY 1
+          """)
+          emit('cmc_2025_cache_total', """
+              SELECT COUNT(*) AS source_rows, COUNT(DISTINCT db_name) AS leagues,
+                COUNT(DISTINCT CAST(week AS INTEGER)) AS weeks
+              FROM lake.public.player_fantasy
+              WHERE CAST(NFL_player_id AS VARCHAR)='00-0033280' AND CAST(year AS INTEGER)=2025
+          """)
+          emit('cmc_2025_ops_by_week', """
+              SELECT CAST(week AS INTEGER) AS week, CAST(season_type AS VARCHAR) AS season_type,
+                COUNT(*) AS rows
+              FROM ops.nfl_historical.nfl_player_stats_all
+              WHERE CAST(NFL_player_id AS VARCHAR)='00-0033280' AND CAST(year AS INTEGER)=2025
+              GROUP BY 1, 2 ORDER BY 1, 2
+          """)
+          PY
