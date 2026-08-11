@@ -54,12 +54,12 @@ jobs:
               materialize_season_core_cohort_position_batch(
                   c, source_table='lake.public.player_fantasy',
                   nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
-                  output_table=core, year=year, position='RB', split_threshold=50,
+                  output_table=core, year=year, position='RB', split_threshold=50, player_id='00-0033280',
               )
               materialize_season_bracket_grade_position_batch(
                   c, source_table='lake.public.player_fantasy',
                   nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
-                  output_table=grade, year=year, position='RB', split_threshold=50,
+                  output_table=grade, year=year, position='RB', split_threshold=50, player_id='00-0033280',
               )
               materialize_season_compact_outer_rows(
                   c, core_outer_table=core, grade_outer_table=grade, output_table=outer,
