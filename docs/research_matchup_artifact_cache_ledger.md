@@ -86,6 +86,41 @@ The receipt workflow is read-only. It asserts, before and after the audit,
 that player schema, player-row count, and the ops-cache hash are unchanged;
 it has no cache-save, cache-delete, or lineage-creation step.
 
+## Cache-completion matrix
+
+The 9,479 artifacts are now partitioned without double-counting by their
+evidence state:
+
+| Completion state | Artifacts | Meaning |
+| --- | ---: | --- |
+| Closed by direct cache evidence | 308 | Every compared canonical cell equals the approved cache. |
+| Closed: no promotable cache cell emitted | 4,522 | The frozen extraction/comparison emitted no canonical-cell candidate. |
+| Closed: non-data-bearing | 3,927 | Aggregate, validation, inventory, or metadata evidence; not a source of canonical cells. |
+| **Open: supported null-cell promotion** | **15** | 82,466 source-supported null cells remain in cache (31,870 already-materialized unambiguous player-row candidates). |
+| **Open: add loss/tie schema** | **706** | Source contains loss/tie evidence; these fields are required for completion and are not yet columns in the approved cache. |
+| **Open: player-team identity bridge or source-only closure** | **703** | Source has team-week evidence but cannot yet be connected safely to a player row, or must be explicitly closed as source-only. |
+| **Open: source-precedence adjudication** | **221** | Source differs from an existing non-null cache value; no overwrite may occur without a field-level precedence rule. |
+
+The final three open categories overlap: for example, a sparse-playoff source
+may need loss/tie schema support **and** a player-team bridge. The artifact
+partition is still exact: **8,757 closed, 722 open**.
+
+The cell totals in this section are receipt totals, not a count of distinct
+cache cells: retained artifacts can contain duplicate source snapshots. A
+promotion run must deduplicate on its approved field-level key before writing
+anything.
+
+### Exact open-work groups
+
+| Obligations on the artifact | Artifacts | Evidence requiring action |
+| --- | ---: | --- |
+| Loss/tie schema only | 4 | 464 loss/tie cells; all 20,960 supported cells already match. |
+| Supported null fill + loss/tie schema | 15 | 82,466 supported null cells; 288,160 loss/tie cells. Fourteen also contain preserved non-null conflicts. |
+| Loss/tie schema + player-team bridge | 473 | 577,482 loss/tie cells and 334,144 unsupported player-team identities. |
+| Loss/tie schema + precedence + player-team bridge | 214 | 4,169,612 loss/tie cells, 128,484 conflicts, and 7,044,748 unresolved identities. |
+| Precedence + player-team bridge | 7 | 9,397 conflicts and 480,208 unresolved identities. |
+| Player-team bridge only | 9 | 2,612 championship/playoff cells with no canonical player-team match. |
+
 ## Canonical promotion contract
 
 The approved GitHub Actions cache is immutable: a runner can restore and
