@@ -20,6 +20,14 @@ on:
         description: Optional comma-separated exact ledger artifact IDs; overrides artifact prefix.
         required: false
         default: ''
+      download_mode:
+        description: Source artifact download strategy; use exact for small selections and source_run only for large retained families.
+        required: true
+        type: choice
+        default: exact
+        options:
+          - exact
+          - source_run
       source_kind:
         description: Raw artifact grain; player evidence is joined on exact player-week identity.
         required: true
@@ -68,6 +76,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT_PREFIX: ${{ inputs.artifact_prefix }}
           ARTIFACT_IDS: ${{ inputs.artifact_ids }}
+          DOWNLOAD_MODE: ${{ inputs.download_mode }}
           SOURCE_KIND: ${{ inputs.source_kind }}
         shell: bash
         run: |
@@ -113,16 +122,31 @@ jobs:
               for row in rows:
                   handle.write(f"{row['workflow_run_id']}\t{row['artifact']}\t{row['artifact_id']}\n")
           PY
-          # Download once per source run, not once per artifact. The ledger
-          # still controls the manifest exactly, but this avoids rate-limiting
-          # GitHub's artifact API on the 621-artifact sparse family.
-          mkdir -p source_runs
-          cut -f1 selected_artifacts.tsv | sort -u | while IFS= read -r run; do
-            gh run download "$run" --repo '${{ github.repository }}' --dir "source_runs/$run"
-          done
+          if [ "$DOWNLOAD_MODE" = source_run ]; then
+            # For a large retained family, source-run download needs only one
+            # workflow invocation per source run. The later manifest remains
+            # ledger-exact.
+            mkdir -p source_runs
+            cut -f1 selected_artifacts.tsv | sort -u | while IFS= read -r run; do
+              gh run download "$run" --repo '${{ github.repository }}' --dir "source_runs/$run"
+            done
+          elif [ "$DOWNLOAD_MODE" = exact ]; then
+            # A small selection must not download every artifact from its
+            # 256-shard source run. Serialize the exact downloads to respect
+            # the shared GitHub Actions installation API quota.
+            mkdir -p sources
+            while IFS=$'\t' read -r run artifact artifact_id; do
+              mkdir -p "sources/$artifact_id"
+              gh run download "$run" --repo '${{ github.repository }}' --name "$artifact" --dir "sources/$artifact_id"
+            done < selected_artifacts.tsv
+          else
+            echo "unsupported download mode: $DOWNLOAD_MODE" >&2
+            exit 2
+          fi
       - name: Build exact raw-source manifest
         env:
           SOURCE_KIND: ${{ inputs.source_kind }}
+          DOWNLOAD_MODE: ${{ inputs.download_mode }}
         shell: bash
         run: |
           set -euo pipefail
@@ -132,9 +156,11 @@ jobs:
           selected=json.loads(Path('selected_artifacts.json').read_text())
           manifest=[]
           source_kind=os.environ['SOURCE_KIND']
+          download_mode=os.environ['DOWNLOAD_MODE']
           for row in selected:
               artifact_id=row['artifact_id']
-              root=Path('source_runs', str(row['workflow_run_id']), row['artifact'])
+              root=(Path('source_runs', str(row['workflow_run_id']), row['artifact'])
+                    if download_mode == 'source_run' else Path('sources', artifact_id))
               if source_kind == 'structured_player':
                   # Structured-player artifacts predate the later delta ledger
                   # and their raw filename is not the ledger's delta filename.
