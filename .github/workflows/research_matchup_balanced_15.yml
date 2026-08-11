@@ -214,6 +214,10 @@ jobs:
           retention-days: 1
           compression-level: 0
       - name: Publish validated full bundle to Fly
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish && !inputs.pilot }}
+        if: ${{ (github.event_name == 'push' && contains(github.event.head_commit.message, 'full')) || (github.event_name == 'workflow_dispatch' && inputs.publish && !inputs.pilot) }}
+        env:
+          DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+          DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+          DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
         run: |
-          python code/scripts/research_cohorts/publish_research_matchup_to_fly.py             --bundle out/research_matchup_adaptive.duckdb --adaptive-only             --slug 12t_flx_half_4pt --apply --i-understand-this-writes-prod
+          python code/scripts/research_cohorts/publish_research_matchup_to_fly.py             --bundle out/research_matchup_adaptive.duckdb --adaptive-only --split-upload             --slug 12t_flx_half_4pt --apply --i-understand-this-writes-prod
