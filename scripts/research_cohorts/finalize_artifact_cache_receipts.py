@@ -234,7 +234,7 @@ def _audit_raw_team_signals(
     # Rich matchup-rescue artifacts carry a team key.  Treat that as the
     # identity—not a manager-name fallback—so a duplicate manager name or a
     # multi-team owner cannot fan a signal into another fantasy team.
-    required_keys = {"db_name", "year", "week", "team_key"}
+    required_keys = {"db_name", "year", "week"}
     for entry in entries:
         artifact_id = int(entry["artifact_id"])
         path = Path(entry["path"])
@@ -246,11 +246,17 @@ def _audit_raw_team_signals(
                 f"DESCRIBE SELECT * FROM read_parquet('{escaped}')"
             ).fetchall()
         }
-        if not required_keys <= raw_columns:
+        if not required_keys <= raw_columns or not ({"team_key", "manager_guid", "franchise_id"} & raw_columns):
             continue
+        raw_team_key = f"NULLIF(TRIM(CAST({_quoted('team_key')} AS VARCHAR)), '')" if "team_key" in raw_columns else "NULL::VARCHAR"
+        manager_guid = f"NULLIF(TRIM(CAST({_quoted('manager_guid')} AS VARCHAR)), '')" if "manager_guid" in raw_columns else "NULL::VARCHAR"
+        franchise_id = f"NULLIF(TRIM(CAST({_quoted('franchise_id')} AS VARCHAR)), '')" if "franchise_id" in raw_columns else "NULL::VARCHAR"
+        platform = f"LOWER(NULLIF(TRIM(CAST({_quoted('platform')} AS VARCHAR)), ''))" if "platform" in raw_columns else "NULL::VARCHAR"
         terms = [
             f"{artifact_id}::BIGINT AS artifact_id",
-            *(_quoted(key) for key in ["db_name", "year", "week", "team_key"]),
+            *(_quoted(key) for key in ["db_name", "year", "week"]),
+            f"CASE WHEN {platform}='mfl' AND COALESCE({manager_guid}, {franchise_id}) IS NOT NULL "
+            f"THEN COALESCE({manager_guid}, {franchise_id}) ELSE {raw_team_key} END AS canonical_team_key",
         ]
         for source, raw_column in RAW_TEAM_SIGNAL_COLUMNS.items():
             target = TEAM_FIELDS[source]
@@ -285,10 +291,14 @@ def _audit_raw_team_signals(
     # join, then identify unmatched source keys from that small match relation.
     con.execute(f"""
         CREATE OR REPLACE TEMP TABLE raw_team_signal_matched_keys AS
-        SELECT DISTINCT e.artifact_id, e.db_name, e.year, e.week, e.team_key
+        SELECT DISTINCT e.artifact_id, e.db_name, e.year, e.week,
+                        e.canonical_team_key AS team_key
         FROM raw_team_signal_evidence e
-        JOIN {target_relation} p ON e.team_key IS NOT NULL
-          AND {_join('p', 'e', ['db_name', 'year', 'week', 'team_key'])}
+        JOIN {target_relation} p ON e.canonical_team_key IS NOT NULL
+          AND p.db_name IS NOT DISTINCT FROM e.db_name
+          AND p."year" IS NOT DISTINCT FROM e."year"
+          AND p.week IS NOT DISTINCT FROM e.week
+          AND p.team_key IS NOT DISTINCT FROM e.canonical_team_key
     """)
     player_fields = ", ".join(
         f"p.{_quoted(target)} AS {_quoted('canonical__' + target)}"
@@ -298,8 +308,11 @@ def _audit_raw_team_signals(
         CREATE OR REPLACE TEMP TABLE raw_team_signal_player_matches AS
         SELECT e.*, {player_fields}
         FROM raw_team_signal_evidence e
-        JOIN {target_relation} p ON e.team_key IS NOT NULL
-          AND {_join('p', 'e', ['db_name', 'year', 'week', 'team_key'])}
+        JOIN {target_relation} p ON e.canonical_team_key IS NOT NULL
+          AND p.db_name IS NOT DISTINCT FROM e.db_name
+          AND p."year" IS NOT DISTINCT FROM e."year"
+          AND p.week IS NOT DISTINCT FROM e.week
+          AND p.team_key IS NOT DISTINCT FROM e.canonical_team_key
     """)
     match_terms: list[str] = []
     unmatched_terms: list[str] = []
@@ -336,7 +349,10 @@ def _audit_raw_team_signals(
         FROM raw_team_signal_evidence e
         LEFT JOIN raw_team_signal_matched_keys k
           ON k.artifact_id=e.artifact_id
-         AND {_join('k', 'e', ['db_name', 'year', 'week', 'team_key'])}
+         AND k.db_name IS NOT DISTINCT FROM e.db_name
+         AND k."year" IS NOT DISTINCT FROM e."year"
+         AND k.week IS NOT DISTINCT FROM e.week
+         AND k.team_key IS NOT DISTINCT FROM e.canonical_team_key
         GROUP BY e.artifact_id
     """).fetchall():
         artifact_id, *counts = row

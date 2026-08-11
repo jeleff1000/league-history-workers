@@ -186,6 +186,46 @@ def test_receipt_requires_team_key_when_raw_team_source_supplies_one(tmp_path: P
     assert row["unmatched_cache_cells"] == 1
 
 
+def test_receipt_fans_mfl_manager_guid_signal_to_all_matching_player_rows(tmp_path: Path) -> None:
+    """MFL source slots must resolve through manager_guid, not the short team_key."""
+    from scripts.research_cohorts.finalize_artifact_cache_receipts import build_receipts
+
+    base = tmp_path / "base.duckdb"
+    _base_cache(base)
+    con = duckdb.connect(str(base))
+    con.execute("UPDATE public.player_fantasy SET platform='mfl', team_key='mfl_team_123_0001', win=NULL")
+    con.execute("""
+        INSERT INTO public.player_fantasy
+        SELECT db_name, year, week, 'p2', is_started, manager, team_key, team_name,
+               platform, win, champion, team_points, is_playoffs
+        FROM public.player_fantasy
+    """)
+    con.close()
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({"rows": [{
+        "artifact_id": 57, "artifact": "mfl-team", "candidate_delta_rows": 1,
+        "candidate_fields": ["win"], "dispositions": ["team_week_signal_candidate"],
+    }]}))
+    raw = tmp_path / "mfl-team.parquet"
+    _write_parquet(raw, [{
+        "db_name": "league", "year": 2024, "week": 15, "platform": "mfl",
+        "team_key": "0001", "manager_guid": "mfl_team_123_0001", "win": 1,
+    }])
+    manifest = tmp_path / "mfl-team-manifest.json"
+    manifest.write_text(json.dumps([{"artifact_id": 57, "path": str(raw)}]))
+
+    result = build_receipts(
+        ledger_path=ledger, base_path=base, team_delta=None, exact_delta=None,
+        structured_delta=None, settings_delta=None, team_signal_manifest=manifest,
+        out_path=tmp_path / "receipts.json",
+    )
+
+    row = result["rows"][0]
+    assert row["final_status"] == "still_missing_cache_cells"
+    assert row["cache_missing_cells"] == 2
+    assert row["unmatched_cache_cells"] == 0
+
+
 def test_receipt_reads_raw_player_outcome_evidence_on_its_exact_key(tmp_path: Path) -> None:
     """Raw MFL player evidence must not be treated as a manager-week fan-out."""
     from scripts.research_cohorts.finalize_artifact_cache_receipts import build_receipts
