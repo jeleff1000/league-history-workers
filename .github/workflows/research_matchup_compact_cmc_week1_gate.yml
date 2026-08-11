@@ -74,23 +74,14 @@ jobs:
                    OR lower(column_name) LIKE '%bye%')
             ORDER BY table_schema, table_name, ordinal_position
           """)
-          fanout_terms = []
-          for slot in range(1, 13):
-              same = " AND ".join(
-                  f"cohort_{dimension}_{slot} IS NOT DISTINCT FROM cohort_{dimension}"
-                  for dimension in ('teams', 'roster', 'scoring', 'pass_td', 'playoff_teams', 'dynasty', 'best_ball', 'position_eligible')
-              )
-              profile = " || '|' || ".join(
-                  f"COALESCE(CAST(cohort_{dimension}_{slot} AS VARCHAR), '<NULL>')"
-                  for dimension in ('teams', 'roster', 'scoring', 'pass_td', 'playoff_teams', 'dynasty', 'best_ball', 'position_eligible')
-              )
-              fanout_terms.append(
-                  f"SELECT {slot} AS slot, COUNT(DISTINCT ({profile})) AS distinct_profiles, "
-                  f"COUNT(*) FILTER (WHERE NOT ({same})) AS rows_different_from_canonical "
-                  "FROM lake.public.player_fantasy "
-                  "WHERE NFL_player_id='00-0033280' AND year=2025 AND week=1"
-              )
-          emit('cmc_week1_fanout_contract', " UNION ALL ".join(fanout_terms) + " ORDER BY slot")
+          fanout_columns = ", ".join(
+              f"cohort_{dimension}_{slot}"
+              for slot in range(1, 13)
+              for dimension in ('teams', 'roster', 'scoring', 'pass_td', 'playoff_teams', 'dynasty', 'best_ball', 'position_eligible')
+          )
+          emit('cmc_week1_fanout_sample',
+               "SELECT " + fanout_columns + " FROM lake.public.player_fantasy "
+               "WHERE NFL_player_id='00-0033280' AND year=2025 AND week=1 LIMIT 1")
           PY
       - name: Run tested compact outer-row primitive against cache
         env:
