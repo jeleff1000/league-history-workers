@@ -27,7 +27,7 @@ def _next_action(receipt: dict) -> str:
 
 def refresh(
     *, ledger_path: Path, receipt_path: Path, selected_path: Path,
-    receipt_run_id: str, out_path: Path,
+    receipt_run_id: str, out_path: Path, team_profile_path: Path | None = None,
 ) -> dict[str, int]:
     ledger_rows = list(csv.DictReader(ledger_path.open(newline="", encoding="utf-8")))
     if not ledger_rows:
@@ -39,6 +39,12 @@ def refresh(
     selected_ids = {int(row["artifact_id"]) for row in selected}
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
     receipt_rows = {int(row["artifact_id"]): row for row in receipt["rows"]}
+    team_profile_rows: dict[int, dict] = {}
+    if team_profile_path is not None:
+        profile = json.loads(team_profile_path.read_text(encoding="utf-8"))
+        team_profile_rows = {
+            int(row["artifact_id"]): row for row in profile.get("rows", [])
+        }
     if not selected_ids <= set(receipt_rows):
         raise SystemExit("selected artifact is absent from receipt")
     digest = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
@@ -60,6 +66,20 @@ def refresh(
         row["final_status"] = str(evidence["final_status"])
         row["final_reason"] = str(evidence["final_reason"])
         row["next_action"] = _next_action(evidence)
+        profile = team_profile_rows.get(artifact_id)
+        if profile is not None:
+            overlap = int(profile.get("league_week_overlap_keys", 0) or 0)
+            matched = int(profile.get("matched_source_team_keys", 0) or 0)
+            source_keys = int(profile.get("source_team_keys", 0) or 0)
+            absent = int(profile.get("league_week_absent_keys", 0) or 0)
+            if overlap > 0 and matched == 0:
+                row["final_status"] = "source_only_team_signal_missing_player_team_bridge"
+                row["final_reason"] = (
+                    f"Raw team signals cover {source_keys} team-weeks; {overlap} overlapping cache "
+                    "league-weeks have player rows but no team_key/manager/team_name bridge; "
+                    f"{absent} source team-weeks have no cache player rows."
+                )
+                row["next_action"] = "locate_player_team_roster_bridge_then_exact_player_upsert"
         updated += 1
     if updated != len(selected_ids):
         raise SystemExit(f"updated {updated} ledger rows for {len(selected_ids)} selected artifacts")
@@ -77,11 +97,13 @@ def main() -> None:
     ap.add_argument("--receipt", type=Path, required=True)
     ap.add_argument("--selected", type=Path, required=True)
     ap.add_argument("--receipt-run-id", required=True)
+    ap.add_argument("--team-profile", type=Path)
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
     print(json.dumps(refresh(
         ledger_path=args.ledger, receipt_path=args.receipt, selected_path=args.selected,
-        receipt_run_id=args.receipt_run_id, out_path=args.out,
+        receipt_run_id=args.receipt_run_id, team_profile_path=args.team_profile,
+        out_path=args.out,
     ), sort_keys=True))
 
 
