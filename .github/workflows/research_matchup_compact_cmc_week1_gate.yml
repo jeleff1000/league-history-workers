@@ -319,9 +319,11 @@ jobs:
 
           c = duckdb.connect()
           c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          c.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
           materialize_season_bracket_grade_cells(
               c,
               source_table='lake.public.player_fantasy',
+              nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
               output_table='cmc_2025_bracket_grades',
               year=2025,
               player_id='00-0033280',
