@@ -153,8 +153,8 @@ def test_receipt_preserves_prior_artifact_readbacks_when_overlaying_raw_signals(
     assert rows[43]["cache_match_cells"] == 1
 
 
-def test_receipt_uses_manager_as_the_canonical_team_identity(tmp_path: Path) -> None:
-    """Replacing manager fanout with either team-key value must make this unmatched."""
+def test_receipt_requires_team_key_when_raw_team_source_supplies_one(tmp_path: Path) -> None:
+    """A manager-name match must never override a supplied, mismatched team key."""
     from scripts.research_cohorts.finalize_artifact_cache_receipts import build_receipts
 
     base = tmp_path / "base.duckdb"
@@ -182,8 +182,8 @@ def test_receipt_uses_manager_as_the_canonical_team_identity(tmp_path: Path) -> 
     )
 
     row = result["rows"][0]
-    assert row["final_status"] == "cache_verified"
-    assert row["cache_match_cells"] == 1
+    assert row["final_status"] == "unmatched_cache_key"
+    assert row["unmatched_cache_cells"] == 1
 
 
 def test_receipt_reads_raw_player_outcome_evidence_on_its_exact_key(tmp_path: Path) -> None:
