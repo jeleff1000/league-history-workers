@@ -76,42 +76,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p sources
-          python - <<'PY'
-          import csv, json, os
-          from pathlib import Path
-          prefix=os.environ['ARTIFACT_PREFIX']
-          requested_ids={int(value) for value in os.environ.get('ARTIFACT_IDS', '').split(',') if value.strip()}
-          source_kind=os.environ['SOURCE_KIND']
-          rows=[]
-          with Path('docs/research_matchup_artifact_cache_ledger.csv').open(newline='', encoding='utf-8') as handle:
-              for row in csv.DictReader(handle):
-                  eligible = row['final_status']=='candidate_provenance_not_found'
-                  # Re-read earlier raw-team receipts after an identity rule is
-                  # corrected. These are the same retained artifacts, not a
-                  # new source population.
-                  if source_kind == 'team':
-                      eligible = eligible or row['final_status'] == 'partial_schema_blocked_unmatched'
-                  # These raw player artifacts were previously mislabeled as
-                  # non-emitting because the old audit only accepted delta files.
-                  if source_kind == 'structured_player':
-                      eligible = eligible or row['final_status'] in {
-                          'no_promotable_candidate_emitted',
-                          'candidate_built_pending_canonical_promotion',
-                      }
-                  if requested_ids:
-                      eligible = eligible and int(row['artifact_id']) in requested_ids
-                  else:
-                      eligible = eligible and row['artifact'].startswith(prefix)
-                  if eligible:
-                      rows.append(row)
-          if not rows:
-              raise SystemExit(f'no unresolved retained artifacts for prefix {prefix!r}')
-          Path('selected_artifacts.json').write_text(json.dumps(rows, indent=2)+'\n')
-          print(json.dumps({'selected_artifacts':len(rows),'prefix':prefix}))
-          with Path('selected_artifacts.tsv').open('w', encoding='utf-8', newline='') as handle:
-              for row in rows:
-                  handle.write(f"{row['workflow_run_id']}\t{row['artifact']}\t{row['artifact_id']}\n")
-          PY
+          python scripts/research_cohorts/select_retained_artifacts.py \
+            --ledger-csv docs/research_matchup_artifact_cache_ledger.csv \
+            --source-kind "$SOURCE_KIND" \
+            --prefix "$ARTIFACT_PREFIX" \
+            --artifact-ids "$ARTIFACT_IDS" \
+            --out-json selected_artifacts.json \
+            --out-tsv selected_artifacts.tsv
           # Preserve receipt counts for every other artifact but replace (do
           # not add to) the selected artifacts' stale prior readback counts.
           selected_ids="$(cut -f3 selected_artifacts.tsv | paste -sd, -)"

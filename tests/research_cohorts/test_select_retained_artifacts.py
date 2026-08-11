@@ -1,0 +1,25 @@
+from __future__ import annotations
+
+import csv
+from pathlib import Path
+
+
+def test_team_readback_reselects_earlier_team_key_only_receipts(tmp_path: Path) -> None:
+    from scripts.research_cohorts.select_retained_artifacts import select
+
+    path = tmp_path / "ledger.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["artifact_id", "artifact", "final_status"])
+        writer.writeheader()
+        writer.writerow({
+            "artifact_id": "101", "artifact": "research-source-matchup-rescue-a",
+            "final_status": "source_only_team_signal_missing_player_team_bridge",
+        })
+        writer.writerow({
+            "artifact_id": "102", "artifact": "research-source-matchup-rescue-b",
+            "final_status": "cache_verified",
+        })
+
+    rows = select(path, source_kind="team", prefix="research-source-matchup-rescue-", requested_ids={101})
+
+    assert [row["artifact_id"] for row in rows] == ["101"]
