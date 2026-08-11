@@ -22,6 +22,11 @@ The latest raw-team identity receipt is
 [31526086561](https://github.com/jeleff1000/league-history-workers/actions/runs/31526086561).
 It is read-only and additionally records whether a raw team-week has any
 canonical player rows before attempting a team identity match.
+The latest exact unique-manager fan-out receipt is
+[31528022884](https://github.com/jeleff1000/league-history-workers/actions/runs/31528022884).
+It re-read sparse-playoff artifact `9016426057` against the same cache without
+mutation: 44 of 80 source team-weeks safely fanned out to 1,087 existing player
+rows; all supported mapped cells already matched the cache.
 
 ## Receipt rules
 
@@ -59,9 +64,10 @@ Each row has an explicit `final_status` and `next_action`.
 | `cache_verified` | 297 | 13,714 source cells match the canonical cache; no missing/conflicting cells. |
 | `no_promotable_candidate_emitted` | 4,522 | Candidate-classified artifact, but no promotable cell was emitted by the frozen comparison. |
 | `not_data_bearing` | 3,927 | Aggregate/validation/metadata artifact; not a canonical-cell source. |
-| `candidate_provenance_not_found` | 695 | 5,504,005 declared candidate rows still require direct source-file comparison. |
+| `candidate_provenance_not_found` | 694 | 5,503,511 declared candidate rows still require direct source-file comparison. |
 | `unmatched_cache_key` | 9 | 1,306 candidate rows / 2,612 cells require team-key-to-player-row reconciliation. |
 | `partial_schema_blocked_cache_updates` | 15 | Direct MFL audit produced 31,870 safe exact-row candidates; remaining source cells include ambiguous identities, preserved conflicts, and 288,160 loss/tie values blocked by the current schema. |
+| `partial_schema_blocked_unmatched` | 1 | Sparse-playoff artifact `9016426057`: 4,348 supported cells already match, 160 loss/tie cells require the explicitly permitted schema fields, and 144 cells belong to 36 source teams with no canonical player row. |
 | `source_only_team_signal_missing_player_team_bridge` | 14 | 1,837,053 raw team-week keys overlap canonical player league-weeks, but cache rows lack `team_key`, `manager`, and `team_name`; the raw source has no player IDs. 13,110 raw team-weeks have no cache player rows. A roster/lineup bridge is required before any player-level upsert. |
 
 The receipt workflow is read-only. It asserts, before and after the audit,
