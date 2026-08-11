@@ -35,6 +35,49 @@ jobs:
           key: ${{ inputs.cache_key }}
           fail-on-cache-miss: true
       - run: python -m pip install duckdb==1.5.1
+      - name: Inventory bounded RB 2025 batch input from cache
+        run: |
+          python - <<'PY'
+          import duckdb, json
+          c = duckdb.connect()
+          c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          summary = c.execute("""
+            SELECT
+              COUNT(*)::BIGINT AS source_rows,
+              COUNT(DISTINCT CAST(NFL_player_id AS VARCHAR))::BIGINT AS players,
+              COUNT(DISTINCT CAST(db_name AS VARCHAR))::BIGINT AS leagues,
+              COUNT(DISTINCT (CAST(NFL_player_id AS VARCHAR), CAST(db_name AS VARCHAR), CAST(week AS INTEGER)))::BIGINT
+                AS player_league_weeks,
+              COUNT(DISTINCT CAST(week AS INTEGER))::BIGINT AS source_weeks
+            FROM lake.public.player_fantasy
+            WHERE CAST(year AS INTEGER) = 2025 AND CAST(position AS VARCHAR) = 'RB'
+          """).fetchone()
+          weekly = c.execute("""
+            SELECT CAST(week AS INTEGER) AS week,
+              COUNT(DISTINCT CAST(db_name AS VARCHAR)) FILTER (WHERE CAST(cohort_position_eligible AS INTEGER) = 1)::BIGINT
+                AS eligible_rb_leagues
+            FROM lake.public.player_fantasy
+            WHERE CAST(year AS INTEGER) = 2025 AND CAST(position AS VARCHAR) = 'RB'
+            GROUP BY 1 ORDER BY 1
+          """).fetchall()
+          selector_cardinality = c.execute("""
+            SELECT
+              COUNT(DISTINCT CAST(cohort_teams AS VARCHAR)) AS teams,
+              COUNT(DISTINCT CAST(cohort_roster AS VARCHAR)) AS roster,
+              COUNT(DISTINCT CAST(cohort_scoring AS VARCHAR)) AS scoring,
+              COUNT(DISTINCT CAST(cohort_pass_td AS VARCHAR)) AS pass_td,
+              COUNT(DISTINCT CAST(cohort_dynasty AS VARCHAR)) AS dynasty,
+              COUNT(DISTINCT CAST(cohort_best_ball AS VARCHAR)) AS best_ball
+            FROM lake.public.player_fantasy
+            WHERE CAST(year AS INTEGER) = 2025 AND CAST(position AS VARCHAR) = 'RB'
+          """).fetchone()
+          print('rb_2025_cache_preflight=' + json.dumps({
+              'summary': summary, 'weekly_eligible': weekly,
+              'selector_cardinality': selector_cardinality,
+          }, default=str))
+          assert summary[0] > 0 and summary[1] > 0 and summary[2] >= 5000, summary
+          assert all(count >= 5000 for _, count in weekly if 1 <= week <= 18), weekly
+          PY
       - name: Print cache-only cohort and active-bye contract
         run: |
           python - <<'PY'
