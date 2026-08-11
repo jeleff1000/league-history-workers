@@ -33,6 +33,10 @@ jobs:
           path: research_public_lake
           key: ${{ inputs.cache_key }}
           fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
       - name: Confirm this is a read-only cache audit
         shell: bash
         run: |
@@ -65,10 +69,6 @@ jobs:
           test -s "$(find combined -name artifact_promotion_evidence_combined.json -print -quit)"
           test -s "$(find comparison -name team_promotable_player_delta.parquet -print -quit)"
           test -s "$(find settings -name settings_promotable_delta.parquet -print -quit)"
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
       - name: Read back every existing candidate against the canonical cache
         shell: bash
         run: |
