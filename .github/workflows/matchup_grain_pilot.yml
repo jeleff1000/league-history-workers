@@ -52,7 +52,7 @@ jobs:
           tables=[r[0] for r in out.execute("select table_name from information_schema.tables where table_schema='main'").fetchall()]
           weekly_cols=[r[0] for r in out.execute("describe research_matchup_adaptive_weekly").fetchall()]
           pilot=out.execute("""
-            select count(*) rows, count(distinct q_teams || '|' || q_roster || '|' || q_ppr || '|' ||
+            select count(*) as row_count, count(distinct q_teams || '|' || q_roster || '|' || q_ppr || '|' ||
               q_td || '|' || q_bracket || '|' || q_league_type || '|' || q_lineup_mode) lanes,
               count(*) filter (where NFL_player_id='00-0033280') cmc_rows,
               max(n_leagues) filter (where NFL_player_id='00-0033280') max_cmc_leagues
