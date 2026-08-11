@@ -27,16 +27,6 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
-      - name: Download file-level manifest evidence
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          mkdir -p audit
-          gh run download '${{ inputs.comparison_run_id }}' \
-            --repo '${{ github.repository }}' \
-            --name 'research-artifact-complete-audit-${{ inputs.comparison_run_id }}' \
-            --dir audit
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -48,8 +38,9 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
-          ledger=json.loads(Path('audit/file_promotion_ledger.json').read_text())
-          ids=sorted({str(row['artifact_id']) for row in ledger['files'] if row.get('disposition')=='settings_candidate'})
+          manifest=json.loads(Path('audit_manifests/research_matchup_artifact_manifest_20260809.json').read_text())
+          settings=[item for item in manifest['artifacts'] if item['artifact'].startswith(('cohort-dimension-fills-','source-settings-rescue-'))]
+          ids=sorted({str(item['artifact_id']) for item in settings})
           if len(ids) != 1633:
               raise SystemExit(f'expected 1633 settings artifacts, found {len(ids)}')
           shard=int('${{ matrix.shard }}')
