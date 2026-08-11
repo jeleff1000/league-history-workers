@@ -80,6 +80,11 @@ jobs:
           with Path('docs/research_matchup_artifact_cache_ledger.csv').open(newline='', encoding='utf-8') as handle:
               for row in csv.DictReader(handle):
                   eligible = row['final_status']=='candidate_provenance_not_found'
+                  # Re-read earlier raw-team receipts after an identity rule is
+                  # corrected. These are the same retained artifacts, not a
+                  # new source population.
+                  if source_kind == 'team':
+                      eligible = eligible or row['final_status'] == 'partial_schema_blocked_unmatched'
                   # These raw player artifacts were previously mislabeled as
                   # non-emitting because the old audit only accepted delta files.
                   if source_kind == 'structured_player':
