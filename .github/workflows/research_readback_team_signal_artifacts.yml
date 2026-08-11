@@ -108,6 +108,51 @@ jobs:
           Path('team_signal_manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
           print(json.dumps({'manifest_rows':len(manifest)}))
           PY
+      - name: Profile raw-team identities against canonical player rows
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import duckdb
+          manifest=json.loads(Path('team_signal_manifest.json').read_text())
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          strategies={
+            'team_key_to_team_key': 'p.team_key IS NOT DISTINCT FROM r.team_key',
+            'mfl_manager_guid_to_team_key': "lower(CAST(r.platform AS VARCHAR))='mfl' AND p.team_key IS NOT DISTINCT FROM r.manager_guid",
+            'manager_to_manager': 'p.manager IS NOT DISTINCT FROM r.manager',
+            'manager_team_name': 'p.manager IS NOT DISTINCT FROM r.manager AND p.team_name IS NOT DISTINCT FROM r.team_name',
+          }
+          rows=[]
+          for item in manifest:
+            path=str(Path(item['path']).resolve()).replace("'", "''")
+            columns={x[0] for x in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{path}')").fetchall()}
+            available={name: clause for name, clause in strategies.items() if (
+              (name=='team_key_to_team_key' and {'team_key'} <= columns) or
+              (name=='mfl_manager_guid_to_team_key' and {'platform','manager_guid'} <= columns) or
+              (name=='manager_to_manager' and {'manager'} <= columns) or
+              (name=='manager_team_name' and {'manager','team_name'} <= columns)
+            )}
+            counts={}
+            for name, clause in available.items():
+              counts[name]=int(con.execute(f"""
+                SELECT COUNT(*)
+                FROM read_parquet('{path}') r
+                WHERE EXISTS (
+                  SELECT 1 FROM public.player_fantasy p
+                  WHERE p.db_name IS NOT DISTINCT FROM r.db_name
+                    AND p.year IS NOT DISTINCT FROM r.year
+                    AND p.week IS NOT DISTINCT FROM r.week
+                    AND {clause}
+                )
+              """).fetchone()[0])
+            total=int(con.execute(f"SELECT COUNT(*) FROM read_parquet('{path}')").fetchone()[0])
+            rows.append({'artifact_id':item['artifact_id'],'source_team_rows':total,'matched_source_rows':counts})
+          con.close()
+          Path('team_signal_join_key_profile.json').write_text(json.dumps(rows, indent=2)+'\n')
+          print(json.dumps(rows, sort_keys=True))
+          PY
       - name: Read back source cells through canonical team-week fan-out
         shell: bash
         run: |
@@ -147,6 +192,7 @@ jobs:
             final_artifact_cache_receipts.json
             selected_artifacts.json
             team_signal_manifest.json
+            team_signal_join_key_profile.json
             prestate.json
             ops_before.sha256
           if-no-files-found: error
