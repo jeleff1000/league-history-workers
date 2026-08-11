@@ -24,10 +24,10 @@ It is read-only and uses the safe team-to-player fan-out hierarchy: direct
 team identity, MFL franchise identity, manager-plus-team-name, then a manager
 only when that source manager has exactly one team in that league-week.
 The latest exact unique-manager fan-out receipt is
-[31528022884](https://github.com/jeleff1000/league-history-workers/actions/runs/31528022884).
-It re-read sparse-playoff artifact `9016426057` against the same cache without
-mutation: 44 of 80 source team-weeks safely fanned out to 1,087 existing player
-rows; all supported mapped cells already matched the cache.
+[31533448048](https://github.com/jeleff1000/league-history-workers/actions/runs/31533448048).
+It re-read all 56 retained `sleeper-missing-outcome-rescue-*` artifacts against
+the same cache without mutation. It safely fanned 190,317 source manager-weeks
+to existing player rows; no supported cache-null cell remained to fill.
 
 ## Receipt rules
 
@@ -65,11 +65,11 @@ Each row has an explicit `final_status` and `next_action`.
 | `cache_verified` | 297 | 13,714 source cells match the canonical cache; no missing/conflicting cells. |
 | `no_promotable_candidate_emitted` | 4,522 | Candidate-classified artifact, but no promotable cell was emitted by the frozen comparison. |
 | `not_data_bearing` | 3,927 | Aggregate/validation/metadata artifact; not a canonical-cell source. |
-| `candidate_provenance_not_found` | 74 | 365,835 declared candidate rows still require direct source-file comparison. |
+| `candidate_provenance_not_found` | 18 | 330,425 declared candidate rows still require direct source-file comparison. |
 | `unmatched_cache_key` | 9 | 1,306 candidate rows / 2,612 cells require team-key-to-player-row reconciliation. |
 | `partial_schema_blocked_cache_updates` | 15 | Direct MFL audit produced 31,870 safe exact-row candidates; remaining source cells include ambiguous identities, preserved conflicts, and 288,160 loss/tie values blocked by the current schema. |
-| `partial_schema_blocked_unmatched` | 422 | 2,610,500 supported cells already match; 179,900 source cells still lack a resolved player-team edge; 153,142 loss/tie cells require the explicitly permitted schema fields. |
-| `partial_schema_blocked_conflicts` | 209 | 30,460,962 supported cells already match; 128,394 existing non-null values conflict and are preserved; 7,027,344 source cells still lack a resolved player-team edge; 4,127,494 loss/tie cells require schema support. |
+| `partial_schema_blocked_unmatched` | 473 | 24,920,856 supported cells already match; 334,144 source cells still lack a resolved player-team edge; 577,482 loss/tie cells require the explicitly permitted schema fields. |
+| `partial_schema_blocked_conflicts` | 214 | 32,532,612 supported cells already match; 128,484 existing non-null values conflict and are preserved; 7,044,748 source cells still lack a resolved player-team edge; 4,169,612 loss/tie cells require schema support. |
 | `blocked_schema` | 4 | Sparse-playoff evidence has 20,960 already-matching supported cells and 464 loss/tie cells; it requires no supported-field update. |
 
 The receipt workflow is read-only. It asserts, before and after the audit,
@@ -173,14 +173,14 @@ unread-artifact work item.
 
 ## Remaining worklist
 
-Only 74 artifacts still lack a direct source-to-cache receipt. The rest have a
+Only 18 artifacts still lack a direct source-to-cache receipt. The rest have a
 cache result and need either a strict promotion transaction, a source-identity
 decision, or an explicit schema/precedence closure. None requires a new API
 pull.
 
 | Family | Artifacts | Current state | Required action |
 | --- | ---: | ---: | --- |
-| `sleeper-missing-outcome-*` | 56 | 35,410 candidate rows; no direct source receipt yet. | Read each raw player artifact on the full player key. |
+| `sleeper-missing-outcome-*` | 56 | Direct manager-week fan-out receipt complete: 24,382,006 supported cells equal cache; zero supported null fills; 90 non-null conflicts; 171,648 source cells identity-unmatched; 466,458 loss/tie cells outside the prior schema. | Resolve/close residual source-only identities and adjudicate conflicts; no null-cell promotion for this family. |
 | `promotable-rescue-delta-*` | 18 | 330,425 candidate rows; no direct source receipt yet. | Read each `promotable_delta.parquet` on the full player key. |
 | `mfl-player-outcome-classification-*` | 15 | 31,870 strict exact-row candidates; 82,466 supported null cells in the direct audit. | Perform the approved single-cache promotion transaction, then exact readback. |
 | `research-source-matchup-rescue-*` | 14 | Corrected fan-out receipt: 28,032,962 cells already equal cache; zero supported null fills; remaining cells are conflicts, schema-blocked loss/tie, or unresolved team identity. | Adjudicate non-null conflicts; resolve/close residual identity gaps; do not run a null-cell promotion for this family. |
