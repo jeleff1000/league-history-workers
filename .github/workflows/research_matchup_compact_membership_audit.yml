@@ -87,14 +87,19 @@ jobs:
               (SELECT COUNT(*) FROM output o LEFT JOIN candidates c USING(NFL_player_id) WHERE c.NFL_player_id IS NULL)
           ''').fetchone()
           missing_by_position = con.execute('''
-            SELECT c.position,COUNT(*) AS missing,
-              COUNT(*) FILTER(WHERE s.NFL_player_id IS NOT NULL) AS with_regular_stats
+            SELECT c.position,COUNT(DISTINCT c.NFL_player_id) AS missing,
+              COUNT(DISTINCT c.NFL_player_id) FILTER(WHERE s.NFL_player_id IS NOT NULL) AS with_regular_stats,
+              COUNT(*) FILTER(WHERE CAST(f.cohort_position_eligible AS INTEGER)=1) AS eligible_league_rows,
+              COUNT(*) FILTER(WHERE CAST(f.is_started AS INTEGER)=1) AS started_league_rows
             FROM candidates c
             LEFT JOIN output o USING(NFL_player_id)
             LEFT JOIN regular_stats s USING(NFL_player_id)
+            LEFT JOIN lake.public.player_fantasy f
+              ON CAST(f.NFL_player_id AS VARCHAR)=c.NFL_player_id
+             AND CAST(f.year AS INTEGER)=?
             WHERE o.NFL_player_id IS NULL
             GROUP BY 1 ORDER BY 1
-          ''').fetchall()
+          ''', [year]).fetchall()
           samples = con.execute('''
             SELECT c.position,c.NFL_player_id
             FROM candidates c LEFT JOIN output o USING(NFL_player_id)
