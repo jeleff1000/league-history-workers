@@ -291,6 +291,51 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
             })
         if len(rows) != len(entries):
             raise SystemExit("profile did not account for every manifest artifact")
+        examples: list[dict[str, Any]] = []
+        if {"manager", "team_name"} <= player_columns:
+            examples = [
+                dict(zip(
+                    (
+                        "artifact_id", "db_name", "year", "week",
+                        "source_team_key", "source_manager", "source_team_name",
+                        "cache_team_identities",
+                    ), row,
+                ))
+                for row in con.execute("""
+                WITH unresolved AS (
+                  SELECT s.*
+                  FROM source_team_keys s
+                  WHERE EXISTS (
+                    SELECT 1 FROM public.player_fantasy p
+                    WHERE p.db_name IS NOT DISTINCT FROM s.db_name
+                      AND p."year" IS NOT DISTINCT FROM s.year
+                      AND p.week IS NOT DISTINCT FROM s.week
+                  )
+                    AND NOT EXISTS (
+                      SELECT 1 FROM resolved_team_matches r
+                      WHERE r.artifact_id=s.artifact_id
+                        AND r.db_name IS NOT DISTINCT FROM s.db_name
+                        AND r.year IS NOT DISTINCT FROM s.year
+                        AND r.week IS NOT DISTINCT FROM s.week
+                        AND r.source_team_key IS NOT DISTINCT FROM s.canonical_team_key
+                    )
+                  ORDER BY s.artifact_id, s.db_name, s.year, s.week, s.canonical_team_key
+                  LIMIT 10
+                )
+                SELECT u.artifact_id, u.db_name, u.year, u.week,
+                       u.canonical_team_key, u.manager_key, u.team_name_key,
+                       STRING_AGG(DISTINCT CONCAT_WS(' | ',
+                         CAST(p.team_key AS VARCHAR), CAST(p.manager AS VARCHAR),
+                         CAST(p.team_name AS VARCHAR)), ' || ')
+                FROM unresolved u
+                JOIN public.player_fantasy p
+                  ON p.db_name IS NOT DISTINCT FROM u.db_name
+                 AND p."year" IS NOT DISTINCT FROM u.year
+                 AND p.week IS NOT DISTINCT FROM u.week
+                GROUP BY 1,2,3,4,5,6,7
+                ORDER BY 1,2,3,4,5
+                """).fetchall()
+            ]
         return {
             "read_only": True,
             "cache_mutated": False,
@@ -299,6 +344,7 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
             "source_artifacts": len(entries),
             "source_rows": int(source_rows),
             "rows": rows,
+            "identity_examples": examples,
         }
     finally:
         con.close()
