@@ -280,36 +280,71 @@ def _audit_raw_team_signals(
             _add_result(totals, artifact_id, {"blocked_schema_cells": value, "source_cells": value})
     if not supported:
         return
-    select_terms: list[str] = []
-    for source, target in supported.items():
-        select_terms.extend([
-            f"SUM(CASE WHEN e.{_quoted(source)} IS NOT NULL AND p.rowid IS NULL THEN 1 ELSE 0 END) AS {_quoted('unmatched__' + target)}",
-            f"SUM(CASE WHEN e.{_quoted(source)} IS NOT NULL AND p.rowid IS NOT NULL AND p.{_quoted(target)} IS NULL THEN 1 ELSE 0 END) AS {_quoted('missing__' + target)}",
-            f"SUM(CASE WHEN e.{_quoted(source)} IS NOT NULL AND p.rowid IS NOT NULL AND p.{_quoted(target)} IS NOT NULL AND p.{_quoted(target)} IS NOT DISTINCT FROM e.{_quoted(source)} THEN 1 ELSE 0 END) AS {_quoted('match__' + target)}",
-            f"SUM(CASE WHEN e.{_quoted(source)} IS NOT NULL AND p.rowid IS NOT NULL AND p.{_quoted(target)} IS NOT NULL AND p.{_quoted(target)} IS DISTINCT FROM e.{_quoted(source)} THEN 1 ELSE 0 END) AS {_quoted('conflict__' + target)}",
-        ])
-    query = f"""
-        SELECT e.artifact_id, {', '.join(select_terms)}
+    # The old outer join let DuckDB choose the 269M-row player relation as the
+    # hash-build side. Materialize source-matched player rows with an inner
+    # join, then identify unmatched source keys from that small match relation.
+    con.execute(f"""
+        CREATE OR REPLACE TEMP TABLE raw_team_signal_matched_keys AS
+        SELECT DISTINCT e.artifact_id, e.db_name, e.year, e.week, e.team_key
         FROM raw_team_signal_evidence e
-        LEFT JOIN {target_relation} p ON e.team_key IS NOT NULL
+        JOIN {target_relation} p ON e.team_key IS NOT NULL
           AND {_join('p', 'e', ['db_name', 'year', 'week', 'team_key'])}
-        GROUP BY e.artifact_id
-    """
-    field_names = [term.rsplit(" AS ", 1)[1].strip('"') for term in select_terms]
-    for row in con.execute(query).fetchall():
+    """)
+    player_fields = ", ".join(
+        f"p.{_quoted(target)} AS {_quoted('canonical__' + target)}"
+        for target in supported.values()
+    )
+    con.execute(f"""
+        CREATE OR REPLACE TEMP TABLE raw_team_signal_player_matches AS
+        SELECT e.*, {player_fields}
+        FROM raw_team_signal_evidence e
+        JOIN {target_relation} p ON e.team_key IS NOT NULL
+          AND {_join('p', 'e', ['db_name', 'year', 'week', 'team_key'])}
+    """)
+    match_terms: list[str] = []
+    unmatched_terms: list[str] = []
+    for source, target in supported.items():
+        canonical = _quoted('canonical__' + target)
+        match_terms.extend([
+            f"SUM(CASE WHEN m.{_quoted(source)} IS NOT NULL AND m.{canonical} IS NULL THEN 1 ELSE 0 END) AS {_quoted('missing__' + target)}",
+            f"SUM(CASE WHEN m.{_quoted(source)} IS NOT NULL AND m.{canonical} IS NOT NULL AND m.{canonical} IS NOT DISTINCT FROM m.{_quoted(source)} THEN 1 ELSE 0 END) AS {_quoted('match__' + target)}",
+            f"SUM(CASE WHEN m.{_quoted(source)} IS NOT NULL AND m.{canonical} IS NOT NULL AND m.{canonical} IS DISTINCT FROM m.{_quoted(source)} THEN 1 ELSE 0 END) AS {_quoted('conflict__' + target)}",
+        ])
+        unmatched_terms.append(
+            f"SUM(CASE WHEN e.{_quoted(source)} IS NOT NULL AND k.artifact_id IS NULL THEN 1 ELSE 0 END) AS {_quoted('unmatched__' + target)}"
+        )
+    match_names = [term.rsplit(" AS ", 1)[1].strip('"') for term in match_terms]
+    unmatched_names = [term.rsplit(" AS ", 1)[1].strip('"') for term in unmatched_terms]
+    for row in con.execute(
+        f"SELECT m.artifact_id, {', '.join(match_terms)} "
+        "FROM raw_team_signal_player_matches m GROUP BY m.artifact_id"
+    ).fetchall():
         artifact_id, *counts = row
         summary = Counter()
-        for field_name, count in zip(field_names, counts):
+        for field_name, count in zip(match_names, counts):
             value = int(count or 0)
             summary["source_cells"] += value
             if field_name.startswith("match__"):
                 summary["cache_match_cells"] += value
             elif field_name.startswith("missing__"):
                 summary["cache_missing_cells"] += value
-            elif field_name.startswith("conflict__"):
+            else:
                 summary["cache_conflict_cells"] += value
-            elif field_name.startswith("unmatched__"):
-                summary["unmatched_cache_cells"] += value
+        _add_result(totals, artifact_id, dict(summary))
+    for row in con.execute(f"""
+        SELECT e.artifact_id, {', '.join(unmatched_terms)}
+        FROM raw_team_signal_evidence e
+        LEFT JOIN raw_team_signal_matched_keys k
+          ON k.artifact_id=e.artifact_id
+         AND {_join('k', 'e', ['db_name', 'year', 'week', 'team_key'])}
+        GROUP BY e.artifact_id
+    """).fetchall():
+        artifact_id, *counts = row
+        summary = Counter()
+        for field_name, count in zip(unmatched_names, counts):
+            value = int(count or 0)
+            summary["source_cells"] += value
+            summary["unmatched_cache_cells"] += value
         _add_result(totals, artifact_id, dict(summary))
 
 
