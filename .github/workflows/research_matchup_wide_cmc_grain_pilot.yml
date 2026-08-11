@@ -1,0 +1,78 @@
+name: Matchup wide CMC grain pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+      year:
+        required: true
+        default: '2025'
+      player_id:
+        required: true
+        default: '00-0033280'
+
+permissions:
+  contents: read
+
+jobs:
+  pilot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      RESEARCH_OUT_DIR: ${{ github.workspace }}/out
+      RESEARCH_OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - name: Install dependencies
+        run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 requests
+      - name: Build direct wide CMC source and bundle
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python code/scripts/research_cohorts/build_wide_matchup_from_cache.py \
+            --snapshot research_public_lake/corpus_snapshot.duckdb \
+            --ops-cache research_public_lake/ops_cache.duckdb \
+            --source-db out/research_cohorts.duckdb \
+            --out-dir out \
+            --year-start ${{ inputs.year }} --year-end ${{ inputs.year }} \
+            --player-id ${{ inputs.player_id }}
+      - name: Enforce CMC product grain
+        run: |
+          python - <<'PY'
+          import duckdb
+          c=duckdb.connect('out/research_merge_bundle.duckdb', read_only=True)
+          checks = {
+              'research_matchup_weekly': "SELECT COUNT(*) FROM research_matchup_weekly WHERE NFL_player_id='00-0033280' AND year=2025",
+              'research_matchup': "SELECT COUNT(*) FROM research_matchup WHERE NFL_player_id='00-0033280' AND year=2025",
+              'research_matchup_career': "SELECT COUNT(*) FROM research_matchup_career WHERE NFL_player_id='00-0033280'",
+          }
+          got={name:c.execute(sql).fetchone()[0] for name,sql in checks.items()}
+          print(got)
+          assert got['research_matchup_weekly'] == 17, got
+          assert got['research_matchup'] == 1, got
+          assert got['research_matchup_career'] == 1, got
+          print('PASS: CMC is 17 weekly rows, one season row, one career row')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: matchup-wide-cmc-grain-pilot-${{ github.run_id }}
+          path: out/research_merge_bundle.duckdb
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
