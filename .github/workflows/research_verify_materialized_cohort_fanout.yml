@@ -1,0 +1,77 @@
+name: Verify saved materialized cohort fan-out
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+      settings_audit_run_id:
+        required: true
+        default: '31446334849'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Download promoted settings delta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir settings_audit
+          gh run download '${{ inputs.settings_audit_run_id }}' \
+            --repo '${{ github.repository }}' \
+            --name 'research-settings-dimension-audit-${{ inputs.settings_audit_run_id }}' \
+            --dir settings_audit
+          delta=$(find settings_audit -name settings_promotable_delta.parquet -print -quit)
+          test -s "$delta"
+          echo "SETTINGS_DELTA=$delta" >> "$GITHUB_ENV"
+      - name: Verify persisted base truth columns
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/audit_materialized_cohort_fanout.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --settings-delta "$SETTINGS_DELTA" \
+            --out saved_materialized_cohort_fanout.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          audit=json.loads(Path('saved_materialized_cohort_fanout.json').read_text())
+          if audit['player_schema_columns'] != 133:
+              raise SystemExit(f"unexpected player schema width: {audit['player_schema_columns']}")
+          required=('pass_td','playoff_teams','roster','best_ball')
+          failures={name:audit['dimensions'][name]['base_mismatches'] for name in required
+                    if audit['dimensions'][name]['base_mismatches'] != 0}
+          eligible=audit['dimensions']['roster']['dependent_columns']['cohort_position_eligible']['base_mismatches']
+          if eligible:
+              failures['cohort_position_eligible']=eligible
+          if failures:
+              raise SystemExit(f"saved canonical cache has stale materialized base fields: {failures}")
+          print(json.dumps({'verified_saved_cache':True,'affected_setting_keys':audit['affected_setting_keys'],
+                            'affected_player_rows':audit['affected_player_rows']}, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: saved-materialized-cohort-fanout-verification-${{ github.run_id }}
+          path: saved_materialized_cohort_fanout.json
+          if-no-files-found: error
+          retention-days: 90
