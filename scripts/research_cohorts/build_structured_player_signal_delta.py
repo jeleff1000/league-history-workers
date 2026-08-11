@@ -101,22 +101,25 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
         f"SELECT COUNT(*) FROM source_unique WHERE {conflict_predicate}"
     ).fetchone()[0])
 
+    # Restrict the cardinality check to source identities.  Grouping all
+    # canonical rows is both unnecessary and expensive for a targeted repair.
     con.execute(f"""
-        CREATE OR REPLACE TEMP TABLE base_key_counts AS
-        SELECT {', '.join(_q(column) for column in KEY)},
-               COUNT(*) AS canonical_rows, MIN(rowid) AS player_rowid
-        FROM public.player_fantasy
-        GROUP BY {', '.join(_q(column) for column in KEY)}
+        CREATE OR REPLACE TEMP TABLE source_base_matches AS
+        SELECT {', '.join(f's.{_q(column)} AS {_q(column)}' for column in KEY)},
+               COUNT(p.rowid) AS canonical_rows, MIN(p.rowid) AS player_rowid
+        FROM source_unique s
+        LEFT JOIN public.player_fantasy p ON {_join('p', 's')}
+        GROUP BY {', '.join(f's.{_q(column)}' for column in KEY)}
     """)
     con.execute(f"""
         CREATE OR REPLACE TEMP TABLE matched AS
         SELECT s.*, b.canonical_rows, b.player_rowid,
                {', '.join(f'p.{_q(target)} AS {_q(target)}' for target, _ in SUPPORTED.values())}
         FROM source_unique s
-        LEFT JOIN base_key_counts b ON {_join('b', 's')}
+        JOIN source_base_matches b ON {_join('b', 's')}
         LEFT JOIN public.player_fantasy p ON p.rowid = b.player_rowid
     """)
-    unmatched = int(con.execute("SELECT COUNT(*) FROM matched WHERE canonical_rows IS NULL").fetchone()[0])
+    unmatched = int(con.execute("SELECT COUNT(*) FROM matched WHERE canonical_rows = 0").fetchone()[0])
     ambiguous = int(con.execute("SELECT COUNT(*) FROM matched WHERE canonical_rows > 1").fetchone()[0])
 
     report_fields: dict[str, dict[str, int]] = {}
