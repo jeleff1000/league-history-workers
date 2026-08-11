@@ -42,7 +42,7 @@ jobs:
           import duckdb, json, os, requests
           source=duckdb.connect("research_public_lake/corpus_snapshot.duckdb", read_only=True)
           source_rows=source.execute("""
-            select count(*) rows, count(distinct db_name) leagues,
+            select count(*) as row_count, count(distinct db_name) as leagues,
                    count(*) filter (where position is null) position_nulls
             from public.player_fantasy
             where NFL_player_id='00-0033280' and cast(year as integer)=2025 and cast(week as integer)=1
