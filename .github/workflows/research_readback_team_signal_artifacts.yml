@@ -83,7 +83,10 @@ jobs:
                   # These raw player artifacts were previously mislabeled as
                   # non-emitting because the old audit only accepted delta files.
                   if source_kind == 'structured_player':
-                      eligible = eligible or row['final_status']=='no_promotable_candidate_emitted'
+                      eligible = eligible or row['final_status'] in {
+                          'no_promotable_candidate_emitted',
+                          'candidate_built_pending_canonical_promotion',
+                      }
                   if eligible and row['artifact'].startswith(prefix):
                       rows.append(row)
           if not rows:
