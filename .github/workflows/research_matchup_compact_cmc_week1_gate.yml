@@ -199,6 +199,45 @@ jobs:
               'outer_rows': outer_rows,
           }, default=str))
           PY
+      - name: Resolve real CMC week 1 core cohort cells independently
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code
+        run: |
+          python - <<'PY'
+          import duckdb, json
+          from scripts.research_cohorts.compact_matchup_cells import materialize_weekly_core_cohort_cells
+
+          c = duckdb.connect()
+          c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          materialize_weekly_core_cohort_cells(
+              c,
+              source_table='lake.public.player_fantasy',
+              output_table='cmc_week1_core_cells',
+              year=2025,
+              week=1,
+              player_id='00-0033280',
+              split_threshold=150,
+          )
+          rows = c.execute("""
+            SELECT o.NFL_player_id, o.year, o.week, o.position, cell.*
+            FROM cmc_week1_core_cells o, UNNEST(o.cohort_cells) AS u(cell)
+            ORDER BY q_teams, q_roster, q_scoring, q_pass_td, q_dynasty, q_best_ball
+          """).fetchall()
+          assert rows and {row[0] for row in rows} == {'00-0033280'}, rows
+          columns = [d[0] for d in c.description]
+          records = [dict(zip(columns, row)) for row in rows]
+          keys = [
+              (r['q_teams'], r['q_roster'], r['q_scoring'], r['q_pass_td'], r['q_dynasty'], r['q_best_ball'])
+              for r in records
+          ]
+          assert len(keys) == len(set(keys)), keys
+          selected = [r for r in records if (
+              r['q_teams'], r['q_roster'], r['q_scoring'], r['q_pass_td'], r['q_dynasty'], r['q_best_ball']
+          ) == ('12t', 'flx', 'half', '4pt', 'redraft', 'managed')]
+          assert len(selected) == 1 and selected[0]['eligible_leagues'] >= 5000, selected
+          assert 'q_playoff_teams' not in selected[0], selected[0]
+          print('cmc_2025_week1_core_cells=' + json.dumps(records, default=str))
+          PY
       - name: Materialize one real CMC 2025 season record for cache validation
         env:
           PYTHONPATH: ${{ github.workspace }}/code
