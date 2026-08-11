@@ -1,0 +1,92 @@
+name: Matchup Grain Pilot - CMC 2025
+
+on:
+  push:
+    paths:
+      - ".matchup_cmc_2025_pilot_dispatch_once"
+
+permissions:
+  contents: read
+
+jobs:
+  pilot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      PYTHONUNBUFFERED: "1"
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1 requests
+      - name: Build only CMC 2025
+        run: |
+          mkdir -p out
+          python code/scripts/research_cohorts/build_direct_matchup_cache.py             --snapshot research_public_lake/corpus_snapshot.duckdb             --ops-cache research_public_lake/ops_cache.duckdb             --output out/cmc_2025.duckdb             --year-start 2025 --year-end 2025             --position-group RB --player-id 00-0033280             --threads 2 --memory-limit-mb 6000
+      - name: Compare all CMC 2025 grains to live schema
+        run: |
+          python - <<'PY'
+          import duckdb, json, os, requests
+          source=duckdb.connect("research_public_lake/corpus_snapshot.duckdb", read_only=True)
+          source_counts=source.execute("""
+            select count(*) as row_count, count(distinct db_name) as leagues,
+                   count(distinct week) as weeks
+            from public.player_fantasy
+            where NFL_player_id='00-0033280' and cast(year as integer)=2025
+          """).fetchone()
+          source.close()
+          def fly(sql):
+              r=requests.post(os.environ["DATABASE_SERVER_URL"].rstrip("/")+"/query",
+                headers={"Authorization":"Bearer "+os.environ["DATABASE_READ_TOKEN"]},
+                json={"sql":sql,"database":"___ops"},timeout=75)
+              r.raise_for_status()
+              return r.json()
+          out=duckdb.connect("out/cmc_2025.duckdb", read_only=True)
+          expected={
+            "research_matchup_adaptive": "research_matchup_adaptive",
+            "research_matchup_adaptive_weekly": "research_matchup_adaptive_weekly",
+            "research_matchup_adaptive_career": "research_matchup_adaptive_career",
+          }
+          report={"source_counts":source_counts,"tables":{}}
+          for table in expected:
+              cols=[r[0] for r in out.execute(f"describe {table}").fetchall()]
+              counts=out.execute(f"""
+                select count(*) as row_count,
+                       count(*) filter (where NFL_player_id='00-0033280') as cmc_rows
+                from {table}
+              """).fetchone()
+              live=fly(f"""
+                select column_name from information_schema.columns
+                where table_schema='nfl_historical' and table_name='{table}'
+                order by ordinal_position
+              """)
+              live_cols=[r["column_name"] for r in live]
+              report["tables"][table]={
+                "counts":counts,"output_columns":len(cols),"live_columns":len(live_cols),
+                "missing":sorted(set(live_cols)-set(cols)),
+                "extra":sorted(set(cols)-set(live_cols)),
+              }
+              assert cols == live_cols, (table,report["tables"][table])
+              assert counts[1] > 0, (table,counts)
+          out.close()
+          print(json.dumps(report,default=str,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: matchup-cmc-2025-pilot-${{ github.run_id }}
+          path: out/cmc_2025.duckdb
+          retention-days: 1
+          compression-level: 0
