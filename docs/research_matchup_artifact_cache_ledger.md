@@ -56,6 +56,23 @@ The receipt workflow is read-only. It asserts, before and after the audit,
 that player schema, player-row count, and the ops-cache hash are unchanged;
 it has no cache-save, cache-delete, or lineage-creation step.
 
+## Canonical promotion contract
+
+The approved GitHub Actions cache is immutable: a runner can restore and
+modify its workspace copy, but cannot update that existing cache object in
+place. The repository currently contains two distinct promotion paths:
+
+| Workflow | Behavior | Status under the one-cache rule |
+| --- | --- | --- |
+| `research_promote_mfl_sidecars.yml` | Deletes the canonical cache key, then saves a replacement under the same key. | Not authorized: deletion is destructive, even though the key text is unchanged. |
+| `research_artifact_candidate_audit.yml` | Applies a validated delta only in the runner workspace, validates it, then explicitly refuses cache replacement. | Safe evidence path; it does not persist a cache update. |
+
+Therefore `candidate_built_pending_canonical_promotion` has one exact meaning:
+the artifact has passed the row/field safety gate, but persisting it requires
+an approved replacement transaction for the single canonical cache. It does
+not mean the candidate was applied, and it does not authorize a second
+lineage, a schema change, an ops-cache change, or a cache deletion.
+
 ## MFL manager-week outcome candidate
 
 The 15 `mfl-player-outcome-classification-*` artifacts contain 1,359,202
