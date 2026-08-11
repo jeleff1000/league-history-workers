@@ -153,8 +153,8 @@ def test_receipt_preserves_prior_artifact_readbacks_when_overlaying_raw_signals(
     assert rows[43]["cache_match_cells"] == 1
 
 
-def test_receipt_uses_mfl_manager_guid_as_the_canonical_team_key(tmp_path: Path) -> None:
-    """Replacing MFL manager-guid mapping with display team_key must make this unmatched."""
+def test_receipt_uses_manager_as_the_canonical_team_identity(tmp_path: Path) -> None:
+    """Replacing manager fanout with either team-key value must make this unmatched."""
     from scripts.research_cohorts.finalize_artifact_cache_receipts import build_receipts
 
     base = tmp_path / "base.duckdb"
@@ -170,7 +170,7 @@ def test_receipt_uses_mfl_manager_guid_as_the_canonical_team_key(tmp_path: Path)
     raw = tmp_path / "mfl-team.parquet"
     _write_parquet(raw, [{
         "db_name": "league", "year": 2024, "week": 15, "platform": "mfl",
-        "team_key": "0001", "manager_guid": "mfl_team_123_0001", "win": 1,
+        "team_key": "0001", "manager_guid": "mfl_team_other_0001", "manager": "mgr", "win": 1,
     }])
     manifest = tmp_path / "mfl-team-manifest.json"
     manifest.write_text(json.dumps([{"artifact_id": 55, "path": str(raw)}]))

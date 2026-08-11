@@ -231,7 +231,7 @@ def _audit_raw_team_signals(
         row[0]: row[1] for row in con.execute(f"DESCRIBE {target_relation}").fetchall()
     }
     selects: list[str] = []
-    required_keys = {"db_name", "year", "week", "team_key"}
+    required_keys = {"db_name", "year", "week", "manager"}
     for entry in entries:
         artifact_id = int(entry["artifact_id"])
         path = Path(entry["path"])
@@ -247,16 +247,8 @@ def _audit_raw_team_signals(
             continue
         terms = [
             f"{artifact_id}::BIGINT AS artifact_id",
-            *(_quoted(key) for key in ["db_name", "year", "week"]),
+            *(_quoted(key) for key in ["db_name", "year", "week", "manager"]),
         ]
-        if {"platform", "manager_guid"} <= raw_columns:
-            terms.append(
-                "CASE WHEN lower(CAST(\"platform\" AS VARCHAR)) = 'mfl' "
-                "AND \"manager_guid\" IS NOT NULL THEN \"manager_guid\" "
-                "ELSE \"team_key\" END AS \"team_key\""
-            )
-        else:
-            terms.append("\"team_key\"")
         for source, raw_column in RAW_TEAM_SIGNAL_COLUMNS.items():
             target = TEAM_FIELDS[source]
             cast_type = target_types.get(target, RAW_TEAM_SIGNAL_FALLBACK_TYPES[source])
@@ -296,7 +288,7 @@ def _audit_raw_team_signals(
     query = f"""
         SELECT e.artifact_id, {', '.join(select_terms)}
         FROM raw_team_signal_evidence e
-        LEFT JOIN {target_relation} p ON {_join('p', 'e', ['db_name', 'year', 'week', 'team_key'])}
+        LEFT JOIN {target_relation} p ON {_join('p', 'e', ['db_name', 'year', 'week', 'manager'])}
         GROUP BY e.artifact_id
     """
     field_names = [term.rsplit(" AS ", 1)[1].strip('"') for term in select_terms]
