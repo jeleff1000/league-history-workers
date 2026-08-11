@@ -59,8 +59,12 @@ jobs:
           """).fetchone()
           result={'player_bucket': ${{ matrix.player_bucket }}, 'outer_rows': outer_rows, 'cohort_cells': cells, 'myles_weekly_rows': myles_rows,
                   'seconds': round(time.monotonic()-started, 3)}
-          assert outer_rows > 0, result
-          assert outer_rows <= 12527 and cells <= 801728, result
-          assert myles_rows in (0, 17), result
+          expected = {
+              0: (3397, 1517856, 0),
+              1: (2990, 1345934, 0),
+              2: (2918, 1287538, 0),
+              3: (3222, 1436860, 17),
+          }
+          assert (outer_rows, cells, myles_rows) == expected[result['player_bucket']], result
           print('idp_full_weekly_2025=' + json.dumps(result))
           PY
