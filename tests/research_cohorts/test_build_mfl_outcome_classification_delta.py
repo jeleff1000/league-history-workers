@@ -51,3 +51,38 @@ def test_mfl_outcome_delta_keeps_only_exact_null_cell_repairs(tmp_path: Path) ->
     row = check.execute("SELECT NFL_player_id, source_win, source_team_points, source_is_playoffs FROM read_parquet(?)", [str(out)]).fetchone()
     assert row == ("p1", 1, 100.0, 1)
     check.close()
+
+
+def test_mfl_outcome_delta_ignores_unrelated_duplicate_canonical_keys(tmp_path: Path) -> None:
+    """Only source keys must be unique; unrelated cache duplication is irrelevant."""
+    from scripts.research_cohorts.build_mfl_outcome_classification_delta import build
+
+    base = tmp_path / "base.duckdb"
+    con = duckdb.connect(str(base))
+    con.execute("""
+      CREATE SCHEMA public;
+      CREATE TABLE public.player_fantasy AS
+      SELECT 'target'::VARCHAR AS db_name, 2024::INTEGER AS "year", 1::INTEGER AS "week",
+             'p1'::VARCHAR NFL_player_id, 'm'::VARCHAR manager,
+             NULL::INTEGER win, 100.0::DOUBLE team_points, NULL::INTEGER is_playoffs
+      UNION ALL
+      SELECT 'unrelated', 2024, 1, 'p2', 'm', NULL, 99.0, NULL
+      UNION ALL
+      SELECT 'unrelated', 2024, 1, 'p2', 'm', NULL, 99.0, NULL;
+    """)
+    con.close()
+    raw = tmp_path / "mfl.parquet"
+    _parquet(raw, [{
+        "db_name": "target", "year": 2024, "week": 1, "NFL_player_id": "p1", "manager": "m",
+        "source_win": 1, "source_team_points": 100.0, "source_is_playoffs": 1,
+        "source_loss": 0, "source_tie": 0,
+    }])
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps([{"artifact_id": 12, "path": str(raw)}]))
+
+    result = build(
+        base=base, manifest=manifest, out=tmp_path / "delta.parquet", report=tmp_path / "report.json"
+    )
+
+    assert result["canonical_duplicate_exact_keys"] == 0
+    assert result["delta_rows"] == 1

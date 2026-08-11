@@ -77,10 +77,15 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
         GROUP BY {', '.join(_q(key) for key in KEY)}
     """)
     source_keys = int(con.execute("SELECT COUNT(*) FROM source_unique").fetchone()[0])
+    # The canonical table may legitimately contain duplicate keys outside this
+    # MFL source population.  Only a source key fanning into multiple canonical
+    # rows would make this exact player-level update unsafe.
+    source_join = " AND ".join(f"p.{_q(key)} IS NOT DISTINCT FROM s.{_q(key)}" for key in KEY)
     base_duplicate_keys = int(con.execute(f"""
         SELECT COUNT(*) FROM (
-          SELECT {', '.join(_q(key) for key in KEY)}
-          FROM public.player_fantasy GROUP BY ALL HAVING COUNT(*) > 1
+          SELECT {', '.join(f's.{_q(key)}' for key in KEY)}
+          FROM source_unique s JOIN public.player_fantasy p ON {source_join}
+          GROUP BY ALL HAVING COUNT(*) > 1
         )
     """).fetchone()[0])
     if base_duplicate_keys:
