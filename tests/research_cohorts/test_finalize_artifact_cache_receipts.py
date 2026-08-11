@@ -380,4 +380,4 @@ def test_canonical_snapshot_receipt_scans_canonical_players_once() -> None:
     )
 
     source = inspect.getsource(_audit_canonical_player_snapshots)
-    assert source.count("LEFT JOIN {target_relation} p") == 1
+    assert source.count("FROM {target_relation}") == 1

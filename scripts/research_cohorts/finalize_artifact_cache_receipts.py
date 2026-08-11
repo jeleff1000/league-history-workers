@@ -602,19 +602,32 @@ def _audit_canonical_player_snapshots(
         AND (s.manager IS NULL OR p.manager IS NOT DISTINCT FROM s.manager)
         AND (s.platform IS NULL OR LOWER(CAST(p.platform AS VARCHAR)) IS NOT DISTINCT FROM LOWER(CAST(s.platform AS VARCHAR)))
     """
-    # Materialize the compared canonical values while resolving the unique
-    # player row.  Rejoining a 269M-row cache by rowid here is logically
-    # redundant and turns a targeted receipt into a second full-cache scan.
+    # Match cache rows through an inner join with the cache on the left, so
+    # DuckDB can build its hash table from the small source relation.  A
+    # source-left join would instead build a 269M-row cache hash table.
+    cache_fields = ", ".join(
+        f"p.{_quoted(target)} AS {_quoted('canonical__' + target)}"
+        for target in supported.values()
+    )
+    con.execute(f"""
+        CREATE OR REPLACE TEMP TABLE canonical_snapshot_cache_matches AS
+        SELECT s.source_row_id, {cache_fields}
+        FROM {target_relation} p
+        JOIN canonical_snapshot_source s ON {canonical_key} {guards}
+    """)
+    # Carry the compared values through the small source-to-match join.
+    # Rejoining the full cache by rowid is both logically redundant and
+    # turns this targeted receipt into a second full-cache scan.
     canonical_projection = ", ".join(
-        f"MIN(p.{_quoted(target)}) AS {_quoted('canonical__' + target)}"
+        f"MIN(m.{_quoted('canonical__' + target)}) AS {_quoted('canonical__' + target)}"
         for target in supported.values()
     )
     con.execute(f"""
         CREATE OR REPLACE TEMP TABLE canonical_snapshot_resolution AS
-        SELECT s.source_row_id, COUNT(p.rowid) AS canonical_match_count,
+        SELECT s.source_row_id, COUNT(m.source_row_id) AS canonical_match_count,
                {canonical_projection}
         FROM canonical_snapshot_source s
-        LEFT JOIN {target_relation} p ON {canonical_key} {guards}
+        LEFT JOIN canonical_snapshot_cache_matches m ON m.source_row_id=s.source_row_id
         GROUP BY s.source_row_id
     """)
     player_fields = ", ".join(
