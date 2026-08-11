@@ -62,6 +62,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT_PREFIX: ${{ inputs.artifact_prefix }}
+          SOURCE_KIND: ${{ inputs.source_kind }}
         shell: bash
         run: |
           set -euo pipefail
@@ -74,10 +75,16 @@ jobs:
           import csv, json, os
           from pathlib import Path
           prefix=os.environ['ARTIFACT_PREFIX']
+          source_kind=os.environ['SOURCE_KIND']
           rows=[]
           with Path('docs/research_matchup_artifact_cache_ledger.csv').open(newline='', encoding='utf-8') as handle:
               for row in csv.DictReader(handle):
-                  if row['final_status']=='candidate_provenance_not_found' and row['artifact'].startswith(prefix):
+                  eligible = row['final_status']=='candidate_provenance_not_found'
+                  # These raw player artifacts were previously mislabeled as
+                  # non-emitting because the old audit only accepted delta files.
+                  if source_kind == 'structured_player':
+                      eligible = eligible or row['final_status']=='no_promotable_candidate_emitted'
+                  if eligible and row['artifact'].startswith(prefix):
                       rows.append(row)
           if not rows:
               raise SystemExit(f'no unresolved retained artifacts for prefix {prefix!r}')
