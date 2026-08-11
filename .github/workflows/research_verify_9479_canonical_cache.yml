@@ -1,0 +1,65 @@
+name: Verify 9,479-artifact canonical cache promotion
+
+on:
+  workflow_dispatch:
+    inputs:
+      comparison_run_id:
+        required: true
+        default: '31441478179'
+      settings_audit_run_id:
+        required: true
+        default: '31446334849'
+      promotion_run_id:
+        required: true
+        default: '31449772459'
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: verified_research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - name: Download deltas and promotion evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p comparison settings_audit promotion_evidence
+          gh run download '${{ inputs.comparison_run_id }}' --repo '${{ github.repository }}' --name 'research-artifact-complete-audit-${{ inputs.comparison_run_id }}' --dir comparison
+          gh run download '${{ inputs.settings_audit_run_id }}' --repo '${{ github.repository }}' --name 'research-settings-dimension-audit-${{ inputs.settings_audit_run_id }}' --dir settings_audit
+          gh run download '${{ inputs.promotion_run_id }}' --repo '${{ github.repository }}' --name 'canonical-9479-promotion-evidence-${{ inputs.promotion_run_id }}' --dir promotion_evidence
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Verify every promoted source cell after restoring saved cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/verify_research_cache_promotion.py \
+            --base verified_research_public_lake/corpus_snapshot.duckdb \
+            --ops verified_research_public_lake/ops_cache.duckdb \
+            --team-delta "$(find comparison -name team_promotable_player_delta.parquet -print -quit)" \
+            --exact-delta "$(find comparison -name exact_promotable_player_delta.parquet -print -quit)" \
+            --structured-delta "$(find comparison -name structured_promotable_delta.parquet -print -quit)" \
+            --settings-delta "$(find settings_audit -name settings_promotable_delta.parquet -print -quit)" \
+            --promotion-evidence promotion_evidence \
+            --out canonical_cache_post_save_audit.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: canonical-9479-post-save-audit-${{ github.run_id }}
+          path: canonical_cache_post_save_audit.json
+          if-no-files-found: error
+          retention-days: 90
