@@ -21,6 +21,9 @@ SUPPORTED = {
     "source_is_playoffs": ("is_playoffs", "INTEGER"),
 }
 BLOCKED = ("source_loss", "source_tie")
+DUPLICATE_PROFILE_COLUMNS = (
+    "team_key", "team_name", "platform", "fantasy_position", "position", "is_started", "is_rostered",
+)
 
 
 def _q(name: str) -> str:
@@ -29,6 +32,11 @@ def _q(name: str) -> str:
 
 def _lit(path: Path) -> str:
     return "'" + str(path.resolve()).replace("'", "''") + "'"
+
+
+def _write_json(path: Path, value: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
@@ -89,6 +97,39 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
         )
     """).fetchone()[0])
     if base_duplicate_keys:
+        profile_columns = [column for column in DUPLICATE_PROFILE_COLUMNS if column in base_columns]
+        sample_select = [*(f"s.{_q(key)} AS {_q(key)}" for key in KEY), "COUNT(*) AS matching_canonical_rows"]
+        sample_select.extend(
+            f"COUNT(DISTINCT p.{_q(column)}) AS {_q(column + '_variants')}"
+            for column in profile_columns
+        )
+        sample = [
+            dict(zip([column[0] for column in cursor.description], row))
+            for cursor in [con.execute(f"""
+                SELECT {', '.join(sample_select)}
+                FROM source_unique s JOIN public.player_fantasy p ON {source_join}
+                GROUP BY {', '.join(f's.{_q(key)}' for key in KEY)}
+                HAVING COUNT(*) > 1
+                ORDER BY matching_canonical_rows DESC, s.{_q('db_name')}, s.{_q('year')}, s.{_q('week')}
+                LIMIT 25
+            """)]
+            for row in cursor.fetchall()
+        ]
+        _write_json(report, {
+            "read_only": True,
+            "cache_mutated": False,
+            "new_lineage": False,
+            "canonical_schema_unchanged": True,
+            "source_artifacts": len(entries),
+            "source_rows": raw_rows,
+            "unique_source_keys": source_keys,
+            "canonical_duplicate_exact_keys": base_duplicate_keys,
+            "duplicate_source_key_profile": {
+                "profile_columns": profile_columns,
+                "sample": sample,
+            },
+        })
+        con.close()
         raise RuntimeError(f"canonical player table has {base_duplicate_keys} duplicate exact MFL outcome keys")
 
     join = " AND ".join(f"p.{_q(key)} IS NOT DISTINCT FROM s.{_q(key)}" for key in KEY)
@@ -148,8 +189,7 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
         "supported_fields": report_fields,
         "blocked_schema_fields": blocked,
     }
-    report.parent.mkdir(parents=True, exist_ok=True)
-    report.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_json(report, result)
     con.close()
     return result
 
