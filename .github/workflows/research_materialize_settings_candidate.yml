@@ -1,0 +1,56 @@
+name: Materialize settings candidate in working copy
+
+on:
+  workflow_dispatch:
+    inputs:
+      settings_audit_run_id:
+        description: Successful sharded settings audit run
+        required: true
+        default: '31446334849'
+      base_cache_key:
+        description: Frozen canonical research cache key
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  materialize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.base_cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-settings-dimension-audit-${{ inputs.settings_audit_run_id }}
+          path: settings_audit
+          run-id: ${{ inputs.settings_audit_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Materialize and read back settings cells
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/materialize_settings_dimension_candidate.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --ops research_public_lake/ops_cache.duckdb \
+            --delta settings_audit/settings_promotable_delta.parquet \
+            --report settings_promotion_report.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-settings-promotion-candidate-${{ github.run_id }}
+          path: |
+            research_public_lake/corpus_snapshot.duckdb
+            settings_promotion_report.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
