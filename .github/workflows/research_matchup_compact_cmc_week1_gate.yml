@@ -143,18 +143,37 @@ jobs:
 
           c = duckdb.connect()
           c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
-          source_weeks = c.execute("""
+          c.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
+          raw_source_weeks = c.execute("""
             SELECT CAST(week AS INTEGER), COUNT(*)::BIGINT
             FROM lake.public.player_fantasy
             WHERE NFL_player_id='00-0033280' AND CAST(year AS INTEGER)=2025
             GROUP BY 1 ORDER BY 1
           """).fetchall()
+          assert sum(count for _, count in raw_source_weeks) == 167625, raw_source_weeks
+          c.execute("""
+            CREATE TEMP TABLE cached_regular_player_weeks AS
+            SELECT DISTINCT
+              CAST(NFL_player_id AS VARCHAR) AS NFL_player_id,
+              CAST(year AS INTEGER) AS year,
+              CAST(week AS INTEGER) AS week
+            FROM ops.nfl_historical.nfl_player_stats_all
+            WHERE CAST(year AS INTEGER)=2025
+              AND COALESCE(season_type, 'REG')='REG'
+              AND NFL_player_id IS NOT NULL AND week IS NOT NULL
+          """)
+          source_weeks = c.execute("""
+            SELECT week
+            FROM cached_regular_player_weeks
+            WHERE NFL_player_id='00-0033280'
+            ORDER BY week
+          """).fetchall()
           expected_weeks = list(range(1, 14)) + list(range(15, 19))
-          assert [week for week, _ in source_weeks] == expected_weeks, source_weeks
-          assert sum(count for _, count in source_weeks) == 167625, source_weeks
+          assert [week for (week,) in source_weeks] == expected_weeks, source_weeks
           materialize_weekly_outer_rows(
               c,
               source_table='lake.public.player_fantasy',
+              valid_player_weeks_table='cached_regular_player_weeks',
               output_table='cmc_2025_outer',
               year=2025,
               week=None,
@@ -170,7 +189,8 @@ jobs:
           ], outer_rows
           assert all(cell_count == 1 for *_, cell_count in outer_rows), outer_rows
           print('cmc_2025_compact_outer=' + json.dumps({
-              'source_week_counts': source_weeks,
+              'raw_source_week_counts': raw_source_weeks,
+              'cached_regular_weeks': source_weeks,
               'outer_rows': outer_rows,
           }, default=str))
           PY
