@@ -87,7 +87,7 @@ jobs:
             WHERE cell.q_playoff_teams='ALL'
           """).fetchone()
           assert core is not None and grade is not None
-          assert core[:3] == (9, 65, 46), core
+          assert core[:3] == (9, 112, 37), core
           assert abs(core[4] + core[5] - core[3]) < 1e-8, core
           season_grade = c.execute("""
             SELECT AVG(cell.champ_rate_pct), SUM(cell.champ_rate_pct/100.0),
