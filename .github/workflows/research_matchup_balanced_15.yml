@@ -214,7 +214,7 @@ jobs:
           retention-days: 1
           compression-level: 0
       - name: Publish validated full bundle to Fly
-        if: ${{ (github.event_name == 'push' && contains(github.event.head_commit.message, 'full')) || (github.event_name == 'workflow_dispatch' && inputs.publish && !inputs.pilot) }}
+        if: ${{ false }}
         env:
           DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
           DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
