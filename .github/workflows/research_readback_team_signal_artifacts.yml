@@ -148,6 +148,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Team/week evidence is the large retained family.  Profile every
+          # artifact in one exact team-key join instead of scanning the full
+          # canonical player table once per artifact/strategy.
+          if [ "$SOURCE_KIND" = "team" ]; then
+            python scripts/research_cohorts/profile_raw_team_signal_sources.py \
+              --base research_public_lake/corpus_snapshot.duckdb \
+              --manifest raw_source_manifest.json \
+              --out raw_signal_join_key_profile.json
+            exit 0
+          fi
           python - <<'PY'
           import json, os
           from pathlib import Path
