@@ -64,10 +64,12 @@ Each row has an explicit `final_status` and `next_action`.
 | `cache_verified` | 297 | 13,714 source cells match the canonical cache; no missing/conflicting cells. |
 | `no_promotable_candidate_emitted` | 4,522 | Candidate-classified artifact, but no promotable cell was emitted by the frozen comparison. |
 | `not_data_bearing` | 3,927 | Aggregate/validation/metadata artifact; not a canonical-cell source. |
-| `candidate_provenance_not_found` | 694 | 5,503,511 declared candidate rows still require direct source-file comparison. |
+| `candidate_provenance_not_found` | 74 | 365,835 declared candidate rows still require direct source-file comparison. |
 | `unmatched_cache_key` | 9 | 1,306 candidate rows / 2,612 cells require team-key-to-player-row reconciliation. |
 | `partial_schema_blocked_cache_updates` | 15 | Direct MFL audit produced 31,870 safe exact-row candidates; remaining source cells include ambiguous identities, preserved conflicts, and 288,160 loss/tie values blocked by the current schema. |
-| `partial_schema_blocked_unmatched` | 1 | Sparse-playoff artifact `9016426057`: 4,348 supported cells already match, 160 loss/tie cells require the explicitly permitted schema fields, and 144 cells belong to 36 source teams with no canonical player row. |
+| `partial_schema_blocked_unmatched` | 414 | Sparse-playoff evidence: 2,171,328 supported cells already match; 152,660 cells belong to source teams with no canonical player row; 129,322 loss/tie cells require the explicitly permitted schema fields. |
+| `partial_schema_blocked_conflicts` | 203 | Sparse-playoff evidence: 2,867,172 supported cells already match; 15,852 existing non-null values conflict and are preserved; 792,984 source-only cells lack a canonical player row; 450,118 loss/tie cells require schema support. |
+| `blocked_schema` | 4 | Sparse-playoff evidence has 20,960 already-matching supported cells and 464 loss/tie cells; it requires no supported-field update. |
 | `source_only_team_signal_missing_player_team_bridge` | 14 | 1,837,053 raw team-week keys overlap canonical player league-weeks, but cache rows lack `team_key`, `manager`, and `team_name`; the raw source has no player IDs. 13,110 raw team-weeks have no cache player rows. A roster/lineup bridge is required before any player-level upsert. |
 
 The receipt workflow is read-only. It asserts, before and after the audit,
@@ -147,18 +149,31 @@ cache-verified. Their only valid next action is exact team-identity
 reconciliation, followed by another receipt, or an explicit source-only
 closure.
 
-## Open source-comparison worklist
+## Completed sparse-playoff source comparison
 
-The 733 unclosed artifacts are finite and are grouped below. These are not new
-API pulls: each needs the already-retained candidate artifact compared to the
-approved cache and then either promoted as a strict improvement or closed with
-its source-specific reason.
+All 621 candidate-bearing `research-sparse-playoff-championship-*` artifacts
+were directly read against the approved cache in
+[31529079339](https://github.com/jeleff1000/league-history-workers/actions/runs/31529079339)
+and [31529603334](https://github.com/jeleff1000/league-history-workers/actions/runs/31529603334).
+The receipts safely fanned 53,401 unique manager-week source teams into
+1,266,542 canonical player rows. They found **zero supported null cells** to
+apply: every supported source cell was either already equal to cache truth,
+conflicted with an existing non-null cache value, or belonged to a source team
+for which no canonical player row exists. This family is no longer an
+unread-artifact work item.
 
-| Family | Artifacts | Candidate rows | Required evidence |
+## Remaining worklist
+
+Only 74 artifacts still lack a direct source-to-cache receipt. The rest have a
+cache result and need either a strict promotion transaction, a source-identity
+decision, or an explicit schema/precedence closure. None requires a new API
+pull.
+
+| Family | Artifacts | Current state | Required action |
 | --- | ---: | ---: | --- |
-| `research-sparse-playoff-*` | 621 | 732,640 | Team-week source file -> canonical team-week fan-out. |
-| `sleeper-missing-outcome-*` | 56 | 35,410 | Player source file -> canonical full player key. |
-| `promotable-rescue-delta-*` | 18 | 330,425 | `promotable_delta.parquet` -> canonical full player key. |
-| `research-source-matchup-rescue-*` | 14 | 4,405,530 | Exact team-key receipt completed: zero canonical matches; reconcile identity or close source-only. |
-| `research-championship-identity-probe-*` | 9 | 1,306 | Reconcile source team key to existing canonical player rows, or explicitly close source-only. |
-| `mfl-player-outcome-classification-*` | 15 | 50,298 canonical candidate rows | Promote the strict manager-week fanout candidates, then read back the cache. |
+| `sleeper-missing-outcome-*` | 56 | 35,410 candidate rows; no direct source receipt yet. | Read each raw player artifact on the full player key. |
+| `promotable-rescue-delta-*` | 18 | 330,425 candidate rows; no direct source receipt yet. | Read each `promotable_delta.parquet` on the full player key. |
+| `mfl-player-outcome-classification-*` | 15 | 31,870 strict exact-row candidates; 82,466 supported null cells in the direct audit. | Perform the approved single-cache promotion transaction, then exact readback. |
+| `research-source-matchup-rescue-*` | 14 | Source team data exists, but canonical player rows lack a player-team bridge. | Locate a roster/lineup bridge or explicitly close source-only rows. |
+| `research-championship-identity-probe-*` | 9 | 1,306 candidate rows with unresolved team identity. | Reconcile to player rows or explicitly close source-only. |
+| `research-sparse-playoff-championship-*` | 621 candidate-bearing | Fully receipted; zero supported null-cell fills. | Close source-only/conflict rows under the explicit precedence and loss/tie schema decisions. |
