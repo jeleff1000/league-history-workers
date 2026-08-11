@@ -55,6 +55,7 @@ def test_profile_batches_exact_team_key_checks_without_mutating_cache(tmp_path: 
         "matched_source_team_keys": 1,
         "unmatched_source_team_keys": 0,
         "matched_by_mfl_manager_guid": 0,
+        "matched_by_manager_team_name": 0,
         "matched_source_player_rows": 2,
     }
     assert by_id[11]["source_team_rows"] == 2
@@ -103,3 +104,39 @@ def test_profile_uses_mfl_manager_guid_as_the_canonical_team_week_identity(tmp_p
     assert row["matched_source_team_keys"] == 1
     assert row["matched_source_player_rows"] == 2
     assert row["matched_by_mfl_manager_guid"] == 1
+
+
+def test_profile_uses_unique_manager_and_team_name_when_mfl_keys_are_rewritten(tmp_path: Path) -> None:
+    """An MFL source team can still map exactly when its canonical key was rewritten."""
+    from scripts.research_cohorts.profile_raw_team_signal_sources import profile
+
+    base = tmp_path / "base.duckdb"
+    con = duckdb.connect(str(base))
+    con.execute("CREATE SCHEMA public")
+    con.execute("""
+        CREATE TABLE public.player_fantasy AS
+        SELECT 'smpl_mfl_2015_16002'::VARCHAR AS db_name,
+               2003::INTEGER AS year, 1::INTEGER AS week,
+               'rewritten-cache-key'::VARCHAR AS team_key,
+               'BLTN'::VARCHAR AS manager, 'BLTN'::VARCHAR AS team_name,
+               'p1'::VARCHAR AS NFL_player_id
+        UNION ALL
+        SELECT 'smpl_mfl_2015_16002', 2003, 1,
+               'rewritten-cache-key', 'BLTN', 'BLTN', 'p2'
+    """)
+    con.close()
+    raw = tmp_path / "mfl.parquet"
+    _parquet(raw, [{
+        "db_name": "smpl_mfl_2015_16002", "year": 2003, "week": 1,
+        "platform": "mfl", "team_key": "0001",
+        "manager_guid": "mfl_team_78253_0001", "manager": "BLTN",
+        "team_name": "BLTN", "win": 1,
+    }])
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps([{"artifact_id": 13, "path": str(raw)}]))
+
+    row = profile(base=base, manifest=manifest)["rows"][0]
+
+    assert row["matched_source_team_rows"] == 1
+    assert row["matched_source_player_rows"] == 2
+    assert row["matched_by_manager_team_name"] == 1

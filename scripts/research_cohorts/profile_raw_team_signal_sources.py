@@ -88,6 +88,14 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
             "NULLIF(TRIM(CAST(r.franchise_id AS VARCHAR)), '')"
             if "franchise_id" in raw_columns else "NULL::VARCHAR"
         )
+        manager_key = (
+            "NULLIF(REGEXP_REPLACE(TRIM(LOWER(CAST(r.manager AS VARCHAR))), '\\s+', ' ', 'g'), '')"
+            if "manager" in raw_columns else "NULL::VARCHAR"
+        )
+        team_name_key = (
+            "NULLIF(REGEXP_REPLACE(TRIM(LOWER(CAST(r.team_name AS VARCHAR))), '\\s+', ' ', 'g'), '')"
+            if "team_name" in raw_columns else "NULL::VARCHAR"
+        )
         platform = (
             "LOWER(NULLIF(TRIM(CAST(r.platform AS VARCHAR)), ''))"
             if "platform" in raw_columns else "NULL::VARCHAR"
@@ -103,6 +111,8 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
               {raw_team_key} AS raw_team_key,
               {manager_guid} AS manager_guid,
               {franchise_id} AS franchise_id,
+              {manager_key} AS manager_key,
+              {team_name_key} AS team_name_key,
               CASE
                 WHEN {platform}='mfl' AND COALESCE({manager_guid}, {franchise_id}) IS NOT NULL
                   THEN COALESCE({manager_guid}, {franchise_id})
@@ -124,17 +134,22 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
         con.execute("""
             CREATE OR REPLACE TEMP TABLE source_team_keys AS
             SELECT artifact_id, db_name, year, week, canonical_team_key, identity_strategy,
+                   manager_key, team_name_key,
                    COUNT(*) AS source_rows
             FROM source_rows
             WHERE canonical_team_key IS NOT NULL
-            GROUP BY 1,2,3,4,5,6
+            GROUP BY 1,2,3,4,5,6,7,8
         """)
         # This is the sole canonical-table access: DuckDB builds from the small
-        # source key relation and performs one exact team-week join.
+        # source key relation.  First prefer an exact canonical team key.  If
+        # MFL's historical team key was rewritten in cache, accept normalized
+        # manager + team name only when it resolves to one canonical team.
         con.execute("""
-            CREATE OR REPLACE TEMP TABLE matched_team_keys AS
+            CREATE OR REPLACE TEMP TABLE primary_team_matches AS
             SELECT DISTINCT s.artifact_id, s.db_name, s.year, s.week,
-                            s.canonical_team_key, s.identity_strategy
+                            s.canonical_team_key AS source_team_key,
+                            p.team_key AS cache_team_key,
+                            s.identity_strategy AS match_strategy
             FROM source_team_keys s
             JOIN public.player_fantasy p
               ON p.db_name IS NOT DISTINCT FROM s.db_name
@@ -142,18 +157,64 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
              AND p.week IS NOT DISTINCT FROM s.week
              AND p.team_key IS NOT DISTINCT FROM s.canonical_team_key
         """)
+        if {"manager", "team_name"} <= player_columns:
+            con.execute("""
+                CREATE OR REPLACE TEMP TABLE manager_team_matches AS
+                SELECT s.artifact_id, s.db_name, s.year, s.week,
+                       s.canonical_team_key AS source_team_key,
+                       p.team_key AS cache_team_key,
+                       'manager_team_name' AS match_strategy
+                FROM source_team_keys s
+                JOIN public.player_fantasy p
+                  ON p.db_name IS NOT DISTINCT FROM s.db_name
+                 AND p."year" IS NOT DISTINCT FROM s.year
+                 AND p.week IS NOT DISTINCT FROM s.week
+                 AND s.manager_key IS NOT NULL
+                 AND s.team_name_key IS NOT NULL
+                 AND s.manager_key=LOWER(TRIM(CAST(p.manager AS VARCHAR)))
+                 AND s.team_name_key=LOWER(TRIM(CAST(p.team_name AS VARCHAR)))
+                GROUP BY 1,2,3,4,5,6
+                HAVING COUNT(DISTINCT p.team_key)=1
+            """)
+        else:
+            con.execute("""
+                CREATE OR REPLACE TEMP TABLE manager_team_matches AS
+                SELECT CAST(NULL AS BIGINT) AS artifact_id,
+                       CAST(NULL AS VARCHAR) AS db_name,
+                       CAST(NULL AS INTEGER) AS year,
+                       CAST(NULL AS INTEGER) AS week,
+                       CAST(NULL AS VARCHAR) AS source_team_key,
+                       CAST(NULL AS VARCHAR) AS cache_team_key,
+                       CAST(NULL AS VARCHAR) AS match_strategy
+                WHERE FALSE
+            """)
         con.execute("""
-            CREATE OR REPLACE TEMP TABLE matched_player_fanout AS
-            SELECT s.artifact_id, s.db_name, s.year, s.week,
-                   s.canonical_team_key, s.identity_strategy,
+            CREATE OR REPLACE TEMP TABLE resolved_team_matches AS
+            SELECT * FROM primary_team_matches
+            UNION ALL
+            SELECT m.*
+            FROM manager_team_matches m
+            WHERE NOT EXISTS (
+              SELECT 1 FROM primary_team_matches p
+              WHERE p.artifact_id=m.artifact_id
+                AND p.db_name IS NOT DISTINCT FROM m.db_name
+                AND p.year IS NOT DISTINCT FROM m.year
+                AND p.week IS NOT DISTINCT FROM m.week
+                AND p.source_team_key IS NOT DISTINCT FROM m.source_team_key
+            )
+        """)
+        con.execute("""
+            CREATE OR REPLACE TEMP TABLE resolved_player_fanout AS
+            SELECT r.artifact_id, r.db_name, r.year, r.week,
+                   r.source_team_key, r.cache_team_key, r.match_strategy,
                    COUNT(*) AS player_rows
-            FROM source_team_keys s
+            FROM resolved_team_matches r
             JOIN public.player_fantasy p
-              ON p.db_name IS NOT DISTINCT FROM s.db_name
-             AND p."year" IS NOT DISTINCT FROM s.year
-             AND p.week IS NOT DISTINCT FROM s.week
-             AND p.team_key IS NOT DISTINCT FROM s.canonical_team_key
-            GROUP BY 1,2,3,4,5,6
+              ON p.db_name IS NOT DISTINCT FROM r.db_name
+             AND p."year" IS NOT DISTINCT FROM r.year
+             AND p.week IS NOT DISTINCT FROM r.week
+             AND p.team_key IS NOT DISTINCT FROM r.cache_team_key
+            GROUP BY 1,2,3,4,5,6,7
         """)
         rows = []
         for row in con.execute("""
@@ -164,27 +225,26 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
               SELECT
                 s.artifact_id,
                 COUNT(*) AS source_team_keys,
-                COALESCE(SUM(CASE WHEN m.artifact_id IS NOT NULL THEN s.source_rows ELSE 0 END), 0) AS matched_source_team_rows,
-                COALESCE(SUM(CASE WHEN m.artifact_id IS NULL THEN s.source_rows ELSE 0 END), 0) AS unmatched_source_team_rows,
-                COUNT(*) FILTER (WHERE m.artifact_id IS NOT NULL) AS matched_source_team_keys,
-                COUNT(*) FILTER (WHERE m.artifact_id IS NULL) AS unmatched_source_team_keys,
-                COUNT(*) FILTER (WHERE m.identity_strategy='mfl_manager_guid' AND m.artifact_id IS NOT NULL) AS matched_by_mfl_manager_guid,
+                COALESCE(SUM(CASE WHEN r.artifact_id IS NOT NULL THEN s.source_rows ELSE 0 END), 0) AS matched_source_team_rows,
+                COALESCE(SUM(CASE WHEN r.artifact_id IS NULL THEN s.source_rows ELSE 0 END), 0) AS unmatched_source_team_rows,
+                COUNT(*) FILTER (WHERE r.artifact_id IS NOT NULL) AS matched_source_team_keys,
+                COUNT(*) FILTER (WHERE r.artifact_id IS NULL) AS unmatched_source_team_keys,
+                COUNT(*) FILTER (WHERE r.match_strategy='mfl_manager_guid') AS matched_by_mfl_manager_guid,
+                COUNT(*) FILTER (WHERE r.match_strategy='manager_team_name') AS matched_by_manager_team_name,
                 COALESCE(SUM(f.player_rows), 0) AS matched_source_player_rows
               FROM source_team_keys s
-              LEFT JOIN matched_team_keys m
-                ON m.artifact_id=s.artifact_id
-               AND m.db_name IS NOT DISTINCT FROM s.db_name
-               AND m.year IS NOT DISTINCT FROM s.year
-               AND m.week IS NOT DISTINCT FROM s.week
-               AND m.canonical_team_key IS NOT DISTINCT FROM s.canonical_team_key
-               AND m.identity_strategy IS NOT DISTINCT FROM s.identity_strategy
-              LEFT JOIN matched_player_fanout f
+              LEFT JOIN resolved_team_matches r
+                ON r.artifact_id=s.artifact_id
+               AND r.db_name IS NOT DISTINCT FROM s.db_name
+               AND r.year IS NOT DISTINCT FROM s.year
+               AND r.week IS NOT DISTINCT FROM s.week
+               AND r.source_team_key IS NOT DISTINCT FROM s.canonical_team_key
+              LEFT JOIN resolved_player_fanout f
                 ON f.artifact_id=s.artifact_id
                AND f.db_name IS NOT DISTINCT FROM s.db_name
                AND f.year IS NOT DISTINCT FROM s.year
                AND f.week IS NOT DISTINCT FROM s.week
-               AND f.canonical_team_key IS NOT DISTINCT FROM s.canonical_team_key
-               AND f.identity_strategy IS NOT DISTINCT FROM s.identity_strategy
+               AND f.source_team_key IS NOT DISTINCT FROM s.canonical_team_key
               GROUP BY s.artifact_id
             )
             SELECT r.artifact_id, r.source_team_rows,
@@ -194,6 +254,7 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
                    COALESCE(k.matched_source_team_keys, 0),
                    COALESCE(k.unmatched_source_team_keys, 0),
                    COALESCE(k.matched_by_mfl_manager_guid, 0),
+                   COALESCE(k.matched_by_manager_team_name, 0),
                    COALESCE(k.matched_source_player_rows, 0)
             FROM raw_counts r
             LEFT JOIN key_counts k USING (artifact_id)
@@ -203,7 +264,8 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
                 artifact_id, source_team_rows, source_team_keys,
                 matched_source_team_rows, unmatched_source_team_rows,
                 matched_source_team_keys, unmatched_source_team_keys,
-                matched_by_mfl_manager_guid, matched_source_player_rows,
+                matched_by_mfl_manager_guid, matched_by_manager_team_name,
+                matched_source_player_rows,
             ) = row
             rows.append({
                 "artifact_id": int(artifact_id),
@@ -214,6 +276,7 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
                 "matched_source_team_keys": int(matched_source_team_keys),
                 "unmatched_source_team_keys": int(unmatched_source_team_keys),
                 "matched_by_mfl_manager_guid": int(matched_by_mfl_manager_guid),
+                "matched_by_manager_team_name": int(matched_by_manager_team_name),
                 "matched_source_player_rows": int(matched_source_player_rows),
             })
         if len(rows) != len(entries):
