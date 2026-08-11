@@ -18,6 +18,10 @@ create a cache or lineage. The latest is the read-only direct MFL player-key
 audit [31515802840](https://github.com/jeleff1000/league-history-workers/actions/runs/31515802840),
 receipt SHA-256
 `4c7608c16ccd8cfc35390d5d3f1980ad02f955b221522451433caedabf5f5f24`.
+The latest team/week receipt is
+[31521837322](https://github.com/jeleff1000/league-history-workers/actions/runs/31521837322),
+receipt SHA-256
+`a5e41d7373d5f52dc4525f1458cc0931e7851feacd58027f88e3f220358ca5c6`.
 
 ## Receipt rules
 
@@ -36,6 +40,9 @@ Each row has an explicit `final_status` and `next_action`.
 - `unmatched_cache_key`: the artifact has candidate cells, but its source team
   key has no matching canonical player row. Reconcile the identity or record a
   source-only closure; never fabricate a player-row update.
+- `partial_schema_blocked_unmatched`: source has both fields outside the frozen
+  player schema and supported fields with no exact canonical key match. It is
+  not a cache update; reconcile the source identity or close it source-only.
 - `candidate_built_pending_canonical_promotion`: a read-only build produced
   exact canonical row IDs and strict null-cell updates, but no cache mutation
   occurred. It is not complete until an approved canonical-cache promotion and
@@ -48,9 +55,10 @@ Each row has an explicit `final_status` and `next_action`.
 | `cache_verified` | 297 | 13,714 source cells match the canonical cache; no missing/conflicting cells. |
 | `no_promotable_candidate_emitted` | 4,522 | Candidate-classified artifact, but no promotable cell was emitted by the frozen comparison. |
 | `not_data_bearing` | 3,927 | Aggregate/validation/metadata artifact; not a canonical-cell source. |
-| `candidate_provenance_not_found` | 709 | 5,504,005 declared candidate rows require direct source-file comparison. |
+| `candidate_provenance_not_found` | 695 | 5,504,005 declared candidate rows still require direct source-file comparison. |
 | `unmatched_cache_key` | 9 | 1,306 candidate rows / 2,612 cells require team-key-to-player-row reconciliation. |
 | `partial_schema_blocked_cache_updates` | 15 | Direct MFL audit produced 31,870 safe exact-row candidates; remaining source cells include ambiguous identities, preserved conflicts, and 288,160 loss/tie values blocked by the current schema. |
+| `partial_schema_blocked_unmatched` | 14 | Raw team/week source artifacts were read against the canonical cache and have zero exact team-key matches; 7,402,392 supported cells cannot be safely fanned out. |
 
 The receipt workflow is read-only. It asserts, before and after the audit,
 that player schema, player-row count, and the ops-cache hash are unchanged;
@@ -111,6 +119,24 @@ the 77 fully specified duplicates and apply the manager-week evidence only
 where its team identity is independently unambiguous. Loss/tie remain a
 separate frozen-schema decision.
 
+## Raw team/week source mismatch
+
+The 14 retained `research-source-matchup-rescue-*` artifacts were directly
+read against the approved cache in
+[31521837322](https://github.com/jeleff1000/league-history-workers/actions/runs/31521837322).
+The read-only run passed the player-schema, player-row-count, ops-hash, and
+no-new-lineage gates.
+
+It examined 1,850,598 retained source team/week rows (including retained
+duplicates across artifact generations). Every one of their 1,850,598 exact
+`(db_name, year, week, team_key)` identities had **zero** matching canonical
+player team/week keys. Consequently, the artifacts provide no safe fan-out to
+current player rows: zero source cells matched or filled cache cells. The
+ledger records all 14 as `partial_schema_blocked_unmatched`, not as applied or
+cache-verified. Their only valid next action is exact team-identity
+reconciliation, followed by another receipt, or an explicit source-only
+closure.
+
 ## Open source-comparison worklist
 
 The 733 unclosed artifacts are finite and are grouped below. These are not new
@@ -123,6 +149,6 @@ its source-specific reason.
 | `research-sparse-playoff-*` | 621 | 732,640 | Team-week source file -> canonical team-week fan-out. |
 | `sleeper-missing-outcome-*` | 56 | 35,410 | Player source file -> canonical full player key. |
 | `promotable-rescue-delta-*` | 18 | 330,425 | `promotable_delta.parquet` -> canonical full player key. |
-| `research-source-matchup-rescue-*` | 14 | 4,405,530 | Team-week source file -> canonical team-week fan-out. |
+| `research-source-matchup-rescue-*` | 14 | 4,405,530 | Exact team-key receipt completed: zero canonical matches; reconcile identity or close source-only. |
 | `research-championship-identity-probe-*` | 9 | 1,306 | Reconcile source team key to existing canonical player rows, or explicitly close source-only. |
 | `mfl-player-outcome-classification-*` | 15 | 50,298 canonical candidate rows | Promote the strict manager-week fanout candidates, then read back the cache. |
