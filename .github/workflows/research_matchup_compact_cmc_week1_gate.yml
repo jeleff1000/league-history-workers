@@ -219,9 +219,17 @@ jobs:
               split_threshold=150,
           )
           rows = c.execute("""
-            SELECT o.NFL_player_id, o.year, o.week, o.position, cell.*
+            SELECT
+              o.NFL_player_id, o.year, o.week, o.position,
+              cell.q_teams, cell.q_roster, cell.q_scoring, cell.q_pass_td,
+              cell.q_dynasty, cell.q_best_ball, cell.eligible_leagues,
+              cell.rostered_leagues, cell.started_leagues, cell.valid_started_outcomes,
+              cell.win_equivalent, cell.roster_rate_pct, cell.start_rate_pct,
+              cell.win_rate_pct, cell.expected_starts, cell.expected_wins,
+              cell.expected_losses, cell.clutch_weekly_average
             FROM cmc_week1_core_cells o, UNNEST(o.cohort_cells) AS u(cell)
-            ORDER BY q_teams, q_roster, q_scoring, q_pass_td, q_dynasty, q_best_ball
+            ORDER BY cell.q_teams, cell.q_roster, cell.q_scoring, cell.q_pass_td,
+              cell.q_dynasty, cell.q_best_ball
           """).fetchall()
           assert rows and {row[0] for row in rows} == {'00-0033280'}, rows
           columns = [d[0] for d in c.description]
