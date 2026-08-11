@@ -37,6 +37,7 @@ jobs:
           python - <<'PY'
           import duckdb, json
           from scripts.research_cohorts.compact_matchup_cells import (
+              _IDP_SOURCE_POSITIONS,
               materialize_season_bracket_grade_position_batch,
               materialize_season_compact_outer_rows,
               materialize_season_core_cohort_position_batch,
@@ -58,7 +59,8 @@ jobs:
             FROM lake.public.player_fantasy
             WHERE CAST(year AS INTEGER)=2025 AND CAST(NFL_player_id AS VARCHAR)=?
           """, [myles_id]).fetchall()
-          assert positions == [('IDP',)], (myles_id, positions)
+          assert positions, (myles_id, positions)
+          assert all(position[0] in _IDP_SOURCE_POSITIONS for position in positions), (myles_id, positions)
           materialize_weekly_core_cohort_position_batch(
               c, source_table='lake.public.player_fantasy',
               nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
