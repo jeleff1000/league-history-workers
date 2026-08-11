@@ -90,16 +90,23 @@ jobs:
               raise SystemExit(f'no unresolved retained artifacts for prefix {prefix!r}')
           Path('selected_artifacts.json').write_text(json.dumps(rows, indent=2)+'\n')
           print(json.dumps({'selected_artifacts':len(rows),'prefix':prefix}))
+          with Path('selected_artifacts.tsv').open('w', encoding='utf-8', newline='') as handle:
+              for row in rows:
+                  handle.write(f"{row['workflow_run_id']}\t{row['artifact']}\t{row['artifact_id']}\n")
           PY
-          while IFS=$'\t' read -r run artifact artifact_id; do
+          # Download exactly the ledger-selected artifacts.  The former serial
+          # loop made one slow API round-trip per artifact; bounded parallelism
+          # keeps the selection exact without enumerating source-run artifacts.
+          download_one() {
+            local run="$1" artifact="$2" artifact_id="$3"
             mkdir -p "sources/$artifact_id"
             gh run download "$run" --repo '${{ github.repository }}' --name "$artifact" --dir "sources/$artifact_id"
-          done < <(python - <<'PY'
-          import json
-          for row in json.load(open('selected_artifacts.json')):
-              print(f"{row['workflow_run_id']}\t{row['artifact']}\t{row['artifact_id']}")
-          PY
-          )
+          }
+          export -f download_one
+          while IFS=$'\t' read -r run artifact artifact_id; do
+            printf '%s\0%s\0%s\0' "$run" "$artifact" "$artifact_id"
+          done < selected_artifacts.tsv |
+            xargs -0 -r -n 3 -P 15 bash -c 'download_one "$@"' _
       - name: Build exact raw-source manifest
         shell: bash
         run: |
