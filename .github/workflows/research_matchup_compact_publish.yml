@@ -11,6 +11,11 @@ on:
         required: true
         default: false
         type: boolean
+      layout_probe:
+        description: 'Measure coded-selector weekly serving layout only; never writes Fly'
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   actions: read
@@ -51,12 +56,19 @@ jobs:
           echo "path=${BUNDLES[0]}" >> "$GITHUB_OUTPUT"
           ls -lh "${BUNDLES[0]}"
       - name: Preflight and measure compact serving tables
-        if: ${{ !inputs.apply }}
+        if: ${{ !inputs.apply && !inputs.layout_probe }}
         run: |
           python code/scripts/research_cohorts/publish_compact_matchup_to_fly.py \
             --bundle '${{ steps.bundle.outputs.path }}' \
             --stage-dir out/compact-matchup-publish \
             --build-only
+      - name: Probe compact selector-code layout without Fly access
+        if: ${{ inputs.layout_probe }}
+        run: |
+          python code/scripts/research_cohorts/publish_compact_matchup_to_fly.py \
+            --bundle '${{ steps.bundle.outputs.path }}' \
+            --stage-dir out/compact-matchup-publish \
+            --layout-probe
       - name: Publish compact serving tables after preflight
         if: ${{ inputs.apply }}
         run: |
