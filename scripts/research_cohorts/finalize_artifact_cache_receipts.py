@@ -602,23 +602,29 @@ def _audit_canonical_player_snapshots(
         AND (s.manager IS NULL OR p.manager IS NOT DISTINCT FROM s.manager)
         AND (s.platform IS NULL OR LOWER(CAST(p.platform AS VARCHAR)) IS NOT DISTINCT FROM LOWER(CAST(s.platform AS VARCHAR)))
     """
+    # Materialize the compared canonical values while resolving the unique
+    # player row.  Rejoining a 269M-row cache by rowid here is logically
+    # redundant and turns a targeted receipt into a second full-cache scan.
+    canonical_projection = ", ".join(
+        f"MIN(p.{_quoted(target)}) AS {_quoted('canonical__' + target)}"
+        for target in supported.values()
+    )
     con.execute(f"""
         CREATE OR REPLACE TEMP TABLE canonical_snapshot_resolution AS
         SELECT s.source_row_id, COUNT(p.rowid) AS canonical_match_count,
-               MIN(p.rowid) AS canonical_rowid
+               {canonical_projection}
         FROM canonical_snapshot_source s
         LEFT JOIN {target_relation} p ON {canonical_key} {guards}
         GROUP BY s.source_row_id
     """)
     player_fields = ", ".join(
-        f"p.{_quoted(target)} AS {_quoted('canonical__' + target)}" for target in supported.values()
+        f"r.{_quoted('canonical__' + target)}" for target in supported.values()
     )
     con.execute(f"""
         CREATE OR REPLACE TEMP TABLE canonical_snapshot_matches AS
         SELECT s.*, r.canonical_match_count, {player_fields}
         FROM canonical_snapshot_source s
         JOIN canonical_snapshot_resolution r ON r.source_row_id=s.source_row_id
-        LEFT JOIN {target_relation} p ON p.rowid=r.canonical_rowid AND r.canonical_match_count=1
     """)
     select_terms: list[str] = []
     for source, target in supported.items():

@@ -1,4 +1,5 @@
 import json
+import inspect
 from pathlib import Path
 
 import duckdb
@@ -370,3 +371,13 @@ def test_receipt_keeps_ambiguous_canonical_snapshot_key_unmatched(tmp_path: Path
     assert row["cache_match_cells"] == 0
     assert row["cache_missing_cells"] == 0
     assert row["unmatched_cache_cells"] == 1
+
+
+def test_canonical_snapshot_receipt_scans_canonical_players_once() -> None:
+    """The snapshot audit must not re-read the full player cache by rowid."""
+    from scripts.research_cohorts.finalize_artifact_cache_receipts import (
+        _audit_canonical_player_snapshots,
+    )
+
+    source = inspect.getsource(_audit_canonical_player_snapshots)
+    assert source.count("LEFT JOIN {target_relation} p") == 1
