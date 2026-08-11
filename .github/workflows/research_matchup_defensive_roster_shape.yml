@@ -43,7 +43,7 @@ jobs:
                   ELSE UPPER(TRIM(CAST(position AS VARCHAR)))
                 END canonical_position,
                 CAST(NFL_player_id AS VARCHAR) NFL_player_id,
-                CAST(db_name AS VARCHAR) db_name, CAST(week AS INTEGER) week,
+                CAST(db_name AS VARCHAR) db_name, CAST(week AS INTEGER) week_number,
                 is_rostered, is_started
               FROM lake.public.player_fantasy
               WHERE CAST(year AS INTEGER)=2025
@@ -65,7 +65,7 @@ jobs:
               COUNT(DISTINCT d.NFL_player_id) AS cache_players,
               COUNT(DISTINCT r.NFL_player_id) FILTER (WHERE r.explicit_rostered=1) AS explicit_rostered_players,
               COUNT(DISTINCT r.NFL_player_id) FILTER (WHERE r.ever_started=1) AS started_players,
-              COUNT(DISTINCT (d.NFL_player_id, d.db_name, d.week)) FILTER (WHERE CAST(d.is_rostered AS INTEGER)=1) AS explicit_rostered_player_league_weeks
+              COUNT(DISTINCT (d.NFL_player_id, d.db_name, d.week_number)) FILTER (WHERE CAST(d.is_rostered AS INTEGER)=1) AS explicit_rostered_player_league_weeks
             FROM scoped d
             LEFT JOIN player_signals r USING(canonical_position,NFL_player_id)
             GROUP BY 1 ORDER BY 1
