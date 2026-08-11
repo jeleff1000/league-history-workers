@@ -14,6 +14,10 @@ jobs:
   idp-weekly:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        player_bucket: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5
@@ -46,16 +50,17 @@ jobs:
               c, source_table='lake.public.player_fantasy',
               nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
               output_table='idp_weekly', year=2025, position='IDP', split_threshold=150,
+              player_bucket_count=4, player_bucket=${{ matrix.player_bucket }},
           )
           outer_rows, cells, myles_rows = c.execute("""
             SELECT COUNT(*), COALESCE(SUM(array_length(cohort_cells)),0),
               COUNT(*) FILTER (WHERE NFL_player_id='00-0033868')
             FROM idp_weekly
           """).fetchone()
-          result={'outer_rows': outer_rows, 'cohort_cells': cells, 'myles_weekly_rows': myles_rows,
+          result={'player_bucket': ${{ matrix.player_bucket }}, 'outer_rows': outer_rows, 'cohort_cells': cells, 'myles_weekly_rows': myles_rows,
                   'seconds': round(time.monotonic()-started, 3)}
-          assert outer_rows == 12527, result
-          assert 12527 <= cells <= 801728, result
-          assert myles_rows == 17, result
+          assert outer_rows > 0, result
+          assert outer_rows <= 12527 and cells <= 801728, result
+          assert myles_rows in (0, 17), result
           print('idp_full_weekly_2025=' + json.dumps(result))
           PY
