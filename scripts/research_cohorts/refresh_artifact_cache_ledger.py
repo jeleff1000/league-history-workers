@@ -14,9 +14,11 @@ from pathlib import Path
 
 
 def _next_action(receipt: dict) -> str:
+    if int(receipt.get("blocked_schema_cells", 0) or 0):
+        if int(receipt.get("cache_missing_cells", 0) or 0):
+            return "apply_supported_null_cell_updates; add_loss_tie_schema_then_readback"
+        return "add_loss_tie_schema_then_readback"
     if int(receipt.get("cache_missing_cells", 0) or 0):
-        if int(receipt.get("blocked_schema_cells", 0) or 0):
-            return "apply_supported_null_cell_updates; separately_adjudicate_blocked_schema_fields"
         return "apply_strict_null_cell_updates_then_readback"
     if int(receipt.get("cache_conflict_cells", 0) or 0):
         return "preserve_conflicts_pending_source_precedence_adjudication"

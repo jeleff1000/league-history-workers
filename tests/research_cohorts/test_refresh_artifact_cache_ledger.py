@@ -45,7 +45,7 @@ def test_refresh_replaces_only_selected_artifact_receipt_fields(tmp_path: Path) 
     result = list(csv.DictReader(out.open(newline="", encoding="utf-8")))
     assert result[0]["receipt_run_id"] == "99"
     assert result[0]["cache_missing_cells"] == "1"
-    assert result[0]["next_action"] == "apply_supported_null_cell_updates; separately_adjudicate_blocked_schema_fields"
+    assert result[0]["next_action"] == "apply_supported_null_cell_updates; add_loss_tie_schema_then_readback"
     assert result[1]["final_status"] == "untouched"
     assert result[1]["source_cells"] == "9"
 
@@ -94,3 +94,15 @@ def test_refresh_records_missing_player_team_bridge_from_team_profile(tmp_path: 
     assert result["final_status"] == "source_only_team_signal_missing_player_team_bridge"
     assert "2 overlapping cache league-weeks" in result["final_reason"]
     assert result["next_action"] == "locate_player_team_roster_bridge_then_exact_player_upsert"
+
+
+def test_refresh_keeps_schema_blocked_evidence_open(tmp_path: Path) -> None:
+    """Required loss/tie evidence cannot be marked closed before schema support."""
+    from scripts.research_cohorts.refresh_artifact_cache_ledger import _next_action
+
+    assert _next_action({
+        "cache_missing_cells": 0,
+        "cache_conflict_cells": 0,
+        "unmatched_cache_cells": 0,
+        "blocked_schema_cells": 12,
+    }) == "add_loss_tie_schema_then_readback"

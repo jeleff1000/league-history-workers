@@ -80,7 +80,7 @@ Each row has an explicit `final_status` and `next_action`.
 | `partial_schema_blocked_cache_updates` | 15 | Direct MFL audit produced 31,870 safe exact-row candidates; remaining source cells include ambiguous identities, preserved conflicts, and 288,160 loss/tie values blocked by the current schema. |
 | `partial_schema_blocked_unmatched` | 473 | 24,920,856 supported cells already match; 334,144 source cells still lack a resolved player-team edge; 577,482 loss/tie cells require the explicitly permitted schema fields. |
 | `partial_schema_blocked_conflicts` | 214 | 32,532,612 supported cells already match; 128,484 existing non-null values conflict and are preserved; 7,044,748 source cells still lack a resolved player-team edge; 4,169,612 loss/tie cells require schema support. |
-| `blocked_schema` | 4 | Sparse-playoff evidence has 20,960 already-matching supported cells and 464 loss/tie cells; it requires no supported-field update. |
+| `blocked_schema` | 4 | Sparse-playoff evidence has 20,960 already-matching supported cells and 464 required loss/tie cells. Those cells remain open until the cache schema supports loss/tie and a readback passes. |
 
 The receipt workflow is read-only. It asserts, before and after the audit,
 that player schema, player-row count, and the ops-cache hash are unchanged;
