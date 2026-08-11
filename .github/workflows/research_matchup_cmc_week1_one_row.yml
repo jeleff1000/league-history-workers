@@ -1,0 +1,87 @@
+name: Research matchup CMC week 1 one-row gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  contents: read
+
+jobs:
+  one_row:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - name: Build exactly one cache-only CMC player-week record
+        run: |
+          python - <<'PY'
+          import duckdb, json
+
+          c = duckdb.connect()
+          c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          row = c.execute("""
+            WITH week_facts AS (
+              SELECT *
+              FROM lake.public.player_fantasy
+              WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1
+            ),
+            cmc_per_league AS (
+              SELECT
+                CAST(db_name AS VARCHAR) AS db_name,
+                MAX(CAST(position AS VARCHAR)) AS position,
+                MAX(CASE WHEN is_rostered IS NULL OR CAST(is_rostered AS INTEGER) <> 0 THEN 1 ELSE 0 END) AS rostered,
+                MAX(CASE WHEN CAST(is_started AS INTEGER)=1 THEN 1 ELSE 0 END) AS started,
+                MAX(CASE WHEN CAST(is_started AS INTEGER)=1 AND CAST(win AS DOUBLE) BETWEEN 0 AND 1 THEN 1 ELSE 0 END) AS valid_started_outcome,
+                MAX(CASE WHEN CAST(is_started AS INTEGER)=1 AND CAST(win AS DOUBLE) BETWEEN 0 AND 1 THEN CAST(win AS DOUBLE) END) AS win_value,
+                AVG(CASE WHEN CAST(is_started AS INTEGER)=1 THEN CAST(clutch_equity AS DOUBLE) END) AS clutch_when_started
+              FROM week_facts
+              WHERE CAST(NFL_player_id AS VARCHAR)='00-0033280'
+              GROUP BY 1
+            ),
+            eligible_rb_leagues AS (
+              SELECT DISTINCT CAST(db_name AS VARCHAR) AS db_name
+              FROM week_facts
+              WHERE CAST(position AS VARCHAR)='RB'
+                AND CAST(cohort_position_eligible AS INTEGER)=1
+            )
+            SELECT
+              '00-0033280' AS NFL_player_id,
+              2025 AS year,
+              1 AS week,
+              MAX(position) AS position,
+              (SELECT COUNT(*) FROM week_facts WHERE CAST(NFL_player_id AS VARCHAR)='00-0033280') AS cache_source_rows,
+              COUNT(*) AS cmc_distinct_leagues,
+              (SELECT COUNT(*) FROM eligible_rb_leagues) AS eligible_rb_leagues,
+              SUM(rostered) AS rostered_leagues,
+              SUM(started) AS started_leagues,
+              SUM(valid_started_outcome) AS valid_started_outcome_leagues,
+              SUM(win_value) AS win_equivalent_started,
+              AVG(clutch_when_started) AS clutch_weekly_average,
+              100.0 * SUM(rostered) / NULLIF((SELECT COUNT(*) FROM eligible_rb_leagues), 0) AS roster_rate_pct,
+              100.0 * SUM(started) / NULLIF((SELECT COUNT(*) FROM eligible_rb_leagues), 0) AS start_rate_pct,
+              100.0 * SUM(win_value) / NULLIF(SUM(valid_started_outcome), 0) AS win_rate_pct,
+              1.0 * SUM(started) / NULLIF((SELECT COUNT(*) FROM eligible_rb_leagues), 0) AS expected_starts,
+              1.0 * SUM(started) / NULLIF((SELECT COUNT(*) FROM eligible_rb_leagues), 0)
+                * SUM(win_value) / NULLIF(SUM(valid_started_outcome), 0) AS expected_wins
+            FROM cmc_per_league
+          """).fetchone()
+          columns = [d[0] for d in c.description]
+          payload = dict(zip(columns, row))
+          assert payload['cache_source_rows'] >= 5000, payload
+          assert payload['cmc_distinct_leagues'] >= 5000, payload
+          assert len([payload]) == 1, payload
+          print('cmc_2025_week1_one_row=' + json.dumps(payload, default=str))
+          PY
