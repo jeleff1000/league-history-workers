@@ -168,15 +168,7 @@ jobs:
             # The canonical snapshot receipt below performs one unioned source
             # to cache join and fails closed on zero/multiple matches.  Do not
             # pre-scan the 269M-row cache once per source file here.
-            python - <<'PY'
-            import json
-            from pathlib import Path
-            Path('raw_signal_join_key_profile.json').write_text(json.dumps({
-              'source_kind': 'canonical_player_snapshot',
-              'identity_rule': '(db_name, year, week, NFL_player_id) with manager/platform guards',
-              'cardinality_evidence': 'reported by final receipt unmatched cells after one unioned cache join',
-            }, indent=2)+'\n')
-            PY
+            python -c "import json; from pathlib import Path; Path('raw_signal_join_key_profile.json').write_text(json.dumps({'source_kind':'canonical_player_snapshot','identity_rule':'(db_name, year, week, NFL_player_id) with manager/platform guards','cardinality_evidence':'reported by final receipt unmatched cells after one unioned cache join'}, indent=2)+'\\n')"
             exit 0
           fi
           python - <<'PY'
