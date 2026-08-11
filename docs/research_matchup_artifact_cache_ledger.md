@@ -28,6 +28,12 @@ The latest exact unique-manager fan-out receipt is
 It re-read all 56 retained `sleeper-missing-outcome-rescue-*` artifacts against
 the same cache without mutation. It safely fanned 190,317 source manager-weeks
 to existing player rows; no supported cache-null cell remained to fill.
+The latest canonical-player snapshot receipt is
+[31545187959](https://github.com/jeleff1000/league-history-workers/actions/runs/31545187959).
+It read 11 previously-unresolved snapshots through the actual unique player
+key `(db_name, year, week, NFL_player_id)`, with manager and platform as
+consistency guards: all 3,441,112 non-null source cells matched the approved
+cache, with zero missing, conflicting, or ambiguous cells.
 
 ## Receipt rules
 
@@ -66,10 +72,9 @@ Each row has an explicit `final_status` and `next_action`.
 
 | Status | Artifacts | Meaning |
 | --- | ---: | --- |
-| `cache_verified` | 297 | 13,714 source cells match the canonical cache; no missing/conflicting cells. |
+| `cache_verified` | 308 | 3,454,826 source cells have direct receipts matching the canonical cache; no missing/conflicting cells. |
 | `no_promotable_candidate_emitted` | 4,522 | Candidate-classified artifact, but no promotable cell was emitted by the frozen comparison. |
 | `not_data_bearing` | 3,927 | Aggregate/validation/metadata artifact; not a canonical-cell source. |
-| `candidate_provenance_not_found` | 11 | 43 full-player snapshot candidates still need the canonical-field exact comparator. |
 | `cache_conflict_preserved` | 7 | 2,142,503 supported cells already match; 9,397 non-null conflicts are preserved; 480,208 source cells remain identity-unmatched; zero cache-null fill candidates. |
 | `unmatched_cache_key` | 9 | 1,306 candidate rows / 2,612 cells require team-key-to-player-row reconciliation. |
 | `partial_schema_blocked_cache_updates` | 15 | Direct MFL audit produced 31,870 safe exact-row candidates; remaining source cells include ambiguous identities, preserved conflicts, and 288,160 loss/tie values blocked by the current schema. |
