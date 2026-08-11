@@ -43,6 +43,10 @@ Each row has an explicit `final_status` and `next_action`.
 - `candidate_provenance_not_found`: the artifact declared candidate cells, but
   the supplied comparison deltas did not retain its original source path. Its
   listed source file must be extracted and compared directly before closure.
+- `cache_conflict_preserved`: direct source-to-cache comparison completed. No
+  supported cache-null cell is available to fill; existing non-null conflicts
+  remain intentionally unmodified, and unmatched source identities remain
+  explicitly tracked.
 - `unmatched_cache_key`: the artifact has candidate cells, but its source team
   key has no matching canonical player row. Reconcile the identity or record a
   source-only closure; never fabricate a player-row update.
@@ -65,7 +69,8 @@ Each row has an explicit `final_status` and `next_action`.
 | `cache_verified` | 297 | 13,714 source cells match the canonical cache; no missing/conflicting cells. |
 | `no_promotable_candidate_emitted` | 4,522 | Candidate-classified artifact, but no promotable cell was emitted by the frozen comparison. |
 | `not_data_bearing` | 3,927 | Aggregate/validation/metadata artifact; not a canonical-cell source. |
-| `candidate_provenance_not_found` | 18 | 330,425 declared candidate rows still require direct source-file comparison. |
+| `candidate_provenance_not_found` | 11 | 43 full-player snapshot candidates still need the canonical-field exact comparator. |
+| `cache_conflict_preserved` | 7 | 2,142,503 supported cells already match; 9,397 non-null conflicts are preserved; 480,208 source cells remain identity-unmatched; zero cache-null fill candidates. |
 | `unmatched_cache_key` | 9 | 1,306 candidate rows / 2,612 cells require team-key-to-player-row reconciliation. |
 | `partial_schema_blocked_cache_updates` | 15 | Direct MFL audit produced 31,870 safe exact-row candidates; remaining source cells include ambiguous identities, preserved conflicts, and 288,160 loss/tie values blocked by the current schema. |
 | `partial_schema_blocked_unmatched` | 473 | 24,920,856 supported cells already match; 334,144 source cells still lack a resolved player-team edge; 577,482 loss/tie cells require the explicitly permitted schema fields. |
@@ -173,7 +178,7 @@ unread-artifact work item.
 
 ## Remaining worklist
 
-Only 18 artifacts still lack a direct source-to-cache receipt. The rest have a
+Only 11 artifacts still lack a usable canonical-field source-to-cache receipt. The rest have a
 cache result and need either a strict promotion transaction, a source-identity
 decision, or an explicit schema/precedence closure. None requires a new API
 pull.
@@ -181,7 +186,8 @@ pull.
 | Family | Artifacts | Current state | Required action |
 | --- | ---: | ---: | --- |
 | `sleeper-missing-outcome-*` | 56 | Direct manager-week fan-out receipt complete: 24,382,006 supported cells equal cache; zero supported null fills; 90 non-null conflicts; 171,648 source cells identity-unmatched; 466,458 loss/tie cells outside the prior schema. | Resolve/close residual source-only identities and adjudicate conflicts; no null-cell promotion for this family. |
-| `promotable-rescue-delta-*` | 18 | 330,425 candidate rows; no direct source receipt yet. | Read each `promotable_delta.parquet` on the full player key. |
+| `promotable-rescue-delta-*` team-week subset | 7 | Direct fan-out receipt complete: 2,142,503 supported cells equal cache; zero supported null fills; 9,397 preserved conflicts; 480,208 identity-unmatched cells. | Resolve/close residual source-only identities and adjudicate conflicts; no null-cell promotion for this subset. |
+| `promotable-rescue-delta-*` player-row subset | 11 | The files are full player-row snapshots with canonical field names; the generic `source_*` receipt correctly emitted no comparison rather than guessing. | Run the exact canonical-field snapshot comparator on the full player key. |
 | `mfl-player-outcome-classification-*` | 15 | 31,870 strict exact-row candidates; 82,466 supported null cells in the direct audit. | Perform the approved single-cache promotion transaction, then exact readback. |
 | `research-source-matchup-rescue-*` | 14 | Corrected fan-out receipt: 28,032,962 cells already equal cache; zero supported null fills; remaining cells are conflicts, schema-blocked loss/tie, or unresolved team identity. | Adjudicate non-null conflicts; resolve/close residual identity gaps; do not run a null-cell promotion for this family. |
 | `research-championship-identity-probe-*` | 9 | 1,306 candidate rows with unresolved team identity. | Reconcile to player rows or explicitly close source-only. |
