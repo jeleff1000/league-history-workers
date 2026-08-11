@@ -1,4 +1,4 @@
-name: Research matchup compact CMC week 1 gate
+name: Research matchup compact CMC cache gates
 
 on:
   workflow_dispatch:
@@ -132,4 +132,45 @@ jobs:
           for key, value in floats.items():
               assert abs(row[key] - value) < 1e-9, (key, row, floats)
           print('cmc_2025_week1_compact_outer=' + json.dumps(row, default=str))
+          PY
+      - name: Fail fast on all real CMC 2025 player weeks
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code
+        run: |
+          python - <<'PY'
+          import duckdb, json
+          from scripts.research_cohorts.compact_matchup_cells import materialize_weekly_outer_rows
+
+          c = duckdb.connect()
+          c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          source_weeks = c.execute("""
+            SELECT CAST(week AS INTEGER), COUNT(*)::BIGINT
+            FROM lake.public.player_fantasy
+            WHERE NFL_player_id='00-0033280' AND CAST(year AS INTEGER)=2025
+            GROUP BY 1 ORDER BY 1
+          """).fetchall()
+          expected_weeks = list(range(1, 14)) + list(range(15, 19))
+          assert [week for week, _ in source_weeks] == expected_weeks, source_weeks
+          assert sum(count for _, count in source_weeks) == 167625, source_weeks
+          materialize_weekly_outer_rows(
+              c,
+              source_table='lake.public.player_fantasy',
+              output_table='cmc_2025_outer',
+              year=2025,
+              week=None,
+              player_id='00-0033280',
+          )
+          outer_rows = c.execute("""
+            SELECT NFL_player_id, year, week, position, array_length(cohort_cells)
+            FROM cmc_2025_outer ORDER BY week
+          """).fetchall()
+          assert len(outer_rows) == 17, outer_rows
+          assert [(row[0], row[1], row[2], row[3]) for row in outer_rows] == [
+              ('00-0033280', 2025, week, 'RB') for week in expected_weeks
+          ], outer_rows
+          assert all(cell_count == 1 for *_, cell_count in outer_rows), outer_rows
+          print('cmc_2025_compact_outer=' + json.dumps({
+              'source_week_counts': source_weeks,
+              'outer_rows': outer_rows,
+          }, default=str))
           PY
