@@ -121,6 +121,23 @@ anything.
 | Precedence + player-team bridge | 7 | 9,397 conflicts and 480,208 unresolved identities. |
 | Player-team bridge only | 9 | 2,612 championship/playoff cells with no canonical player-team match. |
 
+### Identity evidence already attached
+
+The CSV now carries existing read-only profile evidence in
+`identity_profile_run_id`, `source_team_keys`,
+`matched_source_team_keys`, `unmatched_source_team_keys`,
+`league_week_overlap_keys`, `league_week_absent_keys`, and
+`identity_bridge_status`. This is evidence from prior receipts, not a new
+fetch or a cache mutation.
+
+| Identity state among the 722 open artifacts | Artifacts | Meaning |
+| --- | ---: | --- |
+| `fully_matched` | 4 | All source teams already fan out to player rows; only loss/tie schema support remains. |
+| `player_key_profiled` | 15 | Direct MFL player-key evidence; supported null-cell candidates are known. |
+| `partial_bridge` | 559 | Some source teams fan out safely; the remaining teams need a bridge. |
+| `partial_bridge_with_source_only` | 135 | A partial bridge exists and some source league-weeks have no player rows to receive data. |
+| No attached team profile | 9 | Championship-identity probes; they require their first exact team-to-player bridge profile. |
+
 ## Canonical promotion contract
 
 The approved GitHub Actions cache is immutable: a runner can restore and
