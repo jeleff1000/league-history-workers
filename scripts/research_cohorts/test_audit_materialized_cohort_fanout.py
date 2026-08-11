@@ -120,3 +120,27 @@ def test_audit_treats_position_eligibility_as_a_roster_dependent_fanout(tmp_path
     assert eligible["base_mismatches"] == 1
     assert eligible["groups"]["cohort_position_eligible_1"]["mismatches_expected"] == 1
     assert eligible["groups"]["cohort_position_eligible_1"]["position_value_counts"] == {"LB": {"0": 1}}
+
+
+def test_early_season_position_eligibility_still_uses_actual_roster_slots(tmp_path: Path) -> None:
+    base = tmp_path / "corpus.duckdb"
+    delta = tmp_path / "settings.parquet"
+    _create_fixture(base, delta)
+    con = duckdb.connect(str(base))
+    con.execute("UPDATE public.league_settings SET year=2005, roster_K=0, roster_IDP=1")
+    con.execute("UPDATE public.player_fantasy SET year=2005, position='K', cohort_position_eligible='0'")
+    con.execute("""
+      COPY (SELECT 'lg'::VARCHAR AS db_name, 2005::INTEGER AS year,
+                   NULL::DOUBLE AS source_scoring_pass_td,
+                   NULL::INTEGER AS source_playoff_teams,
+                   NULL::INTEGER AS source_roster_FLX,
+                   NULL::INTEGER AS source_roster_SUPER_FLEX,
+                   1::INTEGER AS source_roster_IDP,
+                   NULL::BOOLEAN AS source_sleeper_best_ball)
+      TO ? (FORMAT PARQUET, OVERWRITE_OR_IGNORE TRUE)
+    """, [str(delta)])
+    con.close()
+
+    result = audit(base, delta, include_legacy_groups=False)
+
+    assert result["dimensions"]["roster"]["dependent_columns"]["cohort_position_eligible"]["base_mismatches"] == 0

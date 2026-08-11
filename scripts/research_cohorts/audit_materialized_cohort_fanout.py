@@ -48,7 +48,6 @@ DIMENSIONS = {
           ELSE 'flx' END""",
         "dependent_columns": {
             "cohort_position_eligible": """CASE
-              WHEN CAST(year AS INTEGER) BETWEEN 2003 AND 2010 THEN 1
               WHEN UPPER(TRIM(CAST(position AS VARCHAR))) IN ('QB','RB','WR','TE') THEN 1
               WHEN UPPER(TRIM(CAST(position AS VARCHAR))) IN ('K','PK')
                    AND COALESCE(roster_K, 0) > 0 THEN 1
