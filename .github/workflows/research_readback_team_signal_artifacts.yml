@@ -23,13 +23,14 @@ on:
           - exact
           - source_run
       source_kind:
-        description: Raw artifact grain; player evidence is joined on exact player-week identity.
+        description: Raw artifact grain; each choice has one explicit, fail-closed identity rule.
         required: true
         type: choice
         default: team
         options:
           - team
           - structured_player
+          - canonical_player_snapshot
 
 permissions:
   actions: read
@@ -199,6 +200,42 @@ jobs:
               distinct=int(con.execute(f"SELECT COUNT(*) FROM (SELECT DISTINCT {', '.join(key)} FROM read_parquet('{path}'))").fetchone()[0])
               rows.append({'artifact_id':item['artifact_id'],'source_kind':source_kind,'source_player_rows':total,'distinct_player_keys':distinct,'matched_source_rows':matched})
               continue
+            if source_kind == 'canonical_player_snapshot':
+              key=['db_name','year','week','NFL_player_id']
+              if not set(key) <= columns:
+                raise SystemExit(f"{item['artifact_id']}: missing canonical snapshot player key columns")
+              total=int(con.execute(f"SELECT COUNT(*) FROM read_parquet('{path}')").fetchone()[0])
+              distinct=int(con.execute(f"SELECT COUNT(*) FROM (SELECT DISTINCT {', '.join(key)} FROM read_parquet('{path}'))").fetchone()[0])
+              manager_guard=("AND (r.manager IS NULL OR p.manager IS NOT DISTINCT FROM r.manager)" if 'manager' in columns else '')
+              platform_guard=("AND (r.platform IS NULL OR LOWER(CAST(p.platform AS VARCHAR)) IS NOT DISTINCT FROM LOWER(CAST(r.platform AS VARCHAR)))" if 'platform' in columns else '')
+              profile=con.execute(f"""
+                WITH source_rows AS (
+                  SELECT *, ROW_NUMBER() OVER () AS source_row_id
+                  FROM read_parquet('{path}')
+                ), resolution AS (
+                  SELECT r.source_row_id, COUNT(p.rowid) AS canonical_matches
+                  FROM source_rows r LEFT JOIN public.player_fantasy p
+                    ON p.db_name IS NOT DISTINCT FROM r.db_name
+                   AND p.year IS NOT DISTINCT FROM r.year
+                   AND p.week IS NOT DISTINCT FROM r.week
+                   AND p.NFL_player_id IS NOT DISTINCT FROM r.NFL_player_id
+                   {manager_guard} {platform_guard}
+                  GROUP BY r.source_row_id
+                )
+                SELECT
+                  SUM(CASE WHEN canonical_matches=1 THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN canonical_matches=0 THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN canonical_matches>1 THEN 1 ELSE 0 END)
+                FROM resolution
+              """).fetchone()
+              rows.append({
+                'artifact_id':item['artifact_id'], 'source_kind':source_kind,
+                'source_player_rows':total, 'distinct_player_keys':distinct,
+                'unique_canonical_matches':int(profile[0] or 0),
+                'zero_canonical_matches':int(profile[1] or 0),
+                'ambiguous_canonical_matches':int(profile[2] or 0),
+              })
+              continue
             available={name: clause for name, clause in strategies.items() if (
               (name=='team_key_to_team_key' and {'team_key'} <= columns) or
               (name=='mfl_manager_guid_to_team_key' and {'platform','manager_guid'} <= columns) or
@@ -235,6 +272,8 @@ jobs:
             args+=(--team-signal-manifest raw_source_manifest.json)
           elif [ "$SOURCE_KIND" = "structured_player" ]; then
             args+=(--structured-player-manifest raw_source_manifest.json)
+          elif [ "$SOURCE_KIND" = "canonical_player_snapshot" ]; then
+            args+=(--canonical-snapshot-manifest raw_source_manifest.json)
           else
             echo "unsupported source kind: $SOURCE_KIND" >&2
             exit 2

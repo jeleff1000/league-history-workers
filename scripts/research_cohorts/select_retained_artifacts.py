@@ -17,6 +17,9 @@ STRUCTURED_RECHECK_STATUSES = {
     "no_promotable_candidate_emitted",
     "candidate_built_pending_canonical_promotion",
 }
+CANONICAL_SNAPSHOT_RECHECK_STATUSES = {
+    "candidate_provenance_not_found",
+}
 
 
 def select(
@@ -30,6 +33,8 @@ def select(
         eligible_statuses = TEAM_RECHECK_STATUSES
     elif source_kind == "structured_player":
         eligible_statuses = STRUCTURED_RECHECK_STATUSES
+    elif source_kind == "canonical_player_snapshot":
+        eligible_statuses = CANONICAL_SNAPSHOT_RECHECK_STATUSES
     else:
         raise SystemExit(f"unsupported source kind: {source_kind}")
     with ledger_csv.open(newline="", encoding="utf-8") as handle:
@@ -47,7 +52,10 @@ def select(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ledger-csv", type=Path, required=True)
-    parser.add_argument("--source-kind", required=True, choices=("team", "structured_player"))
+    parser.add_argument(
+        "--source-kind", required=True,
+        choices=("team", "structured_player", "canonical_player_snapshot"),
+    )
     parser.add_argument("--prefix", default="")
     parser.add_argument("--artifact-ids", default="")
     parser.add_argument("--out-json", type=Path, required=True)

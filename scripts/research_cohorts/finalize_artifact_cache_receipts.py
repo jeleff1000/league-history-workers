@@ -38,6 +38,16 @@ STRUCTURED_FIELDS = {
     "source_champion": "champion", "source_final_playoff_seed": "final_playoff_seed",
     "source_made_playoffs": "made_playoffs", "source_clutch_equity": "clutch_equity",
 }
+CANONICAL_SNAPSHOT_FIELDS = {
+    "win": "win",
+    "team_points": "team_points",
+    "is_playoffs": "is_playoffs",
+    "champion": "champion",
+    "has_po_signal": "has_po_signal",
+    "final_playoff_seed": "final_playoff_seed",
+    "made_playoffs": "made_playoffs",
+    "clutch_equity": "clutch_equity",
+}
 SETTINGS_FIELDS = {
     "source_scoring_pass_td": "scoring_pass_td",
     "source_playoff_teams": "playoff_teams",
@@ -519,6 +529,128 @@ def _audit_raw_structured_player_signals(
         _add_result(totals, artifact_id, dict(summary))
 
 
+def _audit_canonical_player_snapshots(
+    con: duckdb.DuckDBPyConnection,
+    *,
+    manifest_path: Path | None,
+    target_relation: str,
+    totals: dict[int, Counter],
+) -> None:
+    """Read full player snapshots through a unique canonical player-week key.
+
+    These source snapshots deliberately omit team_key and team_name.  Their
+    observed source grain is (db_name, year, week, NFL_player_id), which is
+    valid only when it resolves to one cache player row after the optional
+    manager/platform consistency guards.  Any source duplicate or zero/many
+    cache match is counted as unmatched rather than fanned out.
+    """
+    if manifest_path is None or not manifest_path.exists():
+        return
+    entries = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(entries, list):
+        raise SystemExit("canonical-snapshot manifest must be a JSON list")
+    target_columns = _columns(con, target_relation)
+    target_types = {row[0]: row[1] for row in con.execute(f"DESCRIBE {target_relation}").fetchall()}
+    required_keys = ["db_name", "year", "week", "NFL_player_id"]
+    selects: list[str] = []
+    for entry in entries:
+        artifact_id = int(entry["artifact_id"])
+        path = Path(entry["path"])
+        if not path.exists() or path.stat().st_size == 0:
+            continue
+        escaped = str(path.resolve()).replace("'", "''")
+        raw_columns = {
+            row[0] for row in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{escaped}')").fetchall()
+        }
+        if not set(required_keys) <= raw_columns:
+            raise SystemExit(f"{artifact_id}: canonical snapshot misses player-week key")
+        terms = [f"{artifact_id}::BIGINT AS artifact_id", *(_quoted(key) for key in required_keys)]
+        for guard in ("manager", "platform"):
+            terms.append(_quoted(guard) if guard in raw_columns else f"NULL::VARCHAR AS {_quoted(guard)}")
+        for source, target in CANONICAL_SNAPSHOT_FIELDS.items():
+            cast_type = target_types.get(target, "VARCHAR")
+            if source in raw_columns:
+                terms.append(f"CAST({_quoted(source)} AS {cast_type}) AS {_quoted('source_' + source)}")
+            else:
+                terms.append(f"NULL::{cast_type} AS {_quoted('source_' + source)}")
+        selects.append(f"SELECT {', '.join(terms)} FROM read_parquet('{escaped}')")
+    if not selects:
+        return
+    con.execute(
+        "CREATE OR REPLACE TEMP TABLE canonical_snapshot_evidence AS " + " UNION ALL ".join(selects)
+    )
+    source_key = ["artifact_id", *required_keys]
+    key_partition = ", ".join(_quoted(key) for key in source_key)
+    con.execute(f"""
+        CREATE OR REPLACE TEMP TABLE canonical_snapshot_source AS
+        SELECT *,
+               COUNT(*) OVER (PARTITION BY {key_partition}) AS source_key_count,
+               ROW_NUMBER() OVER () AS source_row_id
+        FROM canonical_snapshot_evidence
+    """)
+    source_columns = _columns(con, "canonical_snapshot_source")
+    supported = {
+        source: target for source, target in CANONICAL_SNAPSHOT_FIELDS.items()
+        if f"source_{source}" in source_columns and target in target_columns
+    }
+    if not supported:
+        return
+    canonical_key = " AND ".join(
+        f"p.{_quoted(key)} IS NOT DISTINCT FROM s.{_quoted(key)}" for key in required_keys
+    )
+    guards = """
+        AND (s.manager IS NULL OR p.manager IS NOT DISTINCT FROM s.manager)
+        AND (s.platform IS NULL OR LOWER(CAST(p.platform AS VARCHAR)) IS NOT DISTINCT FROM LOWER(CAST(s.platform AS VARCHAR)))
+    """
+    con.execute(f"""
+        CREATE OR REPLACE TEMP TABLE canonical_snapshot_resolution AS
+        SELECT s.source_row_id, COUNT(p.rowid) AS canonical_match_count,
+               MIN(p.rowid) AS canonical_rowid
+        FROM canonical_snapshot_source s
+        LEFT JOIN {target_relation} p ON {canonical_key} {guards}
+        GROUP BY s.source_row_id
+    """)
+    player_fields = ", ".join(
+        f"p.{_quoted(target)} AS {_quoted('canonical__' + target)}" for target in supported.values()
+    )
+    con.execute(f"""
+        CREATE OR REPLACE TEMP TABLE canonical_snapshot_matches AS
+        SELECT s.*, r.canonical_match_count, {player_fields}
+        FROM canonical_snapshot_source s
+        JOIN canonical_snapshot_resolution r ON r.source_row_id=s.source_row_id
+        LEFT JOIN {target_relation} p ON p.rowid=r.canonical_rowid AND r.canonical_match_count=1
+    """)
+    select_terms: list[str] = []
+    for source, target in supported.items():
+        value = f"m.{_quoted('source_' + source)}"
+        canonical = f"m.{_quoted('canonical__' + target)}"
+        unresolved = "(m.source_key_count <> 1 OR m.canonical_match_count <> 1)"
+        select_terms.extend([
+            f"SUM(CASE WHEN {value} IS NOT NULL AND {unresolved} THEN 1 ELSE 0 END) AS {_quoted('unmatched__' + target)}",
+            f"SUM(CASE WHEN {value} IS NOT NULL AND NOT {unresolved} AND {canonical} IS NULL THEN 1 ELSE 0 END) AS {_quoted('missing__' + target)}",
+            f"SUM(CASE WHEN {value} IS NOT NULL AND NOT {unresolved} AND {canonical} IS NOT NULL AND {canonical} IS NOT DISTINCT FROM {value} THEN 1 ELSE 0 END) AS {_quoted('match__' + target)}",
+            f"SUM(CASE WHEN {value} IS NOT NULL AND NOT {unresolved} AND {canonical} IS NOT NULL AND {canonical} IS DISTINCT FROM {value} THEN 1 ELSE 0 END) AS {_quoted('conflict__' + target)}",
+        ])
+    field_names = [term.rsplit(" AS ", 1)[1].strip('"') for term in select_terms]
+    for row in con.execute(
+        f"SELECT m.artifact_id, {', '.join(select_terms)} FROM canonical_snapshot_matches m GROUP BY m.artifact_id"
+    ).fetchall():
+        artifact_id, *counts = row
+        summary = Counter()
+        for field_name, count in zip(field_names, counts):
+            value = int(count or 0)
+            summary["source_cells"] += value
+            if field_name.startswith("match__"):
+                summary["cache_match_cells"] += value
+            elif field_name.startswith("missing__"):
+                summary["cache_missing_cells"] += value
+            elif field_name.startswith("conflict__"):
+                summary["cache_conflict_cells"] += value
+            elif field_name.startswith("unmatched__"):
+                summary["unmatched_cache_cells"] += value
+        _add_result(totals, artifact_id, dict(summary))
+
+
 def _final_status(row: dict[str, Any], counts: Counter) -> tuple[str, str]:
     source_cells = int(counts["source_cells"])
     if source_cells == 0:
@@ -561,12 +693,19 @@ def build_receipts(
     exact_delta: Path | None, structured_delta: Path | None,
     settings_delta: Path | None, out_path: Path, team_signal_manifest: Path | None = None,
     structured_player_manifest: Path | None = None,
+    canonical_snapshot_manifest: Path | None = None,
     prior_receipts_path: Path | None = None,
 ) -> dict[str, Any]:
     ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
     ledger_rows = ledger.get("rows", ledger.get("files", []))
     if not ledger_rows:
         raise SystemExit("ledger has no rows")
+    canonical_snapshot_ids: set[int] = set()
+    if canonical_snapshot_manifest is not None and canonical_snapshot_manifest.exists():
+        canonical_snapshot_ids = {
+            int(entry["artifact_id"])
+            for entry in json.loads(canonical_snapshot_manifest.read_text(encoding="utf-8"))
+        }
     con = duckdb.connect(str(base_path), read_only=True)
     con.create_function("source_artifact_id", _source_artifact_id, return_type="BIGINT", null_handling="special")
     totals: dict[int, Counter] = defaultdict(Counter)
@@ -585,6 +724,9 @@ def build_receipts(
     _audit_raw_structured_player_signals(
         con, manifest_path=structured_player_manifest, target_relation="public.player_fantasy", totals=totals,
     )
+    _audit_canonical_player_snapshots(
+        con, manifest_path=canonical_snapshot_manifest, target_relation="public.player_fantasy", totals=totals,
+    )
     con.close()
 
     rows: list[dict[str, Any]] = []
@@ -593,6 +735,12 @@ def build_receipts(
         artifact_id = int(result["artifact_id"])
         counts = totals[artifact_id]
         status, reason = _final_status(result, counts)
+        if artifact_id in canonical_snapshot_ids and counts["cache_missing_cells"]:
+            status = "candidate_built_pending_canonical_promotion"
+            reason = (
+                "Canonical snapshot readback found strict uniquely matched null-cell "
+                "candidates; no cache mutation was performed."
+            )
         result.update({
             "source_cells": int(counts["source_cells"]),
             "cache_match_cells": int(counts["cache_match_cells"]),
@@ -633,6 +781,7 @@ def main() -> None:
     ap.add_argument("--settings-delta", type=Path)
     ap.add_argument("--team-signal-manifest", type=Path)
     ap.add_argument("--structured-player-manifest", type=Path)
+    ap.add_argument("--canonical-snapshot-manifest", type=Path)
     ap.add_argument("--prior-receipts", type=Path)
     ap.add_argument("--out", type=Path, required=True)
     args = ap.parse_args()
@@ -642,6 +791,7 @@ def main() -> None:
         settings_delta=args.settings_delta, out_path=args.out,
         team_signal_manifest=args.team_signal_manifest,
         structured_player_manifest=args.structured_player_manifest,
+        canonical_snapshot_manifest=args.canonical_snapshot_manifest,
         prior_receipts_path=args.prior_receipts,
     )
     print(json.dumps(result["summary"], sort_keys=True))

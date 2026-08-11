@@ -294,3 +294,79 @@ def test_receipt_reads_raw_player_outcome_evidence_on_its_exact_key(tmp_path: Pa
     assert row["cache_match_cells"] == 2
     assert row["cache_missing_cells"] == 1
     assert row["blocked_schema_cells"] == 2
+
+
+def test_receipt_reads_canonical_snapshot_by_unique_player_week_key(tmp_path: Path) -> None:
+    """Null team fields must not prevent an exact canonical player readback."""
+    from scripts.research_cohorts.finalize_artifact_cache_receipts import build_receipts
+
+    base = tmp_path / "base.duckdb"
+    _base_cache(base)
+    con = duckdb.connect(str(base))
+    con.execute("UPDATE public.player_fantasy SET champion=NULL")
+    con.close()
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({"rows": [{
+        "artifact_id": 71, "artifact": "canonical-snapshot", "candidate_delta_rows": 1,
+        "candidate_fields": ["win", "team_points", "is_playoffs", "champion"],
+        "dispositions": ["direct_player_candidate"],
+    }]}))
+    raw = tmp_path / "canonical-snapshot.parquet"
+    _write_parquet(raw, [{
+        "db_name": "league", "year": 2024, "week": 15, "NFL_player_id": "p1",
+        "manager": "mgr", "platform": "sleeper", "team_key": None, "team_name": None,
+        "win": 1, "team_points": 100.0, "is_playoffs": 0, "champion": 1,
+        "source_only": "ignored",
+    }])
+    manifest = tmp_path / "canonical-snapshot-manifest.json"
+    manifest.write_text(json.dumps([{"artifact_id": 71, "path": str(raw)}]))
+
+    result = build_receipts(
+        ledger_path=ledger, base_path=base, team_delta=None, exact_delta=None,
+        structured_delta=None, settings_delta=None,
+        canonical_snapshot_manifest=manifest, out_path=tmp_path / "receipts.json",
+    )
+
+    row = result["rows"][0]
+    assert row["final_status"] == "candidate_built_pending_canonical_promotion"
+    assert row["source_cells"] == 4
+    assert row["cache_match_cells"] == 3
+    assert row["cache_missing_cells"] == 1
+    assert row["unmatched_cache_cells"] == 0
+
+
+def test_receipt_keeps_ambiguous_canonical_snapshot_key_unmatched(tmp_path: Path) -> None:
+    """A four-field player key resolving to two canonical rows cannot fan out."""
+    from scripts.research_cohorts.finalize_artifact_cache_receipts import build_receipts
+
+    base = tmp_path / "base.duckdb"
+    _base_cache(base)
+    con = duckdb.connect(str(base))
+    con.execute("INSERT INTO public.player_fantasy SELECT * FROM public.player_fantasy")
+    con.close()
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({"rows": [{
+        "artifact_id": 72, "artifact": "ambiguous-canonical-snapshot", "candidate_delta_rows": 1,
+        "candidate_fields": ["win"], "dispositions": ["direct_player_candidate"],
+    }]}))
+    raw = tmp_path / "ambiguous-canonical-snapshot.parquet"
+    _write_parquet(raw, [{
+        "db_name": "league", "year": 2024, "week": 15, "NFL_player_id": "p1",
+        "manager": "mgr", "platform": "sleeper", "team_key": None, "team_name": None,
+        "win": 1,
+    }])
+    manifest = tmp_path / "ambiguous-canonical-snapshot-manifest.json"
+    manifest.write_text(json.dumps([{"artifact_id": 72, "path": str(raw)}]))
+
+    result = build_receipts(
+        ledger_path=ledger, base_path=base, team_delta=None, exact_delta=None,
+        structured_delta=None, settings_delta=None,
+        canonical_snapshot_manifest=manifest, out_path=tmp_path / "receipts.json",
+    )
+
+    row = result["rows"][0]
+    assert row["final_status"] == "unmatched_cache_key"
+    assert row["source_cells"] == 1
+    assert row["cache_match_cells"] == 0
+    assert row["cache_missing_cells"] == 0
+    assert row["unmatched_cache_cells"] == 1
