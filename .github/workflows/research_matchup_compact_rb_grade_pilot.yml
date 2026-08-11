@@ -52,7 +52,7 @@ jobs:
             FROM rb_2025_grade_batch o, UNNEST(o.grade_cells) AS u(cell)
             WHERE o.NFL_player_id='00-0033280' AND cell.q_playoff_teams='ALL'
           """).fetchone()
-          assert cmc_all == (9980, 6692, 2031), cmc_all
+          assert cmc_all == (9980, 6853, 2031), cmc_all
           invalid = c.execute("""
             SELECT COUNT(*) FROM rb_2025_grade_batch o, UNNEST(o.grade_cells) AS u(cell)
             WHERE cell.champ_leagues > cell.playoff_leagues

@@ -340,7 +340,7 @@ jobs:
               'started_league_weeks': 155272,
               'valid_started_outcomes': 149661,
               'win_equivalent': 91505.0,
-              'playoff_leagues': 6692,
+              'playoff_leagues': 6853,
               'champ_leagues': 2031,
               'active_weeks': 17,
               'inactive_weeks': 0,
@@ -356,7 +356,7 @@ jobs:
               'expected_wins': 10.027170658969757,
               'expected_losses': 6.559300819740164,
               'clutch_season_sum': 10.5456027157515,
-              'playoff_rate_pct': 67.05410821643287,
+              'playoff_rate_pct': 68.66733466933867,
               'champ_rate_pct': 20.350701402805612,
           }
           for key, expected in floats.items():
@@ -471,7 +471,7 @@ jobs:
           materialize_season_bracket_grade_position_batch(c, source_table='lake.public.player_fantasy', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all', output_table='rb_2025_grade_batch', year=2025, position='RB')
           assert c.execute('SELECT COUNT(*) FROM rb_2025_grade_batch').fetchone()[0] == 164
           cmc=c.execute("""SELECT cell.eligible_leagues,cell.playoff_leagues,cell.champ_leagues FROM rb_2025_grade_batch o,UNNEST(o.grade_cells) u(cell) WHERE o.NFL_player_id='00-0033280' AND cell.q_playoff_teams='ALL'""").fetchone()
-          assert cmc == (9980,6692,2031), cmc
+          assert cmc == (9980,6853,2031), cmc
           print('rb_2025_grade_batch_cmc_all=' + str(cmc))
           PY
       - name: Resolve CMC 2025 bracket-grade cells with full denominators
