@@ -73,6 +73,12 @@ jobs:
                 cohort_dynasty, cohort_best_ball
               FROM regular_population
               GROUP BY 1,2,3,4,5,6,7,8,9
+            ),
+            profile AS (
+              SELECT id, week, cohort_teams, cohort_roster, cohort_scoring,
+                cohort_pass_td, cohort_dynasty, cohort_best_ball
+              FROM per_league
+              GROUP BY 1,2,3,4,5,6,7,8
             )
             SELECT
               (SELECT COUNT(*) FROM population) AS population_rows,
@@ -80,10 +86,11 @@ jobs:
               (SELECT COUNT(*) FROM regular_player_weeks) AS regular_player_weeks,
               (SELECT COUNT(*) FROM regular_population) AS regular_population_rows,
               (SELECT COUNT(*) FROM per_league) AS per_league_rows,
+              (SELECT COUNT(*) FROM profile) AS profile_rows,
               (SELECT COUNT(DISTINCT (id, week)) FROM per_league) AS output_outer_rows,
               (SELECT COUNT(DISTINCT (db_name, week, cohort_teams, cohort_roster, cohort_scoring, cohort_pass_td, cohort_playoff_teams, cohort_dynasty, cohort_best_ball)) FROM population) AS inventory_rows
           """).fetchone()
-          keys=['population_rows','players','regular_player_weeks','regular_population_rows','per_league_rows','output_outer_rows','inventory_rows']
+          keys=['population_rows','players','regular_player_weeks','regular_population_rows','per_league_rows','profile_rows','output_outer_rows','inventory_rows']
           result=dict(zip(keys,row))
           result['cube_upper_bound_cells']=result['output_outer_rows'] * 64
           assert result['players'] > 0 and result['output_outer_rows'] > 0, result
