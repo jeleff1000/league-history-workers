@@ -73,12 +73,14 @@ jobs:
             --settings-materialization-report "$(find settings_materialization -name settings_promotion_report.json -print -quit)" \
             --out-json artifact_promotion_evidence_combined.json \
             --out-csv artifact_promotion_evidence_combined.csv
+          cp "$(find comparison -name file_promotion_ledger.json -print -quit)" artifact_promotion_file_evidence.json
       - uses: actions/upload-artifact@v4
         with:
           name: research-artifact-combined-promotion-evidence-${{ github.run_id }}
           path: |
             artifact_promotion_evidence_combined.json
             artifact_promotion_evidence_combined.csv
+            artifact_promotion_file_evidence.json
           if-no-files-found: error
           retention-days: 90
           compression-level: 0

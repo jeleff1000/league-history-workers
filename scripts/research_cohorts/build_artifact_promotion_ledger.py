@@ -79,7 +79,7 @@ def main() -> None:
             "workflow_run_id": row.get("workflow_run_id"),
             "dispositions": set(), "manifest_file_count": 0,
             "candidate_file_count": 0, "candidate_files": [],
-            "settings_delta_rows": 0, "settings_fields": set(), "settings_source_paths": set(),
+            "settings_source_reference_rows": 0, "settings_fields": set(), "settings_source_paths": set(),
         })
         entry["manifest_file_count"] += 1
         if row.get("candidate"):
@@ -90,6 +90,7 @@ def main() -> None:
 
     con = duckdb.connect()
     evidence: dict[str, dict] = defaultdict(lambda: {"rows": 0, "fields": set(), "files": set()})
+    settings_delta_input_rows = 0
 
     def add_view(kind: str, path: Path, column: str) -> None:
         if not path.exists() or path.stat().st_size == 0:
@@ -126,6 +127,7 @@ def main() -> None:
     if args.settings_delta and args.settings_delta.exists() and args.settings_delta.stat().st_size > 0:
         path = str(args.settings_delta.resolve()).replace("'", "''")
         con.execute(f"CREATE OR REPLACE TEMP VIEW settings_delta AS SELECT * FROM read_parquet('{path}')")
+        settings_delta_input_rows = int(con.execute("SELECT COUNT(*) FROM settings_delta").fetchone()[0])
         cols = {r[0] for r in con.execute("DESCRIBE settings_delta").fetchall()}
         source_names = [name for name in SETTINGS_FIELD_MAP if name in cols]
         if "source_files" not in cols:
@@ -142,10 +144,10 @@ def main() -> None:
             entry = artifacts.setdefault(aid, {
                 "artifact_id": int(aid), "artifact": None, "workflow_run_id": None,
                 "dispositions": set(), "manifest_file_count": 0, "candidate_file_count": 0,
-                "candidate_files": [], "settings_delta_rows": 0, "settings_fields": set(),
+                "candidate_files": [], "settings_source_reference_rows": 0, "settings_fields": set(),
                 "settings_source_paths": set(),
             })
-            entry["settings_delta_rows"] += int(count)
+            entry["settings_source_reference_rows"] += int(count)
             entry["settings_source_paths"].add(str(source_path))
             for index, name in enumerate(source_names):
                 if values[index]:
@@ -164,7 +166,7 @@ def main() -> None:
             proof = "blocked_by_canonical_schema"
         elif has_evidence and readback_clean:
             proof = "working_copy_cell_readback_zero_remaining_nulls"
-        settings_has_evidence = int(entry.get("settings_delta_rows", 0)) > 0
+        settings_has_evidence = int(entry.get("settings_source_reference_rows", 0)) > 0
         settings_proof = "not_supplied"
         if settings_has_evidence:
             settings_proof = "not_proven"
@@ -177,7 +179,7 @@ def main() -> None:
             "candidate_files": sorted(set(entry["candidate_files"])),
             "candidate_delta_rows": int(ev.get("rows", 0)),
             "candidate_fields": sorted(ev.get("fields", set())),
-            "settings_delta_rows": int(entry.get("settings_delta_rows", 0)),
+            "settings_source_reference_rows": int(entry.get("settings_source_reference_rows", 0)),
             "settings_fields": sorted(entry.get("settings_fields", set())),
             "settings_source_path_count": len(entry.get("settings_source_paths", set())),
             "source_path_count": len(ev.get("files", set())),
@@ -193,19 +195,19 @@ def main() -> None:
         settings_report = json.loads(args.settings_materialization_report.read_text(encoding="utf-8"))
         settings_clean = all(int(value) == 0 for value in settings_report.get("readback_remaining_nulls", {}).values())
         for row in rows:
-            if row["settings_delta_rows"]:
+            if row["settings_source_reference_rows"]:
                 row["settings_cache_readback_proof"] = "working_copy_settings_cell_readback_zero_remaining_nulls" if settings_clean else "not_proven"
 
     source_ids_seen = set(evidence)
     source_ids_seen.update(
-        aid for aid, entry in artifacts.items() if int(entry.get("settings_delta_rows", 0)) > 0
+        aid for aid, entry in artifacts.items() if int(entry.get("settings_source_reference_rows", 0)) > 0
     )
     mapped_ids = {
         aid for aid, entry in artifacts.items()
-        if evidence.get(aid, {}).get("rows") or int(entry.get("settings_delta_rows", 0)) > 0
+        if evidence.get(aid, {}).get("rows") or int(entry.get("settings_source_reference_rows", 0)) > 0
     }
     settings_rows_with_proof = sum(
-        int(row["settings_delta_rows"])
+        int(row["settings_source_reference_rows"])
         for row in rows
         if row["settings_cache_readback_proof"] == "working_copy_settings_cell_readback_zero_remaining_nulls"
     )
@@ -223,13 +225,14 @@ def main() -> None:
         "schema_unchanged": bool(materialization.get("schema_unchanged", False)),
         "ops_unchanged": bool(materialization.get("ops_unchanged", False)),
         "rows": rows,
-        "settings_rows_with_source_proof": sum(int(row["settings_delta_rows"]) for row in rows),
-        "settings_rows_with_cache_readback_proof": settings_rows_with_proof,
+        "settings_delta_input_rows": settings_delta_input_rows,
+        "settings_source_reference_rows": sum(int(row["settings_source_reference_rows"]) for row in rows),
+        "settings_source_reference_rows_with_cache_readback_proof": settings_rows_with_proof,
         "settings_readback_proof_clean": all(row["settings_cache_readback_proof"] in {"not_supplied", "working_copy_settings_cell_readback_zero_remaining_nulls"} for row in rows),
     }
     args.out_json.parent.mkdir(parents=True, exist_ok=True)
     args.out_json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    fields = ["artifact_id", "artifact", "workflow_run_id", "manifest_file_count", "candidate_file_count", "dispositions", "candidate_files", "candidate_delta_rows", "candidate_fields", "canonical_fields_missing", "source_path_count", "source_refs_mapped", "cache_readback_proof", "settings_delta_rows", "settings_fields", "settings_source_path_count", "settings_cache_readback_proof", "canonical_cache_replaced", "working_copy_only"]
+    fields = ["artifact_id", "artifact", "workflow_run_id", "manifest_file_count", "candidate_file_count", "dispositions", "candidate_files", "candidate_delta_rows", "candidate_fields", "canonical_fields_missing", "source_path_count", "source_refs_mapped", "cache_readback_proof", "settings_source_reference_rows", "settings_fields", "settings_source_path_count", "settings_cache_readback_proof", "canonical_cache_replaced", "working_copy_only"]
     with args.out_csv.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
