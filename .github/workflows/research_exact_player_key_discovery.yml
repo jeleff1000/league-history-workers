@@ -1,7 +1,7 @@
 Exit code: 0
 Wall time: 3.7 seconds
 Output:
-name: Discover canonical player identity key
+name: Audit canonical player and team join keys
 
 on:
   workflow_dispatch:
@@ -31,10 +31,47 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install duckdb==1.5.1
-      - run: python scripts/research_cohorts/discover_player_identity_key.py --base research_public_lake/corpus_snapshot.duckdb --out player_identity_key_discovery.json
+      - name: Record immutable-cache prestate
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          Path('prestate.json').write_text(json.dumps({
+              'schema':[row[0] for row in con.execute('DESCRIBE public.player_fantasy').fetchall()],
+              'rows':int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]),
+          }, indent=2)+'\n')
+          con.close()
+          PY
+      - name: Profile actual cache-side join keys
+        run: python scripts/research_cohorts/audit_canonical_join_keys.py --base research_public_lake/corpus_snapshot.duckdb --out canonical_join_key_contract.json
+      - name: Fail fast on cache or ops mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, hashlib, json
+          from pathlib import Path
+          before=json.loads(Path('prestate.json').read_text())
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          assert [row[0] for row in con.execute('DESCRIBE public.player_fantasy').fetchall()] == before['schema']
+          assert int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]) == before['rows']
+          con.close()
+          digest=hashlib.sha256()
+          with Path('research_public_lake/ops_cache.duckdb').open('rb') as handle:
+              for block in iter(lambda: handle.read(1024*1024), b''):
+                  digest.update(block)
+          assert digest.hexdigest() == Path('ops_before.sha256').read_text().split()[0]
+          PY
       - uses: actions/upload-artifact@v4
         with:
-          name: player-identity-key-discovery-${{ github.run_id }}
-          path: player_identity_key_discovery.json
+          name: canonical-join-key-contract-${{ github.run_id }}
+          path: |
+            canonical_join_key_contract.json
+            prestate.json
+            ops_before.sha256
           retention-days: 30
 
