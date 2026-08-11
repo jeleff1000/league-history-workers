@@ -1,0 +1,75 @@
+import json
+from pathlib import Path
+
+import duckdb
+import pandas as pd
+import pytest
+
+
+def _write_parquet(path: Path, rows: list[dict]) -> None:
+    con = duckdb.connect()
+    con.register("rows", pd.DataFrame(rows))
+    con.execute("CREATE TABLE source AS SELECT * FROM rows")
+    con.execute(f"COPY source TO '{path.as_posix()}' (FORMAT PARQUET)")
+    con.close()
+
+
+def _base_cache(path: Path) -> None:
+    con = duckdb.connect(str(path))
+    con.execute("""
+        CREATE SCHEMA public;
+        CREATE TABLE public.player_fantasy AS
+        SELECT
+          'league'::VARCHAR AS db_name, 2024::INTEGER AS year, 15::INTEGER AS week,
+          'p1'::VARCHAR AS NFL_player_id, 1::INTEGER AS is_started,
+          'mgr'::VARCHAR AS manager, 'team'::VARCHAR AS team_key,
+          'T'::VARCHAR AS team_name, 'sleeper'::VARCHAR AS platform,
+          1::INTEGER AS win, NULL::INTEGER AS champion, 100.0::DOUBLE AS team_points,
+          0::INTEGER AS is_playoffs;
+        CREATE TABLE public.league_settings AS
+        SELECT 'league'::VARCHAR AS db_name, 2024::INTEGER AS year,
+               '4pt'::VARCHAR AS scoring_pass_td;
+    """)
+    con.close()
+
+
+def test_receipt_marks_cache_match_missing_and_non_candidate(tmp_path: Path) -> None:
+    """Removing cache comparison must turn the verified candidate into non-verified."""
+    from scripts.research_cohorts.finalize_artifact_cache_receipts import build_receipts
+
+    base = tmp_path / "base.duckdb"
+    _base_cache(base)
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({"rows": [
+        {"artifact_id": 10, "artifact": "team", "candidate_delta_rows": 1,
+         "candidate_fields": ["win", "champion"], "dispositions": ["team_week_signal_candidate"]},
+        {"artifact_id": 11, "artifact": "settings", "candidate_delta_rows": 0,
+         "candidate_fields": [], "settings_source_reference_rows": 1,
+         "settings_fields": ["scoring_pass_td"], "dispositions": ["settings_candidate"]},
+        {"artifact_id": 12, "artifact": "report", "candidate_delta_rows": 0,
+         "candidate_fields": [], "dispositions": ["report_only"]},
+    ]}))
+    team = tmp_path / "team.parquet"
+    _write_parquet(team, [{
+        "db_name": "league", "year": 2024, "week": 15, "NFL_player_id": "p1",
+        "platform": "sleeper", "manager": "mgr", "team_key": "team", "team_name": "T",
+        "source_win": 1, "source_champion": 1, "source_files": "candidates/10__team.parquet",
+    }])
+    settings = tmp_path / "settings.parquet"
+    _write_parquet(settings, [{
+        "db_name": "league", "year": 2024, "source_scoring_pass_td": "4pt",
+        "source_files": "settings-candidate-shard-0-1/11/x.json",
+    }])
+    out = tmp_path / "receipts.json"
+
+    result = build_receipts(
+        ledger_path=ledger, base_path=base, team_delta=team, exact_delta=None,
+        structured_delta=None, settings_delta=settings, out_path=out,
+    )
+
+    rows = {row["artifact_id"]: row for row in result["rows"]}
+    assert rows[10]["final_status"] == "still_missing_cache_cells"
+    assert rows[10]["cache_match_cells"] == 1
+    assert rows[10]["cache_missing_cells"] == 1
+    assert rows[11]["final_status"] == "cache_verified"
+    assert rows[12]["final_status"] == "not_data_bearing"

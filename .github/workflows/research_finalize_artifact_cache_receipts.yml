@@ -1,0 +1,116 @@
+name: Finalize artifact cache receipts
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+      combined_ledger_run_id:
+        required: true
+        default: '31448116124'
+      comparison_run_id:
+        required: true
+        default: '31441478179'
+      settings_audit_run_id:
+        required: true
+        default: '31446334849'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  receipts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      CANONICAL_CACHE_KEY: ${{ inputs.cache_key }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - name: Confirm this is a read-only cache audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          result={
+            'player_schema':[row[0] for row in con.execute('DESCRIBE public.player_fantasy').fetchall()],
+            'player_rows':int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]),
+          }
+          Path('cache_receipt_prestate.json').write_text(json.dumps(result, indent=2)+'\n')
+          con.close()
+          PY
+      - name: Download existing ledger and candidate deltas
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir combined comparison settings
+          gh run download '${{ inputs.combined_ledger_run_id }}' --repo '${{ github.repository }}' \
+            --name 'research-artifact-combined-promotion-evidence-${{ inputs.combined_ledger_run_id }}' --dir combined
+          gh run download '${{ inputs.comparison_run_id }}' --repo '${{ github.repository }}' \
+            --name 'research-artifact-complete-audit-${{ inputs.comparison_run_id }}' --dir comparison
+          gh run download '${{ inputs.settings_audit_run_id }}' --repo '${{ github.repository }}' \
+            --name 'research-settings-dimension-audit-${{ inputs.settings_audit_run_id }}' --dir settings
+          test -s "$(find combined -name artifact_promotion_evidence_combined.json -print -quit)"
+          test -s "$(find comparison -name team_promotable_player_delta.parquet -print -quit)"
+          test -s "$(find settings -name settings_promotable_delta.parquet -print -quit)"
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Read back every existing candidate against the canonical cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/finalize_artifact_cache_receipts.py \
+            --ledger "$(find combined -name artifact_promotion_evidence_combined.json -print -quit)" \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --team-delta "$(find comparison -name team_promotable_player_delta.parquet -print -quit)" \
+            --exact-delta "$(find comparison -name exact_promotable_player_delta.parquet -print -quit)" \
+            --structured-delta "$(find comparison -name structured_promotable_delta.parquet -print -quit)" \
+            --settings-delta "$(find settings -name settings_promotable_delta.parquet -print -quit)" \
+            --out final_artifact_cache_receipts.json
+      - name: Fail fast if audit changed cache, schema, rows, or ops
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, hashlib, json
+          from pathlib import Path
+          before=json.loads(Path('cache_receipt_prestate.json').read_text())
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          assert [row[0] for row in con.execute('DESCRIBE public.player_fantasy').fetchall()] == before['player_schema']
+          assert int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]) == before['player_rows']
+          con.close()
+          digest=hashlib.sha256()
+          with Path('research_public_lake/ops_cache.duckdb').open('rb') as handle:
+              for block in iter(lambda: handle.read(1024 * 1024), b''):
+                  digest.update(block)
+          digest=digest.hexdigest()
+          assert digest == Path('ops_before.sha256').read_text().split()[0]
+          receipt=json.loads(Path('final_artifact_cache_receipts.json').read_text())
+          assert receipt['summary']['ledger_rows'] == 9479
+          assert receipt['summary']['cache_mutated'] is False
+          assert receipt['summary']['new_lineage'] is False
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-artifact-final-cache-receipts-${{ github.run_id }}
+          path: |
+            final_artifact_cache_receipts.json
+            cache_receipt_prestate.json
+            ops_before.sha256
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
