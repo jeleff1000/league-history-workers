@@ -118,8 +118,8 @@ jobs:
           c=duckdb.connect('research_matchup_compact.duckdb',read_only=True)
           tables={x[0] for x in c.execute('SELECT table_name FROM duckdb_tables()').fetchall()}
           assert tables >= {'research_matchup_compact_weekly','research_matchup_compact_season','research_matchup_compact_career'},tables
-          dupe=c.execute("SELECT COUNT(*) FROM (SELECT NFL_player_id,year,week FROM research_matchup_compact_weekly GROUP BY 1,2,3 HAVING COUNT(*)<>1)").fetchone()[0]
-          cmc=c.execute("SELECT cell.eligible_leagues,cell.rostered_league_weeks,cell.eligible_league_weeks,cell.started_league_weeks,cell.valid_started_outcomes,cell.win_equivalent,cell.active_weeks,cell.inactive_weeks FROM research_matchup_compact_season,UNNEST(cohort_cells) u(cell) WHERE NFL_player_id='00-0033280' AND year=2025 AND cell.q_teams='ALL' AND cell.q_roster='ALL' AND cell.q_scoring='ALL' AND cell.q_pass_td='ALL' AND cell.q_dynasty='ALL' AND cell.q_best_ball='ALL'").fetchone()
+          dupe=c.execute("SELECT COUNT(*) FROM (SELECT NFL_player_id,year,week,position FROM research_matchup_compact_weekly GROUP BY 1,2,3,4 HAVING COUNT(*)<>1)").fetchone()[0]
+          cmc=c.execute("SELECT cell.eligible_leagues,cell.rostered_league_weeks,cell.eligible_league_weeks,cell.started_league_weeks,cell.valid_started_outcomes,cell.win_equivalent,cell.active_weeks,cell.inactive_weeks FROM research_matchup_compact_season,UNNEST(cohort_cells) u(cell) WHERE NFL_player_id='00-0033280' AND year=2025 AND position='RB' AND cell.q_teams='ALL' AND cell.q_roster='ALL' AND cell.q_scoring='ALL' AND cell.q_pass_td='ALL' AND cell.q_dynasty='ALL' AND cell.q_best_ball='ALL'").fetchone()
           assert dupe==0 and cmc==(9980,157712,158687,155272,149661,91505.0,17,0),(dupe,cmc)
           print('compact_rollup='+json.dumps({'weekly':c.execute('SELECT COUNT(*) FROM research_matchup_compact_weekly').fetchone()[0],'season':c.execute('SELECT COUNT(*) FROM research_matchup_compact_season').fetchone()[0],'career':c.execute('SELECT COUNT(*) FROM research_matchup_compact_career').fetchone()[0],'cmc':cmc}))
           PY
