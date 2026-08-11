@@ -13,8 +13,13 @@ on:
         required: true
         default: '31500865474'
       artifact_prefix:
-        required: true
+        description: Ledger artifact-name prefix to read; blank selects all eligible artifacts.
+        required: false
         default: research-source-matchup-rescue-
+      artifact_ids:
+        description: Optional comma-separated exact ledger artifact IDs; overrides artifact prefix.
+        required: false
+        default: ''
       source_kind:
         description: Raw artifact grain; player evidence is joined on exact player-week identity.
         required: true
@@ -62,6 +67,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT_PREFIX: ${{ inputs.artifact_prefix }}
+          ARTIFACT_IDS: ${{ inputs.artifact_ids }}
           SOURCE_KIND: ${{ inputs.source_kind }}
         shell: bash
         run: |
@@ -75,6 +81,7 @@ jobs:
           import csv, json, os
           from pathlib import Path
           prefix=os.environ['ARTIFACT_PREFIX']
+          requested_ids={int(value) for value in os.environ.get('ARTIFACT_IDS', '').split(',') if value.strip()}
           source_kind=os.environ['SOURCE_KIND']
           rows=[]
           with Path('docs/research_matchup_artifact_cache_ledger.csv').open(newline='', encoding='utf-8') as handle:
@@ -92,7 +99,11 @@ jobs:
                           'no_promotable_candidate_emitted',
                           'candidate_built_pending_canonical_promotion',
                       }
-                  if eligible and row['artifact'].startswith(prefix):
+                  if requested_ids:
+                      eligible = eligible and int(row['artifact_id']) in requested_ids
+                  else:
+                      eligible = eligible and row['artifact'].startswith(prefix)
+                  if eligible:
                       rows.append(row)
           if not rows:
               raise SystemExit(f'no unresolved retained artifacts for prefix {prefix!r}')
