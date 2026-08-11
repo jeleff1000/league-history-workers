@@ -6,12 +6,6 @@ on:
       cache_key:
         required: true
         default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
-      combined_ledger_run_id:
-        required: true
-        default: '31448116124'
-      prior_receipt_run_id:
-        required: true
-        default: '31500865474'
       artifact_prefix:
         description: Ledger artifact-name prefix to read; blank selects all eligible artifacts.
         required: false
@@ -81,11 +75,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p combined prior sources
-          gh run download '${{ inputs.combined_ledger_run_id }}' --repo '${{ github.repository }}' \
-            --name 'research-artifact-combined-promotion-evidence-${{ inputs.combined_ledger_run_id }}' --dir combined
-          gh run download '${{ inputs.prior_receipt_run_id }}' --repo '${{ github.repository }}' \
-            --name 'research-artifact-final-cache-receipts-${{ inputs.prior_receipt_run_id }}' --dir prior
+          mkdir -p sources
+          # The checked-in ledger is the authoritative 9,479-artifact record.
+          # Do not consume Actions API quota downloading older copies before an
+          # exact source-artifact readback.
+          python scripts/research_cohorts/materialize_ledger_receipt_inputs.py \
+            --ledger-csv docs/research_matchup_artifact_cache_ledger.csv \
+            --ledger-json ledger_receipt_input.json \
+            --prior-receipts prior_receipts_input.json
           python - <<'PY'
           import csv, json, os
           from pathlib import Path
@@ -271,8 +268,8 @@ jobs:
             exit 2
           fi
           python scripts/research_cohorts/finalize_artifact_cache_receipts.py \
-            --ledger "$(find combined -name artifact_promotion_evidence_combined.json -print -quit)" \
-            --prior-receipts "$(find prior -name final_artifact_cache_receipts.json -print -quit)" \
+            --ledger ledger_receipt_input.json \
+            --prior-receipts prior_receipts_input.json \
             --base research_public_lake/corpus_snapshot.duckdb \
             --out final_artifact_cache_receipts.json "${args[@]}"
       - name: Fail fast on cache, schema, row, or ops mutation
