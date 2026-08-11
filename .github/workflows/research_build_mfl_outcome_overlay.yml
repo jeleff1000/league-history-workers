@@ -1,0 +1,132 @@
+name: Build MFL outcome overlay candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+      receipt_run_id:
+        required: true
+        default: '31508788009'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Record immutable-cache prestate
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          Path('prestate.json').write_text(json.dumps({
+            'schema':[r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()],
+            'rows':int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]),
+          }, indent=2)+'\n')
+          con.close()
+          PY
+      - name: Download exact retained MFL outcome artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p receipt sources
+          gh run download '${{ inputs.receipt_run_id }}' --repo '${{ github.repository }}' \
+            --name 'research-raw-signal-cache-readback-${{ inputs.receipt_run_id }}' --dir receipt
+          while IFS=$'\t' read -r run artifact artifact_id; do
+            mkdir -p "sources/$artifact_id"
+            gh run download "$run" --repo '${{ github.repository }}' --name "$artifact" --dir "sources/$artifact_id"
+          done < <(python - <<'PY'
+          import json
+          from pathlib import Path
+          selected=json.loads(next(Path('receipt').rglob('selected_artifacts.json')).read_text())
+          for row in selected:
+              print(f"{row['workflow_run_id']}\t{row['artifact']}\t{row['artifact_id']}")
+          PY
+          )
+      - name: Build exact source manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          selected=json.loads(next(Path('receipt').rglob('selected_artifacts.json')).read_text())
+          manifest=[]
+          for row in selected:
+              artifact_id=int(row['artifact_id'])
+              expected=[name for name in row['candidate_files'].split('|') if name.endswith('.parquet')]
+              candidates=[]
+              for name in expected:
+                  candidates.extend(Path('sources', str(artifact_id)).rglob(name))
+              if len(candidates) != 1:
+                  raise SystemExit(f'{artifact_id}: expected exactly one source parquet, found {len(candidates)}')
+              manifest.append({'artifact_id':artifact_id,'path':str(candidates[0].resolve())})
+          if len(manifest) != 15:
+              raise SystemExit(f'expected 15 MFL source artifacts, got {len(manifest)}')
+          Path('mfl_outcome_source_manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
+          PY
+      - name: Build read-only null-fill candidate overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/build_mfl_outcome_classification_delta.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --manifest mfl_outcome_source_manifest.json \
+            --out mfl_outcome_null_fill_delta.parquet \
+            --report mfl_outcome_null_fill_report.json
+      - name: Fail fast on cache, schema, row, or ops mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, hashlib, json
+          from pathlib import Path
+          before=json.loads(Path('prestate.json').read_text())
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          assert [r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()] == before['schema']
+          assert int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]) == before['rows']
+          con.close()
+          digest=hashlib.sha256()
+          with Path('research_public_lake/ops_cache.duckdb').open('rb') as handle:
+              for block in iter(lambda: handle.read(1024 * 1024), b''):
+                  digest.update(block)
+          assert digest.hexdigest() == Path('ops_before.sha256').read_text().split()[0]
+          report=json.loads(Path('mfl_outcome_null_fill_report.json').read_text())
+          assert report['cache_mutated'] is False
+          assert report['new_lineage'] is False
+          assert report['canonical_schema_unchanged'] is True
+          assert report['unmatched_canonical_keys'] == 0
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-mfl-outcome-null-fill-candidate-${{ github.run_id }}
+          path: |
+            mfl_outcome_source_manifest.json
+            mfl_outcome_null_fill_delta.parquet
+            mfl_outcome_null_fill_report.json
+            prestate.json
+            ops_before.sha256
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 0
