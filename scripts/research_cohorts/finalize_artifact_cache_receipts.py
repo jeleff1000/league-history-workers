@@ -252,11 +252,16 @@ def _audit_raw_team_signals(
         manager_guid = f"NULLIF(TRIM(CAST({_quoted('manager_guid')} AS VARCHAR)), '')" if "manager_guid" in raw_columns else "NULL::VARCHAR"
         franchise_id = f"NULLIF(TRIM(CAST({_quoted('franchise_id')} AS VARCHAR)), '')" if "franchise_id" in raw_columns else "NULL::VARCHAR"
         platform = f"LOWER(NULLIF(TRIM(CAST({_quoted('platform')} AS VARCHAR)), ''))" if "platform" in raw_columns else "NULL::VARCHAR"
+        manager_key = (
+            f"NULLIF(REGEXP_REPLACE(TRIM(LOWER(CAST({_quoted('manager')} AS VARCHAR))), '\\s+', ' ', 'g'), '')"
+            if "manager" in raw_columns else "NULL::VARCHAR"
+        )
         terms = [
             f"{artifact_id}::BIGINT AS artifact_id",
             *(_quoted(key) for key in ["db_name", "year", "week"]),
-            f"CASE WHEN {platform}='mfl' AND COALESCE({manager_guid}, {franchise_id}) IS NOT NULL "
-            f"THEN COALESCE({manager_guid}, {franchise_id}) ELSE {raw_team_key} END AS canonical_team_key",
+             f"CASE WHEN {platform}='mfl' AND COALESCE({manager_guid}, {franchise_id}) IS NOT NULL "
+             f"THEN COALESCE({manager_guid}, {franchise_id}) ELSE {raw_team_key} END AS canonical_team_key",
+             f"{manager_key} AS manager_key",
         ]
         for source, raw_column in RAW_TEAM_SIGNAL_COLUMNS.items():
             target = TEAM_FIELDS[source]
@@ -289,16 +294,53 @@ def _audit_raw_team_signals(
     # The old outer join let DuckDB choose the 269M-row player relation as the
     # hash-build side. Materialize source-matched player rows with an inner
     # join, then identify unmatched source keys from that small match relation.
+    target_manager_match = (
+        "LOWER(TRIM(CAST(p.manager AS VARCHAR))) IS NOT DISTINCT FROM e.manager_key"
+        if "manager" in target_columns else "FALSE"
+    )
+    con.execute("""
+        CREATE OR REPLACE TEMP TABLE raw_team_signal_manager_counts AS
+        SELECT artifact_id, db_name, year, week, manager_key,
+               COUNT(DISTINCT canonical_team_key) AS source_team_count
+        FROM raw_team_signal_evidence
+        WHERE manager_key IS NOT NULL
+        GROUP BY 1,2,3,4,5
+    """)
     con.execute(f"""
-        CREATE OR REPLACE TEMP TABLE raw_team_signal_matched_keys AS
-        SELECT DISTINCT e.artifact_id, e.db_name, e.year, e.week,
-                        e.canonical_team_key AS team_key
+        CREATE OR REPLACE TEMP TABLE raw_team_signal_resolved_keys AS
+        SELECT e.artifact_id, e.db_name, e.year, e.week, e.canonical_team_key,
+               e.manager_key,
+               CASE
+                 WHEN EXISTS (
+                   SELECT 1 FROM {target_relation} p
+                   WHERE e.canonical_team_key IS NOT NULL
+                     AND p.db_name IS NOT DISTINCT FROM e.db_name
+                     AND p."year" IS NOT DISTINCT FROM e."year"
+                     AND p.week IS NOT DISTINCT FROM e.week
+                     AND p.team_key IS NOT DISTINCT FROM e.canonical_team_key
+                 ) THEN 'team_key'
+                 WHEN mc.source_team_count=1 AND EXISTS (
+                   SELECT 1 FROM {target_relation} p
+                   WHERE p.db_name IS NOT DISTINCT FROM e.db_name
+                     AND p."year" IS NOT DISTINCT FROM e."year"
+                     AND p.week IS NOT DISTINCT FROM e.week
+                     AND {target_manager_match}
+                 ) THEN 'unique_manager'
+                 ELSE NULL
+               END AS match_strategy
         FROM raw_team_signal_evidence e
-        JOIN {target_relation} p ON e.canonical_team_key IS NOT NULL
-          AND p.db_name IS NOT DISTINCT FROM e.db_name
-          AND p."year" IS NOT DISTINCT FROM e."year"
-          AND p.week IS NOT DISTINCT FROM e.week
-          AND p.team_key IS NOT DISTINCT FROM e.canonical_team_key
+        LEFT JOIN raw_team_signal_manager_counts mc
+          ON mc.artifact_id=e.artifact_id
+         AND mc.db_name IS NOT DISTINCT FROM e.db_name
+         AND mc.year IS NOT DISTINCT FROM e.year
+         AND mc.week IS NOT DISTINCT FROM e.week
+         AND mc.manager_key IS NOT DISTINCT FROM e.manager_key
+    """)
+    con.execute("""
+        CREATE OR REPLACE TEMP TABLE raw_team_signal_matched_keys AS
+        SELECT DISTINCT artifact_id, db_name, year, week, canonical_team_key AS team_key
+        FROM raw_team_signal_resolved_keys
+        WHERE match_strategy IS NOT NULL
     """)
     player_fields = ", ".join(
         f"p.{_quoted(target)} AS {_quoted('canonical__' + target)}"
@@ -308,11 +350,21 @@ def _audit_raw_team_signals(
         CREATE OR REPLACE TEMP TABLE raw_team_signal_player_matches AS
         SELECT e.*, {player_fields}
         FROM raw_team_signal_evidence e
-        JOIN {target_relation} p ON e.canonical_team_key IS NOT NULL
-          AND p.db_name IS NOT DISTINCT FROM e.db_name
-          AND p."year" IS NOT DISTINCT FROM e."year"
-          AND p.week IS NOT DISTINCT FROM e.week
-          AND p.team_key IS NOT DISTINCT FROM e.canonical_team_key
+        JOIN raw_team_signal_resolved_keys r
+          ON r.artifact_id=e.artifact_id
+         AND r.db_name IS NOT DISTINCT FROM e.db_name
+         AND r.year IS NOT DISTINCT FROM e.year
+         AND r.week IS NOT DISTINCT FROM e.week
+         AND r.canonical_team_key IS NOT DISTINCT FROM e.canonical_team_key
+        JOIN {target_relation} p
+          ON p.db_name IS NOT DISTINCT FROM e.db_name
+         AND p."year" IS NOT DISTINCT FROM e."year"
+         AND p.week IS NOT DISTINCT FROM e.week
+         AND (
+           (r.match_strategy='team_key' AND p.team_key IS NOT DISTINCT FROM e.canonical_team_key)
+           OR (r.match_strategy='unique_manager' AND {target_manager_match})
+         )
+        WHERE r.match_strategy IS NOT NULL
     """)
     match_terms: list[str] = []
     unmatched_terms: list[str] = []

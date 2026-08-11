@@ -153,8 +153,8 @@ def test_receipt_preserves_prior_artifact_readbacks_when_overlaying_raw_signals(
     assert rows[43]["cache_match_cells"] == 1
 
 
-def test_receipt_requires_team_key_when_raw_team_source_supplies_one(tmp_path: Path) -> None:
-    """A manager-name match must never override a supplied, mismatched team key."""
+def test_receipt_fans_unique_raw_manager_when_team_key_is_rewritten(tmp_path: Path) -> None:
+    """A unique source manager can bridge a rewritten historical team key."""
     from scripts.research_cohorts.finalize_artifact_cache_receipts import build_receipts
 
     base = tmp_path / "base.duckdb"
@@ -182,8 +182,39 @@ def test_receipt_requires_team_key_when_raw_team_source_supplies_one(tmp_path: P
     )
 
     row = result["rows"][0]
+    assert row["final_status"] == "cache_verified"
+    assert row["cache_match_cells"] == 1
+    assert row["unmatched_cache_cells"] == 0
+
+
+def test_receipt_blocks_manager_only_fanout_for_multi_team_owner(tmp_path: Path) -> None:
+    """Two raw teams for one manager-week are ambiguous and must stay unmatched."""
+    from scripts.research_cohorts.finalize_artifact_cache_receipts import build_receipts
+
+    base = tmp_path / "base.duckdb"
+    _base_cache(base)
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({"rows": [{
+        "artifact_id": 58, "artifact": "raw-team", "candidate_delta_rows": 1,
+        "candidate_fields": ["win"], "dispositions": ["team_week_signal_candidate"],
+    }]}))
+    raw = tmp_path / "raw-team.parquet"
+    _write_parquet(raw, [
+        {"db_name": "league", "year": 2024, "week": 15, "team_key": "a", "manager": "mgr", "win": 1},
+        {"db_name": "league", "year": 2024, "week": 15, "team_key": "b", "manager": "mgr", "win": 1},
+    ])
+    manifest = tmp_path / "raw-team-manifest.json"
+    manifest.write_text(json.dumps([{"artifact_id": 58, "path": str(raw)}]))
+
+    result = build_receipts(
+        ledger_path=ledger, base_path=base, team_delta=None, exact_delta=None,
+        structured_delta=None, settings_delta=None, team_signal_manifest=manifest,
+        out_path=tmp_path / "receipts.json",
+    )
+
+    row = result["rows"][0]
     assert row["final_status"] == "unmatched_cache_key"
-    assert row["unmatched_cache_cells"] == 1
+    assert row["unmatched_cache_cells"] == 2
 
 
 def test_receipt_fans_mfl_manager_guid_signal_to_all_matching_player_rows(tmp_path: Path) -> None:

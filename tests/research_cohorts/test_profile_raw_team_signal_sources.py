@@ -58,6 +58,7 @@ def test_profile_batches_exact_team_key_checks_without_mutating_cache(tmp_path: 
         "unmatched_source_team_keys": 0,
         "matched_by_mfl_manager_guid": 0,
         "matched_by_manager_team_name": 0,
+        "matched_by_unique_manager": 0,
         "matched_source_player_rows": 2,
     }
     assert by_id[11]["source_team_rows"] == 2
@@ -170,3 +171,68 @@ def test_profile_reports_source_league_weeks_present_before_identity_resolution(
 
     assert row["league_week_overlap_keys"] == 1
     assert row["league_week_absent_keys"] == 1
+
+
+def test_profile_fans_unique_raw_manager_to_cache_players_when_team_name_is_absent(tmp_path: Path) -> None:
+    """Manager-only is safe only when one source team owns that manager-week."""
+    from scripts.research_cohorts.profile_raw_team_signal_sources import profile
+
+    base = tmp_path / "base.duckdb"
+    con = duckdb.connect(str(base))
+    con.execute("CREATE SCHEMA public")
+    con.execute("""
+        CREATE TABLE public.player_fantasy AS
+        SELECT 'league'::VARCHAR AS db_name, 2024::INTEGER AS year,
+               1::INTEGER AS week, NULL::VARCHAR AS team_key,
+               'manager-a'::VARCHAR AS manager, NULL::VARCHAR AS team_name,
+               'p1'::VARCHAR AS NFL_player_id
+        UNION ALL
+        SELECT 'league', 2024, 1, NULL, 'manager-a', NULL, 'p2'
+    """)
+    con.close()
+    raw = tmp_path / "raw.parquet"
+    _parquet(raw, [{
+        "db_name": "league", "year": 2024, "week": 1,
+        "team_key": "source-team", "manager": "manager-a",
+        "team_name": "source team",
+    }])
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps([{"artifact_id": 15, "path": str(raw)}]))
+
+    row = profile(base=base, manifest=manifest)["rows"][0]
+
+    assert row["matched_source_team_keys"] == 1
+    assert row["matched_source_player_rows"] == 2
+    assert row["matched_by_unique_manager"] == 1
+
+
+def test_profile_blocks_manager_only_fanout_for_multi_team_source_manager(tmp_path: Path) -> None:
+    """A manager with two raw teams that week is not a safe player-team bridge."""
+    from scripts.research_cohorts.profile_raw_team_signal_sources import profile
+
+    base = tmp_path / "base.duckdb"
+    con = duckdb.connect(str(base))
+    con.execute("CREATE SCHEMA public")
+    con.execute("""
+        CREATE TABLE public.player_fantasy AS
+        SELECT 'league'::VARCHAR AS db_name, 2024::INTEGER AS year,
+               1::INTEGER AS week, NULL::VARCHAR AS team_key,
+               'manager-a'::VARCHAR AS manager, NULL::VARCHAR AS team_name,
+               'p1'::VARCHAR AS NFL_player_id
+    """)
+    con.close()
+    raw = tmp_path / "raw.parquet"
+    _parquet(raw, [
+        {"db_name": "league", "year": 2024, "week": 1,
+         "team_key": "source-team-a", "manager": "manager-a"},
+        {"db_name": "league", "year": 2024, "week": 1,
+         "team_key": "source-team-b", "manager": "manager-a"},
+    ])
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps([{"artifact_id": 16, "path": str(raw)}]))
+
+    row = profile(base=base, manifest=manifest)["rows"][0]
+
+    assert row["matched_source_team_keys"] == 0
+    assert row["matched_source_player_rows"] == 0
+    assert row["matched_by_unique_manager"] == 0
