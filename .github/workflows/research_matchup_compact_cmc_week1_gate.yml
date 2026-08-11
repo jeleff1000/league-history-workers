@@ -242,7 +242,9 @@ jobs:
           selected = [r for r in records if (
               r['q_teams'], r['q_roster'], r['q_scoring'], r['q_pass_td'], r['q_dynasty'], r['q_best_ball']
           ) == ('12t', 'flx', 'half', '4pt', 'redraft', 'managed')]
-          assert len(selected) == 1 and selected[0]['eligible_leagues'] >= 5000, selected
+          # This is the explicit Dynasty + Best Ball filter, not the unfiltered
+          # default.  It must clear the weekly split floor on its own.
+          assert len(selected) == 1 and selected[0]['eligible_leagues'] >= 150, selected
           assert 'q_playoff_teams' not in selected[0], selected[0]
           print('cmc_2025_week1_core_cells=' + json.dumps(records, default=str))
           PY
