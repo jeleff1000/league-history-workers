@@ -65,11 +65,14 @@ jobs:
           python scripts/research_cohorts/audit_settings_dimension_candidates.py \
             --base research_public_lake/corpus_snapshot.duckdb \
             --candidates settings_candidates \
-            --out settings_dimension_audit.json
+            --out settings_dimension_audit.json \
+            --delta-out settings_promotable_delta.parquet
       - uses: actions/upload-artifact@v4
         with:
           name: research-settings-dimension-audit-${{ github.run_id }}
-          path: settings_dimension_audit.json
+          path: |
+            settings_dimension_audit.json
+            settings_promotable_delta.parquet
           if-no-files-found: error
           retention-days: 90
           compression-level: 0
