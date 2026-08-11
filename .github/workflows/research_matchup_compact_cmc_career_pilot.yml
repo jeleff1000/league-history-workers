@@ -1,0 +1,102 @@
+name: Research matchup compact CMC career pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  contents: read
+
+jobs:
+  career:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - name: Build and gate CMC compact career cells
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code
+        run: |
+          python - <<'PY'
+          import duckdb, json
+          from scripts.research_cohorts.compact_matchup_cells import (
+              materialize_career_compact_outer_rows,
+              materialize_season_bracket_grade_position_batch,
+              materialize_season_compact_outer_rows,
+              materialize_season_core_cohort_position_batch,
+          )
+
+          c = duckdb.connect()
+          c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          c.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
+          first = True
+          for year in range(2017, 2026):
+              core = f'rb_core_{year}'
+              grade = f'rb_grade_{year}'
+              outer = f'rb_outer_{year}'
+              materialize_season_core_cohort_position_batch(
+                  c, source_table='lake.public.player_fantasy',
+                  nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+                  output_table=core, year=year, position='RB', split_threshold=50,
+              )
+              materialize_season_bracket_grade_position_batch(
+                  c, source_table='lake.public.player_fantasy',
+                  nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+                  output_table=grade, year=year, position='RB', split_threshold=50,
+              )
+              materialize_season_compact_outer_rows(
+                  c, core_outer_table=core, grade_outer_table=grade, output_table=outer,
+              )
+              if first:
+                  c.execute(f'CREATE TABLE cmc_seasons AS SELECT * FROM {outer} WHERE NFL_player_id=\'00-0033280\'')
+                  first = False
+              else:
+                  c.execute(f'INSERT INTO cmc_seasons SELECT * FROM {outer} WHERE NFL_player_id=\'00-0033280\'')
+          assert c.execute('SELECT COUNT(*) FROM cmc_seasons').fetchone()[0] == 9
+          materialize_career_compact_outer_rows(
+              c, season_compact_table='cmc_seasons', output_table='cmc_career',
+          )
+          core = c.execute("""
+            SELECT cell.qualifying_seasons, cell.active_weeks, cell.inactive_weeks,
+              cell.expected_starts, cell.expected_wins, cell.expected_losses
+            FROM cmc_career, UNNEST(cohort_cells) AS u(cell)
+            WHERE cell.q_teams='ALL' AND cell.q_roster='ALL' AND cell.q_scoring='ALL'
+              AND cell.q_pass_td='ALL' AND cell.q_dynasty='ALL' AND cell.q_best_ball='ALL'
+          """).fetchone()
+          grade = c.execute("""
+            SELECT cell.champ_rate_pct, cell.expected_champs,
+              cell.playoff_rate_pct, cell.expected_playoffs
+            FROM cmc_career, UNNEST(grade_cells) AS u(cell)
+            WHERE cell.q_playoff_teams='ALL'
+          """).fetchone()
+          assert core is not None and grade is not None
+          assert core[:3] == (9, 65, 46), core
+          assert abs(core[4] + core[5] - core[3]) < 1e-8, core
+          season_grade = c.execute("""
+            SELECT AVG(cell.champ_rate_pct), SUM(cell.champ_rate_pct/100.0),
+              AVG(cell.playoff_rate_pct), SUM(cell.playoff_rate_pct/100.0)
+            FROM cmc_seasons, UNNEST(grade_cells) AS u(cell)
+            WHERE cell.q_playoff_teams='ALL'
+          """).fetchone()
+          for actual, expected in zip(grade, season_grade, strict=True):
+              assert abs(actual - expected) < 1e-9, (grade, season_grade)
+          assert 0 <= grade[0] <= grade[2] < 100, grade
+          print('cmc_career=' + json.dumps({'core': core, 'grade': grade}))
+          PY
