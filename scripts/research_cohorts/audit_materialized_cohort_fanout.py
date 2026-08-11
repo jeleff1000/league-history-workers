@@ -46,6 +46,20 @@ DIMENSIONS = {
              + COALESCE(roster_DB_LB, 0) + COALESCE(roster_DL_LB, 0) > 0 THEN 'idp'
           WHEN COALESCE(roster_SUPER_FLEX, 0) > 0 THEN 'sflx'
           ELSE 'flx' END""",
+        "dependent_columns": {
+            "cohort_position_eligible": """CASE
+              WHEN CAST(year AS INTEGER) BETWEEN 2003 AND 2010 THEN 1
+              WHEN UPPER(TRIM(CAST(position AS VARCHAR))) IN ('QB','RB','WR','TE') THEN 1
+              WHEN UPPER(TRIM(CAST(position AS VARCHAR))) IN ('K','PK')
+                   AND COALESCE(roster_K, 0) > 0 THEN 1
+              WHEN UPPER(TRIM(CAST(position AS VARCHAR))) IN ('DEF','DST','D/ST')
+                   AND COALESCE(roster_DEF, 0) > 0 THEN 1
+              WHEN UPPER(TRIM(CAST(position AS VARCHAR))) NOT IN ('QB','RB','WR','TE','K','PK','DEF','DST','D/ST')
+                   AND COALESCE(roster_IDP, 0) + COALESCE(roster_DL, 0)
+                     + COALESCE(roster_LB, 0) + COALESCE(roster_DB, 0)
+                     + COALESCE(roster_DB_LB, 0) + COALESCE(roster_DL_LB, 0) > 0 THEN 1
+              ELSE 0 END""",
+        },
     },
     "best_ball": {
         "base": "cohort_best_ball",
@@ -172,6 +186,24 @@ def audit(base: Path, delta: Path) -> dict[str, Any]:
                 "expected_label_counts": labels,
                 "groups": groups,
             }
+            dependent_columns = spec.get("dependent_columns", {})
+            if dependent_columns:
+                dependent_report: dict[str, dict[str, Any]] = {}
+                for dependent_base, dependent_expected in dependent_columns.items():
+                    dependent_groups: dict[str, dict[str, int]] = {}
+                    for group in _groups_for(dependent_base):
+                        dependent_groups[group] = {
+                            "same_as_base": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS NOT DISTINCT FROM {_q(dependent_base)}"),
+                            "different_from_base": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS DISTINCT FROM {_q(dependent_base)}"),
+                            "matches_expected": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS NOT DISTINCT FROM ({dependent_expected})"),
+                            "mismatches_expected": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS DISTINCT FROM ({dependent_expected})"),
+                        }
+                    dependent_report[dependent_base] = {
+                        "base_matches": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(dependent_base)} IS NOT DISTINCT FROM ({dependent_expected})"),
+                        "base_mismatches": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(dependent_base)} IS DISTINCT FROM ({dependent_expected})"),
+                        "groups": dependent_groups,
+                    }
+                report["dimensions"][name]["dependent_columns"] = dependent_report
         return report
     finally:
         con.close()
