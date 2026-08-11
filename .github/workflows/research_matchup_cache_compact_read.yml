@@ -60,15 +60,15 @@ jobs:
           """)
           emit('ops_player_lookup_team_snap_columns', """
               SELECT column_name, data_type
-              FROM ops.information_schema.columns
-              WHERE table_schema='nfl_historical' AND table_name='nfl_player_stats_all'
+              FROM information_schema.columns
+              WHERE table_catalog='ops' AND table_schema='nfl_historical' AND table_name='nfl_player_stats_all'
                 AND (lower(column_name) LIKE '%team%' OR lower(column_name) LIKE '%snap%')
               ORDER BY ordinal_position
           """)
           emit('cohort_fanout_columns', """
               SELECT column_name, data_type
-              FROM lake.information_schema.columns
-              WHERE table_schema='public' AND table_name='player_fantasy'
+              FROM information_schema.columns
+              WHERE table_catalog='lake' AND table_schema='public' AND table_name='player_fantasy'
                 AND (column_name LIKE 'cohort\\_%' ESCAPE '\\' OR column_name='made_playoffs')
               ORDER BY ordinal_position
           """)
