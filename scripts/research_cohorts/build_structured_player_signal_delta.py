@@ -121,6 +121,20 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
     """)
     unmatched = int(con.execute("SELECT COUNT(*) FROM matched WHERE canonical_rows = 0").fetchone()[0])
     ambiguous = int(con.execute("SELECT COUNT(*) FROM matched WHERE canonical_rows > 1").fetchone()[0])
+    ambiguous_identity_nullness = {
+        "null_nfl_player_id": int(con.execute(
+            "SELECT COUNT(*) FROM matched WHERE canonical_rows > 1 AND NFL_player_id IS NULL"
+        ).fetchone()[0]),
+        "null_manager": int(con.execute(
+            "SELECT COUNT(*) FROM matched WHERE canonical_rows > 1 AND manager IS NULL"
+        ).fetchone()[0]),
+        "both_null": int(con.execute(
+            "SELECT COUNT(*) FROM matched WHERE canonical_rows > 1 AND NFL_player_id IS NULL AND manager IS NULL"
+        ).fetchone()[0]),
+        "fully_specified": int(con.execute(
+            "SELECT COUNT(*) FROM matched WHERE canonical_rows > 1 AND NFL_player_id IS NOT NULL AND manager IS NOT NULL"
+        ).fetchone()[0]),
+    }
 
     report_fields: dict[str, dict[str, int]] = {}
     filters: list[str] = []
@@ -173,6 +187,7 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
         "source_conflicting_player_keys": source_conflicts,
         "unmatched_canonical_player_keys": unmatched,
         "ambiguous_canonical_player_keys": ambiguous,
+        "ambiguous_identity_nullness": ambiguous_identity_nullness,
         "delta_rows": delta_rows,
         "supported_fields": report_fields,
     }

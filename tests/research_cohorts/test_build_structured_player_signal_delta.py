@@ -50,6 +50,7 @@ def test_structured_player_delta_keeps_only_unambiguous_null_cell_repairs(tmp_pa
     assert result["new_lineage"] is False
     assert result["delta_rows"] == 2
     assert result["ambiguous_canonical_player_keys"] == 1
+    assert result["ambiguous_identity_nullness"]["fully_specified"] == 1
     assert result["source_conflicting_player_keys"] == 1
     assert result["supported_fields"]["win"]["cache_null_candidates"] == 2
     assert result["supported_fields"]["win"]["cache_conflicts"] == 1
