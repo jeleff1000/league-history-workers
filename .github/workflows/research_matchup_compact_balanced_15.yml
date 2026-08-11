@@ -49,6 +49,7 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       TASKS: ${{ toJSON(matrix.tasks) }}
+      PYTHONPATH: ${{ github.workspace }}/code
     steps:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5
@@ -89,6 +90,8 @@ jobs:
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    env:
+      PYTHONPATH: ${{ github.workspace }}/code
     steps:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5
