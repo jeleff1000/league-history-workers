@@ -191,23 +191,41 @@ def audit(base: Path, delta: Path) -> dict[str, Any]:
                 dependent_report: dict[str, dict[str, Any]] = {}
                 for dependent_base, dependent_expected in dependent_columns.items():
                     dependent_groups: dict[str, dict[str, int]] = {}
-                    for group in _groups_for(dependent_base):
-                        position_value_counts: dict[str, dict[str, int]] = {}
-                        for position, value, count in con.execute(f"""
-                          SELECT COALESCE(NULLIF(TRIM(CAST(position AS VARCHAR)), ''), '<NULL>') AS position,
-                                 COALESCE(CAST({_q(group)} AS VARCHAR), '<NULL>') AS value,
-                                 COUNT(*) AS n
-                          FROM {name}_players
-                          GROUP BY 1, 2 ORDER BY 1, 2
-                        """).fetchall():
-                            position_value_counts.setdefault(str(position), {})[str(value)] = int(count)
+                    groups = _groups_for(dependent_base)
+                    structs = ", ".join(
+                        f"struct_pack(group_name := '{group}', value := COALESCE(CAST({_q(group)} AS VARCHAR), '<NULL>'))"
+                        for group in groups
+                    )
+                    # One scan of the affected roster rows replaces 13 x 5 repeated
+                    # scans.  Include base/expected in the grouping so Python can derive
+                    # every equality count without reading the cache again.
+                    rows = con.execute(f"""
+                      SELECT item.group_name,
+                             COALESCE(NULLIF(TRIM(CAST(position AS VARCHAR)), ''), '<NULL>') AS position,
+                             item.value,
+                             COALESCE(CAST({_q(dependent_base)} AS VARCHAR), '<NULL>') AS base_value,
+                             COALESCE(CAST(({dependent_expected}) AS VARCHAR), '<NULL>') AS expected_value,
+                             COUNT(*) AS n
+                      FROM {name}_players
+                      CROSS JOIN UNNEST([{structs}]) AS u(item)
+                      GROUP BY 1, 2, 3, 4, 5
+                    """).fetchall()
+                    for group in groups:
                         dependent_groups[group] = {
-                            "same_as_base": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS NOT DISTINCT FROM {_q(dependent_base)}"),
-                            "different_from_base": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS DISTINCT FROM {_q(dependent_base)}"),
-                            "matches_expected": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS NOT DISTINCT FROM ({dependent_expected})"),
-                            "mismatches_expected": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(group)} IS DISTINCT FROM ({dependent_expected})"),
-                            "position_value_counts": position_value_counts,
+                            "same_as_base": 0,
+                            "different_from_base": 0,
+                            "matches_expected": 0,
+                            "mismatches_expected": 0,
+                            "position_value_counts": {},
                         }
+                    for group, position, value, base_value, expected_value, count in rows:
+                        entry = dependent_groups[str(group)]
+                        n = int(count)
+                        entry["same_as_base"] += n if value == base_value else 0
+                        entry["different_from_base"] += n if value != base_value else 0
+                        entry["matches_expected"] += n if value == expected_value else 0
+                        entry["mismatches_expected"] += n if value != expected_value else 0
+                        entry["position_value_counts"].setdefault(str(position), {})[str(value)] = n
                     dependent_report[dependent_base] = {
                         "base_matches": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(dependent_base)} IS NOT DISTINCT FROM ({dependent_expected})"),
                         "base_mismatches": _count(con, f"SELECT COUNT(*) FROM {name}_players WHERE {_q(dependent_base)} IS DISTINCT FROM ({dependent_expected})"),
