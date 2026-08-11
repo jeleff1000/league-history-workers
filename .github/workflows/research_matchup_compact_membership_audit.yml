@@ -106,12 +106,39 @@ jobs:
             WHERE o.NFL_player_id IS NULL
             ORDER BY c.position,c.NFL_player_id LIMIT 50
           ''').fetchall()
+          stats_columns = {
+            row[1].lower(): row[1]
+            for row in con.execute("PRAGMA table_info('ops.nfl_historical.nfl_player_stats_all')").fetchall()
+          }
+          selected_metadata = [
+            (alias, stats_columns[alias])
+            for alias in ('player', 'player_name', 'position', 'nfl_team')
+            if alias in stats_columns
+          ]
+          metadata_expr = ','.join(
+            f'MAX(CAST(s."{column}" AS VARCHAR)) AS "{alias}"'
+            for alias, column in selected_metadata
+          )
+          stat_bearing_residuals = con.execute(f'''
+            SELECT c.position AS cache_position,c.NFL_player_id{',' if metadata_expr else ''}{metadata_expr}
+            FROM candidates c
+            LEFT JOIN output o USING(NFL_player_id)
+            INNER JOIN ops.nfl_historical.nfl_player_stats_all s
+              ON CAST(s.NFL_player_id AS VARCHAR)=c.NFL_player_id
+             AND CAST(s.year AS INTEGER)=?
+             AND s.week IS NOT NULL
+             AND COALESCE(s.season_type,'REG')='REG'
+            WHERE o.NFL_player_id IS NULL
+            GROUP BY 1,2 ORDER BY 1,2
+          ''', [year]).fetchall()
           evidence = {
             'year':year,'candidates':totals[0],'output':totals[1],
             'missing_raw_rostered_ids':totals[2],
             'missing_with_regular_stats':totals[3],
             'unexpected_output':totals[4],
             'missing_by_position':missing_by_position,'samples':samples,
+            'stats_metadata_columns':selected_metadata,
+            'stat_bearing_residuals':stat_bearing_residuals,
           }
           print('compact_membership_audit='+json.dumps(evidence))
           assert totals[4] == 0, evidence
