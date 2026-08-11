@@ -247,8 +247,16 @@ def _audit_raw_team_signals(
             continue
         terms = [
             f"{artifact_id}::BIGINT AS artifact_id",
-            *(_quoted(key) for key in ["db_name", "year", "week", "team_key"]),
+            *(_quoted(key) for key in ["db_name", "year", "week"]),
         ]
+        if {"platform", "manager_guid"} <= raw_columns:
+            terms.append(
+                "CASE WHEN lower(CAST(\"platform\" AS VARCHAR)) = 'mfl' "
+                "AND \"manager_guid\" IS NOT NULL THEN \"manager_guid\" "
+                "ELSE \"team_key\" END AS \"team_key\""
+            )
+        else:
+            terms.append("\"team_key\"")
         for source, raw_column in RAW_TEAM_SIGNAL_COLUMNS.items():
             target = TEAM_FIELDS[source]
             cast_type = target_types.get(target, RAW_TEAM_SIGNAL_FALLBACK_TYPES[source])

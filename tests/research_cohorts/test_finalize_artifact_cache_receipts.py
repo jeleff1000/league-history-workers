@@ -151,3 +151,36 @@ def test_receipt_preserves_prior_artifact_readbacks_when_overlaying_raw_signals(
     rows = {row["artifact_id"]: row for row in result["rows"]}
     assert rows[43]["final_status"] == "cache_verified"
     assert rows[43]["cache_match_cells"] == 1
+
+
+def test_receipt_uses_mfl_manager_guid_as_the_canonical_team_key(tmp_path: Path) -> None:
+    """Replacing MFL manager-guid mapping with display team_key must make this unmatched."""
+    from scripts.research_cohorts.finalize_artifact_cache_receipts import build_receipts
+
+    base = tmp_path / "base.duckdb"
+    _base_cache(base)
+    con = duckdb.connect(str(base))
+    con.execute("UPDATE public.player_fantasy SET platform='mfl', team_key='mfl_team_123_0001'")
+    con.close()
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({"rows": [{
+        "artifact_id": 55, "artifact": "mfl-team", "candidate_delta_rows": 1,
+        "candidate_fields": ["win"], "dispositions": ["team_week_signal_candidate"],
+    }]}))
+    raw = tmp_path / "mfl-team.parquet"
+    _write_parquet(raw, [{
+        "db_name": "league", "year": 2024, "week": 15, "platform": "mfl",
+        "team_key": "0001", "manager_guid": "mfl_team_123_0001", "win": 1,
+    }])
+    manifest = tmp_path / "mfl-team-manifest.json"
+    manifest.write_text(json.dumps([{"artifact_id": 55, "path": str(raw)}]))
+
+    result = build_receipts(
+        ledger_path=ledger, base_path=base, team_delta=None, exact_delta=None,
+        structured_delta=None, settings_delta=None, team_signal_manifest=manifest,
+        out_path=tmp_path / "receipts.json",
+    )
+
+    row = result["rows"][0]
+    assert row["final_status"] == "cache_verified"
+    assert row["cache_match_cells"] == 1
