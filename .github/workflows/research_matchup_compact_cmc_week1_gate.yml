@@ -1,0 +1,82 @@
+name: Research matchup compact CMC week 1 gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  contents: read
+
+jobs:
+  cache_only_gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - name: Run tested compact outer-row primitive against cache
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code
+        run: |
+          python - <<'PY'
+          import duckdb, json
+          from scripts.research_cohorts.compact_matchup_cells import materialize_weekly_outer_rows
+
+          c = duckdb.connect()
+          c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          materialize_weekly_outer_rows(
+              c,
+              source_table='lake.public.player_fantasy',
+              output_table='cmc_week1_outer',
+              year=2025,
+              week=1,
+              player_id='00-0033280',
+          )
+          rows = c.execute("""
+            SELECT o.NFL_player_id, o.year, o.week, o.position,
+              cell.cohort_key, cell.rostered_leagues, cell.started_leagues,
+              cell.eligible_leagues, cell.valid_started_outcomes,
+              cell.win_equivalent, cell.roster_rate_pct, cell.start_rate_pct,
+              cell.win_rate_pct, cell.expected_starts, cell.expected_wins,
+              cell.expected_losses, cell.clutch_weekly_average
+            FROM cmc_week1_outer o, UNNEST(o.cohort_cells) AS u(cell)
+          """).fetchall()
+          assert len(rows) == 1, rows
+          columns = [d[0] for d in c.description]
+          row = dict(zip(columns, rows[0]))
+          expected = {
+              'NFL_player_id': '00-0033280', 'year': 2025, 'week': 1,
+              'position': 'RB', 'cohort_key': 'ALL',
+              'rostered_leagues': 9768, 'started_leagues': 9600,
+              'eligible_leagues': 9838, 'valid_started_outcomes': 9578,
+              'win_equivalent': 6019.0,
+          }
+          for key, value in expected.items():
+              assert row[key] == value, (key, row, expected)
+          floats = {
+              'roster_rate_pct': 99.28847326692417,
+              'start_rate_pct': 97.58080910754218,
+              'win_rate_pct': 62.841929421591146,
+              'expected_starts': 0.9758080910754219,
+              'expected_wins': 0.6132166318837924,
+          }
+          for key, value in floats.items():
+              assert abs(row[key] - value) < 1e-9, (key, row, floats)
+          print('cmc_2025_week1_compact_outer=' + json.dumps(row, default=str))
+          PY
