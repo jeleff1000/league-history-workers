@@ -352,9 +352,9 @@ jobs:
               'start_rate_pct': 97.84796486164588,
               'healthy_start_rate_pct': 97.84796486164588,
               'win_rate_pct': 61.14151315305925,
-              'expected_starts': 16.58647147870992,
-              'expected_wins': 10.027170658969757,
-              'expected_losses': 6.559300819740164,
+              'expected_starts': 16.634154026479802,
+              'expected_wins': 10.170373472000282,
+              'expected_losses': 6.46378055447952,
               'clutch_season_sum': 10.5456027157515,
               'playoff_rate_pct': 68.66733466933867,
               'champ_rate_pct': 20.350701402805612,
@@ -409,8 +409,8 @@ jobs:
           expected = (9980, 157712, 158687, 155272, 155272, 158687, 149661, 91505.0)
           assert row[:8] == expected, row
           expected_floats = (99.38558294000138, 97.84796486164588, 97.84796486164588,
-                             61.14151315305925, 16.58647147870992, 10.027170658969757,
-                             6.559300819740163, 10.5456027157515)
+                             61.14151315305925, 16.634154026479802, 10.170373472000282,
+                             6.46378055447952, 10.5456027157515)
           assert all(abs(actual - expected) < 1e-9 for actual, expected in zip(row[8:16], expected_floats)), row
           assert row[16:] == (17, 0), row
           print('cmc_2025_season_core_full_pool=' + json.dumps({

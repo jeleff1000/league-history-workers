@@ -65,5 +65,12 @@ jobs:
           assert cmc[14:] == (17, 0), cmc
           assert abs(cmc[10] - cmc[7] / 100.0 * cmc[14]) < 1e-9, cmc
           assert abs(cmc[11] + cmc[12] - cmc[10]) < 1e-9, cmc
+          expected_floats = (
+              99.38558294000138, 97.84796486164588, 97.84796486164588,
+              61.14151315305925, 16.634154026479802, 10.170373472000282,
+              6.46378055447952, 10.545602715751501,
+          )
+          for actual, want in zip(cmc[6:14], expected_floats, strict=True):
+              assert abs(actual - want) < 1e-9, (actual, want, cmc)
           print('cmc_2025_season_core=' + json.dumps(cmc))
           PY
