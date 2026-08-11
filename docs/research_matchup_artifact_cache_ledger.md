@@ -14,10 +14,10 @@ The source receipt SHA-256 is
 `df8a21d802928f3f0215bff49a272ff7168acb0a6412cc181fd94bd51cf8dbbd`.
 
 Direct source readbacks append their evidence to the same CSV; they do not
-create a cache or lineage. The latest is the read-only MFL manager-week fanout
-candidate build [31512049632](https://github.com/jeleff1000/league-history-workers/actions/runs/31512049632),
+create a cache or lineage. The latest is the read-only direct MFL player-key
+audit [31515802840](https://github.com/jeleff1000/league-history-workers/actions/runs/31515802840),
 receipt SHA-256
-`c157f3544dacab02e6fc6d8078141e97df009c7d6c4355b0bb5809814925f36d`.
+`4c7608c16ccd8cfc35390d5d3f1980ad02f955b221522451433caedabf5f5f24`.
 
 ## Receipt rules
 
@@ -50,7 +50,7 @@ Each row has an explicit `final_status` and `next_action`.
 | `not_data_bearing` | 3,927 | Aggregate/validation/metadata artifact; not a canonical-cell source. |
 | `candidate_provenance_not_found` | 709 | 5,504,005 declared candidate rows require direct source-file comparison. |
 | `unmatched_cache_key` | 9 | 1,306 candidate rows / 2,612 cells require team-key-to-player-row reconciliation. |
-| `candidate_built_pending_canonical_promotion` | 15 | MFL team-week evidence yielded 50,298 safe canonical player-row candidates; they are not yet in the cache. |
+| `partial_schema_blocked_cache_updates` | 15 | Direct MFL player-key audit found 82,466 supported null cells still missing, 1,987 conflicts to preserve, and 288,160 loss/tie cells blocked by the current schema. |
 
 The receipt workflow is read-only. It asserts, before and after the audit,
 that player schema, player-row count, and the ops-cache hash are unchanged;
@@ -73,29 +73,32 @@ an approved replacement transaction for the single canonical cache. It does
 not mean the candidate was applied, and it does not authorize a second
 lineage, a schema change, an ops-cache change, or a cache deletion.
 
-## MFL manager-week outcome candidate
+## MFL player-outcome evidence
 
 The 15 `mfl-player-outcome-classification-*` artifacts contain 1,359,202
-source records. The source is a **manager-week team signal**, not a player
-snapshot: target rows with a null player ID made a player-key join ambiguous.
-The correct fanout is `(db_name, year, week, manager)` to all matching existing
-canonical player rows.
+source records. Although the source does not contain a complete roster/player
+snapshot, it is **player-indexed outcome evidence**: its correct audit key is
+`(db_name, year, week, NFL_player_id, manager)`. The direct source readback is
+[31515802840](https://github.com/jeleff1000/league-history-workers/actions/runs/31515802840).
+It passed cache-schema, player-row-count, ops-hash, and no-new-lineage gates.
 
 | Evidence | Cells |
 | --- | ---: |
-| Unique MFL team-week source groups | 75,673 |
-| Source groups with no manager, quarantined | 7,559 |
-| Non-null-manager source groups with no canonical match | 0 |
-| Safe player-row candidates | 50,298 |
-| Win conflicts preserved | 2,361 |
-| Team-points conflicts preserved | 739 |
-| Candidate rows with null NFL player ID | 858 |
+| Source player rows | 1,359,202 |
+| Distinct exact player keys | 1,301,859 |
+| Source player rows with an exact canonical match | 1,359,202 |
+| Source player rows absent from cache | 0 |
+| Matching source cells already in cache | 379,062 |
+| Supported null cells still missing | 82,466 |
+| Existing non-null conflicts preserved | 1,987 |
+| Loss/tie cells blocked by current schema | 288,160 |
 
-The 15 CSV rows are now marked `candidate_built_pending_canonical_promotion`.
-No cache cell was changed by this receipt. These artifacts do **not** provide
-missing player records; they provide outcome cells for player records already
-in the canonical table. The next action is a canonical promotion that updates
-only these 50,298 candidate cells, followed by a cache readback.
+The former 50,298-row manager-week fanout candidate was incomplete: it was a
+safe lower bound, not the full direct player-key comparison. The ledger now
+marks all 15 artifacts `partial_schema_blocked_cache_updates`. No cache cell
+was changed by this receipt. The next action is to materialize and promote the
+82,466 exact-key, supported null-cell updates, then separately decide whether
+loss/tie belong in the frozen canonical schema and read the cache back.
 
 ## Open source-comparison worklist
 
