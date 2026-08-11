@@ -27,7 +27,13 @@ def _count(value: str | None) -> int:
     return int(value or 0)
 
 
-def materialize(ledger_csv: Path, ledger_json: Path, prior_receipts: Path) -> dict[str, int]:
+def materialize(
+    ledger_csv: Path,
+    ledger_json: Path,
+    prior_receipts: Path,
+    *,
+    exclude_artifact_ids: set[str] | None = None,
+) -> dict[str, int]:
     """Write full-ledger and receipt-seed JSON files without changing the CSV."""
     with ledger_csv.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
@@ -37,9 +43,11 @@ def materialize(ledger_csv: Path, ledger_json: Path, prior_receipts: Path) -> di
         raise SystemExit("artifact ledger contains a row without artifact_id")
 
     ledger_json.write_text(json.dumps({"rows": rows}, indent=2) + "\n", encoding="utf-8")
+    excluded = exclude_artifact_ids or set()
     prior_rows = [
         {"artifact_id": row["artifact_id"], **{column: _count(row.get(column)) for column in COUNT_COLUMNS}}
         for row in rows
+        if row["artifact_id"] not in excluded
     ]
     prior_receipts.write_text(json.dumps({"rows": prior_rows}, indent=2) + "\n", encoding="utf-8")
     return {"ledger_rows": len(rows), "prior_receipt_rows": len(prior_rows)}
@@ -50,8 +58,16 @@ def main() -> None:
     parser.add_argument("--ledger-csv", type=Path, required=True)
     parser.add_argument("--ledger-json", type=Path, required=True)
     parser.add_argument("--prior-receipts", type=Path, required=True)
+    parser.add_argument("--exclude-artifact-ids", default="")
     args = parser.parse_args()
-    print(json.dumps(materialize(args.ledger_csv, args.ledger_json, args.prior_receipts), sort_keys=True))
+    excluded = {value.strip() for value in args.exclude_artifact_ids.split(",") if value.strip()}
+    print(json.dumps(
+        materialize(
+            args.ledger_csv, args.ledger_json, args.prior_receipts,
+            exclude_artifact_ids=excluded,
+        ),
+        sort_keys=True,
+    ))
 
 
 if __name__ == "__main__":

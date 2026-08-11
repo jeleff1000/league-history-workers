@@ -76,13 +76,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p sources
-          # The checked-in ledger is the authoritative 9,479-artifact record.
-          # Do not consume Actions API quota downloading older copies before an
-          # exact source-artifact readback.
-          python scripts/research_cohorts/materialize_ledger_receipt_inputs.py \
-            --ledger-csv docs/research_matchup_artifact_cache_ledger.csv \
-            --ledger-json ledger_receipt_input.json \
-            --prior-receipts prior_receipts_input.json
           python - <<'PY'
           import csv, json, os
           from pathlib import Path
@@ -119,6 +112,14 @@ jobs:
               for row in rows:
                   handle.write(f"{row['workflow_run_id']}\t{row['artifact']}\t{row['artifact_id']}\n")
           PY
+          # Preserve receipt counts for every other artifact but replace (do
+          # not add to) the selected artifacts' stale prior readback counts.
+          selected_ids="$(cut -f3 selected_artifacts.tsv | paste -sd, -)"
+          python scripts/research_cohorts/materialize_ledger_receipt_inputs.py \
+            --ledger-csv docs/research_matchup_artifact_cache_ledger.csv \
+            --ledger-json ledger_receipt_input.json \
+            --prior-receipts prior_receipts_input.json \
+            --exclude-artifact-ids "$selected_ids"
           if [ "$DOWNLOAD_MODE" = source_run ]; then
             # For a large retained family, source-run download needs only one
             # workflow invocation per source run. The later manifest remains
