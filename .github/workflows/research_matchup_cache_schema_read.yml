@@ -41,8 +41,8 @@ jobs:
               print(f'DESCRIBE {name}=' + json.dumps(cols))
           print('ops_bye_tables=' + json.dumps(c.execute("""
               SELECT table_schema, table_name
-              FROM ops.information_schema.tables
-              WHERE lower(table_name) LIKE '%bye%'
+              FROM information_schema.tables
+              WHERE table_catalog='ops' AND lower(table_name) LIKE '%bye%'
               ORDER BY 1,2
           """).fetchall()))
           print('cmc_player_fantasy_weeks=' + json.dumps(c.execute("""
@@ -66,4 +66,3 @@ jobs:
               GROUP BY 1,2 ORDER BY 1,2
           """).fetchall()))
           PY
-
