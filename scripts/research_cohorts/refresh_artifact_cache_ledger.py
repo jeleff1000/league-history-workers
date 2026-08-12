@@ -14,16 +14,23 @@ from pathlib import Path
 
 
 def _next_action(receipt: dict) -> str:
-    if int(receipt.get("blocked_schema_cells", 0) or 0):
-        if int(receipt.get("cache_missing_cells", 0) or 0):
-            return "apply_supported_null_cell_updates; add_loss_tie_schema_then_readback"
-        return "add_loss_tie_schema_then_readback"
-    if int(receipt.get("cache_missing_cells", 0) or 0):
-        return "apply_strict_null_cell_updates_then_readback"
-    if int(receipt.get("cache_conflict_cells", 0) or 0):
-        return "preserve_conflicts_pending_source_precedence_adjudication"
-    if int(receipt.get("unmatched_cache_cells", 0) or 0):
-        return "reconcile_source_identity_or_close_source_only"
+    missing = int(receipt.get("cache_missing_cells", 0) or 0)
+    blocked = int(receipt.get("blocked_schema_cells", 0) or 0)
+    conflicts = int(receipt.get("cache_conflict_cells", 0) or 0)
+    unmatched = int(receipt.get("unmatched_cache_cells", 0) or 0)
+    actions: list[str] = []
+    if missing:
+        actions.append("apply_supported_null_cell_updates")
+    if blocked:
+        actions.append("add_loss_tie_schema_then_readback")
+    if conflicts:
+        actions.append("preserve_conflicts_pending_source_precedence_adjudication")
+    if unmatched:
+        actions.append("reconcile_source_identity_or_close_source_only")
+    if blocked and unmatched and not missing and not conflicts:
+        return "add_loss_tie_schema_then_reconcile_source_identity_or_close_source_only"
+    if actions:
+        return "; ".join(actions)
     return "closed_cache_verified"
 
 

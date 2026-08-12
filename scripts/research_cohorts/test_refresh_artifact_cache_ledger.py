@@ -1,7 +1,7 @@
 import csv
 import json
 
-from refresh_artifact_cache_ledger import refresh
+from refresh_artifact_cache_ledger import _next_action, refresh
 
 
 FIELDS = [
@@ -78,3 +78,12 @@ def test_refresh_records_current_direct_player_reaudit(tmp_path):
     assert row["unmatched_cache_cells"] == "2"
     assert row["final_status"] == "partial_schema_blocked_direct_identity"
     assert row["next_action"] == "add_loss_tie_schema_then_resolve_direct_identity_and_precedence_adjudication"
+
+
+def test_next_action_keeps_identity_closure_visible_with_loss_tie_schema_work():
+    assert _next_action({
+        "blocked_schema_cells": 4,
+        "cache_missing_cells": 0,
+        "cache_conflict_cells": 0,
+        "unmatched_cache_cells": 2,
+    }) == "add_loss_tie_schema_then_reconcile_source_identity_or_close_source_only"

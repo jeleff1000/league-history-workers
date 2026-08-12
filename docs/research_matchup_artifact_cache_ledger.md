@@ -198,6 +198,33 @@ validator fails if a row claims bridge evidence without positive row coverage,
 a candidate classification, and its source receipt. It does not call any
 candidate a completed bridge; that requires a separate cache-side join receipt.
 
+### Read-only team-signal bridge pilot
+
+The 15-artifact, exact-download pilot
+[`31566023441`](https://github.com/jeleff1000/league-history-workers/actions/runs/31566023441)
+tested the real team-to-player fan-out against the approved canonical cache.
+It restored the immutable cache read-only, downloaded only the selected source
+artifacts, and passed its cache-schema-row-count and ops-hash gates.
+
+| Measure | Result |
+| --- | ---: |
+| Source team-week rows | 12,838 |
+| Source team identities | 12,403 |
+| Deterministically resolved team identities | 5,515 |
+| Canonical player rows reached by those identities | 117,906 |
+| Supported source cells already equal to cache | 354,135 |
+| Supported cache-null cells | 0 |
+| Supported non-null conflicts | 0 |
+| Source cells blocked only by missing `loss`/`tie` schema | 25,676 |
+| Supported source cells without a resolved canonical recipient | 22,001 |
+
+This establishes two separate closure paths. Matched cells from this pilot do
+not need promotion because the cache already contains the same supported value.
+The remaining cells require either the approved `loss`/`tie` schema addition or
+a deterministic roster-membership bridge; they cannot be inferred from a
+league-week overlap alone. Each of the 15 selected CSV ledger rows now cites
+this receipt and carries both obligations where applicable.
+
 ### Loss/tie admission matrix
 
 Schema support alone will not close every `loss`/`tie` artifact. The ledger
