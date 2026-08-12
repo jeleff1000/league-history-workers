@@ -18,6 +18,7 @@ on:
           - rb_2025_lane
           - rb_2025_week1_inventory
           - rb_2025_week1_distribution
+          - local_cache_export
 
 permissions:
   contents: read
@@ -75,8 +76,21 @@ jobs:
             WHERE COALESCE(season_type, 'REG') = 'REG' AND week IS NOT NULL
           """)
           mode = os.environ['PILOT_MODE']
-          if mode not in {'cmc_week1', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution'}:
+          if mode not in {'cmc_week1', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'local_cache_export'}:
             raise ValueError(f'unsupported pilot mode: {mode}')
+          if mode == 'local_cache_export':
+              receipt = {
+                'mode': mode,
+                'cache_key': os.environ['CACHE_KEY'],
+                'cache_path': 'research_public_lake',
+                'operation': 'read_only_restore_then_single_transfer_bundle',
+              }
+              print(receipt)
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                  summary.write('## Immutable cache local diagnostic export\n')
+                  summary.write(f'- Receipt: `{receipt}`\n')
+                  summary.write('- No cache save, source mutation, Fly access, API request, aggregation output, or publish step.\n')
+              raise SystemExit(0)
           source_rows = c.execute("SELECT COUNT(*) FROM lake.public.player_fantasy WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1").fetchone()[0]
           if mode == 'rb_2025_week1_inventory':
               inventory = c.execute("""
@@ -467,5 +481,13 @@ jobs:
                   summary.write('## Myles Garrett 2025 compact IDP cache pilot\n')
                   summary.write(f'- Receipt: `{myles_receipt}`\n')
                   summary.write('- Cache-only computation; no Fly read/write, settings join, API request, artifact, or publish step.\n')
-          PY
+           PY
+      - name: Export restored cache for local read-only diagnostics
+        if: ${{ inputs.mode == 'local_cache_export' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-public-lake-readonly-${{ github.run_id }}
+          path: research_public_lake
+          compression-level: 0
+          retention-days: 1
 
