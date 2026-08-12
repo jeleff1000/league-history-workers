@@ -82,10 +82,9 @@ Each row has an explicit `final_status` and `next_action`.
 | Status | Artifacts | Meaning |
 | --- | ---: | --- |
 | `cache_verified` | 308 | 3,454,826 source cells have direct receipts matching the canonical cache; no missing/conflicting cells. |
-| `no_promotable_candidate_emitted` | 4,522 | Candidate-classified artifact, but no promotable cell was emitted by the frozen comparison. |
+| `no_promotable_candidate_emitted` | 4,529 | Candidate-classified artifact, but no promotable cell was emitted by the frozen comparison. |
 | `not_data_bearing` | 3,927 | Aggregate/validation/metadata artifact; not a canonical-cell source. |
 | `cache_conflict_preserved` | 7 | 2,142,503 supported cells already match; 9,397 non-null conflicts are preserved; 480,208 source cells remain identity-unmatched; zero cache-null fill candidates. |
-| `still_missing_cache_cells` | 7 | Seven MFL championship-probe receipts each expose one supported canonical null through a verified manager-week fan-out; their exact candidate rows must be deduplicated before promotion. |
 | `source_only_team_signal_missing_player_team_bridge` | 2 | 151 source team-weeks overlap cache league-weeks but have no safe manager/team bridge to player rows; they cannot be fanned out. |
 | `partial_schema_blocked_cache_updates` | 15 | The 31,870 safe exact-row candidates were promoted and independently read back as 75,078 canonical cells; remaining source cells include ambiguous identities, preserved conflicts, and 288,160 loss/tie values blocked by the current schema. |
 | `partial_schema_blocked_unmatched` | 473 | 24,920,856 supported cells already match; 334,144 source cells still lack a resolved player-team edge; 577,482 loss/tie cells require the explicitly permitted schema fields. |
@@ -104,16 +103,16 @@ evidence state:
 | Completion state | Artifacts | Meaning |
 | --- | ---: | --- |
 | Closed by direct cache evidence | 308 | Every compared canonical cell equals the approved cache. |
-| Closed: no promotable cache cell emitted | 4,522 | The frozen extraction/comparison emitted no canonical-cell candidate. |
+| Closed: no promotable cache cell emitted | 4,529 | The frozen extraction/comparison emitted no canonical-cell candidate. |
 | Closed: non-data-bearing | 3,927 | Aggregate, validation, inventory, or metadata evidence; not a source of canonical cells. |
-| **Open: supported null-cell promotion** | **7** | The 15 direct MFL player artifacts have been promoted and read back; seven championship-probe receipts each still expose one additional manager-week candidate. Exact source-cell deduplication remains required before promotion. |
+| **Open: supported null-cell promotion** | **0** | No safe, unpromoted null-cell candidate is currently recorded in the ledger. |
 | **Open: add loss/tie schema** | **706** | Source contains loss/tie evidence; these fields are required for completion and are not yet columns in the approved cache. |
 | **Open: player-team identity bridge or source-only closure** | **696** | Source has team-week evidence but cannot yet be connected safely to a player row, or must be explicitly closed as source-only. |
 | **Open: source-precedence adjudication** | **221** | Source differs from an existing non-null cache value; no overwrite may occur without a field-level precedence rule. |
 
 The final three open categories overlap: for example, a sparse-playoff source
 may need loss/tie schema support **and** a player-team bridge. The artifact
-partition is still exact: **8,757 closed, 722 open**.
+partition is still exact: **8,764 closed, 715 open**.
 
 The cell totals in this section are receipt totals, not a count of distinct
 cache cells: retained artifacts can contain duplicate source snapshots. A
@@ -129,7 +128,6 @@ anything.
 | Loss/tie schema + player-team bridge | 473 | 577,482 loss/tie cells and 334,144 unsupported player-team identities. |
 | Loss/tie schema + precedence + player-team bridge | 214 | 4,169,612 loss/tie cells, 128,484 conflicts, and 7,044,748 unresolved identities. |
 | Precedence + player-team bridge | 7 | 9,397 conflicts and 480,208 unresolved identities. |
-| Supported null fill through manager-week | 7 | Seven championship-probe artifact receipts have exactly one supported cache-null cell each; materialize and deduplicate their exact target player cells before an approved promotion. |
 | Player-team bridge only | 2 | 151 supported playoff cells have no canonical player-team match. |
 
 ### Identity evidence already attached
@@ -141,9 +139,9 @@ The CSV now carries existing read-only profile evidence in
 `identity_bridge_status`. This is evidence from prior receipts, not a new
 fetch or a cache mutation.
 
-| Identity state among the 722 open artifacts | Artifacts | Meaning |
+| Identity state among the 715 open artifacts | Artifacts | Meaning |
 | --- | ---: | --- |
-| `fully_matched` | 11 | All source teams fan out to player rows; seven championship probes have a supported null-cell candidate and the remainder need only their recorded schema/precedence work. |
+| `fully_matched` | 11 | All source teams fan out to player rows; their remaining work is limited to the recorded schema or source-precedence evidence. |
 | `player_key_profiled` | 15 | Direct MFL player-key evidence; the strict null-cell candidate is promoted and cache-verified. |
 | `partial_bridge` | 559 | Some source teams fan out safely; the remaining teams need a bridge. |
 | `partial_bridge_with_source_only` | 135 | A partial bridge exists and some source league-weeks have no player rows to receive data. |
@@ -308,13 +306,14 @@ only as explicitly source-only evidence; no cache value was invented.
 ## Remaining worklist
 
 Every artifact now has a direct cache disposition. The remaining open work is
-either a strict promotion transaction, a source-identity decision, or an
-explicit schema/precedence closure. None requires a new API pull.
+a source-identity decision or an explicit schema/precedence closure. None
+currently has a safe, unpromoted null-cell candidate and none requires a new
+API pull.
 
-The CSV is the machine-readable authority: **8,771 of 9,479 artifacts are
-closed** and **708 remain open**. The open partition is 473 identity-unmatched,
+The CSV is the machine-readable authority: **8,764 of 9,479 artifacts are
+closed** and **715 remain open**. The open partition is 473 identity-unmatched,
 214 precedence conflicts, 15 schema-blocked safe-null repairs, 4 schema-only
-items, and 2 source-only player-identity gaps. Every one of the 708 has a
+items, and 2 source-only player-identity gaps. Every one of the 715 has a
 non-empty reason and next action in the CSV; an artifact is never considered
 closed merely because its parent workflow completed.
 
@@ -323,7 +322,7 @@ closed merely because its parent workflow completed.
 | `sleeper-missing-outcome-*` | 56 | Direct manager-week fan-out receipt complete: 24,382,006 supported cells equal cache; zero supported null fills; 90 non-null conflicts; 171,648 source cells identity-unmatched; 466,458 loss/tie cells outside the prior schema. | Resolve/close residual source-only identities and adjudicate conflicts; no null-cell promotion for this family. |
 | `promotable-rescue-delta-*` team-week subset | 7 | Direct fan-out receipt complete: 2,142,503 supported cells equal cache; zero supported null fills; 9,397 preserved conflicts; 480,208 identity-unmatched cells. | Resolve/close residual source-only identities and adjudicate conflicts; no null-cell promotion for this subset. |
 | `promotable-rescue-delta-*` player-row subset | 11 | The files are full player-row snapshots with canonical field names; the generic `source_*` receipt correctly emitted no comparison rather than guessing. | Run the exact canonical-field snapshot comparator on the full player key. |
-| `mfl-player-outcome-classification-*` | 15 | 31,870 strict exact-row candidates; 82,466 supported null cells in the direct audit. | Perform the approved single-cache promotion transaction, then exact readback. |
+| `mfl-player-outcome-classification-*` | 15 | 31,870 strict exact-row candidates / 75,078 cells promoted and independently read back; 7,388 direct-audit null cells remain outside that strict candidate. | Add loss/tie schema and re-audit only the remaining direct-source cells; preserve conflicts and ambiguous identities. |
 | `research-source-matchup-rescue-*` | 14 | Corrected fan-out receipt: 28,032,962 cells already equal cache; zero supported null fills; remaining cells are conflicts, schema-blocked loss/tie, or unresolved team identity. | Adjudicate non-null conflicts; resolve/close residual identity gaps; do not run a null-cell promotion for this family. |
 | `research-championship-identity-probe-*` | 9 | Fully adjudicated by receipt 31552757341: seven MFL files have a safe manager-week fan-out but zero valid player-row fills; two files remain source-only because no cache-side identity bridge exists. | Do not promote championship or playoff values from this family; retain the two source-only identity gaps as explicitly unresolved. |
 | `research-sparse-playoff-championship-*` | 621 candidate-bearing | Fully receipted; zero supported null-cell fills. | Close source-only/conflict rows under the explicit precedence and loss/tie schema decisions. |
