@@ -1,0 +1,106 @@
+name: Research matchup CMC week 1 leaf timing
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  leaf_timing:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - name: Run one read-only CMC week 1 leaf query
+        run: |
+          python - <<'PY'
+          import duckdb
+          import json
+          import os
+          from time import perf_counter
+
+          con = duckdb.connect()
+          con.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          query = """
+          WITH rb AS (
+            SELECT
+              db_name, NFL_player_id,
+              cohort_teams, cohort_roster, cohort_scoring, cohort_pass_td,
+              cohort_playoff_teams, cohort_dynasty, cohort_best_ball,
+              cohort_position_eligible,
+              is_rostered, is_started, win,
+              manager, team_key, team_name, team_points, fantasy_points
+            FROM lake.public.player_fantasy
+            WHERE year=2025 AND week=1 AND position='RB'
+          ), inventory AS (
+            SELECT cohort_teams, cohort_roster, cohort_scoring, cohort_pass_td,
+              cohort_playoff_teams, cohort_dynasty, cohort_best_ball,
+              COUNT(DISTINCT db_name) AS eligible_leagues
+            FROM rb WHERE cohort_position_eligible=1 GROUP BY ALL
+          ), cmc_per_league AS (
+            SELECT db_name, cohort_teams, cohort_roster, cohort_scoring, cohort_pass_td,
+              cohort_playoff_teams, cohort_dynasty, cohort_best_ball,
+              MAX(CASE WHEN COALESCE(is_rostered,1)<>0 THEN 1 ELSE 0 END) AS rostered,
+              MAX(CASE WHEN is_started=1 THEN 1 ELSE 0 END) AS started,
+              MAX(CASE WHEN is_started=1 AND win IN (0,1) THEN 1 ELSE 0 END) AS valid_outcome,
+              MAX(CASE WHEN is_started=1 AND win IN (0,1) THEN win ELSE NULL END) AS win_value
+            FROM rb
+            WHERE NFL_player_id='00-0033280'
+              AND NOT (
+                is_rostered=1 AND COALESCE(is_started,0)=0
+                AND NULLIF(TRIM(COALESCE(manager,'')),'') IS NULL
+                AND NULLIF(TRIM(COALESCE(team_key,'')),'') IS NULL
+                AND NULLIF(TRIM(COALESCE(team_name,'')),'') IS NULL
+                AND team_points IS NULL
+                AND (fantasy_points IS NULL OR fantasy_points=0)
+              )
+            GROUP BY ALL
+          ), cmc_leaf AS (
+            SELECT cohort_teams, cohort_roster, cohort_scoring, cohort_pass_td,
+              cohort_playoff_teams, cohort_dynasty, cohort_best_ball,
+              SUM(rostered) AS rostered_leagues, SUM(started) AS started_leagues,
+              SUM(valid_outcome) AS valid_started_outcomes, SUM(win_value) AS win_equivalent
+            FROM cmc_per_league GROUP BY ALL
+          )
+          SELECT COUNT(*) AS exact_leaf_cells,
+            SUM(i.eligible_leagues) AS sum_leaf_eligible,
+            SUM(COALESCE(c.rostered_leagues,0)) AS sum_leaf_rostered,
+            SUM(COALESCE(c.started_leagues,0)) AS sum_leaf_started,
+            SUM(COALESCE(c.valid_started_outcomes,0)) AS sum_leaf_valid_outcomes,
+            SUM(COALESCE(c.win_equivalent,0)) AS sum_leaf_win_equivalent
+          FROM inventory i
+          LEFT JOIN cmc_leaf c USING (
+            cohort_teams, cohort_roster, cohort_scoring, cohort_pass_td,
+            cohort_playoff_teams, cohort_dynasty, cohort_best_ball
+          )
+          """
+          started = perf_counter()
+          result = con.execute(query).fetchone()
+          elapsed = perf_counter() - started
+          assert result[0] > 0 and result[1] > 9000, result
+          receipt = {
+            "operation": "one_read_only_cmc_2025_week1_leaf_query",
+            "cpu_count": os.cpu_count(),
+            "exact_leaf_cells": result[0],
+            "sum_leaf_eligible": result[1],
+            "sum_leaf_rostered": result[2],
+            "sum_leaf_started": result[3],
+            "sum_leaf_valid_outcomes": result[4],
+            "sum_leaf_win_equivalent": result[5],
+            "elapsed_seconds": round(elapsed, 3),
+          }
+          print(json.dumps(receipt, sort_keys=True))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+            summary.write("## CMC week 1 leaf timing\n")
+            summary.write(f"- Receipt: `{json.dumps(receipt, sort_keys=True)}`\n")
+            summary.write("- Read-only cache restore; no cache save, Fly access, artifact, or publish step.\n")
+          PY
