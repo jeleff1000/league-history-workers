@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import duckdb
@@ -98,6 +99,18 @@ def main() -> None:
     else:
         con.execute("CREATE OR REPLACE TEMP TABLE delta_unique AS SELECT * FROM delta_raw")
     before_rows = con.execute("SELECT COUNT(*) FROM public.player_fantasy").fetchone()[0]
+    core_join = """
+        d.db_name=p.db_name
+        AND CAST(d.year AS INTEGER)=CAST(p.year AS INTEGER)
+        AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER)
+        AND d.NFL_player_id IS NOT DISTINCT FROM p.NFL_player_id
+        AND d.platform IS NOT DISTINCT FROM p.platform
+        AND d.manager IS NOT DISTINCT FROM p.manager
+    """
+    full_join = core_join + """
+        AND (p.team_key IS NULL OR d.team_key=p.team_key)
+        AND (p.team_name IS NULL OR d.team_name=p.team_name)
+    """
     con.execute(f"""
       CREATE OR REPLACE TEMP TABLE matched AS
       SELECT p.rowid player_rowid,
@@ -112,17 +125,37 @@ def main() -> None:
              p.final_playoff_seed canonical_final_playoff_seed,
              p.made_playoffs canonical_made_playoffs,
              d.*
-      FROM public.player_fantasy p JOIN delta_unique d
-        ON d.db_name=p.db_name AND CAST(d.year AS INTEGER)=CAST(p.year AS INTEGER)
-       AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER)
-       AND d.NFL_player_id IS NOT DISTINCT FROM p.NFL_player_id
-       AND d.platform IS NOT DISTINCT FROM p.platform
-       AND d.manager IS NOT DISTINCT FROM p.manager
-       AND (p.team_key IS NULL OR d.team_key=p.team_key)
-       AND (p.team_name IS NULL OR d.team_name=p.team_name)
+      FROM public.player_fantasy p JOIN delta_unique d ON {full_join}
     """)
     matched = con.execute("SELECT COUNT(*) FROM matched").fetchone()[0]
     if matched != con.execute("SELECT COUNT(*) FROM delta_unique").fetchone()[0]:
+        con.execute(f"""
+          CREATE OR REPLACE TEMP TABLE unmatched_delta AS
+          SELECT d.* FROM delta_unique d
+          WHERE NOT EXISTS (SELECT 1 FROM public.player_fantasy p WHERE {full_join})
+        """)
+        diagnostic = con.execute(f"""
+          SELECT
+            COUNT(*) AS unmatched_delta_rows,
+            COUNT(*) FILTER (WHERE EXISTS (
+              SELECT 1 FROM public.player_fantasy p WHERE {core_join}
+            )) AS core_identity_matches,
+            COUNT(*) FILTER (WHERE EXISTS (
+              SELECT 1 FROM public.player_fantasy p WHERE {core_join}
+                AND p.team_key IS NOT NULL AND p.team_key IS DISTINCT FROM d.team_key
+            )) AS team_key_conflicts,
+            COUNT(*) FILTER (WHERE EXISTS (
+              SELECT 1 FROM public.player_fantasy p WHERE {core_join}
+                AND p.team_name IS NOT NULL AND p.team_name IS DISTINCT FROM d.team_name
+            )) AS team_name_conflicts,
+            COUNT(*) FILTER (WHERE NFL_player_id IS NULL) AS null_nfl_player_id,
+            COUNT(*) FILTER (WHERE platform IS NULL) AS null_platform,
+            COUNT(*) FILTER (WHERE manager IS NULL) AS null_manager
+          FROM unmatched_delta d
+        """).fetchone()
+        fields = [column[0] for column in con.description]
+        receipt = dict(zip(fields, diagnostic))
+        print("unmatched_diagnostic=" + json.dumps(receipt, sort_keys=True), file=sys.stderr)
         raise SystemExit("delta contains unmatched canonical player rows")
     fields = {
         "win": "source_win",

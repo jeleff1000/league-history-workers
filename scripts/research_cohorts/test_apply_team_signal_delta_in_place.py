@@ -7,7 +7,14 @@ import duckdb
 from canonical_player_schema import BASE_PLAYER_COLUMNS, EXPECTED_COHORT_COLUMNS
 
 
-def _base(path, *, null_team_identity: bool = False, null_player_id: bool = False, null_platform: bool = False):
+def _base(
+    path,
+    *,
+    null_team_identity: bool = False,
+    null_player_id: bool = False,
+    null_platform: bool = False,
+    team_key: str = "team-a",
+):
     columns = BASE_PLAYER_COLUMNS + sorted(EXPECTED_COHORT_COLUMNS) + ["loss", "tie"]
     con = duckdb.connect(str(path))
     con.execute("CREATE SCHEMA public")
@@ -19,7 +26,7 @@ def _base(path, *, null_team_identity: bool = False, null_player_id: bool = Fals
     values = {column: None for column in columns}
     values.update({
         "db_name": "league-a", "year": "2020", "week": "1", "NFL_player_id": "nfl-a",
-        "manager": "manager-a", "team_key": "team-a", "team_name": "Team A", "platform": "mfl",
+        "manager": "manager-a", "team_key": team_key, "team_name": "Team A", "platform": "mfl",
     })
     if null_team_identity:
         values["team_key"] = None
@@ -155,3 +162,22 @@ def test_apply_allows_exact_null_platform_without_fanout(tmp_path):
     con = duckdb.connect(str(base), read_only=True)
     assert con.execute("SELECT loss, tie FROM public.player_fantasy").fetchone() == ("1", "0")
     con.close()
+
+
+def test_apply_reports_identity_receipt_for_unmatched_delta(tmp_path):
+    base = tmp_path / "base.duckdb"
+    delta = tmp_path / "delta.parquet"
+    report = tmp_path / "report.json"
+    _base(base, team_key="different-team")
+    _delta(delta)
+
+    result = subprocess.run([
+        sys.executable,
+        "scripts/research_cohorts/apply_team_signal_delta_in_place.py",
+        "--base", str(base), "--delta", str(delta), "--report", str(report),
+    ], capture_output=True, text=True)
+
+    assert result.returncode != 0
+    assert "unmatched_diagnostic" in result.stderr
+    assert '"unmatched_delta_rows": 1' in result.stderr
+    assert '"core_identity_matches": 1' in result.stderr
