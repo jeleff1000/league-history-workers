@@ -514,12 +514,6 @@ jobs:
           if mode in {'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains'}:
               stats = 'ops.nfl_historical.nfl_player_stats_all'
               cmc_source = 'lake.public.player_fantasy'
-              if mode != 'cmc_2025_all_grains':
-                  materialize_narrow_position_year_source(
-                      c, source_table=cmc_source, output_table='cmc_2025_rb_lane',
-                      year=2025, position='RB',
-                  )
-                  cmc_source = 'cmc_2025_rb_lane'
               full_started = perf_counter()
               weekly_weeks = []
               weekly_selected = 0
