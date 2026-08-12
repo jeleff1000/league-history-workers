@@ -37,10 +37,14 @@ def refresh(
     ids = [int(row["artifact_id"]) for row in ledger_rows]
     if len(ids) != len(set(ids)):
         raise SystemExit("ledger has duplicate artifact IDs")
-    selected = json.loads(selected_path.read_text(encoding="utf-8"))
+    selected = json.loads(selected_path.read_text(encoding="utf-8-sig"))
     selected_ids = {int(row["artifact_id"]) for row in selected}
-    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-    receipt_rows = {int(row["artifact_id"]): row for row in receipt["rows"]}
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8-sig"))
+    promotion_receipt = "artifact_rows" in receipt
+    if promotion_receipt:
+        receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_rows"]}
+    else:
+        receipt_rows = {int(row["artifact_id"]): row for row in receipt["rows"]}
     team_profile_rows: dict[int, dict] = {}
     if team_profile_path is not None:
         profile = json.loads(team_profile_path.read_text(encoding="utf-8"))
@@ -56,6 +60,47 @@ def refresh(
         if artifact_id not in selected_ids:
             continue
         evidence = receipt_rows[artifact_id]
+        if promotion_receipt:
+            expected_rows = int(row["candidate_delta_rows"] or 0)
+            promoted_rows = int(evidence.get("candidate_rows", 0) or 0)
+            if expected_rows != promoted_rows:
+                raise SystemExit(
+                    f"{artifact_id}: receipt rows {promoted_rows} do not match "
+                    f"ledger candidate rows {expected_rows}"
+                )
+            promoted_cells = sum(
+                int(evidence.get(field, 0) or 0)
+                for field in ("win_cells", "team_point_cells", "playoff_cells")
+            )
+            if promoted_cells == 0:
+                raise SystemExit(f"{artifact_id}: promotion receipt has no applied cells")
+            old_missing = int(row["cache_missing_cells"] or 0)
+            if promoted_cells > old_missing:
+                raise SystemExit(
+                    f"{artifact_id}: receipt applies {promoted_cells} cells but ledger only "
+                    f"records {old_missing} missing cells"
+                )
+            row["cache_match_cells"] = str(
+                int(row["cache_match_cells"] or 0) + promoted_cells
+            )
+            row["cache_missing_cells"] = str(old_missing - promoted_cells)
+            row["receipt_run_id"] = str(receipt_run_id)
+            row["receipt_json_sha256"] = digest
+            row["final_status"] = "partial_schema_blocked_cache_updates"
+            row["final_reason"] = (
+                "Exact supported candidate promotion verified after canonical-cache restore: "
+                f"{promoted_rows} player rows and {promoted_cells} cells "
+                f"(win={int(evidence.get('win_cells', 0) or 0)}, "
+                f"team_points={int(evidence.get('team_point_cells', 0) or 0)}, "
+                f"is_playoffs={int(evidence.get('playoff_cells', 0) or 0)}). "
+                "Remaining source evidence is limited to blocked loss/tie schema, "
+                "preserved non-null conflicts, or identity ambiguity."
+            )
+            row["next_action"] = (
+                "add_loss_tie_schema_then_reaudit_remaining_direct_source_cells"
+            )
+            updated += 1
+            continue
         if int(evidence.get("source_cells", 0) or 0) == 0:
             raise SystemExit(f"{artifact_id}: selected artifact has no readback source cells")
         for field in (
