@@ -128,7 +128,11 @@ def main() -> None:
       FROM public.player_fantasy p JOIN delta_unique d ON {full_join}
     """)
     matched = con.execute("SELECT COUNT(*) FROM matched").fetchone()[0]
-    if matched != con.execute("SELECT COUNT(*) FROM delta_unique").fetchone()[0]:
+    unmatched_count = con.execute(f"""
+      SELECT COUNT(*) FROM delta_unique d
+      WHERE NOT EXISTS (SELECT 1 FROM public.player_fantasy p WHERE {full_join})
+    """).fetchone()[0]
+    if unmatched_count:
         con.execute(f"""
           CREATE OR REPLACE TEMP TABLE unmatched_delta AS
           SELECT d.* FROM delta_unique d

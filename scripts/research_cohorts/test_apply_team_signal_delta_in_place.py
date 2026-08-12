@@ -14,6 +14,7 @@ def _base(
     null_player_id: bool = False,
     null_platform: bool = False,
     team_key: str = "team-a",
+    duplicate_canonical_row: bool = False,
 ):
     columns = BASE_PLAYER_COLUMNS + sorted(EXPECTED_COHORT_COLUMNS) + ["loss", "tie"]
     con = duckdb.connect(str(path))
@@ -38,6 +39,8 @@ def _base(
     names = ", ".join(f'"{column}"' for column in columns)
     placeholders = ", ".join("?" for _ in columns)
     con.execute(f"INSERT INTO public.player_fantasy ({names}) VALUES ({placeholders})", list(values.values()))
+    if duplicate_canonical_row:
+        con.execute(f"INSERT INTO public.player_fantasy ({names}) VALUES ({placeholders})", list(values.values()))
     con.close()
 
 
@@ -181,3 +184,25 @@ def test_apply_reports_identity_receipt_for_unmatched_delta(tmp_path):
     assert "unmatched_diagnostic" in result.stderr
     assert '"unmatched_delta_rows": 1' in result.stderr
     assert '"core_identity_matches": 1' in result.stderr
+
+
+def test_apply_updates_each_exact_duplicate_canonical_recipient(tmp_path):
+    base = tmp_path / "base.duckdb"
+    delta = tmp_path / "delta.parquet"
+    report = tmp_path / "report.json"
+    _base(base, duplicate_canonical_row=True)
+    _delta(delta)
+
+    result = subprocess.run([
+        sys.executable,
+        "scripts/research_cohorts/apply_team_signal_delta_in_place.py",
+        "--base", str(base), "--delta", str(delta), "--report", str(report),
+    ], capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    payload = json.loads(report.read_text())
+    assert payload["delta_rows"] == 1
+    assert payload["matched_rows"] == 2
+    con = duckdb.connect(str(base), read_only=True)
+    assert con.execute("SELECT COUNT(*) FROM public.player_fantasy WHERE loss='1' AND tie='0'").fetchone() == (2,)
+    con.close()
