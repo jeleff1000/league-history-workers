@@ -520,11 +520,6 @@ jobs:
                       year=2025, position='RB',
                   )
                   cmc_source = 'cmc_2025_rb_lane'
-              source_rows_2025 = c.execute("""
-                SELECT COUNT(*) FROM lake.public.player_fantasy
-                WHERE CAST(year AS INTEGER)=2025
-                  AND CAST(NFL_player_id AS VARCHAR)='00-0033280'
-              """).fetchone()[0]
               full_started = perf_counter()
               weekly_weeks = []
               weekly_selected = 0
@@ -601,7 +596,7 @@ jobs:
               assert season_grade_cells <= 577, season_grade_cells
               if mode in {'cmc_2025_season', 'cmc_2025_season_only'}:
                   season_receipt = {
-                      'mode': mode, 'cmc_2025_source_rows': source_rows_2025,
+                      'mode': mode,
                       'weekly_outer_rows': len(weekly_weeks), 'weekly_selected_cells': weekly_selected,
                       'weekly_nested_cells': weekly_cells, 'season_outer_rows': 1,
                       'season_selected': season_selected, 'season_core_cells': season_core_cells,
@@ -671,7 +666,7 @@ jobs:
               assert career_invalid == 0, career_invalid
               full_elapsed = perf_counter() - full_started
               full_receipt = {
-                  'mode': mode, 'cmc_2025_source_rows': source_rows_2025,
+                  'mode': mode,
                   'weekly_outer_rows': len(weekly_weeks), 'weekly_selected_cells': weekly_selected,
                   'weekly_nested_cells': weekly_cells, 'season_outer_rows': 1,
                   'season_selected': season_selected, 'season_core_cells': season_core_cells,
