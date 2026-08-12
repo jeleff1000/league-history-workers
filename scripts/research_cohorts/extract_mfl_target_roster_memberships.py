@@ -27,7 +27,7 @@ DIRECTORY_COLUMNS = ["source_year", "mfl_player_id", "espn_id", "raw_name", "raw
 class MFLClient(Protocol):
     def fetch_league(self, league_id: str, year: int) -> dict[str, Any] | None: ...
     def fetch_weekly_results(self, league_id: str, year: int, week: int) -> dict[str, Any] | None: ...
-    def fetch_players(self, league_id: str, year: int) -> dict[str, dict[str, Any]]: ...
+    def fetch_players(self, year: int, league_id: str) -> dict[str, dict[str, Any]]: ...
 
 
 def _clean(value: object) -> str | None:
@@ -182,7 +182,7 @@ def extract_group(group: dict[str, Any], client: MFLClient) -> dict[str, Any]:
                     "is_started": int(str(raw_player.get("status") or "").strip().lower() == "starter"),
                 })
         try:
-            players = client.fetch_players(source_id, source_year) or {}
+            players = client.fetch_players(source_year, source_id) or {}
         except Exception as exc:
             players = {}
             player_directory_status = f"player_directory_error:{type(exc).__name__}"

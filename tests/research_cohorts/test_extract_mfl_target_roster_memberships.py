@@ -32,7 +32,7 @@ class _FakeMFL:
             "franchise": [{"id": "0002", "player": [{"id": "12", "status": "starter"}]}],
         }
 
-    def fetch_players(self, league_id: str, year: int):
+    def fetch_players(self, year: int, league_id: str):
         self.calls.append((league_id, year, -1))
         if (league_id, year) != ("456", 2004):
             return {}

@@ -75,6 +75,16 @@ canonical player cache for writing. A future Action must first run these
 read-only source receipts, then run the bridge receipt, and only then create a
 strict cache-update candidate.
 
+The first 15-target runtime pilot, [31613290294](https://github.com/jeleff1000/league-history-workers/actions/runs/31613290294),
+is recorded as **invalid bridge evidence**, not as a closure. It restored the
+approved cache and passed its no-mutation gate, and it successfully returned
+4,732 raw MFL roster memberships from all 15 source weeks. However, the
+extractor called the MFL client directory method with its `(year, league_id)`
+arguments reversed. All 15 directory calls were therefore invalid and the
+crosswalk had 451 `missing_espn_id` keys / zero resolved recipients. Commit
+`010d954` adds a regression test and fixes only that argument order. The same
+15 targets must be rerun before any ledger disposition may change.
+
 Existing `mfl-underpopulated-week-rescue-*` artifacts are retained source-team
 signals, not roster bridges. A direct schema receipt from
 `mfl-underpopulated-week-rescue-17-31217899167` shows team/franchise IDs,
