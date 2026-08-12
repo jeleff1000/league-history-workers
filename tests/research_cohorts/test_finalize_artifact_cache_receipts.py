@@ -188,6 +188,46 @@ def test_receipt_fans_unique_raw_manager_when_team_key_is_rewritten(tmp_path: Pa
     assert row["unmatched_cache_cells"] == 0
 
 
+def test_receipt_fans_manager_only_signal_when_source_team_key_is_null(tmp_path: Path) -> None:
+    """A source manager-week with no team key still reaches its canonical player rows."""
+    from scripts.research_cohorts.finalize_artifact_cache_receipts import build_receipts
+
+    base = tmp_path / "base.duckdb"
+    _base_cache(base)
+    con = duckdb.connect(str(base))
+    con.execute("UPDATE public.player_fantasy SET team_key=NULL, win=NULL")
+    con.execute("""
+        INSERT INTO public.player_fantasy
+        SELECT db_name, year, week, 'p2', is_started, manager, team_key, team_name,
+               platform, win, champion, team_points, is_playoffs
+        FROM public.player_fantasy
+    """)
+    con.close()
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({"rows": [{
+        "artifact_id": 59, "artifact": "manager-only-team", "candidate_delta_rows": 1,
+        "candidate_fields": ["win"], "dispositions": ["team_week_signal_candidate"],
+    }]}))
+    raw = tmp_path / "manager-only-team.parquet"
+    _write_parquet(raw, [{
+        "db_name": "league", "year": 2024, "week": 15,
+        "team_key": None, "manager": "mgr", "win": 1,
+    }])
+    manifest = tmp_path / "manager-only-team-manifest.json"
+    manifest.write_text(json.dumps([{"artifact_id": 59, "path": str(raw)}]))
+
+    result = build_receipts(
+        ledger_path=ledger, base_path=base, team_delta=None, exact_delta=None,
+        structured_delta=None, settings_delta=None, team_signal_manifest=manifest,
+        out_path=tmp_path / "receipts.json",
+    )
+
+    row = result["rows"][0]
+    assert row["final_status"] == "still_missing_cache_cells"
+    assert row["cache_missing_cells"] == 2
+    assert row["unmatched_cache_cells"] == 0
+
+
 def test_receipt_blocks_manager_only_fanout_for_multi_team_owner(tmp_path: Path) -> None:
     """Two raw teams for one manager-week are ambiguous and must stay unmatched."""
     from scripts.research_cohorts.finalize_artifact_cache_receipts import build_receipts

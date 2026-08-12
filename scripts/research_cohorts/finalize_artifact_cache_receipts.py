@@ -271,6 +271,11 @@ def _audit_raw_team_signals(
             *(_quoted(key) for key in ["db_name", "year", "week"]),
              f"CASE WHEN {platform}='mfl' AND COALESCE({manager_guid}, {franchise_id}) IS NOT NULL "
              f"THEN COALESCE({manager_guid}, {franchise_id}) ELSE {raw_team_key} END AS canonical_team_key",
+             f"CASE WHEN {platform}='mfl' AND COALESCE({manager_guid}, {franchise_id}) IS NOT NULL "
+             f"THEN 'team:' || COALESCE({manager_guid}, {franchise_id}) "
+             f"WHEN {raw_team_key} IS NOT NULL THEN 'team:' || {raw_team_key} "
+             f"WHEN {manager_key} IS NOT NULL THEN 'manager:' || {manager_key} "
+             f"ELSE NULL::VARCHAR END AS source_identity_key",
              f"{manager_key} AS manager_key",
         ]
         for source, raw_column in RAW_TEAM_SIGNAL_COLUMNS.items():
@@ -311,14 +316,16 @@ def _audit_raw_team_signals(
     con.execute("""
         CREATE OR REPLACE TEMP TABLE raw_team_signal_manager_counts AS
         SELECT artifact_id, db_name, year, week, manager_key,
-               COUNT(DISTINCT canonical_team_key) AS source_team_count
+               COUNT(DISTINCT source_identity_key) AS source_team_count,
+               COUNT(*) AS source_rows
         FROM raw_team_signal_evidence
         WHERE manager_key IS NOT NULL
         GROUP BY 1,2,3,4,5
     """)
     con.execute(f"""
         CREATE OR REPLACE TEMP TABLE raw_team_signal_resolved_keys AS
-        SELECT e.artifact_id, e.db_name, e.year, e.week, e.canonical_team_key,
+        SELECT e.artifact_id, e.db_name, e.year, e.week, e.source_identity_key,
+               e.canonical_team_key,
                e.manager_key,
                CASE
                  WHEN EXISTS (
@@ -329,7 +336,9 @@ def _audit_raw_team_signals(
                      AND p.week IS NOT DISTINCT FROM e.week
                      AND p.team_key IS NOT DISTINCT FROM e.canonical_team_key
                  ) THEN 'team_key'
-                 WHEN mc.source_team_count=1 AND EXISTS (
+                WHEN mc.source_team_count=1
+                 AND (e.canonical_team_key IS NOT NULL OR mc.source_rows=1)
+                 AND EXISTS (
                    SELECT 1 FROM {target_relation} p
                    WHERE p.db_name IS NOT DISTINCT FROM e.db_name
                      AND p."year" IS NOT DISTINCT FROM e."year"
@@ -348,7 +357,7 @@ def _audit_raw_team_signals(
     """)
     con.execute("""
         CREATE OR REPLACE TEMP TABLE raw_team_signal_matched_keys AS
-        SELECT DISTINCT artifact_id, db_name, year, week, canonical_team_key AS team_key
+        SELECT DISTINCT artifact_id, db_name, year, week, source_identity_key
         FROM raw_team_signal_resolved_keys
         WHERE match_strategy IS NOT NULL
     """)
@@ -365,7 +374,7 @@ def _audit_raw_team_signals(
          AND r.db_name IS NOT DISTINCT FROM e.db_name
          AND r.year IS NOT DISTINCT FROM e.year
          AND r.week IS NOT DISTINCT FROM e.week
-         AND r.canonical_team_key IS NOT DISTINCT FROM e.canonical_team_key
+         AND r.source_identity_key IS NOT DISTINCT FROM e.source_identity_key
         JOIN {target_relation} p
           ON p.db_name IS NOT DISTINCT FROM e.db_name
          AND p."year" IS NOT DISTINCT FROM e."year"
@@ -414,7 +423,7 @@ def _audit_raw_team_signals(
          AND k.db_name IS NOT DISTINCT FROM e.db_name
          AND k."year" IS NOT DISTINCT FROM e."year"
          AND k.week IS NOT DISTINCT FROM e.week
-         AND k.team_key IS NOT DISTINCT FROM e.canonical_team_key
+         AND k.source_identity_key IS NOT DISTINCT FROM e.source_identity_key
         GROUP BY e.artifact_id
     """).fetchall():
         artifact_id, *counts = row
