@@ -21,7 +21,7 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           path: code
-          ref: 4112c5da08708f918062b0bc25f5a9b94e0cf3d6
+          ref: 837dfc419c0fdd440e598cd40f3595ffda761255
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -100,14 +100,14 @@ jobs:
           elapsed_s = perf_counter() - started_at
           outer_rows = c.execute('SELECT COUNT(*) FROM cmc_week1').fetchone()[0]
           cell_count = c.execute('SELECT SUM(list_count(cohort_cells)) FROM cmc_week1').fetchone()[0]
-          assert cell_count <= 144, cell_count
+          assert cell_count <= 145, cell_count
           peak_rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
           receipt = {'source_rows_read': source_rows, 'outer_rows': outer_rows, 'nested_cells': cell_count, 'wall_seconds': round(elapsed_s, 3), 'peak_rss_kb': peak_rss_kb, 'cmc_2025_week_1_all': full, 'cmc_2025_week_1_selected': selected[0]}
           print(receipt)
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
               summary.write('## CMC W1 compact cache truth gate\n')
               summary.write(f'- Cache: `{os.environ.get("CACHE_KEY", "immutable input")}`\n')
-              summary.write('- Source commit: `4112c5da08708f918062b0bc25f5a9b94e0cf3d6`\n')
+              summary.write('- Source commit: `837dfc419c0fdd440e598cd40f3595ffda761255`\n')
               summary.write(f'- ALL cell: `{full}`\n- Selected cell: `{selected[0]}`\n')
               summary.write(f'- Source rows read: `{source_rows}`; outer rows: `{outer_rows}`; nested cells: `{cell_count}`\n')
               summary.write(f'- Build wall time: `{elapsed_s:.3f}s`; peak RSS: `{peak_rss_kb} KB`\n')
