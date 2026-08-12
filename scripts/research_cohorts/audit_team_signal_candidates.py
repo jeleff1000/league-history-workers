@@ -119,7 +119,11 @@ def main() -> None:
             "CAST(NULL AS INTEGER)"
         )} source_playoffs,
         {(
-            f"MAX(CASE WHEN {flag_expr('is_championship')}=1 AND {flag_expr('champion')}=1 THEN 1 ELSE 0 END)"
+            # A season-level champion flag may be repeated on an arbitrary
+            # playoff row.  Only an explicit championship-week winner is
+            # safe evidence for a player champion value; unknown/non-final
+            # rows must remain NULL rather than becoming invented zeroes.
+            f"MAX(CASE WHEN {flag_expr('is_championship')}=1 AND {flag_expr('champion')}=1 THEN 1 ELSE NULL END)"
             if 'is_championship' in cols and 'champion' in cols else
             "CAST(NULL AS INTEGER)"
         )} source_champion,

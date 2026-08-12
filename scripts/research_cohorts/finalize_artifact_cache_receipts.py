@@ -266,6 +266,16 @@ def _audit_raw_team_signals(
             f"NULLIF(REGEXP_REPLACE(TRIM(LOWER(CAST({_quoted('manager')} AS VARCHAR))), '\\s+', ' ', 'g'), '')"
             if "manager" in raw_columns else "NULL::VARCHAR"
         )
+        def raw_flag(column: str) -> str:
+            if column not in raw_columns:
+                return "NULL::BIGINT"
+            value = _quoted(column)
+            normalized = f"LOWER(TRIM(CAST({value} AS VARCHAR)))"
+            return (
+                f"CASE WHEN {normalized} IN ('1','true','t','yes','y') THEN 1 "
+                f"WHEN {normalized} IN ('0','false','f','no','n') THEN 0 "
+                f"ELSE TRY_CAST({value} AS BIGINT) END"
+            )
         terms = [
             f"{artifact_id}::BIGINT AS artifact_id",
             *(_quoted(key) for key in ["db_name", "year", "week"]),
@@ -281,7 +291,17 @@ def _audit_raw_team_signals(
         for source, raw_column in RAW_TEAM_SIGNAL_COLUMNS.items():
             target = TEAM_FIELDS[source]
             cast_type = target_types.get(target, RAW_TEAM_SIGNAL_FALLBACK_TYPES[source])
-            if raw_column in raw_columns:
+            if source == "source_champion":
+                # A season-level champion flag is often propagated to an
+                # arbitrary playoff row.  It is not championship-game credit.
+                # Only an explicit championship-week marker can support a
+                # player ``champion`` value.
+                terms.append(
+                    f"CAST(CASE WHEN {raw_flag('is_championship')}=1 "
+                    f"AND {raw_flag('champion')}=1 THEN 1 ELSE NULL END AS {cast_type}) "
+                    f"AS {_quoted(source)}"
+                )
+            elif raw_column in raw_columns:
                 terms.append(f"CAST({_quoted(raw_column)} AS {cast_type}) AS {_quoted(source)}")
             else:
                 terms.append(f"NULL::{cast_type} AS {_quoted(source)}")

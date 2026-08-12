@@ -98,7 +98,7 @@ def test_receipt_fans_raw_team_signal_to_matching_player_rows(tmp_path: Path) ->
     _write_parquet(raw, [{
         "db_name": "league", "year": 2024, "week": 15, "team_key": "team",
         "manager": "mgr", "win": 1, "team_points": 100.0,
-        "is_playoffs": 1, "champion": 1,
+        "is_playoffs": 1, "is_championship": 1, "champion": 1,
     }])
     manifest = tmp_path / "raw-team-manifest.json"
     manifest.write_text(json.dumps([{"artifact_id": 42, "path": str(raw)}]))
@@ -225,6 +225,40 @@ def test_receipt_fans_manager_only_signal_when_source_team_key_is_null(tmp_path:
     row = result["rows"][0]
     assert row["final_status"] == "still_missing_cache_cells"
     assert row["cache_missing_cells"] == 2
+    assert row["unmatched_cache_cells"] == 0
+
+
+def test_receipt_does_not_treat_season_champion_flag_as_championship_week_credit(tmp_path: Path) -> None:
+    """Champion evidence without an explicit championship week must never fill player champion cells."""
+    from scripts.research_cohorts.finalize_artifact_cache_receipts import build_receipts
+
+    base = tmp_path / "base.duckdb"
+    _base_cache(base)
+    con = duckdb.connect(str(base))
+    con.execute("UPDATE public.player_fantasy SET champion=NULL")
+    con.close()
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({"rows": [{
+        "artifact_id": 60, "artifact": "season-champion-flag", "candidate_delta_rows": 1,
+        "candidate_fields": ["champion"], "dispositions": ["team_week_signal_candidate"],
+    }]}))
+    raw = tmp_path / "season-champion-flag.parquet"
+    _write_parquet(raw, [{
+        "db_name": "league", "year": 2024, "week": 15,
+        "team_key": "team", "manager": "mgr", "champion": 1,
+        "is_championship": None,
+    }])
+    manifest = tmp_path / "season-champion-flag-manifest.json"
+    manifest.write_text(json.dumps([{"artifact_id": 60, "path": str(raw)}]))
+
+    result = build_receipts(
+        ledger_path=ledger, base_path=base, team_delta=None, exact_delta=None,
+        structured_delta=None, settings_delta=None, team_signal_manifest=manifest,
+        out_path=tmp_path / "receipts.json",
+    )
+
+    row = result["rows"][0]
+    assert row["cache_missing_cells"] == 0
     assert row["unmatched_cache_cells"] == 0
 
 
