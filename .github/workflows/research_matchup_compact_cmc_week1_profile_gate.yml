@@ -481,7 +481,7 @@ jobs:
                   summary.write('## Myles Garrett 2025 compact IDP cache pilot\n')
                   summary.write(f'- Receipt: `{myles_receipt}`\n')
                   summary.write('- Cache-only computation; no Fly read/write, settings join, API request, artifact, or publish step.\n')
-           PY
+          PY
       - name: Export restored cache for local read-only diagnostics
         if: ${{ inputs.mode == 'local_cache_export' }}
         uses: actions/upload-artifact@v4
