@@ -110,7 +110,9 @@ jobs:
             SUM(COALESCE(p.started_leagues,0))::BIGINT AS started_leagues,
             SUM(COALESCE(p.valid_started_outcomes,0))::BIGINT AS valid_started_outcomes,
             SUM(COALESCE(p.win_equivalent,0)) AS win_equivalent
-          FROM targets t CROSS JOIN inventory i
+          FROM targets t
+          INNER JOIN active_target_weeks a USING (NFL_player_id)
+          INNER JOIN inventory i ON i.week=a.week
           LEFT JOIN player_leaf p
             ON p.NFL_player_id=t.NFL_player_id
            AND p.week=i.week
