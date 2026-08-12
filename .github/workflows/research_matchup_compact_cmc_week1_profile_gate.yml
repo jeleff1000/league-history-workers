@@ -38,10 +38,15 @@ jobs:
         run: |
           python - <<'PY'
           import duckdb
+          import os
+          import resource
+          from time import perf_counter
           from scripts.research_cohorts.compact_matchup_cells import materialize_weekly_core_cohort_cells
 
           c = duckdb.connect()
           c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          source_rows = c.execute("SELECT COUNT(*) FROM lake.public.player_fantasy WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1").fetchone()[0]
+          started_at = perf_counter()
           materialize_weekly_core_cohort_cells(
               c,
               source_table='lake.public.player_fantasy',
@@ -92,12 +97,18 @@ jobs:
           """).fetchall()
           assert len(selected) == 1, selected
           assert selected[0][0] >= 150, selected
-          print({'cmc_2025_week_1_all': full, 'cmc_2025_week_1_selected': selected[0]})
-          import os
+          elapsed_s = perf_counter() - started_at
+          outer_rows = c.execute('SELECT COUNT(*) FROM cmc_week1').fetchone()[0]
+          cell_count = c.execute('SELECT SUM(list_count(cohort_cells)) FROM cmc_week1').fetchone()[0]
+          peak_rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+          receipt = {'source_rows_read': source_rows, 'outer_rows': outer_rows, 'nested_cells': cell_count, 'wall_seconds': round(elapsed_s, 3), 'peak_rss_kb': peak_rss_kb, 'cmc_2025_week_1_all': full, 'cmc_2025_week_1_selected': selected[0]}
+          print(receipt)
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
               summary.write('## CMC W1 compact cache truth gate\n')
               summary.write(f'- Cache: `{os.environ.get("CACHE_KEY", "immutable input")}`\n')
               summary.write('- Source commit: `da88eaf88d81075f07c6f5b708adf927715bf739`\n')
               summary.write(f'- ALL cell: `{full}`\n- Selected cell: `{selected[0]}`\n')
+              summary.write(f'- Source rows read: `{source_rows}`; outer rows: `{outer_rows}`; nested cells: `{cell_count}`\n')
+              summary.write(f'- Build wall time: `{elapsed_s:.3f}s`; peak RSS: `{peak_rss_kb} KB`\n')
           PY
 
