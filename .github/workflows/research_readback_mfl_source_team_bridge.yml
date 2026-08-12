@@ -1,0 +1,104 @@
+name: Read back MFL source-team bridge cache promotion
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_run_id:
+        description: Prior apply run whose evidence contains the 204 exact candidate rows.
+        required: true
+        default: '31646045505'
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+jobs:
+  readback:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: mfl-source-team-bridge-apply-evidence-${{ inputs.apply_run_id }}
+          path: evidence
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - name: Independently restore and verify all 204 exact NULL fills
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, hashlib, json
+          from pathlib import Path
+          delta=next(Path('evidence').rglob('team_promotable_player_delta.parquet'))
+          before=json.loads(Path('evidence/cache_before.json').read_text())
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          delta_path=str(delta).replace("'", "''")
+          con.execute(f"CREATE TEMP VIEW d AS SELECT * FROM read_parquet('{delta_path}')")
+          join='''
+            d.db_name=p.db_name AND CAST(d.year AS INTEGER)=CAST(p.year AS INTEGER)
+            AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER)
+            AND d.NFL_player_id IS NOT DISTINCT FROM p.NFL_player_id
+            AND d.platform IS NOT DISTINCT FROM p.platform
+            AND d.manager IS NOT DISTINCT FROM p.manager
+            AND (p.team_key IS NULL OR d.team_key=p.team_key)
+            AND (p.team_name IS NULL OR d.team_name=p.team_name)
+          '''
+          matched=int(con.execute(f'SELECT COUNT(*) FROM public.player_fantasy p JOIN d ON {join}').fetchone()[0])
+          unmatched=int(con.execute(f'SELECT COUNT(*) FROM d WHERE NOT EXISTS (SELECT 1 FROM public.player_fantasy p WHERE {join})').fetchone()[0])
+          checks={
+            'loss_remaining_null_source_cells':'d.source_loss IS NOT NULL AND p.loss IS NULL',
+            'tie_remaining_null_source_cells':'d.source_tie IS NOT NULL AND p.tie IS NULL',
+            'team_points_remaining_null_source_cells':'d.source_team_points IS NOT NULL AND p.team_points IS NULL',
+            'playoffs_remaining_null_source_cells':'d.source_playoffs IS NOT NULL AND p.is_playoffs IS NULL',
+          }
+          remaining={name:int(con.execute(f'SELECT COUNT(*) FROM public.player_fantasy p JOIN d ON {join} WHERE {where}').fetchone()[0]) for name,where in checks.items()}
+          schema=con.execute('DESCRIBE public.player_fantasy').fetchall()
+          rows=int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])
+          con.close()
+          digest=hashlib.sha256()
+          with Path('research_public_lake/ops_cache.duckdb').open('rb') as f:
+              for block in iter(lambda:f.read(1024*1024), b''): digest.update(block)
+          result={
+            'canonical_cache_key':'research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613',
+            'apply_run_id':'${{ inputs.apply_run_id }}',
+            'candidate_rows':204, 'matched_player_rows':matched, 'unmatched_candidate_keys':unmatched,
+            **remaining,
+            'schema_unchanged':schema==[tuple(row) for row in before['schema']],
+            'player_rows_unchanged':rows==before['player_rows'],
+            'ops_unchanged':digest.hexdigest()==Path('evidence/ops_before.sha256').read_text().split()[0],
+            'fresh_restore':True, 'new_lineage':False,
+          }
+          if not (matched==204 and unmatched==0 and not any(remaining.values())
+                  and result['schema_unchanged'] and result['player_rows_unchanged'] and result['ops_unchanged']):
+              raise SystemExit(json.dumps(result, sort_keys=True))
+          Path('mfl_source_team_bridge_readback.json').write_text(json.dumps(result, indent=2)+'\n')
+          print(json.dumps(result, sort_keys=True))
+          PY
+      - name: Prove exactly one same-key cache object remains
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          printf '%s\n' "${ids[0]}" > canonical_cache_id.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-source-team-bridge-readback-${{ github.run_id }}
+          path: |
+            mfl_source_team_bridge_readback.json
+            canonical_cache_id.txt
+          retention-days: 90

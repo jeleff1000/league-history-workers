@@ -199,7 +199,8 @@ jobs:
           delta=next(Path('evidence').rglob('team_promotable_player_delta.parquet'))
           before=json.loads(Path('evidence/cache_before.json').read_text())
           con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
-          con.execute("CREATE TEMP VIEW d AS SELECT * FROM read_parquet(?)",[str(delta)])
+          delta_path=str(delta).replace("'", "''")
+          con.execute(f"CREATE TEMP VIEW d AS SELECT * FROM read_parquet('{delta_path}')")
           join='''
             d.db_name=p.db_name AND CAST(d.year AS INTEGER)=CAST(p.year AS INTEGER)
             AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER)
