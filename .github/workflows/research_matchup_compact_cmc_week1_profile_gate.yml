@@ -1,0 +1,92 @@
+name: Research matchup compact CMC week-1 profile gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  contents: read
+
+jobs:
+  one_cmc_week:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+          ref: 57e4bb9059b2e69c33aec8574b60b64c2f8cd136
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - name: Build and validate exactly CMC 2025 week 1
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code
+          CACHE_KEY: ${{ inputs.cache_key }}
+        run: |
+          python - <<'PY'
+          import duckdb
+          from scripts.research_cohorts.compact_matchup_cells import materialize_weekly_core_cohort_cells
+
+          c = duckdb.connect()
+          c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          materialize_weekly_core_cohort_cells(
+              c,
+              source_table='lake.public.player_fantasy',
+              output_table='cmc_week1',
+              year=2025,
+              week=1,
+              player_id='00-0033280',
+              split_threshold=150,
+          )
+          assert c.execute('SELECT COUNT(*) FROM cmc_week1').fetchone()[0] == 1
+          full = c.execute("""
+            SELECT cell.eligible_leagues, cell.rostered_leagues,
+              cell.started_leagues, cell.valid_started_outcomes, cell.win_equivalent
+            FROM cmc_week1, UNNEST(cohort_cells) AS u(cell)
+            WHERE cell.q_teams='ALL' AND cell.q_roster='ALL'
+              AND cell.q_scoring='ALL' AND cell.q_pass_td='ALL'
+              AND cell.q_dynasty='ALL' AND cell.q_best_ball='ALL'
+          """).fetchone()
+          assert full == (9838, 9768, 9600, 9578, 6019.0), full
+          selected = c.execute("""
+            WITH resolved AS (
+              SELECT
+                CASE WHEN cohort_profile.teams_12t_split=1 THEN '12t' ELSE 'ALL' END AS q_teams,
+                CASE WHEN cohort_profile.roster_flx_split=1 THEN 'flx' ELSE 'ALL' END AS q_roster,
+                CASE WHEN cohort_profile.scoring_half_split=1 THEN 'half' ELSE 'ALL' END AS q_scoring,
+                CASE WHEN cohort_profile.pass_td_4pt_split=1 THEN '4pt' ELSE 'ALL' END AS q_pass_td,
+                CASE WHEN cohort_profile.dynasty_redraft_split=1 THEN 'redraft' ELSE 'ALL' END AS q_dynasty,
+                CASE WHEN cohort_profile.best_ball_managed_split=1 THEN 'managed' ELSE 'ALL' END AS q_best_ball,
+                cohort_cells
+              FROM cmc_week1
+            )
+            SELECT cell.eligible_leagues, cell.rostered_leagues, cell.started_leagues
+            FROM resolved, UNNEST(cohort_cells) AS u(cell)
+            WHERE cell.q_teams=resolved.q_teams AND cell.q_roster=resolved.q_roster
+              AND cell.q_scoring=resolved.q_scoring AND cell.q_pass_td=resolved.q_pass_td
+              AND cell.q_dynasty=resolved.q_dynasty AND cell.q_best_ball=resolved.q_best_ball
+          """).fetchall()
+          assert len(selected) == 1, selected
+          assert selected[0][0] >= 150, selected
+          print({'cmc_2025_week_1_all': full, 'cmc_2025_week_1_selected': selected[0]})
+          import os
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              summary.write('## CMC W1 compact cache truth gate\n')
+              summary.write(f'- Cache: `{os.environ.get("CACHE_KEY", "immutable input")}`\n')
+              summary.write('- Source commit: `57e4bb9059b2e69c33aec8574b60b64c2f8cd136`\n')
+              summary.write(f'- ALL cell: `{full}`\n- Selected cell: `{selected[0]}`\n')
+          PY
+
