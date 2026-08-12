@@ -80,6 +80,10 @@ CANDIDATE_DISPOSITIONS = {
     "direct_player_candidate", "team_week_signal_candidate", "player_signal_candidate",
     "settings_candidate", "structured_evidence_candidate",
 }
+RECEIPT_COUNT_FIELDS = (
+    "source_cells", "cache_match_cells", "cache_missing_cells",
+    "cache_conflict_cells", "unmatched_cache_cells", "blocked_schema_cells",
+)
 
 
 def _source_artifact_id(path: str | None) -> int | None:
@@ -132,10 +136,7 @@ def _seed_prior_receipts(
     for row in prior.get("rows", []):
         _add_result(totals, int(row["artifact_id"]), {
             key: int(row.get(key, 0) or 0)
-            for key in (
-                "source_cells", "cache_match_cells", "cache_missing_cells",
-                "cache_conflict_cells", "unmatched_cache_cells", "blocked_schema_cells",
-            )
+            for key in RECEIPT_COUNT_FIELDS
         })
 
 
@@ -780,6 +781,15 @@ def build_receipts(
     rows: list[dict[str, Any]] = []
     for row in ledger_rows:
         result = dict(row)
+        # Supplemental recovery receipts are already independently verified
+        # cache facts, not raw artifacts. They may use descriptive string IDs
+        # and must be carried through unchanged rather than coerced into the
+        # numeric raw-artifact namespace.
+        if result.get("record_type") == "cache_recovery_receipt":
+            for field in RECEIPT_COUNT_FIELDS:
+                result[field] = int(result.get(field, 0) or 0)
+            rows.append(result)
+            continue
         artifact_id = int(result["artifact_id"])
         counts = totals[artifact_id]
         status, reason = _final_status(result, counts)
