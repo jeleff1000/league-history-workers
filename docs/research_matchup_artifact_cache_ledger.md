@@ -194,6 +194,25 @@ The CSV columns `bridge_evidence_file_count`, `bridge_evidence_row_count`,
 validator fails if a row claims bridge evidence without positive row coverage,
 a strength classification, and its source receipt.
 
+### Loss/tie admission matrix
+
+Schema support alone will not close every `loss`/`tie` artifact. The ledger
+currently identifies 713 source artifacts with either `loss`/`tie` evidence or
+schema-blocked cells. These are retained-receipt counts, not distinct cache
+cells; duplicate source snapshots are deduplicated only during an eventual
+field-level promotion.
+
+| Admission condition | Artifacts | Retained loss/tie cells | Additional obligation |
+| --- | ---: | ---: | --- |
+| Schema only | 4 | 464 | Add `loss`/`tie`, then exact null-fill/readback. |
+| Direct MFL player evidence | 15 | 288,160 | Resolve 1,532 ambiguous identities and preserve/adjudicate 1,201 non-null conflicts. |
+| Schema plus identity gap, conflict, or both | 694 | 4,747,094 | Require a deterministic player-team bridge and, where present, source-precedence adjudication. |
+
+Across this source family the ledger retains 7,860,632 unmatched identity
+cells and 139,082 non-null conflicts. Therefore a successful schema migration
+must not mark the source family complete by itself: it can close only the four
+schema-only artifacts and any later candidates with an exact proven recipient.
+
 ## Canonical promotion contract
 
 The approved GitHub Actions cache is immutable: a runner can restore and
