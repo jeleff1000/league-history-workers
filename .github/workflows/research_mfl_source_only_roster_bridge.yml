@@ -1,0 +1,140 @@
+name: Research MFL source-only roster bridge
+
+on:
+  workflow_dispatch:
+    inputs:
+      shard_count:
+        description: Exact deterministic MFL source-only target shards.
+        required: true
+        default: '256'
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+  SOURCE_RUN_ID: '31062083630'
+  SOURCE_ARTIFACT: research-source-matchup-rescue-3-31062083630
+
+jobs:
+  bridge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153, 154, 155, 156, 157, 158, 159, 160, 161, 162, 163, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 216, 217, 218, 219, 220, 221, 222, 223, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pandas==2.2.3 pyarrow==15.0.2 requests==2.32.4 polars==1.35.2
+      - name: Record immutable prestate
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import duckdb, json
+          import pandas as pd
+          from pathlib import Path
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          Path('cache_before.json').write_text(json.dumps({'schema':con.execute('DESCRIBE public.player_fantasy').fetchall(),'rows':int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])})+'\n')
+          con.close()
+          PY
+      - name: Materialize this shard's exact source-only MFL weeks
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHARD: ${{ matrix.shard }}
+          SHARD_COUNT: ${{ inputs.shard_count }}
+        run: |
+          set -euo pipefail
+          mkdir -p source out
+          gh run download "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$SOURCE_ARTIFACT" --dir source
+          source_file=$(find source -name 'source_matchup_rescue_3.parquet' -print -quit)
+          test -n "$source_file"
+          python scripts/research_cohorts/materialize_mfl_source_only_roster_targets.py --base research_public_lake/corpus_snapshot.duckdb --source "$source_file" --out all_source_only_targets.json
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          data=json.loads(Path('all_source_only_targets.json').read_text())
+          shard=int(os.environ['SHARD']); count=int(os.environ['SHARD_COUNT'])
+          groups=[g for g in data['groups'] if int(hashlib.sha256(f"{g['db_name']}|{g['year']}|{g['week']}".encode()).hexdigest()[:12],16)%count==shard]
+          Path('shard_targets.json').write_text(json.dumps({'groups':groups},indent=2)+'\n')
+          print({'all_targets':len(data['groups']),'shard_targets':len(groups),'shard':shard})
+          PY
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          source=next(Path('source').rglob('source_matchup_rescue_3.parquet'))
+          groups=json.loads(Path('shard_targets.json').read_text())['groups']
+          con=duckdb.connect()
+          con.register('wanted', pd.DataFrame(groups, columns=['db_name','year','week','source_id']))
+          con.execute("""
+            COPY (
+              SELECT s.* FROM read_parquet(?) s JOIN wanted w
+                ON s.db_name=w.db_name AND CAST(s.year AS INTEGER)=CAST(w.year AS INTEGER)
+               AND CAST(s.week AS INTEGER)=CAST(w.week AS INTEGER)
+            ) TO 'shard_source_signals.parquet' (FORMAT PARQUET, COMPRESSION ZSTD)
+          """, [str(source)])
+          con.close()
+          PY
+      - name: Fetch only source-only roster memberships
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
+          MFL_RATE_LIMIT_PER_MIN: '25'
+          SHARD: ${{ matrix.shard }}
+        run: |
+          python scripts/research_cohorts/extract_mfl_target_roster_memberships.py --manifest shard_targets.json --shard 0 --shards 1 --out-memberships out/memberships.parquet --out-player-directory out/player_directory.parquet --out-report out/extract_report.json
+      - name: Build exact player bridge and NULL-fill candidate
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/build_mfl_roster_player_crosswalk.py --directory out/player_directory.parquet --ops-cache research_public_lake/ops_cache.duckdb --out out/crosswalk.parquet --report out/crosswalk_report.json
+          python scripts/research_cohorts/build_mfl_roster_bridge_receipt.py --base research_public_lake/corpus_snapshot.duckdb --memberships out/memberships.parquet --crosswalk out/crosswalk.parquet --out out/bridge.parquet --diagnostic-out out/bridge_diagnostic.parquet --report out/bridge_report.json
+          mkdir -p candidate_input
+          cp shard_source_signals.parquet candidate_input/team_signals.parquet
+          cp out/bridge.parquet candidate_input/player_bridge.parquet
+          python scripts/research_cohorts/audit_team_signal_candidates.py --base research_public_lake/corpus_snapshot.duckdb --candidates candidate_input --out out/candidate
+      - name: Fail fast on cache mutation or unsafe candidate
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, hashlib, json
+          from pathlib import Path
+          before=json.loads(Path('cache_before.json').read_text())
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          assert con.execute('DESCRIBE public.player_fantasy').fetchall()==[tuple(x) for x in before['schema']]
+          assert int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])==before['rows']
+          con.close()
+          h=hashlib.sha256()
+          with Path('research_public_lake/ops_cache.duckdb').open('rb') as f:
+            for block in iter(lambda:f.read(1024*1024),b''): h.update(block)
+          assert h.hexdigest()==Path('ops_before.sha256').read_text().split()[0]
+          for path in ['all_source_only_targets.json','shard_targets.json','out/extract_report.json','out/crosswalk_report.json','out/bridge_report.json','out/candidate/team_signal_candidate_report.json']:
+            report=json.loads(Path(path).read_text())
+            assert report.get('cache_mutated',False) is False if 'report' in path else True
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-source-only-roster-bridge-${{ matrix.shard }}-${{ github.run_id }}
+          path: |
+            all_source_only_targets.json
+            shard_targets.json
+            shard_source_signals.parquet
+            out/
+            cache_before.json
+            ops_before.sha256
+          retention-days: 90
+          compression-level: 0
