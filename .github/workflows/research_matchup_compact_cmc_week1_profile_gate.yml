@@ -29,7 +29,7 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           path: code
-          ref: 837dfc419c0fdd440e598cd40f3595ffda761255
+          ref: 1e66f54426efaa6262e8298714699a1cd59da03e
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -60,6 +60,14 @@ jobs:
 
           c = duckdb.connect()
           c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          c.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
+          c.execute("""
+            CREATE TEMP VIEW cached_regular_player_weeks AS
+            SELECT DISTINCT CAST(NFL_player_id AS VARCHAR) AS NFL_player_id,
+              CAST(year AS INTEGER) AS year, CAST(week AS INTEGER) AS week
+            FROM ops.nfl_historical.nfl_player_stats_all
+            WHERE COALESCE(season_type, 'REG') = 'REG' AND week IS NOT NULL
+          """)
           mode = os.environ['PILOT_MODE']
           if mode not in {'cmc_week1', 'cmc_2025_all_grains'}:
               raise ValueError(f'unsupported pilot mode: {mode}')
@@ -68,6 +76,7 @@ jobs:
           materialize_weekly_core_cohort_cells(
               c,
               source_table='lake.public.player_fantasy',
+              valid_player_weeks_table='cached_regular_player_weeks',
               output_table='cmc_week1',
               year=2025,
               week=1,
@@ -131,7 +140,6 @@ jobs:
               summary.write(f'- Build wall time: `{elapsed_s:.3f}s`; peak RSS: `{peak_rss_kb} KB`\n')
 
           if mode == 'cmc_2025_all_grains':
-              c.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
               stats = 'ops.nfl_historical.nfl_player_stats_all'
               source_rows_2025 = c.execute("""
                 SELECT COUNT(*) FROM lake.public.player_fantasy
@@ -141,6 +149,7 @@ jobs:
               full_started = perf_counter()
               materialize_weekly_core_cohort_cells(
                   c, source_table='lake.public.player_fantasy', output_table='cmc_2025_weekly',
+                  valid_player_weeks_table='cached_regular_player_weeks',
                   year=2025, week=None, player_id='00-0033280', split_threshold=150,
               )
               weekly_weeks = [r[0] for r in c.execute(
