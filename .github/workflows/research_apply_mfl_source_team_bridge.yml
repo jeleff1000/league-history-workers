@@ -1,0 +1,258 @@
+name: Apply validated MFL source-team player bridge
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Must equal APPLY_MFL_SOURCE_TEAM_BRIDGE.
+        required: true
+        default: ''
+      candidate_run_id:
+        description: Read-only validation run that emitted the exact candidate delta.
+        required: true
+        default: '31645490959'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: canonical-research-cache-replacement
+  cancel-in-progress: false
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+  EXPECTED_DELTA_ROWS: '204'
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pytest==8.3.5
+      - run: >-
+          python -m pytest -q
+          scripts/research_cohorts/test_apply_team_signal_delta_in_place.py
+          tests/research_cohorts/test_research_apply_mfl_source_team_bridge.py
+
+  apply:
+    needs: tests
+    if: ${{ inputs.confirm == 'APPLY_MFL_SOURCE_TEAM_BRIDGE' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Record immutable pre-state
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          result={
+            'schema': con.execute('DESCRIBE public.player_fantasy').fetchall(),
+            'player_rows': int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]),
+          }
+          con.close()
+          Path('cache_before.json').write_text(json.dumps(result, indent=2)+'\n')
+          PY
+      - name: Download only the proven candidate delta
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p candidate
+          gh run download '${{ inputs.candidate_run_id }}' --repo '${{ github.repository }}' \
+            --name 'mfl-source-team-bridge-validation-4-${{ inputs.candidate_run_id }}' --dir candidate
+          test "$(find candidate -name team_promotable_player_delta.parquet | wc -l)" -eq 1
+          test "$(find candidate -name team_signal_candidate_report.json | wc -l)" -eq 1
+      - name: Reject any broadened, conflicting, or stale candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          report=json.loads(next(Path('candidate').rglob('team_signal_candidate_report.json')).read_text())
+          invariant={'read_only':True,'cache_mutated':False,'new_lineage':False,'canonical_schema_unchanged':True}
+          for key, expected in invariant.items():
+              if report.get(key) != expected:
+                  raise SystemExit(f'candidate invariant failed: {key}={report.get(key)!r}')
+          expected={'win':0,'loss':204,'tie':204,'team_points':204,'is_playoffs':204,
+                    'champion':0,'final_playoff_seed':0,'made_playoffs':0}
+          actual={key:int(report.get('improvements_by_field',{}).get(key,0)) for key in expected}
+          if actual != expected or int(report.get('matched_player_rows',0)) != 204:
+              raise SystemExit(f'candidate improvement gate failed: {actual}; {report.get("matched_player_rows")}')
+          if any(int(v) for v in report.get('positive_mismatches_not_auto_promoted',{}).values()):
+              raise SystemExit('candidate contains a conflicting non-null source value')
+          delta=next(Path('candidate').rglob('team_promotable_player_delta.parquet'))
+          con=duckdb.connect()
+          total=int(con.execute("SELECT COUNT(*) FROM read_parquet(?)",[str(delta)]).fetchone()[0])
+          unique=int(con.execute("SELECT COUNT(*) FROM (SELECT DISTINCT db_name,year,week,NFL_player_id,manager,team_key,team_name,platform FROM read_parquet(?))",[str(delta)]).fetchone()[0])
+          methods=con.execute("SELECT DISTINCT join_method FROM read_parquet(?) ORDER BY 1",[str(delta)]).fetchall()
+          con.close()
+          if total != 204 or unique != 204 or methods != [('player_bridge',)]:
+              raise SystemExit(f'candidate key/method gate failed: total={total} unique={unique} methods={methods}')
+          PY
+      - name: Apply exact NULL fills to existing player rows only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/apply_team_signal_delta_in_place.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --delta "$(find candidate -name team_promotable_player_delta.parquet -print -quit)" \
+            --report apply_report.json
+      - name: Fail fast before replacing the same-key cache object
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, hashlib, json
+          from pathlib import Path
+          before=json.loads(Path('cache_before.json').read_text())
+          report=json.loads(Path('apply_report.json').read_text())
+          expected={'win':0,'loss':204,'tie':204,'team_points':204,'is_playoffs':204,
+                    'champion':0,'final_playoff_seed':0,'made_playoffs':0}
+          actual={key:int(report['improvements_by_field'].get(key,0)) for key in expected}
+          if actual != expected or int(report.get('matched_rows',-1)) != 204:
+              raise SystemExit(f'apply improvement gate failed: {actual}; {report}')
+          if (report.get('schema_unchanged') is not True or report.get('ops_untouched') is not True
+              or report.get('new_lineage') is not False or int(report.get('inserted_rows',-1)) != 0):
+              raise SystemExit(f'apply invariant failed: {report}')
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          assert con.execute('DESCRIBE public.player_fantasy').fetchall()==[tuple(row) for row in before['schema']]
+          assert int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])==before['player_rows']
+          con.close()
+          digest=hashlib.sha256()
+          with Path('research_public_lake/ops_cache.duckdb').open('rb') as f:
+              for block in iter(lambda:f.read(1024*1024), b''): digest.update(block)
+          assert digest.hexdigest()==Path('ops_before.sha256').read_text().split()[0]
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-source-team-bridge-apply-evidence-${{ github.run_id }}
+          path: |
+            cache_before.json
+            ops_before.sha256
+            apply_report.json
+            candidate/**/team_signal_candidate_report.json
+            candidate/**/team_promotable_player_delta.parquet
+          retention-days: 90
+          compression-level: 0
+      - name: Replace only the single approved cache object under its existing key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${ids[0]}"
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+
+  readback:
+    needs: apply
+    if: ${{ inputs.confirm == 'APPLY_MFL_SOURCE_TEAM_BRIDGE' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: mfl-source-team-bridge-apply-evidence-${{ github.run_id }}
+          path: evidence
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - name: Independently restore and verify all 204 exact NULL fills
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, hashlib, json
+          from pathlib import Path
+          delta=next(Path('evidence').rglob('team_promotable_player_delta.parquet'))
+          before=json.loads(Path('evidence/cache_before.json').read_text())
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          con.execute("CREATE TEMP VIEW d AS SELECT * FROM read_parquet(?)",[str(delta)])
+          join='''
+            d.db_name=p.db_name AND CAST(d.year AS INTEGER)=CAST(p.year AS INTEGER)
+            AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER)
+            AND d.NFL_player_id IS NOT DISTINCT FROM p.NFL_player_id
+            AND d.platform IS NOT DISTINCT FROM p.platform
+            AND d.manager IS NOT DISTINCT FROM p.manager
+            AND (p.team_key IS NULL OR d.team_key=p.team_key)
+            AND (p.team_name IS NULL OR d.team_name=p.team_name)
+          '''
+          matched=int(con.execute(f'SELECT COUNT(*) FROM public.player_fantasy p JOIN d ON {join}').fetchone()[0])
+          unmatched=int(con.execute(f'SELECT COUNT(*) FROM d WHERE NOT EXISTS (SELECT 1 FROM public.player_fantasy p WHERE {join})').fetchone()[0])
+          checks={
+            'loss_remaining_null_source_cells':'d.source_loss IS NOT NULL AND p.loss IS NULL',
+            'tie_remaining_null_source_cells':'d.source_tie IS NOT NULL AND p.tie IS NULL',
+            'team_points_remaining_null_source_cells':'d.source_team_points IS NOT NULL AND p.team_points IS NULL',
+            'playoffs_remaining_null_source_cells':'d.source_playoffs IS NOT NULL AND p.is_playoffs IS NULL',
+          }
+          remaining={name:int(con.execute(f'SELECT COUNT(*) FROM public.player_fantasy p JOIN d ON {join} WHERE {where}').fetchone()[0]) for name,where in checks.items()}
+          schema=con.execute('DESCRIBE public.player_fantasy').fetchall()
+          rows=int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])
+          con.close()
+          digest=hashlib.sha256()
+          with Path('research_public_lake/ops_cache.duckdb').open('rb') as f:
+              for block in iter(lambda:f.read(1024*1024), b''): digest.update(block)
+          result={
+            'canonical_cache_key':'research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613',
+            'candidate_run_id':'${{ inputs.candidate_run_id }}',
+            'candidate_rows':204, 'matched_player_rows':matched, 'unmatched_candidate_keys':unmatched,
+            **remaining,
+            'schema_unchanged':schema==[tuple(row) for row in before['schema']],
+            'player_rows_unchanged':rows==before['player_rows'],
+            'ops_unchanged':digest.hexdigest()==Path('evidence/ops_before.sha256').read_text().split()[0],
+            'fresh_restore':True, 'new_lineage':False,
+          }
+          if not (matched==204 and unmatched==0 and not any(remaining.values())
+                  and result['schema_unchanged'] and result['player_rows_unchanged'] and result['ops_unchanged']):
+              raise SystemExit(json.dumps(result, sort_keys=True))
+          Path('mfl_source_team_bridge_readback.json').write_text(json.dumps(result, indent=2)+'\n')
+          print(json.dumps(result, sort_keys=True))
+          PY
+      - name: Prove exactly one same-key cache object remains
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          printf '%s\n' "${ids[0]}" > canonical_cache_id.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-source-team-bridge-readback-${{ github.run_id }}
+          path: |
+            mfl_source_team_bridge_readback.json
+            canonical_cache_id.txt
+          retention-days: 90
