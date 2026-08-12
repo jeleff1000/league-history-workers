@@ -21,7 +21,7 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           path: code
-          ref: da88eaf88d81075f07c6f5b708adf927715bf739
+          ref: 57e4bb9059b2e69c33aec8574b60b64c2f8cd136
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -60,6 +60,16 @@ jobs:
               AND cell.q_scoring='ALL' AND cell.q_pass_td='ALL'
               AND cell.q_dynasty='ALL' AND cell.q_best_ball='ALL'
           """).fetchone()
+          raw_outcomes = c.execute("""
+            SELECT CAST(win AS DOUBLE) AS win_value,
+              COUNT(*) AS source_rows, COUNT(DISTINCT CAST(db_name AS VARCHAR)) AS leagues
+            FROM lake.public.player_fantasy
+            WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1
+              AND CAST(NFL_player_id AS VARCHAR)='00-0033280'
+              AND CAST(is_started AS INTEGER)=1
+            GROUP BY 1 ORDER BY 1
+          """).fetchall()
+          print({'cmc_2025_week_1_raw_started_outcomes': raw_outcomes})
           assert full == (9838, 9768, 9600, 9578, 6019.0), full
           selected = c.execute("""
             WITH resolved AS (
@@ -86,7 +96,7 @@ jobs:
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
               summary.write('## CMC W1 compact cache truth gate\n')
               summary.write(f'- Cache: `{os.environ.get("CACHE_KEY", "immutable input")}`\n')
-              summary.write('- Source commit: `da88eaf88d81075f07c6f5b708adf927715bf739`\n')
+              summary.write('- Source commit: `57e4bb9059b2e69c33aec8574b60b64c2f8cd136`\n')
               summary.write(f'- ALL cell: `{full}`\n- Selected cell: `{selected[0]}`\n')
           PY
 
