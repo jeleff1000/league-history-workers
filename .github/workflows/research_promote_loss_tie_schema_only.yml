@@ -1,0 +1,215 @@
+name: Promote exact loss and tie source cells
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: canonical-research-cache-replacement
+  cancel-in-progress: false
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+  SOURCE_RUN_A: '31239084738'
+  SOURCE_RUN_B: '31252933410'
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pytest==8.3.3
+      - run: python -m pytest -q scripts/research_cohorts/test_add_canonical_loss_tie_columns.py
+
+  apply:
+    needs: tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pytest==8.3.3
+      - name: Record exact pre-state
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          Path('prestate.json').write_text(json.dumps({
+            'schema':[r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()],
+            'rows':int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]),
+          }, indent=2)+'\n')
+          con.close()
+          PY
+      - name: Download exactly the four schema-only source artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p sources/a19 sources/a208 sources/b19 sources/b208
+          gh run download "$SOURCE_RUN_A" --repo "$GITHUB_REPOSITORY" --name research-sparse-playoff-championship-rescue-19-31239084738 --dir sources/a19
+          gh run download "$SOURCE_RUN_A" --repo "$GITHUB_REPOSITORY" --name research-sparse-playoff-championship-rescue-208-31239084738 --dir sources/a208
+          gh run download "$SOURCE_RUN_B" --repo "$GITHUB_REPOSITORY" --name research-sparse-playoff-championship-rescue-19-31252933410 --dir sources/b19
+          gh run download "$SOURCE_RUN_B" --repo "$GITHUB_REPOSITORY" --name research-sparse-playoff-championship-rescue-208-31252933410 --dir sources/b208
+          test "$(find sources -name '*.parquet' | wc -l)" -eq 4
+      - name: Add only sanctioned loss and tie columns
+        run: |
+          python scripts/research_cohorts/add_canonical_loss_tie_columns.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --ops research_public_lake/ops_cache.duckdb \
+            --report loss_tie_schema_report.json
+      - name: Build exact source-to-player delta
+        run: |
+          python scripts/research_cohorts/audit_team_signal_candidates.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --candidates sources \
+            --out candidate
+      - name: Apply only exact null loss/tie fan-out cells
+        run: |
+          python scripts/research_cohorts/apply_team_signal_delta_in_place.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --delta candidate/team_promotable_player_delta.parquet \
+            --report loss_tie_apply_report.json
+      - name: Fail fast before cache replacement
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, hashlib, json
+          from pathlib import Path
+          pre=json.loads(Path('prestate.json').read_text())
+          schema=json.loads(Path('loss_tie_schema_report.json').read_text())
+          apply=json.loads(Path('loss_tie_apply_report.json').read_text())
+          if schema['added_columns'] != ['loss','tie']:
+              raise SystemExit(f"unexpected schema addition: {schema['added_columns']}")
+          if int(schema['player_rows_before']) != int(schema['player_rows_after']) or int(schema['player_rows_before']) != int(pre['rows']):
+              raise SystemExit('player row count changed while adding loss/tie')
+          if not schema['ops_unchanged'] or not apply['schema_unchanged'] or not apply['ops_untouched']:
+              raise SystemExit('schema/ops preservation gate failed')
+          if int(apply['improvements_by_field'].get('loss',0)) <= 0 or int(apply['improvements_by_field'].get('tie',0)) <= 0:
+              raise SystemExit(f"expected nonzero loss/tie improvements: {apply['improvements_by_field']}")
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          cols=[r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()]
+          if cols != pre['schema'] + ['loss','tie']:
+              raise SystemExit('schema drift outside loss/tie')
+          if int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]) != int(pre['rows']):
+              raise SystemExit('player row count changed after apply')
+          con.close()
+          digest=hashlib.sha256()
+          with Path('research_public_lake/ops_cache.duckdb').open('rb') as handle:
+              for block in iter(lambda: handle.read(1024*1024), b''): digest.update(block)
+          if digest.hexdigest() != Path('ops_before.sha256').read_text().split()[0]:
+              raise SystemExit('ops cache changed')
+          PY
+      - name: Save evidence before replacement
+        uses: actions/upload-artifact@v4
+        with:
+          name: loss-tie-promotion-evidence-${{ github.run_id }}
+          path: |
+            prestate.json
+            ops_before.sha256
+            loss_tie_schema_report.json
+            candidate/team_signal_candidate_report.json
+            loss_tie_apply_report.json
+          retention-days: 90
+          compression-level: 0
+      - name: Replace only the exact approved cache key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${ids[0]}"
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+
+  readback:
+    needs: apply
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Download the same four source artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p sources/a19 sources/a208 sources/b19 sources/b208
+          gh run download "$SOURCE_RUN_A" --repo "$GITHUB_REPOSITORY" --name research-sparse-playoff-championship-rescue-19-31239084738 --dir sources/a19
+          gh run download "$SOURCE_RUN_A" --repo "$GITHUB_REPOSITORY" --name research-sparse-playoff-championship-rescue-208-31239084738 --dir sources/a208
+          gh run download "$SOURCE_RUN_B" --repo "$GITHUB_REPOSITORY" --name research-sparse-playoff-championship-rescue-19-31252933410 --dir sources/b19
+          gh run download "$SOURCE_RUN_B" --repo "$GITHUB_REPOSITORY" --name research-sparse-playoff-championship-rescue-208-31252933410 --dir sources/b208
+      - name: Independently read back exact source values
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/audit_team_signal_candidates.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --candidates sources \
+            --out readback_candidate
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          report=json.loads(Path('readback_candidate/team_signal_candidate_report.json').read_text())
+          if any(int(report['improvements_by_field'].get(field, 0)) for field in ('loss','tie')):
+              raise SystemExit(f"loss/tie source cells remain null: {report['improvements_by_field']}")
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          cols=[r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()]
+          if cols[-2:] != ['loss','tie']:
+              raise SystemExit('approved loss/tie schema is absent after fresh restore')
+          Path('loss_tie_readback.json').write_text(json.dumps({
+              'canonical_cache_key':'${{ env.CANONICAL_CACHE_KEY }}',
+              'loss_remaining_null_source_cells':int(report['improvements_by_field'].get('loss',0)),
+              'tie_remaining_null_source_cells':int(report['improvements_by_field'].get('tie',0)),
+              'fresh_restore':True,
+              'new_lineage':False,
+          }, indent=2)+'\n')
+          con.close()
+          PY
+      - name: Verify one approved cache object remains
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: loss-tie-promotion-readback-${{ github.run_id }}
+          path: |
+            loss_tie_readback.json
+            readback_candidate/team_signal_candidate_report.json
+          retention-days: 90
+          compression-level: 0
