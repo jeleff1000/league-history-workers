@@ -25,7 +25,10 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install duckdb==1.5.1 pytest==8.3.3
-      - run: python -m pytest -q scripts/research_cohorts/test_add_canonical_loss_tie_columns.py
+      - run: >-
+          python -m pytest -q
+          scripts/research_cohorts/test_add_canonical_loss_tie_columns.py
+          scripts/research_cohorts/test_apply_team_signal_delta_in_place.py
 
   apply:
     needs: tests

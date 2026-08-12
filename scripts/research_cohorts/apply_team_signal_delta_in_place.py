@@ -115,7 +115,7 @@ def main() -> None:
       FROM public.player_fantasy p JOIN delta_unique d
         ON d.db_name=p.db_name AND CAST(d.year AS INTEGER)=CAST(p.year AS INTEGER)
        AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER)
-       AND d.NFL_player_id=p.NFL_player_id
+       AND d.NFL_player_id IS NOT DISTINCT FROM p.NFL_player_id
        AND d.platform=p.platform
        AND d.manager IS NOT DISTINCT FROM p.manager
        AND (p.team_key IS NULL OR d.team_key=p.team_key)
