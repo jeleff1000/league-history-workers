@@ -87,3 +87,36 @@ def test_candidate_audit_does_not_fill_champion_from_a_non_championship_week(
     ).fetchone()[0]
     con.close()
     assert emitted == 0
+
+
+def test_candidate_audit_accepts_manager_only_source_without_team_key(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """A source that lacks the team-key column can still use its unique manager-week bridge."""
+    from scripts.research_cohorts.audit_team_signal_candidates import main
+
+    base = tmp_path / "base.duckdb"
+    _base_cache(base)
+    con = duckdb.connect(str(base))
+    con.execute("UPDATE public.player_fantasy SET team_key=NULL, is_playoffs=NULL")
+    con.close()
+    candidates = tmp_path / "candidates"
+    candidates.mkdir()
+    _write_parquet(candidates / "manager-only.parquet", [{
+        "db_name": "league", "year": 2024, "week": 15,
+        "manager": "mgr", "is_playoffs": 1,
+    }])
+    out = tmp_path / "out"
+    monkeypatch.setattr(sys, "argv", [
+        "audit_team_signal_candidates.py",
+        "--base", str(base), "--candidates", str(candidates), "--out", str(out),
+    ])
+
+    main()
+
+    con = duckdb.connect()
+    emitted = con.execute(
+        "SELECT COUNT(*) FROM read_parquet(?)", [str(out / "team_promotable_player_delta.parquet")]
+    ).fetchone()[0]
+    con.close()
+    assert emitted == 1

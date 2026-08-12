@@ -40,7 +40,11 @@ def main() -> None:
         cols = {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet({parquet_path})").fetchall()}
         # Exact/player-grain artifacts are audited by the separate player pass;
         # this pass must consume only team/week-grain sources.
-        if {"db_name", "year", "week", "team_key"}.issubset(cols) and "NFL_player_id" not in cols:
+        if (
+            {"db_name", "year", "week"}.issubset(cols)
+            and "NFL_player_id" not in cols
+            and ({"team_key", "manager"} & cols)
+        ):
             files.append(path)
         # Player-grain evidence is a valid bridge even when the source did not
         # expose a team_key.  Manager/team identity plus NFL_player_id is enough
@@ -58,10 +62,12 @@ def main() -> None:
         "SELECT * FROM read_parquet([" + ",".join("'" + p + "'" for p in paths) + "], union_by_name=true, filename=true)"
     )
     cols = {r[0] for r in con.execute("DESCRIBE source_raw").fetchall()}
-    required = {"db_name", "year", "week", "team_key"}
+    required = {"db_name", "year", "week"}
     missing = required - cols
     if missing:
         raise SystemExit(f"team candidate missing required columns: {sorted(missing)}")
+    if not ({"team_key", "manager"} & cols):
+        raise SystemExit("team candidate needs a team_key or manager identity column")
 
     # Normalize the source to the only signals that can safely fill canonical
     # player cells.  Championship credit requires the explicit championship
@@ -99,13 +105,14 @@ def main() -> None:
         raw = f"LOWER(TRIM(CAST({col} AS VARCHAR)))"
         return f"NULLIF(CASE WHEN INSTR({raw}, '_') > 0 THEN REGEXP_EXTRACT({raw}, '([^_]+)$', 1) ELSE {raw} END, '')"
 
+    source_team_key = expr("team_key", "VARCHAR")
     con.execute(f"""
       CREATE OR REPLACE TEMP TABLE source_signals AS
       SELECT
         CAST(db_name AS VARCHAR) db_name,
         CAST("year" AS INTEGER) AS year,
         CAST("week" AS INTEGER) AS week,
-        NULLIF(TRIM(CAST(team_key AS VARCHAR)), '') team_key,
+        NULLIF(TRIM(CAST({source_team_key} AS VARCHAR)), '') team_key,
         {key_expr('team_key')} team_key_norm,
         {label_expr('manager')} manager_key,
         {label_expr('team_name')} team_name_key,
@@ -135,6 +142,14 @@ def main() -> None:
     """)
     source_keys = con.execute("SELECT COUNT(*) FROM source_signals").fetchone()[0]
     source_duplicate_rows = con.execute("SELECT COALESCE(SUM(source_rows-1),0) FROM source_signals").fetchone()[0]
+    con.execute("""
+      CREATE OR REPLACE TEMP TABLE source_manager_counts AS
+      SELECT db_name, year, week, manager_key,
+             COUNT(*) AS source_team_count
+      FROM source_signals
+      WHERE manager_key IS NOT NULL
+      GROUP BY 1,2,3,4
+    """)
 
     # Some canonical rows have no manager/team identity at all.  A team/week
     # signal can still be safely fanned out when an artifact player row bridges
@@ -217,7 +232,10 @@ def main() -> None:
         ON s.db_name=p.db_name
        AND s.year=CAST(p.year AS INTEGER)
        AND s.week=CAST(p.week AS INTEGER)
-       AND (
+      LEFT JOIN source_manager_counts mc
+        ON mc.db_name=s.db_name AND mc.year=s.year AND mc.week=s.week
+       AND mc.manager_key IS NOT DISTINCT FROM s.manager_key
+      WHERE (
          ((s.team_key IS NOT NULL
            AND s.team_key=NULLIF(TRIM(CAST(p.team_key AS VARCHAR)),''))
           OR (s.team_key_norm IS NOT NULL AND s.team_key_norm={p_key_expr('p.team_key')}))
@@ -225,7 +243,8 @@ def main() -> None:
          (s.manager_key IS NOT NULL
           AND s.manager_key={p_label_expr('p.manager')}
           AND (s.team_name_key={p_label_expr('p.team_name')}
-               OR p.team_name IS NULL))
+               OR p.team_name IS NULL
+               OR mc.source_team_count=1))
        )
     """)
     con.execute("""
