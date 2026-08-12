@@ -19,6 +19,7 @@ on:
           - cmc_2025_all_grains
           - myles_2025_season
           - rb_2025_weekly
+          - all_2025_weekly
           - rb_2025_lane
           - rb_2025_week1_inventory
           - rb_2025_week1_distribution
@@ -88,11 +89,11 @@ jobs:
             CREATE TEMP VIEW cached_regular_player_weeks AS
             SELECT DISTINCT CAST(NFL_player_id AS VARCHAR) AS NFL_player_id,
               CAST(year AS INTEGER) AS year, CAST(week AS INTEGER) AS week
-            FROM ops.nfl_historical.nfl_player_stats_all
-            WHERE COALESCE(season_type, 'REG') = 'REG' AND week IS NOT NULL
+            FROM lake.public.player_active_week
+            WHERE week BETWEEN 1 AND 18
           """)
           mode = os.environ['PILOT_MODE']
-          if mode not in {'cmc_week1', 'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_weekly', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'rb_2025_bucket_inventory', 'rb_2025_bucket', 'local_cache_export'}:
+          if mode not in {'cmc_week1', 'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_weekly', 'all_2025_weekly', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'rb_2025_bucket_inventory', 'rb_2025_bucket', 'local_cache_export'}:
             raise ValueError(f'unsupported pilot mode: {mode}')
           if mode == 'local_cache_export':
               receipt = {
@@ -675,6 +676,58 @@ jobs:
                   summary.write('## CMC 2025 all-grain compact cache pilot\n')
                   summary.write(f'- Receipt: `{full_receipt}`\n')
                   summary.write('- Cache-only computation; no Fly read/write, settings join, API request, artifact, or publish step.\n')
+          if mode == 'all_2025_weekly':
+              position_lanes = ('QB', 'RB', 'WR', 'TE', 'K', 'DEF', 'DL', 'LB', 'DB')
+              lane_receipts = []
+              lane_tables = []
+              for lane_position in position_lanes:
+                  output_table = f'weekly_2025_{lane_position.lower()}'
+                  lane_started = perf_counter()
+                  materialize_weekly_core_cohort_cells(
+                      c, source_table='lake.public.player_fantasy',
+                      valid_player_weeks_table='cached_regular_player_weeks', output_table=output_table,
+                      year=2025, week=None, player_id=None, position=lane_position, split_threshold=150,
+                  )
+                  lane_seconds = perf_counter() - lane_started
+                  lane_rows, lane_players, lane_min_week, lane_max_week, lane_cells = c.execute(f"""
+                    SELECT COUNT(*), COUNT(DISTINCT NFL_player_id), MIN(week), MAX(week),
+                      COALESCE(SUM(list_count(cohort_cells)), 0)
+                    FROM {output_table}
+                  """).fetchone()
+                  assert lane_rows > 0 and lane_players > 0, (lane_position, lane_rows, lane_players)
+                  assert lane_min_week >= 1 and lane_max_week <= 18, (lane_position, lane_min_week, lane_max_week)
+                  assert lane_cells <= lane_rows * 145, (lane_position, lane_cells, lane_rows)
+                  lane_tables.append(output_table)
+                  lane_receipts.append({
+                      'position': lane_position, 'seconds': round(lane_seconds, 3),
+                      'outer_rows': lane_rows, 'players': lane_players,
+                      'week_range': (lane_min_week, lane_max_week), 'nested_cells': lane_cells,
+                  })
+              c.execute('CREATE TEMP TABLE weekly_2025_all AS ' + ' UNION ALL BY NAME '.join(
+                  f'SELECT * FROM {table}' for table in lane_tables
+              ))
+              all_rows, all_players, all_cells, duplicate_outer_keys = c.execute("""
+                SELECT COUNT(*), COUNT(DISTINCT NFL_player_id), COALESCE(SUM(list_count(cohort_cells)), 0),
+                  COUNT(*) - COUNT(DISTINCT CONCAT_WS('|', NFL_player_id, year, week, position))
+                FROM weekly_2025_all
+              """).fetchone()
+              cmc_rows = c.execute("""
+                SELECT COUNT(*) FROM weekly_2025_rb
+                WHERE NFL_player_id='00-0033280' AND year=2025
+              """).fetchone()[0]
+              assert cmc_rows == 17, cmc_rows
+              assert duplicate_outer_keys == 0, duplicate_outer_keys
+              receipt = {
+                  'mode': mode, 'lanes': lane_receipts, 'all_outer_rows': all_rows,
+                  'all_distinct_players': all_players, 'all_nested_cells': all_cells,
+                  'cmc_2025_weekly_rows': cmc_rows,
+              }
+              print(receipt)
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                  summary.write('## All-position 2025 weekly compact cache pilot\n')
+                  summary.write(f'- Receipt: `{receipt}`\n')
+                  summary.write('- Direct immutable-cache reads and temporary compact outputs only; no cache save, Fly access, artifact, or publish step.\n')
+              raise SystemExit(0)
           if mode in {'myles_2025_season', 'rb_2025_weekly', 'rb_2025_lane'}:
               player_name, lane_position = (
                   ('myles garrett', 'DL') if mode == 'myles_2025_season'
