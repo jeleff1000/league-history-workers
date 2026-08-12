@@ -11,6 +11,7 @@ TEAM_RECHECK_STATUSES = {
     "candidate_provenance_not_found",
     "partial_schema_blocked_unmatched",
     "source_only_team_signal_missing_player_team_bridge",
+    "unmatched_cache_key",
 }
 STRUCTURED_RECHECK_STATUSES = {
     "candidate_provenance_not_found",

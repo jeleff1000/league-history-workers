@@ -25,6 +25,23 @@ def test_team_readback_reselects_earlier_team_key_only_receipts(tmp_path: Path) 
     assert [row["artifact_id"] for row in rows] == ["101"]
 
 
+def test_team_readback_selects_explicit_unmatched_cache_key_probe(tmp_path: Path) -> None:
+    from scripts.research_cohorts.select_retained_artifacts import select
+
+    path = tmp_path / "ledger.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["artifact_id", "artifact", "final_status"])
+        writer.writeheader()
+        writer.writerow({
+            "artifact_id": "103", "artifact": "research-championship-identity-probe-a",
+            "final_status": "unmatched_cache_key",
+        })
+
+    rows = select(path, source_kind="team", prefix="", requested_ids={103})
+
+    assert [row["artifact_id"] for row in rows] == ["103"]
+
+
 def test_snapshot_readback_selects_unreceipted_canonical_player_artifacts(tmp_path: Path) -> None:
     """The snapshot reader must select only the still-unreceipted snapshot artifact."""
     from scripts.research_cohorts.select_retained_artifacts import select
