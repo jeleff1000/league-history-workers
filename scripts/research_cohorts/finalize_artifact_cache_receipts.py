@@ -16,6 +16,11 @@ from typing import Any
 
 import duckdb
 
+try:
+    from .enrich_artifact_cache_ledger_completion_gates import derive_gate_states
+except ImportError:  # direct script execution in Actions
+    from enrich_artifact_cache_ledger_completion_gates import derive_gate_states
+
 
 PLAYER_KEY = [
     "db_name", "year", "week", "NFL_player_id", "platform", "manager",
@@ -809,6 +814,12 @@ def build_receipts(
             "final_status": status,
             "final_reason": reason,
         })
+        # Counts above come from the just-restored canonical cache.  Gate
+        # states must be derived from those fresh counts, never inherited from
+        # a prior receipt that may still describe a pre-promotion schema.
+        result.update(derive_gate_states({
+            key: str(value) for key, value in result.items()
+        }))
         rows.append(result)
     summary = {
         "ledger_rows": len(rows),
