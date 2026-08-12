@@ -59,6 +59,24 @@ def test_championship_probe_readback_uses_the_same_exact_team_selection(tmp_path
     assert [row["artifact_id"] for row in rows] == ["104"]
 
 
+def test_championship_probe_readback_reselects_a_known_missing_cache_cell(tmp_path: Path) -> None:
+    """A probe with a verified cache-null cell must reach candidate materialization."""
+    from scripts.research_cohorts.select_retained_artifacts import select
+
+    path = tmp_path / "ledger.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["artifact_id", "artifact", "final_status"])
+        writer.writeheader()
+        writer.writerow({
+            "artifact_id": "105", "artifact": "research-championship-identity-probe-b",
+            "final_status": "still_missing_cache_cells",
+        })
+
+    rows = select(path, source_kind="championship_probe", prefix="", requested_ids={105})
+
+    assert [row["artifact_id"] for row in rows] == ["105"]
+
+
 def test_snapshot_readback_selects_unreceipted_canonical_player_artifacts(tmp_path: Path) -> None:
     """The snapshot reader must select only the still-unreceipted snapshot artifact."""
     from scripts.research_cohorts.select_retained_artifacts import select

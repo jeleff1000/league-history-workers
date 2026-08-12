@@ -11,6 +11,10 @@ TEAM_RECHECK_STATUSES = {
     "candidate_provenance_not_found",
     "partial_schema_blocked_unmatched",
     "source_only_team_signal_missing_player_team_bridge",
+    # The readback receipt already proved this source has an actual canonical
+    # NULL cell.  It must be eligible for candidate materialization; excluding
+    # it here strands the evidence before the manager-week fan-out.
+    "still_missing_cache_cells",
     "unmatched_cache_key",
 }
 STRUCTURED_RECHECK_STATUSES = {
