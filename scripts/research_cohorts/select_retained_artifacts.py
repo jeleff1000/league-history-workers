@@ -30,7 +30,7 @@ def select(
     prefix: str,
     requested_ids: set[int],
 ) -> list[dict[str, str]]:
-    if source_kind == "team":
+    if source_kind in {"team", "championship_probe"}:
         eligible_statuses = TEAM_RECHECK_STATUSES
     elif source_kind == "structured_player":
         eligible_statuses = STRUCTURED_RECHECK_STATUSES
@@ -55,7 +55,7 @@ def main() -> None:
     parser.add_argument("--ledger-csv", type=Path, required=True)
     parser.add_argument(
         "--source-kind", required=True,
-        choices=("team", "structured_player", "canonical_player_snapshot"),
+        choices=("team", "championship_probe", "structured_player", "canonical_player_snapshot"),
     )
     parser.add_argument("--prefix", default="")
     parser.add_argument("--artifact-ids", default="")

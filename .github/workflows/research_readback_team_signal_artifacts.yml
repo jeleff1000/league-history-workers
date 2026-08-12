@@ -29,6 +29,7 @@ on:
         default: team
         options:
           - team
+          - championship_probe
           - structured_player
           - canonical_player_snapshot
 
@@ -120,6 +121,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [ "$SOURCE_KIND" = "championship_probe" ]; then
+            python scripts/research_cohorts/materialize_championship_identity_probe_sources.py \
+              --selected selected_artifacts.json \
+              --sources-root sources \
+              --out-manifest raw_source_manifest.json
+            exit 0
+          fi
           python - <<'PY'
           import json, os
           from pathlib import Path
@@ -157,7 +165,7 @@ jobs:
           # Team/week evidence is the large retained family.  Profile every
           # artifact in one exact team-key join instead of scanning the full
           # canonical player table once per artifact/strategy.
-          if [ "$SOURCE_KIND" = "team" ]; then
+          if [ "$SOURCE_KIND" = "team" ] || [ "$SOURCE_KIND" = "championship_probe" ]; then
             python scripts/research_cohorts/profile_raw_team_signal_sources.py \
               --base research_public_lake/corpus_snapshot.duckdb \
               --manifest raw_source_manifest.json \
@@ -275,7 +283,7 @@ jobs:
         run: |
           set -euo pipefail
           args=()
-          if [ "$SOURCE_KIND" = "team" ]; then
+          if [ "$SOURCE_KIND" = "team" ] || [ "$SOURCE_KIND" = "championship_probe" ]; then
             args+=(--team-signal-manifest raw_source_manifest.json)
           elif [ "$SOURCE_KIND" = "structured_player" ]; then
             args+=(--structured-player-manifest raw_source_manifest.json)
