@@ -30,7 +30,7 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           path: code
-          ref: e1fd40de7831bf2b45bc189578647b3a23aa56ce
+          ref: 9f8c53b707c2bd570a46db78a7e4db2bce1b52a7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -137,7 +137,7 @@ jobs:
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
               summary.write('## CMC W1 compact cache truth gate\n')
               summary.write(f'- Cache: `{os.environ.get("CACHE_KEY", "immutable input")}`\n')
-              summary.write('- Source commit: `e1fd40de7831bf2b45bc189578647b3a23aa56ce`\n')
+              summary.write('- Source commit: `9f8c53b707c2bd570a46db78a7e4db2bce1b52a7`\n')
               summary.write(f'- ALL cell: `{full}`\n- Selected cell: `{selected[0]}`\n')
               summary.write(f'- Source rows read: `{source_rows}`; outer rows: `{outer_rows}`; nested cells: `{cell_count}`\n')
               summary.write(f'- Build wall time: `{elapsed_s:.3f}s`; peak RSS: `{peak_rss_kb} KB`\n')
@@ -300,12 +300,12 @@ jobs:
               weekly_started = perf_counter()
               materialize_weekly_core_cohort_cells(
                   c, source_table='lake.public.player_fantasy',
-                  valid_player_weeks_table='cached_regular_player_weeks', output_table='weekly_2025_all',
-                  year=2025, week=None, player_id=None, split_threshold=150,
+                  valid_player_weeks_table='cached_regular_player_weeks', output_table='weekly_2025_dl',
+                  year=2025, week=None, player_id=None, position='DL', split_threshold=150,
               )
               weekly_seconds = perf_counter() - weekly_started
-              weekly_batch_rows = c.execute('SELECT COUNT(*) FROM weekly_2025_all').fetchone()[0]
-              c.execute('CREATE OR REPLACE TABLE myles_2025_weekly AS SELECT * FROM weekly_2025_all WHERE NFL_player_id=?', [myles_id])
+              weekly_batch_rows = c.execute('SELECT COUNT(*) FROM weekly_2025_dl').fetchone()[0]
+              c.execute('CREATE OR REPLACE TABLE myles_2025_weekly AS SELECT * FROM weekly_2025_dl WHERE NFL_player_id=?', [myles_id])
               core_started = perf_counter()
               materialize_season_core_cohort_position_batch(
                   c, source_table='lake.public.player_fantasy', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
