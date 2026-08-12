@@ -659,9 +659,11 @@ ops-cache SHA-256 were unchanged.
 
 The independent fresh restore in that same run proved all 52,667 target rows
 matched and that zero source-backed loss/tie nulls remained. The one approved
-cache key remains a single object. The follow-up read-only receipt
-[31639682101](https://github.com/jeleff1000/league-history-workers/actions/runs/31639682101)
-then found zero remaining safe fills for this artifact.
+cache key remains a single object. The latest independent read-only receipt
+[31641698977](https://github.com/jeleff1000/league-history-workers/actions/runs/31641698977)
+again found zero remaining safe fills and zero source/cache conflicts. It also
+recomputed the admission gates from that fresh receipt, eliminating the stale
+schema-blocked label.
 
 This artifact is deliberately still **open** in the CSV as
 `unmatched_cache_key`, rather than being falsely marked complete: 3,606 source
