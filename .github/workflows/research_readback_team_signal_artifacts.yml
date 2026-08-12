@@ -40,6 +40,14 @@ on:
         options:
           - 'false'
           - 'true'
+      emit_team_null_candidate:
+        description: Emit a read-only, exact existing-player NULL-fill delta for selected team sources.
+        required: true
+        type: choice
+        default: 'false'
+        options:
+          - 'false'
+          - 'true'
 
 permissions:
   actions: read
@@ -83,6 +91,7 @@ jobs:
           DOWNLOAD_MODE: ${{ inputs.download_mode }}
           SOURCE_KIND: ${{ inputs.source_kind }}
           EMIT_STRICT_NULL_CANDIDATE: ${{ inputs.emit_strict_null_candidate }}
+          EMIT_TEAM_NULL_CANDIDATE: ${{ inputs.emit_team_null_candidate }}
         shell: bash
         run: |
           set -euo pipefail
@@ -325,6 +334,36 @@ jobs:
             --base research_public_lake/corpus_snapshot.duckdb \
             --candidates championship_identity_probe_parquet \
             --out strict_null_candidate
+      - name: Materialize exact selected-team NULL-fill candidate
+        env:
+          SOURCE_KIND: ${{ inputs.source_kind }}
+          EMIT_TEAM_NULL_CANDIDATE: ${{ inputs.emit_team_null_candidate }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EMIT_TEAM_NULL_CANDIDATE" = "false" ]; then
+            exit 0
+          fi
+          if [ "$SOURCE_KIND" != "team" ]; then
+            echo "team NULL-fill candidate materialization requires source_kind=team" >&2
+            exit 2
+          fi
+          python - <<'PY'
+          import json, shutil
+          from pathlib import Path
+          manifest=json.loads(Path('raw_source_manifest.json').read_text())
+          out=Path('selected_team_candidate_sources'); out.mkdir()
+          for entry in manifest:
+              source=Path(entry['path'])
+              target=out / f"{entry['artifact_id']}__{source.name}"
+              shutil.copy2(source, target)
+          if len(list(out.glob('*.parquet'))) != len(manifest):
+              raise SystemExit('candidate source copy did not cover every selected artifact exactly once')
+          PY
+          python scripts/research_cohorts/audit_team_signal_candidates.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --candidates selected_team_candidate_sources \
+            --out team_null_candidate
       - name: Fail fast on cache, schema, row, or ops mutation
         shell: bash
         run: |
@@ -360,6 +399,7 @@ jobs:
             prestate.json
             ops_before.sha256
             strict_null_candidate/*
+            team_null_candidate/*
           if-no-files-found: error
           retention-days: 90
           compression-level: 0
