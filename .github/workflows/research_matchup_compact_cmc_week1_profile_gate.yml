@@ -38,7 +38,7 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           path: code
-          ref: a253322ed58d336c5fa98a11f40313b8c98c6865
+          ref: cc071882a2cab76eb5dc940aec86a263429d8e8e
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -63,6 +63,7 @@ jobs:
               _source_without_bad_identity_rows,
               materialize_career_cohort_grade_cells,
               materialize_career_core_cohort_cells,
+              materialize_narrow_position_year_source,
               materialize_season_bracket_grade_cells,
               materialize_season_bracket_grade_position_batch,
               materialize_season_core_cohort_cells,
@@ -361,6 +362,13 @@ jobs:
 
           if mode in {'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains'}:
               stats = 'ops.nfl_historical.nfl_player_stats_all'
+              cmc_source = 'lake.public.player_fantasy'
+              if mode != 'cmc_2025_all_grains':
+                  materialize_narrow_position_year_source(
+                      c, source_table=cmc_source, output_table='cmc_2025_rb_lane',
+                      year=2025, position='RB',
+                  )
+                  cmc_source = 'cmc_2025_rb_lane'
               source_rows_2025 = c.execute("""
                 SELECT COUNT(*) FROM lake.public.player_fantasy
                 WHERE CAST(year AS INTEGER)=2025
@@ -372,7 +380,7 @@ jobs:
               weekly_cells = 0
               if mode != 'cmc_2025_season_only':
                   materialize_weekly_core_cohort_cells(
-                      c, source_table='lake.public.player_fantasy', output_table='cmc_2025_weekly',
+                      c, source_table=cmc_source, output_table='cmc_2025_weekly',
                       valid_player_weeks_table='cached_regular_player_weeks',
                       year=2025, week=None, player_id='00-0033280', position='RB', split_threshold=150,
                   )
@@ -402,13 +410,13 @@ jobs:
                       raise SystemExit(0)
 
               materialize_season_core_cohort_cells(
-                  c, source_table='lake.public.player_fantasy', nfl_stats_table=stats,
+                  c, source_table=cmc_source, nfl_stats_table=stats,
                   output_table='cmc_2025_season_core', year=2025, player_id='00-0033280',
                   position='RB',
                   split_threshold=50,
               )
               materialize_season_bracket_grade_cells(
-                  c, source_table='lake.public.player_fantasy', nfl_stats_table=stats,
+                  c, source_table=cmc_source, nfl_stats_table=stats,
                   output_table='cmc_2025_season_grade', year=2025, player_id='00-0033280',
                   position='RB',
                   split_threshold=50,
@@ -548,9 +556,13 @@ jobs:
                   assert set(cache_positions).issubset({('DL',), ('DE',), ('DT',), ('NT',), ('EDGE',)}), cache_positions
               else:
                   assert (lane_position,) in set(cache_positions), cache_positions
+              materialize_narrow_position_year_source(
+                  c, source_table='lake.public.player_fantasy', output_table='lane_2025_source',
+                  year=2025, position=lane_position,
+              )
               weekly_started = perf_counter()
               materialize_weekly_core_cohort_cells(
-                  c, source_table='lake.public.player_fantasy',
+                  c, source_table='lane_2025_source',
                   valid_player_weeks_table='cached_regular_player_weeks', output_table='weekly_2025_dl',
                   year=2025, week=None, player_id=None, position=lane_position, split_threshold=150,
               )
@@ -559,13 +571,13 @@ jobs:
               c.execute('CREATE OR REPLACE TABLE myles_2025_weekly AS SELECT * FROM weekly_2025_dl WHERE NFL_player_id=?', [myles_id])
               core_started = perf_counter()
               materialize_season_core_cohort_position_batch(
-                  c, source_table='lake.public.player_fantasy', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+                  c, source_table='lane_2025_source', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
                   output_table='myles_2025_season_core', year=2025, position=lane_position, split_threshold=50,
               )
               core_seconds = perf_counter() - core_started
               grade_started = perf_counter()
               materialize_season_bracket_grade_position_batch(
-                  c, source_table='lake.public.player_fantasy', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+                  c, source_table='lane_2025_source', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
                   output_table='myles_2025_season_grade', year=2025, position=lane_position, split_threshold=50,
               )
               grade_seconds = perf_counter() - grade_started
