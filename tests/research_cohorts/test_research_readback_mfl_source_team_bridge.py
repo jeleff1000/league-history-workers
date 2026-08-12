@@ -13,3 +13,4 @@ def test_readback_workflow_is_restore_only_and_uses_literal_duckdb_path() -> Non
     assert "gh api --method DELETE" not in workflow
     assert "CREATE TEMP VIEW d AS SELECT * FROM read_parquet(?)" not in workflow
     assert "team_points_remaining_null_source_cells" in workflow
+    assert 'gh run download "$APPLY_RUN_ID"' in workflow

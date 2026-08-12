@@ -26,10 +26,15 @@ jobs:
           path: research_public_lake
           key: ${{ env.CANONICAL_CACHE_KEY }}
           fail-on-cache-miss: true
-      - uses: actions/download-artifact@v4
-        with:
-          name: mfl-source-team-bridge-apply-evidence-${{ inputs.apply_run_id }}
-          path: evidence
+      - name: Download apply evidence from the specified prior run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPLY_RUN_ID: ${{ inputs.apply_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh run download "$APPLY_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "mfl-source-team-bridge-apply-evidence-${APPLY_RUN_ID}" --dir evidence
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
