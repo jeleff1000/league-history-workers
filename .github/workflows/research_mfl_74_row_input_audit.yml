@@ -90,6 +90,15 @@ jobs:
           )
           con.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
           ops_columns = [row[0] for row in con.execute('DESCRIBE ops.nfl_historical.nfl_player_stats_all').fetchall()]
+          matchup_schema = [row[0] for row in con.execute('DESCRIBE public.matchup').fetchall()]
+          matchup_fields = [field for field in ('db_name', 'year', 'week', 'manager', 'opponent', 'p_champ', 'is_playoffs', 'win') if field in matchup_schema]
+          matchup_rows = records(
+              f'''SELECT {', '.join('"' + f + '"' for f in matchup_fields)}
+                  FROM public.matchup
+                  WHERE db_name=? AND year=? AND manager IN ({manager_sql})
+                  ORDER BY manager, week''',
+              ['smpl_mfl_2015_10030', 2012, *managers],
+          )
           out = {
               'read_only': True,
               'cache_mutated': False,
@@ -100,6 +109,8 @@ jobs:
               'target_team_week_summary': summary,
               'league_settings': settings,
               'ops_columns_relevant': [name for name in ops_columns if any(token in name.lower() for token in ('lamar', 'fantasy', 'position', 'player_week', 'nfl_player_id'))],
+              'matchup_schema': matchup_schema,
+              'target_manager_matchup_rows': matchup_rows,
               'target_player_rows_present': int(con.execute("SELECT COUNT(*) FROM public.player_fantasy WHERE db_name=? AND year=? AND NFL_player_id IN ('00-0020245','00-0020337','00-0025438','00-0026364','00-0027007','00-0027531')", ['smpl_mfl_2015_10030', 2012]).fetchone()[0]),
           }
           Path('mfl_74_input_audit.json').write_text(json.dumps(out, indent=2, default=str)+'\n')
