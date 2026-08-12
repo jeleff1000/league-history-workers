@@ -678,6 +678,32 @@ preserved-conflict artifacts, and 2 source-only player-identity gaps. Every one 
 non-empty reason and next action in the CSV; an artifact is never considered
 closed merely because its parent workflow completed.
 
+## MFL source-team player bridge — independently proven
+
+The original bridge required a cache manager name before it would emit a
+player/team mapping. That was the wrong boundary for MFL source-only rows,
+whose cache-side manager/team fields are often null. The corrected source chain
+is direct and deterministic: MFL franchise roster membership → year-specific
+MFL-to-NFL player crosswalk → raw MFL franchise/team-week signal → existing
+canonical player row.
+
+The read-only candidate run [31645490959](https://github.com/jeleff1000/league-history-workers/actions/runs/31645490959)
+found 204 exact existing player rows from its captured shard. It had no
+non-null conflicts and could fill four values on each row: `loss`, `tie`,
+`team_points`, and `is_playoffs`. The same-key apply run
+[31646045505](https://github.com/jeleff1000/league-history-workers/actions/runs/31646045505)
+applied only those null fills. The independent fresh restore
+[31646989467](https://github.com/jeleff1000/league-history-workers/actions/runs/31646989467)
+proved all 204 rows match, with zero remaining source-backed nulls for each of
+the four fields. It also proved the player schema, player-row count, and ops
+cache were unchanged and that exactly one approved cache object remained.
+
+The receipt SHA-256 is
+`8f6ae61a79ae2c561206b2054329ca3d24d7a926449cdec5199446d05f2386e3`.
+It is a supplemental `cache_recovery_receipt`; it does not alter the frozen
+9,479-artifact inventory or falsely close the still-open source-only team
+identities.
+
 | Family | Artifacts | Current state | Required action |
 | --- | ---: | ---: | --- |
 | `sleeper-missing-outcome-*` | 56 | Direct manager-week fan-out receipt complete: 24,382,006 supported cells equal cache; zero supported null fills; 90 non-null conflicts; 171,648 source cells identity-unmatched; 466,458 loss/tie cells outside the prior schema. | Resolve/close residual source-only identities and adjudicate conflicts; no null-cell promotion for this family. |
