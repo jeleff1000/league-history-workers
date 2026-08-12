@@ -9,3 +9,4 @@ def test_mfl_roster_bridge_pilot_installs_the_private_mfl_client_dependencies() 
 
     assert "requests==2.32.4" in workflow
     assert "polars==1.35.2" in workflow
+    assert "--diagnostic-out out/mfl_roster_bridge_diagnostic.parquet" in workflow

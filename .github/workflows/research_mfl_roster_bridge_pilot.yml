@@ -87,6 +87,7 @@ jobs:
             --memberships out/mfl_roster_memberships.parquet \
             --crosswalk out/mfl_roster_crosswalk.parquet \
             --out out/mfl_roster_bridge_resolved.parquet \
+            --diagnostic-out out/mfl_roster_bridge_diagnostic.parquet \
             --report out/mfl_roster_bridge_report.json
       - name: Fail fast on any cache or ops mutation
         shell: bash

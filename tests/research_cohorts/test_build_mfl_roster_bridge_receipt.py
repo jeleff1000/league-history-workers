@@ -77,8 +77,12 @@ def test_bridge_requires_unique_raw_team_crosswalk_and_canonical_recipient(tmp_p
     ])
 
     out = tmp_path / "bridge.parquet"
+    diagnostic = tmp_path / "bridge_diagnostic.parquet"
     report = tmp_path / "report.json"
-    result = build(base=base, memberships=memberships, crosswalk=crosswalk, out=out, report=report)
+    result = build(
+        base=base, memberships=memberships, crosswalk=crosswalk, out=out,
+        diagnostic_out=diagnostic, report=report,
+    )
 
     assert result["read_only"] is True
     assert result["cache_mutated"] is False
@@ -105,6 +109,19 @@ def test_bridge_requires_unique_raw_team_crosswalk_and_canonical_recipient(tmp_p
     ).fetchall()
     check.close()
     assert resolved == [("10", "p1", "Owner One")]
+
+    check = duckdb.connect()
+    absent = check.execute(
+        """
+        SELECT source_franchise_id, source_manager, mfl_player_id, NFL_player_id,
+               canonical_player_week_count, canonical_recipient_count, bridge_status
+        FROM read_parquet(?)
+        WHERE bridge_status = 'no_canonical_recipient'
+        """,
+        [str(diagnostic)],
+    ).fetchall()
+    check.close()
+    assert absent == [("0001", "Owner One", "18", "p4", 1, 0, "no_canonical_recipient")]
 
     after = duckdb.connect(str(base), read_only=True)
     assert after.execute("DESCRIBE public.player_fantasy").fetchall() == before_schema

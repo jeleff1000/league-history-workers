@@ -63,6 +63,7 @@ def build(
     crosswalk: Path,
     out: Path,
     report: Path,
+    diagnostic_out: Path | None = None,
 ) -> dict[str, Any]:
     """Create a bridge receipt without mutating ``base``."""
     con = duckdb.connect(str(base), read_only=True)
@@ -234,6 +235,14 @@ def build(
               ORDER BY membership_ordinal
             ) TO {_path(out)} (FORMAT PARQUET, COMPRESSION ZSTD)
         """)
+        if diagnostic_out is not None:
+            diagnostic_out.parent.mkdir(parents=True, exist_ok=True)
+            con.execute(f"""
+                COPY (
+                  SELECT * FROM receipt
+                  ORDER BY membership_ordinal
+                ) TO {_path(diagnostic_out)} (FORMAT PARQUET, COMPRESSION ZSTD)
+            """)
         result = {
             "read_only": True,
             "cache_mutated": False,
@@ -260,11 +269,12 @@ def main() -> None:
     parser.add_argument("--memberships", type=Path, required=True)
     parser.add_argument("--crosswalk", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--diagnostic-out", type=Path)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
     print(json.dumps(build(
         base=args.base, memberships=args.memberships, crosswalk=args.crosswalk,
-        out=args.out, report=args.report,
+        out=args.out, diagnostic_out=args.diagnostic_out, report=args.report,
     ), indent=2, sort_keys=True))
 
 
