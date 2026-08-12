@@ -812,6 +812,12 @@ def build_receipts(
         rows.append(result)
     summary = {
         "ledger_rows": len(rows),
+        "raw_artifact_rows": sum(
+            row.get("record_type") == "artifact_inventory" for row in rows
+        ),
+        "supplemental_cache_recovery_receipt_rows": sum(
+            row.get("record_type") == "cache_recovery_receipt" for row in rows
+        ),
         "status_counts": dict(sorted(Counter(row["final_status"] for row in rows).items())),
         "source_cells": sum(row["source_cells"] for row in rows),
         "cache_match_cells": sum(row["cache_match_cells"] for row in rows),

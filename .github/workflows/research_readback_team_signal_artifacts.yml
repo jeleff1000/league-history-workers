@@ -343,7 +343,9 @@ jobs:
                   digest.update(block)
           assert digest.hexdigest() == Path('ops_before.sha256').read_text().split()[0]
           receipt=json.loads(Path('final_artifact_cache_receipts.json').read_text())
-          assert receipt['summary']['ledger_rows']==9479
+          assert receipt['summary']['ledger_rows'] == 9480
+          assert receipt['summary']['raw_artifact_rows'] == 9479
+          assert receipt['summary']['supplemental_cache_recovery_receipt_rows'] == 1
           assert receipt['summary']['cache_mutated'] is False
           assert receipt['summary']['new_lineage'] is False
           PY

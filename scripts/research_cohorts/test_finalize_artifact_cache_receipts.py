@@ -33,5 +33,7 @@ def test_receipts_preserve_non_numeric_supplemental_cache_recovery_record(tmp_pa
     )
 
     assert result["summary"]["ledger_rows"] == 1
+    assert result["summary"]["raw_artifact_rows"] == 0
+    assert result["summary"]["supplemental_cache_recovery_receipt_rows"] == 1
     assert result["summary"]["cache_match_cells"] == 74
     assert json.loads(out.read_text(encoding="utf-8"))["rows"][0]["artifact_id"] == "mfl-74-row-recovery-31624673691"
