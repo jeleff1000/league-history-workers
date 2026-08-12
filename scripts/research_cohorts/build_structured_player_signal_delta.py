@@ -43,7 +43,10 @@ def _write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
+def build(
+    *, base: Path, manifest: Path, out: Path, report: Path,
+    rejected_out: Path | None = None,
+) -> dict:
     entries = json.loads(manifest.read_text(encoding="utf-8"))
     if not isinstance(entries, list) or not entries:
         raise ValueError("manifest must be a non-empty list")
@@ -176,6 +179,46 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
     if duplicate_rows:
         raise RuntimeError(f"delta has {duplicate_rows} duplicate canonical player rows")
 
+    residual_null_cells_by_reason = {
+        "ambiguous_canonical_identity": 0,
+        "source_value_conflict": 0,
+    }
+    if rejected_out is not None:
+        rejected_out.parent.mkdir(parents=True, exist_ok=True)
+        rejected_terms: list[str] = []
+        for source_field, (target, _) in SUPPORTED.items():
+            variants = _q(source_field + "_variants")
+            safe_source = f"{variants} <= 1 AND {_q(source_field)} IS NOT NULL"
+            rejected_terms.append(f"""
+                SELECT {', '.join(_q(column) for column in KEY)},
+                       source_artifact_ids,
+                       '{target}' AS target_field,
+                       '{source_field}' AS source_field,
+                       {_q(source_field)} AS source_value,
+                       {_q(target)} AS canonical_value,
+                       canonical_rows AS canonical_rows_for_identity,
+                       CASE
+                         WHEN canonical_rows > 1 THEN 'ambiguous_canonical_identity'
+                         WHEN {safe_source} AND canonical_rows = 1
+                              AND {_q(target)} IS NOT NULL
+                              AND {_q(target)} IS DISTINCT FROM {_q(source_field)}
+                           THEN 'source_value_conflict'
+                       END AS rejection_reason,
+                       CASE WHEN {_q(target)} IS NULL THEN 1 ELSE 0 END AS canonical_null_rows
+                FROM matched
+                WHERE ({safe_source} AND canonical_rows > 1 AND {_q(target)} IS NULL)
+                   OR ({safe_source} AND canonical_rows = 1 AND {_q(target)} IS NOT NULL
+                       AND {_q(target)} IS DISTINCT FROM {_q(source_field)})
+            """)
+        con.execute(
+            f"COPY ({' UNION ALL '.join(rejected_terms)}) TO {_lit(rejected_out)} (FORMAT PARQUET)"
+        )
+        for reason in residual_null_cells_by_reason:
+            residual_null_cells_by_reason[reason] = int(con.execute(
+                f"SELECT COALESCE(SUM(canonical_null_rows), 0) FROM read_parquet({_lit(rejected_out)}) "
+                f"WHERE rejection_reason = '{reason}'"
+            ).fetchone()[0])
+
     result = {
         "read_only": True,
         "cache_mutated": False,
@@ -189,6 +232,7 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
         "ambiguous_canonical_player_keys": ambiguous,
         "ambiguous_identity_nullness": ambiguous_identity_nullness,
         "delta_rows": delta_rows,
+        "residual_null_cells_by_reason": residual_null_cells_by_reason,
         "supported_fields": report_fields,
     }
     _write_json(report, result)
@@ -201,9 +245,13 @@ def main() -> None:
     parser.add_argument("--base", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--rejected-out", type=Path)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
-    print(json.dumps(build(base=args.base, manifest=args.manifest, out=args.out, report=args.report), sort_keys=True))
+    print(json.dumps(build(
+        base=args.base, manifest=args.manifest, out=args.out,
+        rejected_out=args.rejected_out, report=args.report,
+    ), sort_keys=True))
 
 
 if __name__ == "__main__":
