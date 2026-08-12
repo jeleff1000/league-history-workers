@@ -149,6 +149,23 @@ def build(
             GROUP BY 1
         """)
         con.execute("""
+            CREATE OR REPLACE TEMP TABLE canonical_player_week_candidates AS
+            SELECT
+              m.membership_ordinal,
+              COUNT(p.rowid) AS canonical_player_week_count
+            FROM memberships m
+            JOIN crosswalk_summary c
+              ON c.source_year IS NOT DISTINCT FROM m.source_year
+             AND c.mfl_player_id IS NOT DISTINCT FROM m.mfl_player_id
+             AND c.nfl_id_count = 1
+            JOIN public.player_fantasy p
+              ON CAST(p.db_name AS VARCHAR) IS NOT DISTINCT FROM m.db_name
+             AND TRY_CAST(p."year" AS INTEGER) IS NOT DISTINCT FROM m.year
+             AND TRY_CAST(p.week AS INTEGER) IS NOT DISTINCT FROM m.week
+             AND NULLIF(TRIM(CAST(p.NFL_player_id AS VARCHAR)), '') IS NOT DISTINCT FROM c.NFL_player_id
+            GROUP BY 1
+        """)
+        con.execute("""
             CREATE OR REPLACE TEMP TABLE receipt AS
             SELECT
               m.membership_ordinal,
@@ -160,6 +177,7 @@ def build(
               COALESCE(c.nfl_id_count, 0) AS crosswalk_nfl_id_count,
               COALESCE(mc.source_franchise_count, 0) AS source_franchise_count_for_manager,
               COALESCE(cc.canonical_recipient_count, 0) AS canonical_recipient_count,
+              COALESCE(cp.canonical_player_week_count, 0) AS canonical_player_week_count,
               cc.canonical_player_rowid,
               cc.canonical_manager,
               CASE
@@ -185,6 +203,8 @@ def build(
              AND c.mfl_player_id IS NOT DISTINCT FROM m.mfl_player_id
             LEFT JOIN canonical_candidates cc
               ON cc.membership_ordinal = m.membership_ordinal
+            LEFT JOIN canonical_player_week_candidates cp
+              ON cp.membership_ordinal = m.membership_ordinal
         """)
         input_memberships = int(con.execute("SELECT COUNT(*) FROM memberships").fetchone()[0])
         status_counts = {
@@ -192,6 +212,18 @@ def build(
             for status, count in con.execute(
                 "SELECT bridge_status, COUNT(*) FROM receipt GROUP BY 1 ORDER BY 1"
             ).fetchall()
+        }
+        no_canonical_recipient_detail = {
+            "canonical_player_week_absent": int(con.execute("""
+                SELECT COUNT(*) FROM receipt
+                WHERE bridge_status = 'no_canonical_recipient'
+                  AND canonical_player_week_count = 0
+            """).fetchone()[0]),
+            "same_canonical_player_different_manager": int(con.execute("""
+                SELECT COUNT(*) FROM receipt
+                WHERE bridge_status = 'no_canonical_recipient'
+                  AND canonical_player_week_count > 0
+            """).fetchone()[0]),
         }
         out.parent.mkdir(parents=True, exist_ok=True)
         con.execute(f"""
@@ -213,6 +245,7 @@ def build(
             "input_memberships": input_memberships,
             "resolved_exact_player_team": status_counts.get("resolved_exact_player_team", 0),
             "status_counts": status_counts,
+            "no_canonical_recipient_detail": no_canonical_recipient_detail,
         }
         report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")

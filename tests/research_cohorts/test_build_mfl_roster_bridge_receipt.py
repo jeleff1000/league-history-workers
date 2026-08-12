@@ -61,6 +61,9 @@ def test_bridge_requires_unique_raw_team_crosswalk_and_canonical_recipient(tmp_p
         {"db_name": "league", "year": 2024, "week": 1, "source_year": 2024,
          "source_franchise_id": "0005", "source_manager": "Owner Three",
          "source_manager_origin": "target_inventory_manager", "mfl_player_id": "17"},
+        {"db_name": "league", "year": 2024, "week": 1, "source_year": 2024,
+         "source_franchise_id": "0001", "source_manager": "Owner One",
+         "source_manager_origin": "mfl_franchise_owner_name", "mfl_player_id": "18"},
     ])
     crosswalk = tmp_path / "crosswalk.parquet"
     _parquet(crosswalk, [
@@ -70,6 +73,7 @@ def test_bridge_requires_unique_raw_team_crosswalk_and_canonical_recipient(tmp_p
         {"source_year": 2024, "mfl_player_id": "13", "NFL_player_id": "p1"},
         {"source_year": 2024, "mfl_player_id": "13", "NFL_player_id": "p2"},
         {"source_year": 2024, "mfl_player_id": "14", "NFL_player_id": "p4"},
+        {"source_year": 2024, "mfl_player_id": "18", "NFL_player_id": "p4"},
     ])
 
     out = tmp_path / "bridge.parquet"
@@ -79,14 +83,19 @@ def test_bridge_requires_unique_raw_team_crosswalk_and_canonical_recipient(tmp_p
     assert result["read_only"] is True
     assert result["cache_mutated"] is False
     assert result["new_lineage"] is False
-    assert result["input_memberships"] == 7
+    assert result["input_memberships"] == 8
     assert result["status_counts"] == {
         "ambiguous_canonical_recipient": 1,
         "ambiguous_player_crosswalk": 1,
         "ambiguous_source_franchise_manager": 2,
         "invalid_source_manager_provenance": 1,
         "missing_source_manager": 1,
+        "no_canonical_recipient": 1,
         "resolved_exact_player_team": 1,
+    }
+    assert result["no_canonical_recipient_detail"] == {
+        "canonical_player_week_absent": 0,
+        "same_canonical_player_different_manager": 1,
     }
 
     check = duckdb.connect()
