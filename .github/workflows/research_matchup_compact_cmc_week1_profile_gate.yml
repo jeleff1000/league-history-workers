@@ -704,7 +704,9 @@ jobs:
                   year=2025, week=None, player_id=None, position=lane_position, split_threshold=150,
               )
               weekly_seconds = perf_counter() - weekly_started
-              weekly_batch_rows = c.execute('SELECT COUNT(*) FROM weekly_2025_dl').fetchone()[0]
+              weekly_batch_rows, weekly_batch_players = c.execute(
+                  'SELECT COUNT(*), COUNT(DISTINCT NFL_player_id) FROM weekly_2025_dl'
+              ).fetchone()
               c.execute('CREATE OR REPLACE TABLE myles_2025_weekly AS SELECT * FROM weekly_2025_dl WHERE NFL_player_id=?', [myles_id])
               core_started = perf_counter()
               materialize_season_core_cohort_position_batch(
@@ -743,7 +745,7 @@ jobs:
                   receipt = {
                       'mode': mode, 'canonical_position': lane_position,
                       'weekly_seconds': round(weekly_seconds, 3),
-                      'weekly_batch_outer_rows': weekly_batch_rows, 'weekly_distinct_players': weekly_players,
+                      'weekly_batch_outer_rows': weekly_batch_rows, 'weekly_distinct_players': weekly_batch_players,
                       'cmc_weekly_outer_rows': weekly_rows,
                       'cmc_week_range': (weekly_min, weekly_max),
                       'cmc_nested_cells': weekly_cells,
@@ -796,4 +798,3 @@ jobs:
           path: research_public_lake
           compression-level: 0
           retention-days: 1
-
