@@ -180,19 +180,23 @@ must retain `ambiguous` or `source_only`, never infer a recipient.
 The completed artifact receipt
 [`31448116124`](https://github.com/jeleff1000/league-history-workers/actions/runs/31448116124)
 was mechanically joined into this same ledger. It found **526 non-empty
-artifacts** that can participate in a deterministic bridge; zero-row Parquet
-files are explicitly excluded because they prove no membership.
+artifacts with candidate bridge fields**; zero-row Parquet files are
+explicitly excluded because they prove no membership. A source schema is not
+itself a completed bridge: every candidate still requires an exact source-team
+to canonical-player join receipt before it can fan out a team signal.
 
-| Evidence strength | Artifacts | Required source fields | Meaning |
+| Candidate class | Artifacts | Required source fields | Meaning |
 | --- | ---: | --- | --- |
-| `strong_player_team` | 508 | `db_name`, `year`, `week`, `NFL_player_id`, plus source `team_key` or `team_name` | Can prove a player's source fantasy-team membership before a team-signal fan-out. |
-| `manager_only_player` | 18 | `db_name`, `year`, `week`, `NFL_player_id`, `manager` | Usable only when the manager maps to exactly one fantasy team in that league-week. |
+| `candidate_player_manager_team_name` | 417 | `db_name`, `year`, `week`, `NFL_player_id`, `manager`, `team_name` | Candidate source membership. It cannot join by `team_name` until cache-side membership is proven. |
+| `candidate_player_team_key` | 91 | `db_name`, `year`, `week`, `NFL_player_id`, `team_key` | Strongest source candidate, but still needs a unique canonical-player recipient because canonical team keys are empty. |
+| `candidate_player_manager_only` | 18 | `db_name`, `year`, `week`, `NFL_player_id`, `manager` | Candidate only when the manager resolves to exactly one fantasy team in that league-week. |
 
 The CSV columns `bridge_evidence_file_count`, `bridge_evidence_row_count`,
 `bridge_evidence_strength`, `bridge_evidence_schemas`, and
 `bridge_evidence_receipt_run_id` record this per artifact. The ledger
 validator fails if a row claims bridge evidence without positive row coverage,
-a strength classification, and its source receipt.
+a candidate classification, and its source receipt. It does not call any
+candidate a completed bridge; that requires a separate cache-side join receipt.
 
 ### Loss/tie admission matrix
 

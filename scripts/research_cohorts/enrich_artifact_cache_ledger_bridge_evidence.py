@@ -23,17 +23,21 @@ REQUIRED_PLAYER_WEEK = {"db_name", "year", "week", "NFL_player_id"}
 
 
 def _strength(columns: set[str]) -> tuple[str, str] | None:
-    """Return the strongest exact team-membership evidence in one file."""
+    """Classify source fields without claiming that a cache bridge exists.
+
+    A source file can establish a candidate player/team membership edge, but
+    cache-side team identity must still be proven by a separate join receipt.
+    """
     if not REQUIRED_PLAYER_WEEK <= columns:
         return None
     if "team_key" in columns:
-        return "strong_player_team", "player_team_key"
+        return "candidate_player_team_key", "player_team_key"
     if "team_name" in columns and "manager" in columns:
-        return "strong_player_team", "player_manager_team_name"
+        return "candidate_player_manager_team_name", "player_manager_team_name"
     if "team_name" in columns:
-        return "strong_player_team", "player_team_name"
+        return "candidate_player_team_name", "player_team_name"
     if "manager" in columns:
-        return "manager_only_player", "player_manager_only"
+        return "candidate_player_manager_only", "player_manager_only"
     return None
 
 
@@ -70,7 +74,7 @@ def enrich(*, ledger_path: Path, receipt_path: Path, receipt_run_id: str, out_pa
     for column in BRIDGE_COLUMNS:
         if column not in fields:
             fields.append(column)
-    strong = 0
+    player_team_candidate = 0
     manager_only = 0
     for row in ledger_rows:
         artifact_evidence = evidence.get(int(row["artifact_id"]), [])
@@ -81,13 +85,23 @@ def enrich(*, ledger_path: Path, receipt_path: Path, receipt_run_id: str, out_pa
         strengths = {value[0] for value in artifact_evidence}
         row["bridge_evidence_file_count"] = str(len(artifact_evidence))
         row["bridge_evidence_row_count"] = str(sum(value[1] for value in artifact_evidence))
-        row["bridge_evidence_strength"] = (
-            "strong_player_team" if "strong_player_team" in strengths else "manager_only_player"
+        team_strengths = {
+            "candidate_player_team_key",
+            "candidate_player_manager_team_name",
+            "candidate_player_team_name",
+        }
+        row["bridge_evidence_strength"] = next(
+            (strength for strength in (
+                "candidate_player_team_key",
+                "candidate_player_manager_team_name",
+                "candidate_player_team_name",
+            ) if strength in strengths),
+            "candidate_player_manager_only",
         )
         row["bridge_evidence_schemas"] = "|".join(sorted({value[2] for value in artifact_evidence}))
         row["bridge_evidence_receipt_run_id"] = str(receipt_run_id)
-        if row["bridge_evidence_strength"] == "strong_player_team":
-            strong += 1
+        if row["bridge_evidence_strength"] in team_strengths:
+            player_team_candidate += 1
         else:
             manager_only += 1
 
@@ -99,8 +113,8 @@ def enrich(*, ledger_path: Path, receipt_path: Path, receipt_run_id: str, out_pa
     return {
         "ledger_rows": len(ledger_rows),
         "bridge_artifacts": len(evidence),
-        "strong_player_team_artifacts": strong,
-        "manager_only_player_artifacts": manager_only,
+        "player_team_candidate_artifacts": player_team_candidate,
+        "manager_only_candidate_artifacts": manager_only,
         "unknown_receipt_artifacts": len(unknown),
     }
 

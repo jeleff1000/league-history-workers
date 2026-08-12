@@ -10,7 +10,7 @@ def test_attaches_player_team_bridge_receipt_to_existing_ledger_rows(tmp_path):
         writer = csv.DictWriter(handle, fieldnames=["artifact_id", "artifact"])
         writer.writeheader()
         writer.writerows([
-            {"artifact_id": "1", "artifact": "strong"},
+            {"artifact_id": "1", "artifact": "candidate-team"},
             {"artifact_id": "2", "artifact": "manager-only"},
             {"artifact_id": "3", "artifact": "not-a-bridge"},
         ])
@@ -48,14 +48,14 @@ def test_attaches_player_team_bridge_receipt_to_existing_ledger_rows(tmp_path):
     assert result == {
         "ledger_rows": 3,
         "bridge_artifacts": 2,
-        "strong_player_team_artifacts": 1,
-        "manager_only_player_artifacts": 1,
+        "player_team_candidate_artifacts": 1,
+        "manager_only_candidate_artifacts": 1,
         "unknown_receipt_artifacts": 0,
     }
     rows = {row["artifact_id"]: row for row in csv.DictReader(out.open(newline="", encoding="utf-8"))}
     assert rows["1"]["bridge_evidence_file_count"] == "1"
     assert rows["1"]["bridge_evidence_row_count"] == "12"
-    assert rows["1"]["bridge_evidence_strength"] == "strong_player_team"
+    assert rows["1"]["bridge_evidence_strength"] == "candidate_player_manager_team_name"
     assert rows["1"]["bridge_evidence_receipt_run_id"] == "31448116124"
-    assert rows["2"]["bridge_evidence_strength"] == "manager_only_player"
+    assert rows["2"]["bridge_evidence_strength"] == "candidate_player_manager_only"
     assert rows["3"]["bridge_evidence_file_count"] == ""
