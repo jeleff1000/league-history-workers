@@ -27,10 +27,11 @@ import duckdb
 
 MEMBERSHIP_REQUIRED = {
     "db_name", "year", "week", "source_year", "source_franchise_id",
-    "source_manager", "mfl_player_id",
+    "source_manager", "source_manager_origin", "mfl_player_id",
 }
 CROSSWALK_REQUIRED = {"source_year", "mfl_player_id", "NFL_player_id"}
 CANONICAL_REQUIRED = {"db_name", "year", "week", "NFL_player_id", "manager"}
+RAW_MANAGER_ORIGINS = {"mfl_franchise_owner_name", "mfl_franchise_name"}
 
 
 def _q(name: str) -> str:
@@ -93,6 +94,7 @@ def build(
               NULLIF(TRIM(CAST({_q('source_franchise_id')} AS VARCHAR)), '') AS source_franchise_id,
               NULLIF(TRIM(CAST({_q('source_manager')} AS VARCHAR)), '') AS source_manager,
               {_normalised(_q('source_manager'))} AS source_manager_key,
+              LOWER(NULLIF(TRIM(CAST({_q('source_manager_origin')} AS VARCHAR)), '')) AS source_manager_origin,
               NULLIF(TRIM(CAST({_q('mfl_player_id')} AS VARCHAR)), '') AS mfl_player_id
             FROM raw_memberships
         """)
@@ -101,7 +103,8 @@ def build(
             SELECT db_name, year, week, source_manager_key,
                    COUNT(DISTINCT source_franchise_id) AS source_franchise_count
             FROM memberships
-            WHERE source_manager_key IS NOT NULL AND source_franchise_id IS NOT NULL
+            WHERE source_manager_origin IN ('mfl_franchise_owner_name', 'mfl_franchise_name')
+              AND source_manager_key IS NOT NULL AND source_franchise_id IS NOT NULL
             GROUP BY 1, 2, 3, 4
         """)
         con.execute(f"""
@@ -140,6 +143,7 @@ def build(
              AND NULLIF(TRIM(CAST(p.NFL_player_id AS VARCHAR)), '') IS NOT DISTINCT FROM c.NFL_player_id
              AND """ + _normalised("p.manager") + """ IS NOT DISTINCT FROM m.source_manager_key
             WHERE m.source_franchise_id IS NOT NULL
+              AND m.source_manager_origin IN ('mfl_franchise_owner_name', 'mfl_franchise_name')
               AND m.source_manager_key IS NOT NULL
               AND mc.source_franchise_count = 1
             GROUP BY 1
@@ -150,6 +154,7 @@ def build(
               m.membership_ordinal,
               m.db_name, m.year, m.week, m.source_year,
               m.source_franchise_id, m.source_manager, m.source_manager_key,
+              m.source_manager_origin,
               m.mfl_player_id,
               c.NFL_player_id,
               COALESCE(c.nfl_id_count, 0) AS crosswalk_nfl_id_count,
@@ -159,6 +164,8 @@ def build(
               cc.canonical_manager,
               CASE
                 WHEN m.source_franchise_id IS NULL THEN 'missing_source_franchise'
+                WHEN m.source_manager_origin NOT IN ('mfl_franchise_owner_name', 'mfl_franchise_name')
+                  THEN 'invalid_source_manager_provenance'
                 WHEN m.source_manager_key IS NULL THEN 'missing_source_manager'
                 WHEN COALESCE(mc.source_franchise_count, 0) <> 1 THEN 'ambiguous_source_franchise_manager'
                 WHEN COALESCE(c.nfl_id_count, 0) = 0 THEN 'missing_player_crosswalk'

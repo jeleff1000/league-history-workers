@@ -52,6 +52,17 @@ canonical fantasy team. It may not infer that edge from a copied target
 Raw MFL records without an ESPN ID are separate explicit cases: deterministic
 DST team/year resolution or a one-to-one protected player-bio proof is
 required; otherwise they remain source-only.
+
+The read-only receipt implementation is
+`scripts/research_cohorts/build_mfl_roster_bridge_receipt.py`, added in commit
+`6ae77ce`. Its input contract requires `source_manager_origin` to be either
+`mfl_franchise_owner_name` or `mfl_franchise_name`; a copied target-inventory
+manager is rejected before it can become a bridge. The implementation test
+also rejects two raw franchises for one manager, a non-unique MFL-to-NFL
+crosswalk, and duplicate canonical recipients. This is an implementation
+completion, **not** an artifact or cache completion: no MFL bridge receipt has
+yet been run against the target population, so the ledger's 715 open artifact
+statuses remain unchanged.
 The latest corrected raw-team identity receipt is
 [31532904897](https://github.com/jeleff1000/league-history-workers/actions/runs/31532904897).
 It is read-only and uses the safe team-to-player fan-out hierarchy: direct

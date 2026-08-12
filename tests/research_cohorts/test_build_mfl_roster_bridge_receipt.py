@@ -41,17 +41,26 @@ def test_bridge_requires_unique_raw_team_crosswalk_and_canonical_recipient(tmp_p
     memberships = tmp_path / "memberships.parquet"
     _parquet(memberships, [
         {"db_name": "league", "year": 2024, "week": 1, "source_year": 2024,
-         "source_franchise_id": "0001", "source_manager": " Owner  One ", "mfl_player_id": "10"},
+         "source_franchise_id": "0001", "source_manager": " Owner  One ",
+         "source_manager_origin": "mfl_franchise_owner_name", "mfl_player_id": "10"},
         {"db_name": "league", "year": 2024, "week": 1, "source_year": 2024,
-         "source_franchise_id": "0001", "source_manager": "Owner One", "mfl_player_id": "12"},
+         "source_franchise_id": "0001", "source_manager": "Owner One",
+         "source_manager_origin": "mfl_franchise_owner_name", "mfl_player_id": "12"},
         {"db_name": "league", "year": 2024, "week": 1, "source_year": 2024,
-         "source_franchise_id": "0001", "source_manager": "Owner One", "mfl_player_id": "13"},
+         "source_franchise_id": "0001", "source_manager": "Owner One",
+         "source_manager_origin": "mfl_franchise_owner_name", "mfl_player_id": "13"},
         {"db_name": "league", "year": 2024, "week": 1, "source_year": 2024,
-         "source_franchise_id": "0002", "source_manager": "Owner Two", "mfl_player_id": "14"},
+         "source_franchise_id": "0002", "source_manager": "Owner Two",
+         "source_manager_origin": "mfl_franchise_owner_name", "mfl_player_id": "14"},
         {"db_name": "league", "year": 2024, "week": 1, "source_year": 2024,
-         "source_franchise_id": "0004", "source_manager": "Owner Two", "mfl_player_id": "16"},
+         "source_franchise_id": "0004", "source_manager": "Owner Two",
+         "source_manager_origin": "mfl_franchise_owner_name", "mfl_player_id": "16"},
         {"db_name": "league", "year": 2024, "week": 1, "source_year": 2024,
-         "source_franchise_id": "0003", "source_manager": None, "mfl_player_id": "15"},
+         "source_franchise_id": "0003", "source_manager": None,
+         "source_manager_origin": "mfl_franchise_owner_name", "mfl_player_id": "15"},
+        {"db_name": "league", "year": 2024, "week": 1, "source_year": 2024,
+         "source_franchise_id": "0005", "source_manager": "Owner Three",
+         "source_manager_origin": "target_inventory_manager", "mfl_player_id": "17"},
     ])
     crosswalk = tmp_path / "crosswalk.parquet"
     _parquet(crosswalk, [
@@ -70,11 +79,12 @@ def test_bridge_requires_unique_raw_team_crosswalk_and_canonical_recipient(tmp_p
     assert result["read_only"] is True
     assert result["cache_mutated"] is False
     assert result["new_lineage"] is False
-    assert result["input_memberships"] == 6
+    assert result["input_memberships"] == 7
     assert result["status_counts"] == {
         "ambiguous_canonical_recipient": 1,
         "ambiguous_player_crosswalk": 1,
         "ambiguous_source_franchise_manager": 2,
+        "invalid_source_manager_provenance": 1,
         "missing_source_manager": 1,
         "resolved_exact_player_team": 1,
     }
