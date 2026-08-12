@@ -147,6 +147,34 @@ fetch or a cache mutation.
 | `partial_bridge_with_source_only` | 135 | A partial bridge exists and some source league-weeks have no player rows to receive data. |
 | `no_player_team_bridge` | 2 | The two remaining championship probes overlap cache league-weeks but lack a usable player-to-team bridge. |
 
+### What the unresolved bridge actually lacks
+
+The bridge counters below are retained-receipt counters, so repeated artifact
+generations can describe the same source team-week more than once. They are
+evidence of coverage and failure mode, not a distinct league-week census. A
+future bridge candidate must deduplicate by its source team-week key before it
+can write a single canonical player cell.
+
+| Bridge state | Source team-weeks in receipts | Already matched to canonical player rows | Still lacking a player-team edge | No canonical player league-week exists |
+| --- | ---: | ---: | ---: | ---: |
+| `fully_matched` | 232 | 232 | 0 | 0 |
+| `partial_bridge` | 393,851 | 230,218 | 163,633 | 0 |
+| `partial_bridge_with_source_only` | 2,121,073 | 320,375 | 1,800,698 | 15,918 |
+| `no_player_team_bridge` | 151 | 0 | 151 | 0 |
+
+The 15,918 source-only league-weeks have no canonical player row that could
+receive a player outcome, playoff, or championship value. They require an
+explicit source-only closure after a direct player-population check; they are
+not candidate cache updates. The remaining 1,964,482 retained unmatched
+source-team observations overlap a canonical league-week but need a
+deterministic roster-membership edge before they can fan out to players.
+
+The canonical cache does not currently retain populated `team_key` or
+`team_name` values. A bridge therefore cannot rely on raw team identifiers.
+It must prove membership through an exact player key, a unique normalized
+manager-week, or platform roster-player identity. If none exists, the ledger
+must retain `ambiguous` or `source_only`, never infer a recipient.
+
 ## Canonical promotion contract
 
 The approved GitHub Actions cache is immutable: a runner can restore and
