@@ -58,7 +58,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: python -m pip install duckdb==1.5.1 pandas==2.2.3 pyarrow==15.0.2 requests==2.32.4
+      - run: python -m pip install duckdb==1.5.1 pandas==2.2.3 pyarrow==15.0.2 requests==2.32.4 polars==1.35.2
       - name: Record immutable pre-state
         shell: bash
         run: |
