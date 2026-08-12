@@ -99,11 +99,11 @@ jobs:
           SHARD: ${{ matrix.shard }}
         run: |
           python scripts/research_cohorts/extract_mfl_target_roster_memberships.py --manifest shard_targets.json --shard 0 --shards 1 --out-memberships out/memberships.parquet --out-player-directory out/player_directory.parquet --out-report out/extract_report.json
-      - name: Build exact player bridge and NULL-fill candidate
+      - name: Build direct source franchise-to-player-to-team bridge and NULL-fill candidate
         run: |
           set -euo pipefail
           python scripts/research_cohorts/build_mfl_roster_player_crosswalk.py --directory out/player_directory.parquet --ops-cache research_public_lake/ops_cache.duckdb --out out/crosswalk.parquet --report out/crosswalk_report.json
-          python scripts/research_cohorts/build_mfl_roster_bridge_receipt.py --base research_public_lake/corpus_snapshot.duckdb --memberships out/memberships.parquet --crosswalk out/crosswalk.parquet --out out/bridge.parquet --diagnostic-out out/bridge_diagnostic.parquet --report out/bridge_report.json
+          python scripts/research_cohorts/build_mfl_source_team_player_bridge.py --memberships out/memberships.parquet --crosswalk out/crosswalk.parquet --team-signals shard_source_signals.parquet --out out/bridge.parquet --report out/bridge_report.json
           mkdir -p candidate_input
           cp shard_source_signals.parquet candidate_input/team_signals.parquet
           cp out/bridge.parquet candidate_input/player_bridge.parquet
