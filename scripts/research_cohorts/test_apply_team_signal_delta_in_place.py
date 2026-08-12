@@ -7,7 +7,7 @@ import duckdb
 from canonical_player_schema import BASE_PLAYER_COLUMNS, EXPECTED_COHORT_COLUMNS
 
 
-def _base(path, *, null_team_identity: bool = False, null_player_id: bool = False):
+def _base(path, *, null_team_identity: bool = False, null_player_id: bool = False, null_platform: bool = False):
     columns = BASE_PLAYER_COLUMNS + sorted(EXPECTED_COHORT_COLUMNS) + ["loss", "tie"]
     con = duckdb.connect(str(path))
     con.execute("CREATE SCHEMA public")
@@ -26,13 +26,15 @@ def _base(path, *, null_team_identity: bool = False, null_player_id: bool = Fals
         values["team_name"] = None
     if null_player_id:
         values["NFL_player_id"] = None
+    if null_platform:
+        values["platform"] = None
     names = ", ".join(f'"{column}"' for column in columns)
     placeholders = ", ".join("?" for _ in columns)
     con.execute(f"INSERT INTO public.player_fantasy ({names}) VALUES ({placeholders})", list(values.values()))
     con.close()
 
 
-def _delta(path, *, conflicting_loss: bool = False, null_player_id: bool = False):
+def _delta(path, *, conflicting_loss: bool = False, null_player_id: bool = False, null_platform: bool = False):
     con = duckdb.connect()
     con.execute("""
         CREATE TABLE d AS
@@ -46,6 +48,8 @@ def _delta(path, *, conflicting_loss: bool = False, null_player_id: bool = False
     """)
     if null_player_id:
         con.execute("UPDATE d SET NFL_player_id=NULL")
+    if null_platform:
+        con.execute("UPDATE d SET platform=NULL")
     con.execute("INSERT INTO d SELECT * FROM d")
     if conflicting_loss:
         con.execute("UPDATE d SET source_loss='0' WHERE rowid=1")
@@ -121,6 +125,25 @@ def test_apply_allows_exact_null_player_id_without_fanout(tmp_path):
     report = tmp_path / "report.json"
     _base(base, null_player_id=True)
     _delta(delta, null_player_id=True)
+
+    result = subprocess.run([
+        sys.executable,
+        "scripts/research_cohorts/apply_team_signal_delta_in_place.py",
+        "--base", str(base), "--delta", str(delta), "--report", str(report),
+    ], capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    con = duckdb.connect(str(base), read_only=True)
+    assert con.execute("SELECT loss, tie FROM public.player_fantasy").fetchone() == ("1", "0")
+    con.close()
+
+
+def test_apply_allows_exact_null_platform_without_fanout(tmp_path):
+    base = tmp_path / "base.duckdb"
+    delta = tmp_path / "delta.parquet"
+    report = tmp_path / "report.json"
+    _base(base, null_platform=True)
+    _delta(delta, null_platform=True)
 
     result = subprocess.run([
         sys.executable,

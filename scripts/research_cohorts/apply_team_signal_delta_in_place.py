@@ -116,7 +116,7 @@ def main() -> None:
         ON d.db_name=p.db_name AND CAST(d.year AS INTEGER)=CAST(p.year AS INTEGER)
        AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER)
        AND d.NFL_player_id IS NOT DISTINCT FROM p.NFL_player_id
-       AND d.platform=p.platform
+       AND d.platform IS NOT DISTINCT FROM p.platform
        AND d.manager IS NOT DISTINCT FROM p.manager
        AND (p.team_key IS NULL OR d.team_key=p.team_key)
        AND (p.team_name IS NULL OR d.team_name=p.team_name)
