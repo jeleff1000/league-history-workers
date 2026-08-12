@@ -256,7 +256,7 @@ jobs:
           # normal numeric workflow unchanged, but make the quota manifest a
           # local default so a dispatch that drops optional inputs cannot
           # silently run empty shards.
-          if [ "${{ inputs.id_start || '0' }}" = "0" ] && [ "${{ inputs.id_end || '999' }}" = "0" ]; then
+          if [ "${{ inputs.id_start }}" = "0" ] && [ "${{ inputs.id_end }}" = "0" ]; then
             task_manifest="${{ inputs.task_manifest || 'corpus_seed/mfl_uncovered_task_plan.json' }}"
             task_window="${{ inputs.task_window || '0' }}"
             if [ -f "code/${task_manifest}" ]; then
