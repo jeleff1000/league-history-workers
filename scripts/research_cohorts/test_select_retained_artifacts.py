@@ -16,3 +16,18 @@ def test_selection_ignores_supplemental_cache_recovery_receipts(tmp_path):
     assert [row["artifact_id"] for row in select(
         ledger, source_kind="team", prefix="", requested_ids=set()
     )] == ["1"]
+
+
+def test_team_selection_rechecks_legacy_loss_tie_schema_blocked_artifacts(tmp_path):
+    ledger = tmp_path / "ledger.csv"
+    with ledger.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["record_type", "artifact_id", "artifact", "final_status"])
+        writer.writeheader()
+        writer.writerows([
+            {"record_type": "artifact_inventory", "artifact_id": "1", "artifact": "team-a", "final_status": "partial_schema_blocked_direct_identity"},
+            {"record_type": "artifact_inventory", "artifact_id": "2", "artifact": "team-b", "final_status": "partial_schema_blocked_conflicts"},
+        ])
+
+    assert [row["artifact_id"] for row in select(
+        ledger, source_kind="team", prefix="", requested_ids=set()
+    )] == ["1", "2"]

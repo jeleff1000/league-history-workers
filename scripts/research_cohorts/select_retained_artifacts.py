@@ -16,6 +16,12 @@ TEAM_RECHECK_STATUSES = {
     # it here strands the evidence before the manager-week fan-out.
     "still_missing_cache_cells",
     "unmatched_cache_key",
+    # These statuses were assigned while canonical loss/tie fields did not
+    # exist.  Once those two sanctioned fields are present, their source facts
+    # must be re-audited against the live cache rather than left permanently
+    # stranded behind an obsolete schema gate.
+    "partial_schema_blocked_direct_identity",
+    "partial_schema_blocked_conflicts",
 }
 STRUCTURED_RECHECK_STATUSES = {
     "candidate_provenance_not_found",

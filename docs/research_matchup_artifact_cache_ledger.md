@@ -71,7 +71,7 @@ manager is rejected before it can become a bridge. The implementation test
 also rejects two raw franchises for one manager, a non-unique MFL-to-NFL
 crosswalk, and duplicate canonical recipients. This is an implementation
 completion, **not** an artifact or cache completion: no MFL bridge receipt has
-yet been run against the target population, so the ledger's 715 open artifact
+yet been run against the target population, so the ledger's 711 open artifact
 statuses remain unchanged.
 
 The source-side predecessor is
@@ -226,15 +226,14 @@ Each row has an explicit `final_status` and `next_action`.
 
 | Status | Artifacts | Meaning |
 | --- | ---: | --- |
-| `cache_verified` | 308 | 3,454,826 source cells have direct receipts matching the canonical cache; no missing/conflicting cells. |
+| `cache_verified` | 312 | 3,476,250 source cells have direct receipts matching the canonical cache; no missing/conflicting cells. This includes the four loss/tie source artifacts read back in run `31633809547`. |
 | `no_promotable_candidate_emitted` | 4,529 | Candidate-classified artifact, but no promotable cell was emitted by the frozen comparison. |
 | `not_data_bearing` | 3,927 | Aggregate/validation/metadata artifact; not a canonical-cell source. |
 | `cache_conflict_preserved` | 7 | 2,142,503 supported cells already match; 9,397 non-null conflicts are preserved; 480,208 source cells remain identity-unmatched; zero cache-null fill candidates. |
 | `source_only_team_signal_missing_player_team_bridge` | 2 | 151 source team-weeks overlap cache league-weeks but have no safe manager/team bridge to player rows; they cannot be fanned out. |
-| `partial_schema_blocked_direct_identity` | 15 | The 31,870 safe exact-row candidates were promoted and independently read back as 75,078 canonical cells. A current re-audit finds no safe null fills: 1,532 remaining null cells have ambiguous canonical identity, 1,201 cells conflict with an existing non-null value, and 288,160 loss/tie cells remain schema-blocked. |
-| `partial_schema_blocked_unmatched` | 473 | 24,920,856 supported cells already match; 334,144 source cells still lack a resolved player-team edge; 577,482 loss/tie cells require the explicitly permitted schema fields. |
-| `partial_schema_blocked_conflicts` | 214 | 32,532,612 supported cells already match; 128,484 existing non-null values conflict and are preserved; 7,044,748 source cells still lack a resolved player-team edge; 4,169,612 loss/tie cells require schema support. |
-| `blocked_schema` | 4 | Sparse-playoff evidence has 20,960 already-matching supported cells and 464 required loss/tie cells. Those cells remain open until the cache schema supports loss/tie and a readback passes. |
+| `partial_schema_blocked_direct_identity` | 15 | Legacy pre-loss/tie receipt: 31,870 safe exact-row candidates had prior cache evidence. Its loss/tie portion must now be re-audited against the approved cache before any remaining gap is asserted. |
+| `partial_schema_blocked_unmatched` | 473 | Legacy pre-loss/tie receipt: the player-team identity gap remains a real unresolved category, while its recorded loss/tie schema count requires fresh comparison against the current cache. |
+| `partial_schema_blocked_conflicts` | 214 | Legacy pre-loss/tie receipt: non-null conflicts remain preserved pending precedence policy, while its recorded loss/tie schema count requires fresh comparison against the current cache. |
 
 The receipt workflow is read-only. It asserts, before and after the audit,
 that player schema, player-row count, and the ops-cache hash are unchanged;
@@ -247,17 +246,18 @@ evidence state:
 
 | Completion state | Artifacts | Meaning |
 | --- | ---: | --- |
-| Closed by direct cache evidence | 308 | Every compared canonical cell equals the approved cache. |
+| Closed by direct cache evidence | 312 | Every compared canonical cell equals the approved cache. |
 | Closed: no promotable cache cell emitted | 4,529 | The frozen extraction/comparison emitted no canonical-cell candidate. |
 | Closed: non-data-bearing | 3,927 | Aggregate, validation, inventory, or metadata evidence; not a source of canonical cells. |
 | **Open: supported null-cell promotion** | **0** | No safe, unpromoted null-cell candidate is currently recorded in the ledger. |
-| **Open: add loss/tie schema** | **706** | Source contains loss/tie evidence; these fields are required for completion and are not yet columns in the approved cache. |
+| **Legacy loss/tie gate requiring re-audit** | **702** | These artifacts were classified before the approved cache gained canonical `loss`/`tie`. They must be read back again against the current cache; the old schema gate is not proof of a current gap. |
 | **Open: player-team identity bridge or source-only closure** | **711** | Source has team-week or direct-player evidence that cannot yet be connected safely to a single eligible player row, or must be explicitly closed as source-only. |
 | **Open: source-precedence adjudication** | **233** | Source differs from an existing non-null cache value; no overwrite may occur without a field-level precedence rule. |
 
-The final three open categories overlap: for example, a sparse-playoff source
-may need loss/tie schema support **and** a player-team bridge. The artifact
-partition is still exact: **8,764 closed, 715 open**.
+The final three open categories overlap. The 702 legacy loss/tie gate rows are
+being re-audited against the current schema before any remaining schema gap is
+asserted. The artifact
+partition is still exact: **8,768 closed, 711 open**.
 
 ### Machine-checkable cache-admission gates
 
@@ -270,12 +270,12 @@ schema-blocked, unmatched, or conflict cells.
 
 | Admission state | Artifacts | Required work before any cache write |
 | --- | ---: | --- |
-| `open_loss_tie` | 4 | Add only canonical `loss`/`tie`, then exact candidate/readback. |
+| `open_loss_tie` | 0 | The four schema-only artifacts were promoted and independently read back in `31633809547`. |
 | `open_player_team_bridge` | 2 | Produce raw roster-membership evidence or an explicit source-only closure. |
-| `open_loss_tie_and_player_team_bridge` | 476 | Complete both schema and raw player/team bridge gates. |
+| `open_loss_tie_and_player_team_bridge` | 476 | Legacy gate values; re-audit against the current loss/tie schema before treating this as an active schema blocker. |
 | `open_player_team_bridge_and_source_precedence` | 7 | Complete bridge proof and field-level conflict adjudication. |
-| `open_all_required_gates` | 226 | Complete schema, raw bridge, and precedence gates. |
-| `closed_*` | 8,764 | Closed by the final status shown above; no cache update is implied unless the status is `closed_cache_verified`. |
+| `open_all_required_gates` | 226 | Legacy schema component requires exact re-audit; bridge and precedence evidence still require adjudication. |
+| `closed_*` | 8,768 | Closed by the final status shown above; no cache update is implied unless the status is `closed_cache_verified`. |
 
 The only state that proves a cache value is present is `closed_cache_verified`
 with its restored-cache receipt. `closed_no_promotable_candidate_emitted` and
@@ -307,7 +307,7 @@ The CSV now carries existing read-only profile evidence in
 `identity_bridge_status`. This is evidence from prior receipts, not a new
 fetch or a cache mutation.
 
-| Identity state among the 715 open artifacts | Artifacts | Meaning |
+| Identity state among the 711 open artifacts | Artifacts | Meaning |
 | --- | ---: | --- |
 | `fully_matched` | 11 | All source teams fan out to player rows; their remaining work is limited to the recorded schema or source-precedence evidence. |
 | `player_key_profiled` | 15 | Direct MFL player-key evidence; the strict null-cell candidate is promoted and cache-verified, while the remaining nulls are identity-ambiguous. |
@@ -647,10 +647,10 @@ a source-identity decision or an explicit schema/precedence closure. None
 currently has a safe, unpromoted null-cell candidate and none requires a new
 API pull.
 
-The CSV is the machine-readable authority: **8,764 of 9,479 artifacts are
-closed** and **715 remain open**. The open partition is 473 identity-unmatched,
-214 precedence conflicts, 15 schema-blocked safe-null repairs, 4 schema-only
-items, and 2 source-only player-identity gaps. Every one of the 715 has a
+The CSV is the machine-readable authority: **8,768 of 9,479 artifacts are
+closed** and **711 remain open**. The open partition is 473 identity-unmatched,
+214 precedence conflicts, 15 legacy schema-blocked safe-null repairs, 7
+preserved-conflict artifacts, and 2 source-only player-identity gaps. Every one of the 711 has a
 non-empty reason and next action in the CSV; an artifact is never considered
 closed merely because its parent workflow completed.
 
