@@ -61,25 +61,28 @@ def test_builds_one_complete_exact_schema_mfl_row_from_source_membership_and_tea
     memberships = tmp_path / "memberships.parquet"
     _parquet(memberships, "source", [
         ("db_name", "VARCHAR"), ("year", "INTEGER"), ("week", "INTEGER"),
-        ("source_year", "INTEGER"), ("source_manager", "VARCHAR"),
+        ("source_year", "INTEGER"), ("source_franchise_id", "VARCHAR"), ("source_manager", "VARCHAR"),
         ("mfl_player_id", "VARCHAR"), ("is_started", "INTEGER"), ("fantasy_points", "DOUBLE"),
-    ], [("league", 2012, 1, 2012, "Manager", "100", 1, 12.5)])
+    ], [
+        ("league", 2012, 1, 2012, "0001", "Manager", "100", 1, 12.5),
+        ("league", 2012, 1, 2012, "0001", "Manager", "101", 1, 8.0),
+    ])
     directory = tmp_path / "directory.parquet"
     _parquet(directory, "source", [
         ("source_year", "INTEGER"), ("mfl_player_id", "VARCHAR"),
         ("espn_id", "VARCHAR"), ("raw_team", "VARCHAR"),
-    ], [(2012, "100", "999", "NEP")])
+    ], [(2012, "100", "999", "NEP"), (2012, "101", "998", "NEP")])
     crosswalk = tmp_path / "crosswalk.parquet"
     _parquet(crosswalk, "source", [
         ("source_year", "INTEGER"), ("mfl_player_id", "VARCHAR"), ("NFL_player_id", "VARCHAR"),
-    ], [(2012, "100", "nfl-missing")])
+    ], [(2012, "100", "nfl-missing"), (2012, "101", "existing")])
     targets = tmp_path / "targets.parquet"
     _parquet(targets, "source", [
         ("db_name", "VARCHAR"), ("year", "INTEGER"), ("week", "INTEGER"),
-        ("source_year", "INTEGER"), ("source_manager", "VARCHAR"),
+        ("source_year", "INTEGER"), ("source_franchise_id", "VARCHAR"), ("source_manager", "VARCHAR"),
         ("mfl_player_id", "VARCHAR"), ("bridge_status", "VARCHAR"),
         ("canonical_player_week_count", "INTEGER"),
-    ], [("league", 2012, 1, 2012, "Manager", "100", "no_canonical_recipient", 0)])
+    ], [("league", 2012, 1, 2012, "0001", "Manager", "100", "no_canonical_recipient", 0)])
 
     out = tmp_path / "candidate.parquet"
     report = tmp_path / "report.json"

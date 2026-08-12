@@ -111,16 +111,33 @@ def build(
             SELECT source_year, mfl_player_id, MIN(espn_id) AS espn_id, MIN(raw_team) AS raw_team
             FROM read_parquet({_path(directory)})
             GROUP BY 1, 2
+          ), source_members AS (
+            SELECT m.db_name, m.year, m.week, m.source_franchise_id, c.NFL_player_id
+            FROM read_parquet({_path(memberships)}) m
+            JOIN read_parquet({_path(crosswalk)}) c
+              ON c.source_year=m.source_year AND c.mfl_player_id=m.mfl_player_id
+            WHERE c.NFL_player_id IS NOT NULL
+          ), franchise_bridge AS (
+            SELECT s.db_name, s.year, s.week, s.source_franchise_id,
+                   COUNT(DISTINCT p.manager) FILTER (WHERE p.manager IS NOT NULL) AS canonical_manager_count,
+                   MIN(p.manager) FILTER (WHERE p.manager IS NOT NULL) AS canonical_manager
+            FROM source_members s
+            JOIN public.player_fantasy p
+              ON p.db_name=s.db_name AND p.year=s.year AND p.week=s.week
+             AND p.NFL_player_id=s.NFL_player_id
+            GROUP BY 1, 2, 3, 4
           )
-          SELECT m.db_name, m.year, m.week, m.source_year, m.source_manager,
+          SELECT m.db_name, m.year, m.week, m.source_year, m.source_franchise_id, m.source_manager,
                  m.mfl_player_id, m.is_started, m.fantasy_points,
                  d.espn_id, d.raw_team, c.NFL_player_id,
                  o.player AS ops_player, o.position AS ops_position,
-                 o.lamar_12t_idp_ppr_6pt AS ops_lamar
+                 o.lamar_12t_idp_ppr_6pt AS ops_lamar,
+                 b.canonical_manager_count, b.canonical_manager
           FROM read_parquet({_path(memberships)}) m
           JOIN read_parquet({_path(targets)}) t
             ON t.db_name=m.db_name AND t.year=m.year AND t.week=m.week
-           AND t.source_year=m.source_year AND t.source_manager=m.source_manager
+           AND t.source_year=m.source_year AND t.source_franchise_id=m.source_franchise_id
+           AND t.source_manager=m.source_manager
            AND t.mfl_player_id=m.mfl_player_id
            AND t.bridge_status='no_canonical_recipient'
            AND t.canonical_player_week_count=0
@@ -128,6 +145,9 @@ def build(
             ON d.source_year=m.source_year AND d.mfl_player_id=m.mfl_player_id
           JOIN read_parquet({_path(crosswalk)}) c
             ON c.source_year=m.source_year AND c.mfl_player_id=m.mfl_player_id
+          LEFT JOIN franchise_bridge b
+            ON b.db_name=m.db_name AND b.year=m.year AND b.week=m.week
+           AND b.source_franchise_id=m.source_franchise_id
           LEFT JOIN ops.nfl_historical.nfl_player_stats_all o
             ON o.NFL_player_id=c.NFL_player_id AND o.year=m.year AND o.week=m.week
           ORDER BY m.db_name, m.year, m.week, c.NFL_player_id, m.source_manager
@@ -139,12 +159,14 @@ def build(
         seen: set[tuple[Any, ...]] = set()
         candidate_rows: list[list[Any]] = []
         for source in source_rows:
-            required_source = ("source_manager", "mfl_player_id", "fantasy_points", "espn_id", "NFL_player_id", "ops_player", "ops_position", "ops_lamar")
+            required_source = ("source_franchise_id", "mfl_player_id", "fantasy_points", "espn_id", "NFL_player_id", "ops_player", "ops_position", "ops_lamar", "canonical_manager")
             absent = [field for field in required_source if source.get(field) is None]
             if absent:
                 raise ValueError(f"source-proven row lacks required fields {absent}: {source}")
+            if int(source["canonical_manager_count"] or 0) != 1:
+                raise ValueError(f"source franchise does not map to exactly one cache manager: {source}")
             logical_key = (
-                source["db_name"], source["year"], source["week"], source["NFL_player_id"], source["source_manager"],
+                source["db_name"], source["year"], source["week"], source["NFL_player_id"], source["canonical_manager"],
             )
             if logical_key in seen:
                 raise ValueError(f"duplicate candidate logical key: {logical_key}")
@@ -157,7 +179,7 @@ def build(
                 raise ValueError(f"candidate key already exists in canonical cache: {logical_key}")
             template = _single_template(
                 con, db_name=str(source["db_name"]), year=int(source["year"]), week=int(source["week"]),
-                manager=str(source["source_manager"]), columns=name_set,
+                manager=str(source["canonical_manager"]), columns=name_set,
             )
             values = {name: None for name in names}
             values.update(template)
@@ -166,7 +188,7 @@ def build(
                 "year": source["year"],
                 "week": source["week"],
                 "NFL_player_id": source["NFL_player_id"],
-                "manager": source["source_manager"],
+                "manager": source["canonical_manager"],
                 "is_started": int(bool(source["is_started"])),
                 "is_rostered": 1,
                 "fantasy_points": float(source["fantasy_points"]),
