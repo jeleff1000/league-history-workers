@@ -41,8 +41,11 @@ def refresh(
     selected_ids = {int(row["artifact_id"]) for row in selected}
     receipt = json.loads(receipt_path.read_text(encoding="utf-8-sig"))
     promotion_receipt = "artifact_rows" in receipt
+    direct_reaudit_receipt = "artifact_current_state" in receipt
     if promotion_receipt:
         receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_rows"]}
+    elif direct_reaudit_receipt:
+        receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_current_state"]}
     else:
         receipt_rows = {int(row["artifact_id"]): row for row in receipt["rows"]}
     team_profile_rows: dict[int, dict] = {}
@@ -60,6 +63,31 @@ def refresh(
         if artifact_id not in selected_ids:
             continue
         evidence = receipt_rows[artifact_id]
+        if direct_reaudit_receipt:
+            if int(evidence.get("safe_null_candidates", 0) or 0) != 0:
+                raise SystemExit(
+                    f"{artifact_id}: direct re-audit has safe null candidates; "
+                    "build an exact promotion candidate before refreshing the ledger"
+                )
+            row["cache_match_cells"] = str(int(evidence.get("cache_equal_cells", 0) or 0))
+            row["cache_missing_cells"] = "0"
+            row["cache_conflict_cells"] = str(int(evidence.get("cache_conflict_cells", 0) or 0))
+            row["unmatched_cache_cells"] = str(int(evidence.get("ambiguous_null_cells", 0) or 0))
+            row["receipt_run_id"] = str(receipt_run_id)
+            row["receipt_json_sha256"] = digest
+            row["final_status"] = "partial_schema_blocked_direct_identity"
+            row["final_reason"] = (
+                "Current exact-player re-audit found no safe cache-null candidate; "
+                f"{int(evidence.get('cache_equal_cells', 0) or 0)} supported cells already match, "
+                f"{int(evidence.get('ambiguous_null_cells', 0) or 0)} null cells require identity resolution, "
+                f"and {int(evidence.get('cache_conflict_cells', 0) or 0)} non-null cells require "
+                "source-precedence adjudication."
+            )
+            row["next_action"] = (
+                "add_loss_tie_schema_then_resolve_direct_identity_or_preserve_conflicts"
+            )
+            updated += 1
+            continue
         if promotion_receipt:
             expected_rows = int(row["candidate_delta_rows"] or 0)
             promoted_rows = int(evidence.get("candidate_rows", 0) or 0)
