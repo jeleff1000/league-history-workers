@@ -106,9 +106,10 @@ jobs:
                   summary.write(f'- Receipt: `{receipt}`\n')
                   summary.write('- No cache save, source mutation, Fly access, API request, aggregation output, or publish step.\n')
               raise SystemExit(0)
-          source_rows = c.execute("SELECT COUNT(*) FROM lake.public.player_fantasy WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1").fetchone()[0]
           rollup_source = _source_without_bad_identity_rows(c, 'lake.public.player_fantasy')
-          filtered_source_rows = c.execute(f"SELECT COUNT(*) FROM {rollup_source} WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1").fetchone()[0]
+          if mode in {'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes'}:
+              source_rows = c.execute("SELECT COUNT(*) FROM lake.public.player_fantasy WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1").fetchone()[0]
+              filtered_source_rows = c.execute(f"SELECT COUNT(*) FROM {rollup_source} WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1").fetchone()[0]
           if mode == 'rb_2025_week1_inventory':
               inventory = c.execute(f"""
                 WITH rb AS (
@@ -500,14 +501,14 @@ jobs:
           cell_count = c.execute('SELECT SUM(list_count(cohort_cells)) FROM cmc_week1').fetchone()[0]
           assert cell_count <= 145, cell_count
           peak_rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-          receipt = {'source_rows_read': source_rows, 'outer_rows': outer_rows, 'nested_cells': cell_count, 'wall_seconds': round(elapsed_s, 3), 'peak_rss_kb': peak_rss_kb, 'cmc_2025_week_1_all': full, 'cmc_2025_week_1_selected': selected[0]}
+          receipt = {'outer_rows': outer_rows, 'nested_cells': cell_count, 'wall_seconds': round(elapsed_s, 3), 'peak_rss_kb': peak_rss_kb, 'cmc_2025_week_1_all': full, 'cmc_2025_week_1_selected': selected[0]}
           print(receipt)
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
               summary.write('## CMC W1 compact cache truth gate\n')
               summary.write(f'- Cache: `{os.environ.get("CACHE_KEY", "immutable input")}`\n')
               summary.write('- Source commit: `2d98750e59fa7f454ffb32170a532cccb4dfed06`\n')
               summary.write(f'- ALL cell: `{full}`\n- Selected cell: `{selected[0]}`\n')
-              summary.write(f'- Source rows read: `{source_rows}`; outer rows: `{outer_rows}`; nested cells: `{cell_count}`\n')
+              summary.write(f'- Outer rows: `{outer_rows}`; nested cells: `{cell_count}`\n')
               summary.write(f'- Build wall time: `{elapsed_s:.3f}s`; peak RSS: `{peak_rss_kb} KB`\n')
 
           if mode in {'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains'}:
