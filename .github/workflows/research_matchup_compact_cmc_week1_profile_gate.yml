@@ -30,7 +30,7 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           path: code
-          ref: f9f99e10b8b3ce3e7a69ecb0f327741a2bab1397
+          ref: 4240541218617e87f90126c6bd602c86dfabf7b9
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -55,7 +55,9 @@ jobs:
               materialize_career_cohort_grade_cells,
               materialize_career_core_cohort_cells,
               materialize_season_bracket_grade_cells,
+              materialize_season_bracket_grade_position_batch,
               materialize_season_core_cohort_cells,
+              materialize_season_core_cohort_position_batch,
               materialize_weekly_core_cohort_cells,
           )
 
@@ -135,7 +137,7 @@ jobs:
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
               summary.write('## CMC W1 compact cache truth gate\n')
               summary.write(f'- Cache: `{os.environ.get("CACHE_KEY", "immutable input")}`\n')
-              summary.write('- Source commit: `f9f99e10b8b3ce3e7a69ecb0f327741a2bab1397`\n')
+              summary.write('- Source commit: `4240541218617e87f90126c6bd602c86dfabf7b9`\n')
               summary.write(f'- ALL cell: `{full}`\n- Selected cell: `{selected[0]}`\n')
               summary.write(f'- Source rows read: `{source_rows}`; outer rows: `{outer_rows}`; nested cells: `{cell_count}`\n')
               summary.write(f'- Build wall time: `{elapsed_s:.3f}s`; peak RSS: `{peak_rss_kb} KB`\n')
@@ -300,13 +302,13 @@ jobs:
                   valid_player_weeks_table='cached_regular_player_weeks', output_table='myles_2025_weekly',
                   year=2025, week=None, player_id=myles_id, split_threshold=150,
               )
-              materialize_season_core_cohort_cells(
+              materialize_season_core_cohort_position_batch(
                   c, source_table='lake.public.player_fantasy', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
-                  output_table='myles_2025_season_core', year=2025, player_id=myles_id, split_threshold=50,
+                  output_table='myles_2025_season_core', year=2025, position='DL', split_threshold=50,
               )
-              materialize_season_bracket_grade_cells(
+              materialize_season_bracket_grade_position_batch(
                   c, source_table='lake.public.player_fantasy', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
-                  output_table='myles_2025_season_grade', year=2025, player_id=myles_id, split_threshold=50,
+                  output_table='myles_2025_season_grade', year=2025, position='DL', split_threshold=50,
               )
               c.execute("""
                 CREATE OR REPLACE TABLE myles_2025_season AS
