@@ -185,6 +185,7 @@ concurrency:
   # All windows share one lock. The scheduler releases the next individual
   # workflow only after the current one completes.
   group: mfl-historical-discovery-global
+  queue: max
   cancel-in-progress: false
 
 jobs:
