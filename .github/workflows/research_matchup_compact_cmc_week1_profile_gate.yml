@@ -298,6 +298,7 @@ jobs:
               year=2025,
               week=1,
               player_id='00-0033280',
+              position='RB',
               split_threshold=150,
           )
           assert c.execute('SELECT COUNT(*) FROM cmc_week1').fetchone()[0] == 1
@@ -367,7 +368,7 @@ jobs:
               materialize_weekly_core_cohort_cells(
                   c, source_table='lake.public.player_fantasy', output_table='cmc_2025_weekly',
                   valid_player_weeks_table='cached_regular_player_weeks',
-                  year=2025, week=None, player_id='00-0033280', split_threshold=150,
+                  year=2025, week=None, player_id='00-0033280', position='RB', split_threshold=150,
               )
               weekly_weeks = [r[0] for r in c.execute(
                   'SELECT week FROM cmc_2025_weekly ORDER BY week'
