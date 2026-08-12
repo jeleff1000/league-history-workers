@@ -15,6 +15,7 @@ on:
           - cmc_week1
           - cmc_2025_all_grains
           - myles_2025_season
+          - rb_2025_lane
 
 permissions:
   contents: read
@@ -72,7 +73,7 @@ jobs:
             WHERE COALESCE(season_type, 'REG') = 'REG' AND week IS NOT NULL
           """)
           mode = os.environ['PILOT_MODE']
-          if mode not in {'cmc_week1', 'cmc_2025_all_grains', 'myles_2025_season'}:
+          if mode not in {'cmc_week1', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_lane'}:
               raise ValueError(f'unsupported pilot mode: {mode}')
           source_rows = c.execute("SELECT COUNT(*) FROM lake.public.player_fantasy WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1").fetchone()[0]
           started_at = perf_counter()
@@ -282,13 +283,17 @@ jobs:
                   summary.write(f'- Receipt: `{full_receipt}`\n')
                   summary.write('- Cache-only computation; no Fly read/write, settings join, API request, artifact, or publish step.\n')
 
-          if mode == 'myles_2025_season':
+          if mode in {'myles_2025_season', 'rb_2025_lane'}:
+              player_name, lane_position = (
+                  ('myles garrett', 'DL') if mode == 'myles_2025_season'
+                  else ('christian mccaffrey', 'RB')
+              )
               myles_ids = c.execute("""
                 SELECT DISTINCT CAST(NFL_player_id AS VARCHAR)
                 FROM ops.nfl_historical.nfl_player_stats_all
                 WHERE CAST(year AS INTEGER)=2025
-                  AND LOWER(TRIM(CAST(player AS VARCHAR)))='myles garrett'
-              """).fetchall()
+                  AND LOWER(TRIM(CAST(player AS VARCHAR)))=?
+              """, [player_name]).fetchall()
               assert len(myles_ids) == 1, myles_ids
               myles_id = myles_ids[0][0]
               cache_positions = c.execute("""
@@ -296,12 +301,15 @@ jobs:
                 FROM lake.public.player_fantasy
                 WHERE CAST(year AS INTEGER)=2025 AND CAST(NFL_player_id AS VARCHAR)=?
               """, [myles_id]).fetchall()
-              assert set(cache_positions).issubset({('DL',), ('DE',), ('DT',), ('NT',), ('EDGE',)}), cache_positions
+              if lane_position == 'DL':
+                  assert set(cache_positions).issubset({('DL',), ('DE',), ('DT',), ('NT',), ('EDGE',)}), cache_positions
+              else:
+                  assert (lane_position,) in set(cache_positions), cache_positions
               weekly_started = perf_counter()
               materialize_weekly_core_cohort_cells(
                   c, source_table='lake.public.player_fantasy',
                   valid_player_weeks_table='cached_regular_player_weeks', output_table='weekly_2025_dl',
-                  year=2025, week=None, player_id=None, position='DL', split_threshold=150,
+                  year=2025, week=None, player_id=None, position=lane_position, split_threshold=150,
               )
               weekly_seconds = perf_counter() - weekly_started
               weekly_batch_rows = c.execute('SELECT COUNT(*) FROM weekly_2025_dl').fetchone()[0]
@@ -309,13 +317,13 @@ jobs:
               core_started = perf_counter()
               materialize_season_core_cohort_position_batch(
                   c, source_table='lake.public.player_fantasy', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
-                  output_table='myles_2025_season_core', year=2025, position='DL', split_threshold=50,
+                  output_table='myles_2025_season_core', year=2025, position=lane_position, split_threshold=50,
               )
               core_seconds = perf_counter() - core_started
               grade_started = perf_counter()
               materialize_season_bracket_grade_position_batch(
                   c, source_table='lake.public.player_fantasy', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
-                  output_table='myles_2025_season_grade', year=2025, position='DL', split_threshold=50,
+                  output_table='myles_2025_season_grade', year=2025, position=lane_position, split_threshold=50,
               )
               grade_seconds = perf_counter() - grade_started
               c.execute("""
@@ -335,12 +343,14 @@ jobs:
                 FROM myles_2025_weekly
               """).fetchone()
               assert weekly_rows > 0 and weekly_min >= 1 and weekly_max <= 18, (weekly_rows, weekly_min, weekly_max)
+              if mode == 'rb_2025_lane':
+                  assert weekly_rows == 17 and (weekly_min, weekly_max) == (1, 18), (weekly_rows, weekly_min, weekly_max)
               assert weekly_cells <= weekly_rows * 145, weekly_cells
               assert c.execute('SELECT COUNT(*) FROM myles_2025_season').fetchone()[0] == 1
               season_position, season_core_cells, season_grade_cells = c.execute("""
                 SELECT position, list_count(cohort_cells), list_count(grade_cells) FROM myles_2025_season
               """).fetchone()
-              assert season_position == 'DL', season_position
+              assert season_position == lane_position, season_position
               assert season_core_cells <= 145 and season_grade_cells <= 577
               core_invalid = c.execute("""
                 SELECT COUNT(*) FROM myles_2025_season, UNNEST(cohort_cells) AS u(cell)
@@ -356,7 +366,7 @@ jobs:
               """).fetchone()[0]
               assert core_invalid == 0 and grade_invalid == 0, (core_invalid, grade_invalid)
               myles_receipt = {
-                  'mode': mode, 'myles_id': myles_id, 'canonical_position': season_position,
+                  'mode': mode, 'player_name': player_name, 'player_id': myles_id, 'canonical_position': season_position,
                   'weekly_seconds': round(weekly_seconds, 3), 'weekly_batch_outer_rows': weekly_batch_rows,
                   'core_seconds': round(core_seconds, 3), 'grade_seconds': round(grade_seconds, 3),
                   'batch_core_outer_rows': batch_core_rows, 'batch_grade_outer_rows': batch_grade_rows,
