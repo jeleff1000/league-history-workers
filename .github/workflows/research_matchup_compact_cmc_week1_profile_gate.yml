@@ -17,6 +17,7 @@ on:
           - myles_2025_season
           - rb_2025_lane
           - rb_2025_week1_inventory
+          - rb_2025_week1_distribution
 
 permissions:
   contents: read
@@ -74,7 +75,7 @@ jobs:
             WHERE COALESCE(season_type, 'REG') = 'REG' AND week IS NOT NULL
           """)
           mode = os.environ['PILOT_MODE']
-          if mode not in {'cmc_week1', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_lane', 'rb_2025_week1_inventory'}:
+          if mode not in {'cmc_week1', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution'}:
             raise ValueError(f'unsupported pilot mode: {mode}')
           source_rows = c.execute("SELECT COUNT(*) FROM lake.public.player_fantasy WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1").fetchone()[0]
           if mode == 'rb_2025_week1_inventory':
@@ -102,6 +103,66 @@ jobs:
                   summary.write('## RB 2025 week 1 immutable-cache inventory\n')
                   summary.write(f'- Receipt: `{receipt}`\n')
                   summary.write('- Cache-only count; no aggregation table, cache save, Fly access, API request, artifact, or publish step.\n')
+              raise SystemExit(0)
+          if mode == 'rb_2025_week1_distribution':
+              c.execute("""
+                CREATE TEMP TABLE rb_week1_exposure AS
+                SELECT CAST(NFL_player_id AS VARCHAR) AS NFL_player_id,
+                  COUNT(DISTINCT db_name) FILTER (
+                    WHERE is_rostered IS NULL OR CAST(is_rostered AS INTEGER) <> 0
+                  )::BIGINT AS rostered_leagues
+                FROM lake.public.player_fantasy
+                WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1
+                  AND UPPER(TRIM(CAST(position AS VARCHAR)))='RB'
+                GROUP BY 1
+              """)
+              distribution = c.execute("""
+                SELECT COUNT(*) AS distinct_rb_players,
+                  COUNT(*) FILTER (WHERE rostered_leagues >= 1) AS ge_1,
+                  COUNT(*) FILTER (WHERE rostered_leagues >= 5) AS ge_5,
+                  COUNT(*) FILTER (WHERE rostered_leagues >= 10) AS ge_10,
+                  COUNT(*) FILTER (WHERE rostered_leagues >= 25) AS ge_25,
+                  COUNT(*) FILTER (WHERE rostered_leagues >= 50) AS ge_50,
+                  COUNT(*) FILTER (WHERE rostered_leagues >= 100) AS ge_100,
+                  COUNT(*) FILTER (WHERE rostered_leagues >= 150) AS ge_150,
+                  COUNT(*) FILTER (WHERE rostered_leagues >= 500) AS ge_500,
+                  COUNT(*) FILTER (WHERE rostered_leagues >= 1000) AS ge_1000,
+                  COUNT(*) FILTER (WHERE rostered_leagues >= 5000) AS ge_5000,
+                  MIN(rostered_leagues) AS min_leagues,
+                  MAX(rostered_leagues) AS max_leagues
+                FROM rb_week1_exposure
+              """).fetchone()
+              player_directory = """
+                SELECT CAST(NFL_player_id AS VARCHAR) AS NFL_player_id,
+                  ANY_VALUE(CAST(player AS VARCHAR)) AS player,
+                  ANY_VALUE(CAST(position AS VARCHAR)) AS stats_position
+                FROM ops.nfl_historical.nfl_player_stats_all
+                WHERE CAST(year AS INTEGER)=2025
+                GROUP BY 1
+              """
+              lowest = c.execute(f"""
+                SELECT e.NFL_player_id, d.player, d.stats_position, e.rostered_leagues
+                FROM rb_week1_exposure e
+                LEFT JOIN ({player_directory}) d USING (NFL_player_id)
+                ORDER BY e.rostered_leagues, e.NFL_player_id
+                LIMIT 20
+              """).fetchall()
+              highest = c.execute(f"""
+                SELECT e.NFL_player_id, d.player, d.stats_position, e.rostered_leagues
+                FROM rb_week1_exposure e
+                LEFT JOIN ({player_directory}) d USING (NFL_player_id)
+                ORDER BY e.rostered_leagues DESC, e.NFL_player_id
+                LIMIT 20
+              """).fetchall()
+              receipt = {
+                'mode': mode, 'distribution': distribution,
+                'lowest_exposure': lowest, 'highest_exposure': highest,
+              }
+              print(receipt)
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                  summary.write('## RB 2025 week 1 immutable-cache exposure distribution\n')
+                  summary.write(f'- Receipt: `{receipt}`\n')
+                  summary.write('- Cache-only diagnostic; no aggregation output, cache save, Fly access, API request, artifact, or publish step.\n')
               raise SystemExit(0)
           started_at = perf_counter()
           materialize_weekly_core_cohort_cells(
