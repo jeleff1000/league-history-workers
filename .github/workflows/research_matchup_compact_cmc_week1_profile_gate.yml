@@ -1,4 +1,4 @@
-name: Research matchup compact CMC week-1 profile gate
+name: Research matchup compact CMC cache pilot
 
 on:
   workflow_dispatch:
@@ -6,12 +6,20 @@ on:
       cache_key:
         required: true
         default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+      mode:
+        description: Immutable cache-only pilot scope
+        required: true
+        type: choice
+        default: cmc_week1
+        options:
+          - cmc_week1
+          - cmc_2025_all_grains
 
 permissions:
   contents: read
 
 jobs:
-  one_cmc_week:
+  cmc_cache_pilot:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -35,16 +43,26 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}/code
           CACHE_KEY: ${{ inputs.cache_key }}
+          PILOT_MODE: ${{ inputs.mode }}
         run: |
           python - <<'PY'
           import duckdb
           import os
           import resource
           from time import perf_counter
-          from scripts.research_cohorts.compact_matchup_cells import materialize_weekly_core_cohort_cells
+          from scripts.research_cohorts.compact_matchup_cells import (
+              materialize_career_cohort_grade_cells,
+              materialize_career_core_cohort_cells,
+              materialize_season_bracket_grade_cells,
+              materialize_season_core_cohort_cells,
+              materialize_weekly_core_cohort_cells,
+          )
 
           c = duckdb.connect()
           c.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          mode = os.environ['PILOT_MODE']
+          if mode not in {'cmc_week1', 'cmc_2025_all_grains'}:
+              raise ValueError(f'unsupported pilot mode: {mode}')
           source_rows = c.execute("SELECT COUNT(*) FROM lake.public.player_fantasy WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1").fetchone()[0]
           started_at = perf_counter()
           materialize_weekly_core_cohort_cells(
@@ -111,5 +129,145 @@ jobs:
               summary.write(f'- ALL cell: `{full}`\n- Selected cell: `{selected[0]}`\n')
               summary.write(f'- Source rows read: `{source_rows}`; outer rows: `{outer_rows}`; nested cells: `{cell_count}`\n')
               summary.write(f'- Build wall time: `{elapsed_s:.3f}s`; peak RSS: `{peak_rss_kb} KB`\n')
+
+          if mode == 'cmc_2025_all_grains':
+              c.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
+              stats = 'ops.nfl_historical.nfl_player_stats_all'
+              source_rows_2025 = c.execute("""
+                SELECT COUNT(*) FROM lake.public.player_fantasy
+                WHERE CAST(year AS INTEGER)=2025
+                  AND CAST(NFL_player_id AS VARCHAR)='00-0033280'
+              """).fetchone()[0]
+              full_started = perf_counter()
+              materialize_weekly_core_cohort_cells(
+                  c, source_table='lake.public.player_fantasy', output_table='cmc_2025_weekly',
+                  year=2025, week=None, player_id='00-0033280', split_threshold=150,
+              )
+              weekly_weeks = [r[0] for r in c.execute(
+                  'SELECT week FROM cmc_2025_weekly ORDER BY week'
+              ).fetchall()]
+              assert weekly_weeks == list(range(1, 14)) + list(range(15, 19)), weekly_weeks
+              weekly_selected = c.execute("""
+                SELECT COUNT(*)
+                FROM cmc_2025_weekly, UNNEST(cohort_cells) AS u(cell)
+                WHERE cell.q_teams=CASE WHEN cohort_profile.teams_12t_split=1 THEN '12t' ELSE 'ALL' END
+                  AND cell.q_roster=CASE WHEN cohort_profile.roster_flx_split=1 THEN 'flx' ELSE 'ALL' END
+                  AND cell.q_scoring=CASE WHEN cohort_profile.scoring_half_split=1 THEN 'half' ELSE 'ALL' END
+                  AND cell.q_pass_td=CASE WHEN cohort_profile.pass_td_4pt_split=1 THEN '4pt' ELSE 'ALL' END
+                  AND cell.q_dynasty=CASE WHEN cohort_profile.dynasty_redraft_split=1 THEN 'redraft' ELSE 'ALL' END
+                  AND cell.q_best_ball=CASE WHEN cohort_profile.best_ball_managed_split=1 THEN 'managed' ELSE 'ALL' END
+              """).fetchone()[0]
+              weekly_cells = c.execute(
+                  'SELECT COALESCE(SUM(list_count(cohort_cells)), 0) FROM cmc_2025_weekly'
+              ).fetchone()[0]
+              assert weekly_selected == 17, weekly_selected
+              assert weekly_cells <= 17 * 145, weekly_cells
+
+              materialize_season_core_cohort_cells(
+                  c, source_table='lake.public.player_fantasy', nfl_stats_table=stats,
+                  output_table='cmc_2025_season_core', year=2025, player_id='00-0033280',
+                  split_threshold=50,
+              )
+              materialize_season_bracket_grade_cells(
+                  c, source_table='lake.public.player_fantasy', nfl_stats_table=stats,
+                  output_table='cmc_2025_season_grade', year=2025, player_id='00-0033280',
+                  split_threshold=50,
+              )
+              c.execute("""
+                CREATE OR REPLACE TABLE cmc_2025_season AS
+                SELECT core.*, grades.grade_cells
+                FROM cmc_2025_season_core AS core
+                INNER JOIN cmc_2025_season_grade AS grades USING (NFL_player_id, year, position)
+              """)
+              assert c.execute('SELECT COUNT(*) FROM cmc_2025_season').fetchone()[0] == 1
+              season_selected = c.execute("""
+                SELECT cell.active_weeks, cell.inactive_weeks, cell.expected_starts,
+                  cell.started_league_weeks, cell.eligible_league_weeks
+                FROM cmc_2025_season, UNNEST(cohort_cells) AS u(cell)
+                WHERE cell.q_teams=CASE WHEN cohort_profile.teams_12t_split=1 THEN '12t' ELSE 'ALL' END
+                  AND cell.q_roster=CASE WHEN cohort_profile.roster_flx_split=1 THEN 'flx' ELSE 'ALL' END
+                  AND cell.q_scoring=CASE WHEN cohort_profile.scoring_half_split=1 THEN 'half' ELSE 'ALL' END
+                  AND cell.q_pass_td=CASE WHEN cohort_profile.pass_td_4pt_split=1 THEN '4pt' ELSE 'ALL' END
+                  AND cell.q_dynasty=CASE WHEN cohort_profile.dynasty_redraft_split=1 THEN 'redraft' ELSE 'ALL' END
+                  AND cell.q_best_ball=CASE WHEN cohort_profile.best_ball_managed_split=1 THEN 'managed' ELSE 'ALL' END
+              """).fetchone()
+              assert season_selected is not None
+              active, inactive, expected_starts, started, eligible = season_selected
+              assert (active, inactive) == (17, 0), season_selected
+              assert abs(expected_starts - (started / eligible * active)) < 1e-9, season_selected
+              season_core_cells, season_grade_cells = c.execute("""
+                SELECT list_count(cohort_cells), list_count(grade_cells) FROM cmc_2025_season
+              """).fetchone()
+              assert season_core_cells <= 145, season_core_cells
+              assert season_grade_cells <= 577, season_grade_cells
+
+              c.execute('CREATE OR REPLACE TABLE cmc_career_seasons AS SELECT * FROM cmc_2025_season WHERE FALSE')
+              for season_year in range(2017, 2026):
+                  materialize_season_core_cohort_cells(
+                      c, source_table='lake.public.player_fantasy', nfl_stats_table=stats,
+                      output_table='cmc_one_season_core', year=season_year, player_id='00-0033280',
+                      split_threshold=50,
+                  )
+                  materialize_season_bracket_grade_cells(
+                      c, source_table='lake.public.player_fantasy', nfl_stats_table=stats,
+                      output_table='cmc_one_season_grade', year=season_year, player_id='00-0033280',
+                      split_threshold=50,
+                  )
+                  c.execute("""
+                    INSERT INTO cmc_career_seasons
+                    SELECT core.*, grades.grade_cells
+                    FROM cmc_one_season_core AS core
+                    INNER JOIN cmc_one_season_grade AS grades USING (NFL_player_id, year, position)
+                  """)
+              assert c.execute('SELECT COUNT(*) FROM cmc_career_seasons').fetchone()[0] == 9
+              materialize_career_core_cohort_cells(
+                  c, season_outer_table='cmc_career_seasons', output_table='cmc_career_core',
+                  player_id='00-0033280',
+              )
+              materialize_career_cohort_grade_cells(
+                  c, season_outer_table='cmc_career_seasons', output_table='cmc_career_grade',
+                  player_id='00-0033280',
+              )
+              c.execute("""
+                CREATE OR REPLACE TABLE cmc_career AS
+                SELECT core.*, grades.grade_cells
+                FROM cmc_career_core AS core
+                INNER JOIN cmc_career_grade AS grades USING (NFL_player_id, position)
+              """)
+              assert c.execute('SELECT COUNT(*) FROM cmc_career').fetchone()[0] == 1
+              career_selected = c.execute("""
+                SELECT cell.qualifying_seasons
+                FROM cmc_career, UNNEST(cohort_cells) AS u(cell)
+                WHERE cell.q_teams='12t' AND cell.q_roster='flx' AND cell.q_scoring='half'
+                  AND cell.q_pass_td='4pt' AND cell.q_dynasty='redraft' AND cell.q_best_ball='managed'
+              """).fetchone()
+              assert career_selected == (9,), career_selected
+              career_core_cells, career_grade_cells = c.execute("""
+                SELECT list_count(cohort_cells), list_count(grade_cells) FROM cmc_career
+              """).fetchone()
+              assert career_core_cells == 144, career_core_cells
+              assert career_grade_cells == 576, career_grade_cells
+              career_invalid = c.execute("""
+                SELECT COUNT(*) FROM cmc_career, UNNEST(grade_cells) AS u(cell)
+                WHERE cell.champ_credits > cell.playoff_credits
+                   OR cell.champ_rate_pct > cell.playoff_rate_pct
+              """).fetchone()[0]
+              assert career_invalid == 0, career_invalid
+              full_elapsed = perf_counter() - full_started
+              full_receipt = {
+                  'mode': mode, 'cmc_2025_source_rows': source_rows_2025,
+                  'weekly_outer_rows': len(weekly_weeks), 'weekly_selected_cells': weekly_selected,
+                  'weekly_nested_cells': weekly_cells, 'season_outer_rows': 1,
+                  'season_selected': season_selected, 'season_core_cells': season_core_cells,
+                  'season_grade_cells': season_grade_cells, 'career_outer_rows': 1,
+                  'career_qualifying_seasons': career_selected[0],
+                  'career_core_cells': career_core_cells, 'career_grade_cells': career_grade_cells,
+                  'wall_seconds': round(full_elapsed, 3),
+              }
+              print(full_receipt)
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                  summary.write('## CMC 2025 all-grain compact cache pilot\n')
+                  summary.write(f'- Receipt: `{full_receipt}`\n')
+                  summary.write('- Cache-only computation; no Fly read/write, settings join, API request, artifact, or publish step.\n')
           PY
 
