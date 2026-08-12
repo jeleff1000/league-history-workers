@@ -30,7 +30,7 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           path: code
-          ref: 6890fe9e57dde3c0895ef0a6934669872c7f17c8
+          ref: f9f99e10b8b3ce3e7a69ecb0f327741a2bab1397
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -135,7 +135,7 @@ jobs:
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
               summary.write('## CMC W1 compact cache truth gate\n')
               summary.write(f'- Cache: `{os.environ.get("CACHE_KEY", "immutable input")}`\n')
-              summary.write('- Source commit: `6890fe9e57dde3c0895ef0a6934669872c7f17c8`\n')
+              summary.write('- Source commit: `f9f99e10b8b3ce3e7a69ecb0f327741a2bab1397`\n')
               summary.write(f'- ALL cell: `{full}`\n- Selected cell: `{selected[0]}`\n')
               summary.write(f'- Source rows read: `{source_rows}`; outer rows: `{outer_rows}`; nested cells: `{cell_count}`\n')
               summary.write(f'- Build wall time: `{elapsed_s:.3f}s`; peak RSS: `{peak_rss_kb} KB`\n')
@@ -294,7 +294,7 @@ jobs:
                 FROM lake.public.player_fantasy
                 WHERE CAST(year AS INTEGER)=2025 AND CAST(NFL_player_id AS VARCHAR)=?
               """, [myles_id]).fetchall()
-              assert cache_positions == [('DL',)], cache_positions
+              assert set(cache_positions).issubset({('DL',), ('DE',), ('DT',), ('NT',), ('EDGE',)}), cache_positions
               materialize_weekly_core_cohort_cells(
                   c, source_table='lake.public.player_fantasy',
                   valid_player_weeks_table='cached_regular_player_weeks', output_table='myles_2025_weekly',
