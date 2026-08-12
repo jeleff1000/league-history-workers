@@ -1,0 +1,111 @@
+name: Audit exact MFL 74-row recovery inputs
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        description: Existing approved research cache key; this workflow is read-only.
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - name: Read exact source-recipient context without cache mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import duckdb
+
+          base = 'research_public_lake/corpus_snapshot.duckdb'
+          con = duckdb.connect(base, read_only=True)
+          schema = [row[0] for row in con.execute('DESCRIBE public.player_fantasy').fetchall()]
+          managers = ('Who Dey', 'Get off my Ditka', 'The Jills', 'Mr_Black')
+          fields = [
+              'manager', 'week', 'NFL_player_id', 'player', 'position', 'fantasy_position',
+              'is_started', 'is_rostered', 'fantasy_points', 'win', 'champion',
+              'clutch_equity', 'manager_lamar', 'team_points', 'final_playoff_seed',
+              'is_playoffs', 'has_po_signal', 'made_playoffs', 'platform',
+              'team_key', 'team_name', 'nfl_team_api', 'espn_player_id', 'mfl_player_id',
+              'cohort_teams', 'cohort_roster', 'cohort_scoring', 'cohort_pass_td',
+              'cohort_playoff_teams', 'cohort_dynasty', 'cohort_best_ball',
+              'cohort_position_eligible',
+          ]
+          fields = [field for field in fields if field in schema]
+          manager_sql = ', '.join('?' for _ in managers)
+          rows = con.execute(
+              f'''SELECT {', '.join('"' + f + '"' for f in fields)}
+                  FROM public.player_fantasy
+                  WHERE db_name=? AND year=? AND manager IN ({manager_sql})
+                  ORDER BY manager, week, NFL_player_id''',
+              ['smpl_mfl_2015_10030', 2012, *managers],
+          ).fetchdf().to_dict(orient='records')
+          summary = con.execute(
+              f'''SELECT manager, week, COUNT(*) AS player_rows,
+                         COUNT(*) FILTER (WHERE is_started=1) AS started_rows,
+                         COUNT(DISTINCT win) FILTER (WHERE win IS NOT NULL) AS win_values,
+                         COUNT(DISTINCT team_points) FILTER (WHERE team_points IS NOT NULL) AS team_point_values,
+                         COUNT(DISTINCT is_playoffs) FILTER (WHERE is_playoffs IS NOT NULL) AS playoff_values,
+                         COUNT(DISTINCT final_playoff_seed) FILTER (WHERE final_playoff_seed IS NOT NULL) AS seed_values,
+                         COUNT(DISTINCT made_playoffs) FILTER (WHERE made_playoffs IS NOT NULL) AS made_playoff_values,
+                         COUNT(DISTINCT cohort_teams) AS cohort_teams_values,
+                         COUNT(DISTINCT cohort_roster) AS cohort_roster_values,
+                         COUNT(DISTINCT cohort_scoring) AS cohort_scoring_values,
+                         COUNT(DISTINCT cohort_pass_td) AS cohort_pass_td_values,
+                         COUNT(DISTINCT cohort_playoff_teams) AS cohort_playoff_values,
+                         COUNT(DISTINCT cohort_dynasty) AS cohort_dynasty_values,
+                         COUNT(DISTINCT cohort_best_ball) AS cohort_best_ball_values
+                  FROM public.player_fantasy
+                  WHERE db_name=? AND year=? AND manager IN ({manager_sql})
+                  GROUP BY manager, week ORDER BY manager, week''',
+              ['smpl_mfl_2015_10030', 2012, *managers],
+          ).fetchdf().to_dict(orient='records')
+          settings = con.execute(
+              "SELECT * FROM public.league_settings WHERE db_name=? AND year=?",
+              ['smpl_mfl_2015_10030', 2012],
+          ).fetchdf().to_dict(orient='records')
+          con.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
+          ops_columns = [row[0] for row in con.execute('DESCRIBE ops.nfl_historical.nfl_player_stats_all').fetchall()]
+          out = {
+              'read_only': True,
+              'cache_mutated': False,
+              'new_lineage': False,
+              'cache_key': '${{ inputs.cache_key }}',
+              'player_schema': schema,
+              'target_team_rows': rows,
+              'target_team_week_summary': summary,
+              'league_settings': settings,
+              'ops_columns_relevant': [name for name in ops_columns if any(token in name.lower() for token in ('lamar', 'fantasy', 'position', 'player_week', 'nfl_player_id'))],
+              'target_player_rows_present': int(con.execute("SELECT COUNT(*) FROM public.player_fantasy WHERE db_name=? AND year=? AND NFL_player_id IN ('00-0020245','00-0020337','00-0025438','00-0026364','00-0027007','00-0027531')", ['smpl_mfl_2015_10030', 2012]).fetchone()[0]),
+          }
+          Path('mfl_74_input_audit.json').write_text(json.dumps(out, indent=2, default=str)+'\n')
+          con.close()
+          PY
+          cmp ops_before.sha256 <(sha256sum research_public_lake/ops_cache.duckdb)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-74-row-input-audit-${{ github.run_id }}
+          path: |
+            mfl_74_input_audit.json
+            ops_before.sha256
+          retention-days: 90
