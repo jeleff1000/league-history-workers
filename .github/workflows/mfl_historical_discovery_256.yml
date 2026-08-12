@@ -238,6 +238,7 @@ jobs:
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             /scripts/extraplatform_corpus/
+            /corpus_seed/mfl_uncovered_task_plan.json
             /fantasy_football_data_scripts/
             /requirements.txt
             /pyproject.toml
