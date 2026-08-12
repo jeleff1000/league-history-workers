@@ -103,6 +103,44 @@ def _fanout_stats(
     }
 
 
+def _mfl_id_coverage(
+    con: duckdb.DuckDBPyConnection, relation: str, columns: set[str]
+) -> list[dict[str, int | str]]:
+    """Report whether MFL player IDs survive in canonical rows.
+
+    A raw MFL roster bridge can use a direct native-ID recipient only if this
+    field is populated. This is an observation, not a fallback join rule.
+    """
+    mfl_id = (
+        f"NULLIF(TRIM(CAST({_q('mfl_player_id')} AS VARCHAR)), '')"
+        if "mfl_player_id" in columns else "NULL::VARCHAR"
+    )
+    nfl_id = f"NULLIF(TRIM(CAST({_q('NFL_player_id')} AS VARCHAR)), '')"
+    rows = con.execute(f"""
+        SELECT
+          LOWER(TRIM(CAST({_q('platform')} AS VARCHAR))) AS platform,
+          COUNT(*) AS rows,
+          COUNT(*) FILTER (WHERE {nfl_id} IS NOT NULL) AS rows_with_nfl_player_id,
+          COUNT(*) FILTER (WHERE {mfl_id} IS NOT NULL) AS rows_with_mfl_player_id,
+          COUNT(*) FILTER (WHERE {mfl_id} IS NOT NULL AND {nfl_id} IS NOT NULL)
+            AS rows_with_mfl_and_nfl_player_id
+        FROM {relation}
+        WHERE LOWER(TRIM(CAST({_q('platform')} AS VARCHAR))) = 'mfl'
+        GROUP BY 1
+        ORDER BY 1
+    """).fetchall()
+    return [
+        {
+            "platform": str(platform),
+            "rows": int(count or 0),
+            "rows_with_nfl_player_id": int(nfl_count or 0),
+            "rows_with_mfl_player_id": int(mfl_count or 0),
+            "rows_with_mfl_and_nfl_player_id": int(both_count or 0),
+        }
+        for platform, count, nfl_count, mfl_count, both_count in rows
+    ]
+
+
 def _native_player_id_expression(columns: set[str]) -> str:
     def source_id(name: str) -> str:
         return f"NULLIF(TRIM(CAST({_q(name)} AS VARCHAR)), '')" if name in columns else "NULL::VARCHAR"
@@ -157,6 +195,7 @@ def profile_relation(con: duckdb.DuckDBPyConnection, relation: str) -> dict[str,
         "rows": int(con.execute(f"SELECT COUNT(*) FROM {relation}").fetchone()[0]),
         "non_null_component_rows": component_population,
         "player_keys": player_keys,
+        "platform_id_coverage": _mfl_id_coverage(con, prepared, columns),
         "team_keys": {"team_week_team_key": _team_fanout_stats(con, prepared)},
         "manager_fanout": {
             "manager_week": _fanout_stats(
