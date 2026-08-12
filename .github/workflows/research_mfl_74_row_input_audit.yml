@@ -39,6 +39,10 @@ jobs:
 
           base = 'research_public_lake/corpus_snapshot.duckdb'
           con = duckdb.connect(base, read_only=True)
+          def records(sql, params):
+              cursor = con.execute(sql, params)
+              names = [item[0] for item in cursor.description]
+              return [dict(zip(names, row)) for row in cursor.fetchall()]
           schema = [row[0] for row in con.execute('DESCRIBE public.player_fantasy').fetchall()]
           managers = ('Who Dey', 'Get off my Ditka', 'The Jills', 'Mr_Black')
           fields = [
@@ -53,14 +57,14 @@ jobs:
           ]
           fields = [field for field in fields if field in schema]
           manager_sql = ', '.join('?' for _ in managers)
-          rows = con.execute(
+          rows = records(
               f'''SELECT {', '.join('"' + f + '"' for f in fields)}
                   FROM public.player_fantasy
                   WHERE db_name=? AND year=? AND manager IN ({manager_sql})
                   ORDER BY manager, week, NFL_player_id''',
               ['smpl_mfl_2015_10030', 2012, *managers],
-          ).fetchdf().to_dict(orient='records')
-          summary = con.execute(
+          )
+          summary = records(
               f'''SELECT manager, week, COUNT(*) AS player_rows,
                          COUNT(*) FILTER (WHERE is_started=1) AS started_rows,
                          COUNT(DISTINCT win) FILTER (WHERE win IS NOT NULL) AS win_values,
@@ -79,11 +83,11 @@ jobs:
                   WHERE db_name=? AND year=? AND manager IN ({manager_sql})
                   GROUP BY manager, week ORDER BY manager, week''',
               ['smpl_mfl_2015_10030', 2012, *managers],
-          ).fetchdf().to_dict(orient='records')
-          settings = con.execute(
+          )
+          settings = records(
               "SELECT * FROM public.league_settings WHERE db_name=? AND year=?",
               ['smpl_mfl_2015_10030', 2012],
-          ).fetchdf().to_dict(orient='records')
+          )
           con.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
           ops_columns = [row[0] for row in con.execute('DESCRIBE ops.nfl_historical.nfl_player_stats_all').fetchall()]
           out = {
