@@ -84,3 +84,20 @@ def test_resolver_tries_historical_candidates_and_preserves_raw_franchise_proven
         {"source_year": 2004, "mfl_player_id": "11", "espn_id": "101", "raw_name": "Two, Player", "raw_position": "WR", "raw_team": "KCC"},
         {"source_year": 2004, "mfl_player_id": "12", "espn_id": None, "raw_name": "Team, DST", "raw_position": "Def", "raw_team": "GBP"},
     ]
+
+
+def test_selection_limits_the_global_sorted_population_before_sharding() -> None:
+    from scripts.research_cohorts.extract_mfl_target_roster_memberships import selected_groups
+
+    groups = [
+        {"db_name": "league-b", "year": 2024, "week": 1},
+        {"db_name": "league-a", "year": 2024, "week": 2},
+        {"db_name": "league-a", "year": 2024, "week": 1},
+    ]
+
+    selected = selected_groups(groups, shard=0, shards=1, max_groups=2)
+
+    assert selected == [
+        {"db_name": "league-a", "year": 2024, "week": 1},
+        {"db_name": "league-a", "year": 2024, "week": 2},
+    ]

@@ -217,23 +217,38 @@ def _selected(group: dict[str, Any], shard: int, shards: int) -> bool:
     return int(hashlib.sha256(value.encode()).hexdigest()[:12], 16) % shards == shard
 
 
+def selected_groups(
+    groups: list[dict[str, Any]], *, shard: int, shards: int, max_groups: int | None = None
+) -> list[dict[str, Any]]:
+    """Deterministically bound a pilot before allocating its shards."""
+    ordered = sorted(groups, key=lambda row: (str(row["db_name"]), int(row["year"]), int(row["week"])))
+    if max_groups is not None:
+        ordered = ordered[:max_groups]
+    return [group for group in ordered if _selected(group, shard, shards)]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--shard", type=int, required=True)
     parser.add_argument("--shards", type=int, required=True)
+    parser.add_argument("--max-groups", type=int, default=None)
     parser.add_argument("--out-memberships", type=Path, required=True)
     parser.add_argument("--out-player-directory", type=Path, required=True)
     parser.add_argument("--out-report", type=Path, required=True)
     args = parser.parse_args()
     if not 0 <= args.shard < args.shards:
         raise SystemExit("shard must be in [0, shards)")
+    if args.max_groups is not None and args.max_groups < 1:
+        raise SystemExit("max-groups must be positive when supplied")
     from multi_league.data_fetchers.mfl.mfl_api_client import MFLAPIClient
     import duckdb
     import pandas as pd
 
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-    groups = [group for group in manifest["groups"] if _selected(group, args.shard, args.shards)]
+    groups = selected_groups(
+        manifest["groups"], shard=args.shard, shards=args.shards, max_groups=args.max_groups,
+    )
     client = MFLAPIClient()
     results = [extract_group(group, client) for group in groups]
     memberships = [row for result in results for row in result["memberships"]]
