@@ -647,6 +647,28 @@ a source-identity decision or an explicit schema/precedence closure. None
 currently has a safe, unpromoted null-cell candidate and none requires a new
 API pull.
 
+## Exact team-to-player loss/tie promotion — proven, but not over-claimed
+
+Source artifact `8952555354` (`research-source-matchup-rescue-3-31062083630`)
+was re-read through its safe unique-manager-week fan-out, then promoted in
+[run 31639212646](https://github.com/jeleff1000/league-history-workers/actions/runs/31639212646).
+The update filled exactly 52,667 existing player-row `loss` cells and 52,667
+existing `tie` cells. It inserted no player rows; all fields other than loss
+and tie had zero eligible null fills; the player schema, player-row count, and
+ops-cache SHA-256 were unchanged.
+
+The independent fresh restore in that same run proved all 52,667 target rows
+matched and that zero source-backed loss/tie nulls remained. The one approved
+cache key remains a single object. The follow-up read-only receipt
+[31639682101](https://github.com/jeleff1000/league-history-workers/actions/runs/31639682101)
+then found zero remaining safe fills for this artifact.
+
+This artifact is deliberately still **open** in the CSV as
+`unmatched_cache_key`, rather than being falsely marked complete: 3,606 source
+team-week identities have no canonical player recipient. Its loss/tie schema
+gate is now closed; its only remaining gate is the documented player-team
+bridge or a source-only closure.
+
 The CSV is the machine-readable authority: **8,768 of 9,479 artifacts are
 closed** and **711 remain open**. The open partition is 473 identity-unmatched,
 214 precedence conflicts, 15 legacy schema-blocked safe-null repairs, 7
