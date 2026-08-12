@@ -274,6 +274,32 @@ conflicted with an existing non-null cache value, or belonged to a source team
 for which no canonical player row exists. This family is no longer an
 unread-artifact work item.
 
+## Championship-identity probe adjudication
+
+The stronger nine-artifact, read-only receipt
+[31552757341](https://github.com/jeleff1000/league-history-workers/actions/runs/31552757341)
+supersedes the earlier provisional statement that each MFL probe contained a
+promotable player cell. It preserved the approved cache, schema, row count,
+and ops seed unchanged.
+
+| Evidence | Result |
+| --- | ---: |
+| Source rows across all nine probe artifacts | 1,313 |
+| Duplicate source rows collapsed | 996 |
+| Distinct source team-weeks | 317 |
+| MFL manager-week signals safely fanned to existing cache rows | 166 team-weeks → 3,327 rows |
+| Valid strict NULL fills on real NFL player rows | 0 |
+| Valid strict NULL fills overall | 1 `is_playoffs` cell on a row with `NFL_player_id = NULL` |
+| Champion fills | 0 |
+| Source-only team-weeks with no cache-side identity bridge | 151 |
+
+The seven MFL files use the confirmed unique normalized manager-week fan-out.
+Their apparent champion candidates are season-level champion flags and cannot
+be interpreted as championship-game starts. The one surviving strict-null cell
+is not an NFL player row, so it cannot affect the research player tables. The
+two non-MFL probes have no manager/team identity in the cache and remain open
+only as explicitly source-only evidence; no cache value was invented.
+
 ## Remaining worklist
 
 Every artifact now has a direct cache disposition. The remaining open work is
@@ -287,5 +313,5 @@ explicit schema/precedence closure. None requires a new API pull.
 | `promotable-rescue-delta-*` player-row subset | 11 | The files are full player-row snapshots with canonical field names; the generic `source_*` receipt correctly emitted no comparison rather than guessing. | Run the exact canonical-field snapshot comparator on the full player key. |
 | `mfl-player-outcome-classification-*` | 15 | 31,870 strict exact-row candidates; 82,466 supported null cells in the direct audit. | Perform the approved single-cache promotion transaction, then exact readback. |
 | `research-source-matchup-rescue-*` | 14 | Corrected fan-out receipt: 28,032,962 cells already equal cache; zero supported null fills; remaining cells are conflicts, schema-blocked loss/tie, or unresolved team identity. | Adjudicate non-null conflicts; resolve/close residual identity gaps; do not run a null-cell promotion for this family. |
-| `research-championship-identity-probe-*` | 9 | Seven MFL artifacts safely fan out through manager-week and each have one supported cache-null cell; two artifacts remain source-only because no cache-side manager bridge exists. | Materialize exact target player cells, deduplicate across the seven sources, then perform an approved strict-null promotion; separately resolve or close the two source-only probes. |
+| `research-championship-identity-probe-*` | 9 | Fully adjudicated by receipt 31552757341: seven MFL files have a safe manager-week fan-out but zero valid player-row fills; two files remain source-only because no cache-side identity bridge exists. | Do not promote championship or playoff values from this family; retain the two source-only identity gaps as explicitly unresolved. |
 | `research-sparse-playoff-championship-*` | 621 candidate-bearing | Fully receipted; zero supported null-cell fills. | Close source-only/conflict rows under the explicit precedence and loss/tie schema decisions. |
