@@ -17,6 +17,11 @@ from typing import Any, Protocol
 
 
 _DB_SEED = re.compile(r"^smpl_mfl_(?P<year>\d{4})_(?P<league_id>\d+)$", re.IGNORECASE)
+MEMBERSHIP_COLUMNS = [
+    "db_name", "year", "week", "source_id", "source_year", "source_franchise_id",
+    "source_manager", "source_manager_origin", "mfl_player_id", "is_started",
+]
+DIRECTORY_COLUMNS = ["source_year", "mfl_player_id", "espn_id", "raw_name", "raw_position", "raw_team"]
 
 
 class MFLClient(Protocol):
@@ -235,8 +240,10 @@ def main() -> None:
     directory = [row for result in results for row in result["player_directory"]]
     args.out_memberships.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect()
-    con.register("memberships", pd.DataFrame(memberships))
-    con.register("directory", pd.DataFrame(directory))
+    # Explicit schemas make an all-source-unresolved shard a valid receipt,
+    # rather than an empty DataFrame that cannot be written to Parquet.
+    con.register("memberships", pd.DataFrame(memberships, columns=MEMBERSHIP_COLUMNS))
+    con.register("directory", pd.DataFrame(directory, columns=DIRECTORY_COLUMNS))
     con.execute("COPY memberships TO ? (FORMAT PARQUET, COMPRESSION ZSTD)", [str(args.out_memberships)])
     con.execute("COPY directory TO ? (FORMAT PARQUET, COMPRESSION ZSTD)", [str(args.out_player_directory)])
     con.close()

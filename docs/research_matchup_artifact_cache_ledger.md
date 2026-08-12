@@ -75,6 +75,16 @@ canonical player cache for writing. A future Action must first run these
 read-only source receipts, then run the bridge receipt, and only then create a
 strict cache-update candidate.
 
+Existing `mfl-underpopulated-week-rescue-*` artifacts are retained source-team
+signals, not roster bridges. A direct schema receipt from
+`mfl-underpopulated-week-rescue-17-31217899167` shows team/franchise IDs,
+manager identity, outcomes, playoff/championship flags, and points—but no MFL
+player ID or per-player roster membership. They remain valuable as the source
+of team outcomes after a bridge is proved; they cannot by themselves decide
+which player rows receive those outcomes. The raw target roster membership is
+therefore the one missing source edge, not a request to re-fetch an entire
+league-season population.
+
 The latest corrected raw-team identity receipt is
 [31532904897](https://github.com/jeleff1000/league-history-workers/actions/runs/31532904897).
 It is read-only and uses the safe team-to-player fan-out hierarchy: direct
