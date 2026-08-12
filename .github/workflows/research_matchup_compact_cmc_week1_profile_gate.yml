@@ -69,8 +69,7 @@ jobs:
               AND CAST(is_started AS INTEGER)=1
             GROUP BY 1 ORDER BY 1
           """).fetchall()
-          print({'cmc_2025_week_1_raw_started_outcomes': raw_outcomes})
-          assert full == (9838, 9768, 9600, 9578, 6019.0), full
+          assert full == (9838, 9768, 9600, 9578, 6019.0), (full, raw_outcomes)
           selected = c.execute("""
             WITH resolved AS (
               SELECT
