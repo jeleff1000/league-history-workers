@@ -8,6 +8,8 @@ on:
       - docs/research_matchup_artifact_cache_ledger.md
       - scripts/research_cohorts/validate_artifact_cache_ledger.py
       - scripts/research_cohorts/test_validate_artifact_cache_ledger.py
+      - scripts/research_cohorts/enrich_artifact_cache_ledger_bridge_evidence.py
+      - scripts/research_cohorts/test_enrich_artifact_cache_ledger_bridge_evidence.py
 
 jobs:
   validate:
@@ -19,7 +21,10 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install pytest
       - name: Run ledger validator tests
-        run: pytest -q scripts/research_cohorts/test_validate_artifact_cache_ledger.py
+        run: >-
+          pytest -q
+          scripts/research_cohorts/test_validate_artifact_cache_ledger.py
+          scripts/research_cohorts/test_enrich_artifact_cache_ledger_bridge_evidence.py
       - name: Fail fast on invalid ledger evidence
         run: >-
           python scripts/research_cohorts/validate_artifact_cache_ledger.py

@@ -1,0 +1,124 @@
+"""Attach existing player-to-team bridge evidence to the durable artifact ledger.
+
+This consumes a prior read-only artifact receipt and updates only the existing
+CSV ledger.  It neither restores nor changes a research cache.
+"""
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+from collections import defaultdict
+from pathlib import Path
+
+
+BRIDGE_COLUMNS = (
+    "bridge_evidence_file_count",
+    "bridge_evidence_row_count",
+    "bridge_evidence_strength",
+    "bridge_evidence_schemas",
+    "bridge_evidence_receipt_run_id",
+)
+REQUIRED_PLAYER_WEEK = {"db_name", "year", "week", "NFL_player_id"}
+
+
+def _strength(columns: set[str]) -> tuple[str, str] | None:
+    """Return the strongest exact team-membership evidence in one file."""
+    if not REQUIRED_PLAYER_WEEK <= columns:
+        return None
+    if "team_key" in columns:
+        return "strong_player_team", "player_team_key"
+    if "team_name" in columns and "manager" in columns:
+        return "strong_player_team", "player_manager_team_name"
+    if "team_name" in columns:
+        return "strong_player_team", "player_team_name"
+    if "manager" in columns:
+        return "manager_only_player", "player_manager_only"
+    return None
+
+
+def enrich(*, ledger_path: Path, receipt_path: Path, receipt_run_id: str, out_path: Path) -> dict[str, int]:
+    ledger_rows = list(csv.DictReader(ledger_path.open(newline="", encoding="utf-8-sig")))
+    if not ledger_rows:
+        raise SystemExit("ledger is empty")
+    ledger_ids = {int(row["artifact_id"]) for row in ledger_rows}
+    if len(ledger_ids) != len(ledger_rows):
+        raise SystemExit("ledger has duplicate artifact IDs")
+
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    evidence: dict[int, list[tuple[str, int, str]]] = defaultdict(list)
+    unknown: set[int] = set()
+    for record in receipt.get("files", []):
+        if record.get("artifact_id") is None:
+            continue
+        # A zero-row Parquet file proves only that a producer ran, not that it
+        # retained a player/team membership edge usable by the bridge.
+        row_count = int(record.get("rows") or 0)
+        if row_count <= 0:
+            continue
+        artifact_id = int(record["artifact_id"])
+        if artifact_id not in ledger_ids:
+            unknown.add(artifact_id)
+            continue
+        classified = _strength(set(record.get("columns") or []))
+        if classified is None:
+            continue
+        strength, schema = classified
+        evidence[artifact_id].append((strength, row_count, schema))
+
+    fields = list(ledger_rows[0].keys())
+    for column in BRIDGE_COLUMNS:
+        if column not in fields:
+            fields.append(column)
+    strong = 0
+    manager_only = 0
+    for row in ledger_rows:
+        artifact_evidence = evidence.get(int(row["artifact_id"]), [])
+        for column in BRIDGE_COLUMNS:
+            row[column] = ""
+        if not artifact_evidence:
+            continue
+        strengths = {value[0] for value in artifact_evidence}
+        row["bridge_evidence_file_count"] = str(len(artifact_evidence))
+        row["bridge_evidence_row_count"] = str(sum(value[1] for value in artifact_evidence))
+        row["bridge_evidence_strength"] = (
+            "strong_player_team" if "strong_player_team" in strengths else "manager_only_player"
+        )
+        row["bridge_evidence_schemas"] = "|".join(sorted({value[2] for value in artifact_evidence}))
+        row["bridge_evidence_receipt_run_id"] = str(receipt_run_id)
+        if row["bridge_evidence_strength"] == "strong_player_team":
+            strong += 1
+        else:
+            manager_only += 1
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with out_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields, lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(ledger_rows)
+    return {
+        "ledger_rows": len(ledger_rows),
+        "bridge_artifacts": len(evidence),
+        "strong_player_team_artifacts": strong,
+        "manager_only_player_artifacts": manager_only,
+        "unknown_receipt_artifacts": len(unknown),
+    }
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--ledger", type=Path, required=True)
+    ap.add_argument("--receipt", type=Path, required=True)
+    ap.add_argument("--receipt-run-id", required=True)
+    ap.add_argument("--out", type=Path, required=True)
+    args = ap.parse_args()
+    print(json.dumps(enrich(
+        ledger_path=args.ledger,
+        receipt_path=args.receipt,
+        receipt_run_id=args.receipt_run_id,
+        out_path=args.out,
+    ), sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()

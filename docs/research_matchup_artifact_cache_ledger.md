@@ -175,6 +175,25 @@ It must prove membership through an exact player key, a unique normalized
 manager-week, or platform roster-player identity. If none exists, the ledger
 must retain `ambiguous` or `source_only`, never infer a recipient.
 
+### Retained player-to-team bridge evidence
+
+The completed artifact receipt
+[`31448116124`](https://github.com/jeleff1000/league-history-workers/actions/runs/31448116124)
+was mechanically joined into this same ledger. It found **526 non-empty
+artifacts** that can participate in a deterministic bridge; zero-row Parquet
+files are explicitly excluded because they prove no membership.
+
+| Evidence strength | Artifacts | Required source fields | Meaning |
+| --- | ---: | --- | --- |
+| `strong_player_team` | 508 | `db_name`, `year`, `week`, `NFL_player_id`, plus source `team_key` or `team_name` | Can prove a player's source fantasy-team membership before a team-signal fan-out. |
+| `manager_only_player` | 18 | `db_name`, `year`, `week`, `NFL_player_id`, `manager` | Usable only when the manager maps to exactly one fantasy team in that league-week. |
+
+The CSV columns `bridge_evidence_file_count`, `bridge_evidence_row_count`,
+`bridge_evidence_strength`, `bridge_evidence_schemas`, and
+`bridge_evidence_receipt_run_id` record this per artifact. The ledger
+validator fails if a row claims bridge evidence without positive row coverage,
+a strength classification, and its source receipt.
+
 ## Canonical promotion contract
 
 The approved GitHub Actions cache is immutable: a runner can restore and

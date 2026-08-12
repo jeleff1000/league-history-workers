@@ -72,6 +72,18 @@ def validate_rows(rows: list[dict[str, str]]) -> dict:
             if gap_total == 0:
                 issues.append(_issue(artifact_id, "open_row_has_no_quantified_gap"))
 
+        # A bridge claim is evidence, not a vague note.  If an artifact says
+        # it has player-to-team evidence, retain enough receipt information to
+        # reproduce that claim before it can ever be used for a fan-out.
+        bridge_files = _number(row, "bridge_evidence_file_count")
+        if bridge_files:
+            if _number(row, "bridge_evidence_row_count") <= 0:
+                issues.append(_issue(artifact_id, "bridge_evidence_has_no_rows"))
+            if not str(row.get("bridge_evidence_strength", "") or "").strip():
+                issues.append(_issue(artifact_id, "bridge_evidence_missing_strength"))
+            if not str(row.get("bridge_evidence_receipt_run_id", "") or "").strip():
+                issues.append(_issue(artifact_id, "bridge_evidence_missing_receipt"))
+
     return {
         "ok": not issues,
         "ledger_rows": len(rows),
