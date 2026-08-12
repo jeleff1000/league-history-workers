@@ -88,6 +88,16 @@ on:
         required: false
         default: ""
         type: string
+      task_manifest:
+        description: "Path in yahoo_oauth checkout to an uncovered task-plan JSON"
+        required: false
+        default: ""
+        type: string
+      task_window:
+        description: "Zero-based task-plan window"
+        required: false
+        default: "0"
+        type: string
   workflow_call:
     inputs:
       shard_count:
@@ -157,6 +167,14 @@ on:
       additional_artifact_namespaces:
         required: false
         default: ""
+        type: string
+      task_manifest:
+        required: false
+        default: ""
+        type: string
+      task_window:
+        required: false
+        default: "0"
         type: string
 
 permissions:
@@ -241,6 +259,7 @@ jobs:
             --id-end "${{ inputs.id_end || '999' }}" \
             --id-bands "${{ inputs.id_bands || '1-9999,10000-29999,30000-59999,60000-80000' }}" \
             --sleep "${{ inputs.request_sleep || '5.0' }}" \
+            ${{ inputs.task_manifest && format('--task-manifest "code/{0}" --task-window "{1}"', inputs.task_manifest, inputs.task_window || '0') || '' }} \
             --out "out/mfl_shard_${{ matrix.shard }}.json"
 
       - name: Upload shard artifact
