@@ -608,6 +608,26 @@ is not an NFL player row, so it cannot affect the research player tables. The
 two non-MFL probes have no manager/team identity in the cache and remain open
 only as explicitly source-only evidence; no cache value was invented.
 
+## Exact MFL missing-player-row recovery — closed
+
+The source-bridge receipt from `mfl-roster-bridge-pilot-31616814643` identified
+74 real MFL player-week rows absent from the approved cache. The recovery was
+applied and independently read back in
+[run 31624673691](https://github.com/jeleff1000/league-history-workers/actions/runs/31624673691)
+without a schema change, a second cache key, or an ops-cache change.
+
+| Gate | Verified result |
+| --- | ---: |
+| Exact source rows inserted | 74 |
+| Independently restored cache rows present | 74 / 74 |
+| Structurally complete rows | 74 / 74 |
+| Source-confirmed starts | 43 |
+| Starts with source score and player-week LAMAR | 43 / 43 |
+| Cache objects under approved exact key | 1 |
+
+The durable readback receipt SHA-256 is
+`ae0917ae66f45ac2e66661e8505b4d515829d71603fe80cab6026dccccf35c50`.
+
 ## Remaining worklist
 
 Every artifact now has a direct cache disposition. The remaining open work is
