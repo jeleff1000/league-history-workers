@@ -172,8 +172,26 @@ deterministic roster-membership edge before they can fan out to players.
 The canonical cache does not currently retain populated `team_key` or
 `team_name` values. A bridge therefore cannot rely on raw team identifiers.
 It must prove membership through an exact player key, a unique normalized
-manager-week, or platform roster-player identity. If none exists, the ledger
-must retain `ambiguous` or `source_only`, never infer a recipient.
+manager-week, or a platform roster-player identity mapped to an exact canonical
+player key. If none exists, the ledger must retain `ambiguous` or `source_only`,
+never infer a recipient.
+
+## Required gates before any further promotion
+
+No artifact is complete merely because it has a source value. Every future
+cache update must satisfy these three independent gates and retain an
+artifact-level receipt for each one:
+
+| Gate | Required proof | Prohibited shortcut |
+| --- | --- | --- |
+| `loss_tie_schema` | The fixed canonical schema contains only the permitted `loss` and `tie` fields, with types and pre/post schema hashes recorded. | BF/fallback fields, source-only columns, or a second cache key. |
+| `player_team_bridge` | Raw source roster membership maps the platform player ID through its protected crosswalk to exactly one canonical `(db_name, year, week, NFL_player_id)` recipient. | Manager-name similarity, a target-inventory manager, or an artifact derived from the cache. |
+| `source_precedence` | A field-level rule plus exact old/new values and source provenance authorizes any non-null overwrite. | A blanket source-wins rule or an implicit overwrite. |
+
+After a write, an independent restored-cache readback must prove the exact
+changed canonical cells, unchanged row count, unchanged non-target fields, the
+same approved cache key, and the same ops-cache hash. Until that receipt
+exists, a candidate is open regardless of workflow success.
 
 ### Retained player-to-team bridge evidence
 
@@ -282,9 +300,12 @@ lineage, a schema change, an ops-cache change, or a cache deletion.
 ## MFL player-outcome evidence
 
 The 15 `mfl-player-outcome-classification-*` artifacts contain 1,359,202
-source records. Although the source does not contain a complete roster/player
-snapshot, it is **player-indexed outcome evidence**: its correct audit key is
-`(db_name, year, week, NFL_player_id, manager)`. The direct source readback is
+player-indexed outcome records. They are **not** raw roster-membership
+evidence: their `manager` value is carried from the target inventory and does
+not independently prove that a particular source fantasy team rostered the
+named player. Their audit key is `(db_name, year, week, NFL_player_id,
+manager)`, but that key can validate an already-built comparison only; it
+cannot authorize a new team-to-player fan-out. The direct source readback is
 [31515802840](https://github.com/jeleff1000/league-history-workers/actions/runs/31515802840).
 It passed cache-schema, player-row-count, ops-hash, and no-new-lineage gates.
 
@@ -318,16 +339,18 @@ The current-cache re-audit
 then re-read all 15 source artifacts without mutating the cache. It found zero
 safe current null candidates. The 1,532 remaining null cells are all attached
 to source identities that map to multiple canonical rows; they cannot be
-promoted until a roster/player identity bridge resolves their recipient.
+promoted until a raw roster/player identity bridge resolves their recipient.
 
 The remaining direct-source identities are intentionally not folded into that
 candidate: 55,180 source keys map to more than one canonical row. Of those,
 43,669 have only a null manager, 6,743 only a null NFL player ID, 4,691 have
 both null, and only 77 are fully specified duplicate canonical identities.
 The next action is to add the explicitly allowed loss/tie schema, then resolve
-direct identity only where an independently auditable roster/player edge exists;
-all other ambiguous identities remain unpromoted. Non-null disagreements remain
-preserved until source precedence is decided.
+identity only where an independently auditable roster/player edge exists. For
+MFL, that means `weeklyResults.player.id -> players.espn_id -> protected ops
+ESPN-to-NFL map -> (db_name, year, week, NFL_player_id)`. All other ambiguous
+identities remain unpromoted. Non-null disagreements remain preserved until
+source precedence is decided.
 
 ## Verified current cache join contract
 
