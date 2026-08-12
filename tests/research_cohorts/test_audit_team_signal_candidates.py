@@ -122,6 +122,7 @@ def test_candidate_audit_accepts_manager_only_source_without_team_key(
     con.close()
     assert emitted == 1
     report = json.loads((out / "team_signal_candidate_report.json").read_text(encoding="utf-8"))
+    assert report["unmatched_source_team_keys"] == 0
     assert report["candidate_file_inventory"] == [{
         "path": str(candidates / "manager-only.parquet"),
         "columns": ["db_name", "is_playoffs", "manager", "week", "year"],

@@ -284,6 +284,11 @@ def main() -> None:
       INSERT INTO player_matches
       SELECT * FROM bridge_matches
     """)
+    con.execute("""
+      CREATE OR REPLACE TEMP TABLE matched_source_signals AS
+      SELECT DISTINCT db_name, year, week, team_key, team_key_norm, manager_key, team_name_key
+      FROM player_matches
+    """)
     matched = con.execute("SELECT COUNT(*) FROM player_matches").fetchone()[0]
 
     diagnostic = {}
@@ -386,22 +391,16 @@ def main() -> None:
         "duplicate_source_rows_collapsed": int(source_duplicate_rows),
         "matched_player_rows": int(matched),
         "bridge_matched_player_rows": int(con.execute("SELECT COUNT(*) FROM bridge_matches").fetchone()[0]),
-        "unmatched_source_team_keys": int(con.execute(f"""
+        "unmatched_source_team_keys": int(con.execute("""
           SELECT COUNT(*) FROM source_signals s
-          WHERE NOT EXISTS (SELECT 1 FROM player_matches m
-                            JOIN public.player_fantasy p ON p.rowid=m.player_rowid
-                            WHERE p.db_name=s.db_name AND CAST(p.year AS INTEGER)=s.year
-                              AND CAST(p.week AS INTEGER)=s.week
-                              AND (((s.team_key IS NOT NULL AND s.team_key=NULLIF(TRIM(CAST(p.team_key AS VARCHAR)),''))
-                                OR (s.team_key_norm IS NOT NULL AND s.team_key_norm={p_key_expr('p.team_key')})
-                                )
-                                OR (s.manager_key IS NOT NULL AND s.team_name_key IS NOT NULL
-                                    AND s.manager_key={p_label_expr('p.manager')}
-                                    AND s.team_name_key={p_label_expr('p.team_name')})))
-                            OR EXISTS (SELECT 1 FROM bridge_matches bm
-                                       WHERE bm.db_name=s.db_name
-                                         AND bm.year=s.year AND bm.week=s.week
-                                         AND bm.team_key IS NOT DISTINCT FROM s.team_key)
+          WHERE NOT EXISTS (
+            SELECT 1 FROM matched_source_signals m
+            WHERE m.db_name=s.db_name AND m.year=s.year AND m.week=s.week
+              AND m.team_key IS NOT DISTINCT FROM s.team_key
+              AND m.team_key_norm IS NOT DISTINCT FROM s.team_key_norm
+              AND m.manager_key IS NOT DISTINCT FROM s.manager_key
+              AND m.team_name_key IS NOT DISTINCT FROM s.team_name_key
+          )
         """).fetchone()[0]),
         "improvements_by_field": {k: int(v) for k,v in improvements.items()},
         "join_diagnostic": diagnostic,
