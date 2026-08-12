@@ -16,6 +16,7 @@ on:
           - cmc_2025_all_grains
           - myles_2025_season
           - rb_2025_lane
+          - rb_2025_week1_inventory
 
 permissions:
   contents: read
@@ -73,9 +74,35 @@ jobs:
             WHERE COALESCE(season_type, 'REG') = 'REG' AND week IS NOT NULL
           """)
           mode = os.environ['PILOT_MODE']
-          if mode not in {'cmc_week1', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_lane'}:
-              raise ValueError(f'unsupported pilot mode: {mode}')
+          if mode not in {'cmc_week1', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_lane', 'rb_2025_week1_inventory'}:
+            raise ValueError(f'unsupported pilot mode: {mode}')
           source_rows = c.execute("SELECT COUNT(*) FROM lake.public.player_fantasy WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1").fetchone()[0]
+          if mode == 'rb_2025_week1_inventory':
+              inventory = c.execute("""
+                WITH rb AS (
+                  SELECT CAST(NFL_player_id AS VARCHAR) AS NFL_player_id,
+                    CASE WHEN is_rostered IS NULL OR CAST(is_rostered AS INTEGER) <> 0 THEN 1 ELSE 0 END AS rostered
+                  FROM lake.public.player_fantasy
+                  WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1
+                    AND UPPER(TRIM(CAST(position AS VARCHAR)))='RB'
+                )
+                SELECT COUNT(DISTINCT NFL_player_id) AS distinct_rb_players,
+                  COUNT(DISTINCT NFL_player_id) FILTER (WHERE rostered=1) AS rostered_rb_players,
+                  COUNT(DISTINCT NFL_player_id) FILTER (WHERE rostered=0) AS explicitly_unrostered_rb_players
+                FROM rb
+              """).fetchone()
+              receipt = {
+                'mode': mode, 'source_rows_read': source_rows,
+                'distinct_rb_players': inventory[0],
+                'rostered_rb_players': inventory[1],
+                'explicitly_unrostered_rb_players': inventory[2],
+              }
+              print(receipt)
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                  summary.write('## RB 2025 week 1 immutable-cache inventory\n')
+                  summary.write(f'- Receipt: `{receipt}`\n')
+                  summary.write('- Cache-only count; no aggregation table, cache save, Fly access, API request, artifact, or publish step.\n')
+              raise SystemExit(0)
           started_at = perf_counter()
           materialize_weekly_core_cohort_cells(
               c,
