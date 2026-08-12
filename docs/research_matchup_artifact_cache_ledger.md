@@ -63,6 +63,18 @@ crosswalk, and duplicate canonical recipients. This is an implementation
 completion, **not** an artifact or cache completion: no MFL bridge receipt has
 yet been run against the target population, so the ledger's 715 open artifact
 statuses remain unchanged.
+
+The source-side predecessor is
+`scripts/research_cohorts/extract_mfl_target_roster_memberships.py`. It fetches
+only a flagged league-week and writes raw roster membership plus its MFL player
+directory; it records every attempted source-ID/year pair, including the
+historical seed ID encoded in the database name. Its companion
+`build_mfl_roster_player_crosswalk.py` resolves only exact one-to-one
+ESPN-to-NFL IDs from the protected ops player bio. Neither program opens the
+canonical player cache for writing. A future Action must first run these
+read-only source receipts, then run the bridge receipt, and only then create a
+strict cache-update candidate.
+
 The latest corrected raw-team identity receipt is
 [31532904897](https://github.com/jeleff1000/league-history-workers/actions/runs/31532904897).
 It is read-only and uses the safe team-to-player fan-out hierarchy: direct
