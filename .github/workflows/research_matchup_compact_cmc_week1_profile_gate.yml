@@ -30,7 +30,7 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           path: code
-          ref: 4240541218617e87f90126c6bd602c86dfabf7b9
+          ref: 699731f5197f532e4482ab8e3fe29387c25602fc
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -137,7 +137,7 @@ jobs:
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
               summary.write('## CMC W1 compact cache truth gate\n')
               summary.write(f'- Cache: `{os.environ.get("CACHE_KEY", "immutable input")}`\n')
-              summary.write('- Source commit: `4240541218617e87f90126c6bd602c86dfabf7b9`\n')
+              summary.write('- Source commit: `699731f5197f532e4482ab8e3fe29387c25602fc`\n')
               summary.write(f'- ALL cell: `{full}`\n- Selected cell: `{selected[0]}`\n')
               summary.write(f'- Source rows read: `{source_rows}`; outer rows: `{outer_rows}`; nested cells: `{cell_count}`\n')
               summary.write(f'- Build wall time: `{elapsed_s:.3f}s`; peak RSS: `{peak_rss_kb} KB`\n')
