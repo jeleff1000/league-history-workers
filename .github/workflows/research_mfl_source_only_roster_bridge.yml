@@ -7,6 +7,10 @@ on:
         description: Exact deterministic MFL source-only target shards.
         required: true
         default: '256'
+      only_shard:
+        description: Optional one-shard pilot; use -1 for the full 256-shard matrix.
+        required: true
+        default: '-1'
 
 permissions:
   actions: read
@@ -19,6 +23,7 @@ env:
 
 jobs:
   bridge:
+    if: ${{ fromJSON(inputs.only_shard) == -1 || matrix.shard == fromJSON(inputs.only_shard) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
