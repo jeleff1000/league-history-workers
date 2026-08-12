@@ -1,0 +1,125 @@
+name: Research matchup five RB week 1 leaf timing
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  leaf_timing:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - name: Run one read-only five-RB week 1 leaf query
+        run: |
+          python - <<'PY'
+          import duckdb
+          import json
+          import os
+          from time import perf_counter
+
+          con = duckdb.connect()
+          con.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          query = """
+          WITH targets(NFL_player_id, player_name) AS (
+            VALUES
+              ('00-0033280', 'Christian McCaffrey'),
+              ('00-0038542', 'Bijan Robinson'),
+              ('00-0039139', 'Jahmyr Gibbs'),
+              ('00-0032764', 'Derrick Henry'),
+              ('00-0037248', 'James Cook')
+          ), rb AS (
+            SELECT db_name, NFL_player_id,
+              cohort_teams, cohort_roster, cohort_scoring, cohort_pass_td,
+              cohort_playoff_teams, cohort_dynasty, cohort_best_ball,
+              cohort_position_eligible,
+              is_rostered, is_started, win,
+              manager, team_key, team_name, team_points, fantasy_points
+            FROM lake.public.player_fantasy
+            WHERE year=2025 AND week=1 AND position='RB'
+          ), inventory AS (
+            SELECT cohort_teams, cohort_roster, cohort_scoring, cohort_pass_td,
+              cohort_playoff_teams, cohort_dynasty, cohort_best_ball,
+              COUNT(DISTINCT db_name)::BIGINT AS eligible_leagues
+            FROM rb WHERE cohort_position_eligible=1 GROUP BY ALL
+          ), player_per_league AS (
+            SELECT r.NFL_player_id, r.db_name,
+              r.cohort_teams, r.cohort_roster, r.cohort_scoring, r.cohort_pass_td,
+              r.cohort_playoff_teams, r.cohort_dynasty, r.cohort_best_ball,
+              MAX(CASE WHEN COALESCE(r.is_rostered,1)<>0 THEN 1 ELSE 0 END) AS rostered,
+              MAX(CASE WHEN r.is_started=1 THEN 1 ELSE 0 END) AS started,
+              MAX(CASE WHEN r.is_started=1 AND r.win IN (0,1) THEN 1 ELSE 0 END) AS valid_outcome,
+              MAX(CASE WHEN r.is_started=1 AND r.win IN (0,1) THEN r.win ELSE NULL END) AS win_value
+            FROM rb r INNER JOIN targets t USING (NFL_player_id)
+            WHERE NOT (
+              r.is_rostered=1 AND COALESCE(r.is_started,0)=0
+              AND NULLIF(TRIM(COALESCE(r.manager,'')),'') IS NULL
+              AND NULLIF(TRIM(COALESCE(r.team_key,'')),'') IS NULL
+              AND NULLIF(TRIM(COALESCE(r.team_name,'')),'') IS NULL
+              AND r.team_points IS NULL
+              AND (r.fantasy_points IS NULL OR r.fantasy_points=0)
+            )
+            GROUP BY ALL
+          ), player_leaf AS (
+            SELECT NFL_player_id,
+              cohort_teams, cohort_roster, cohort_scoring, cohort_pass_td,
+              cohort_playoff_teams, cohort_dynasty, cohort_best_ball,
+              SUM(rostered)::BIGINT AS rostered_leagues,
+              SUM(started)::BIGINT AS started_leagues,
+              SUM(valid_outcome)::BIGINT AS valid_started_outcomes,
+              SUM(win_value) AS win_equivalent
+            FROM player_per_league GROUP BY ALL
+          )
+          SELECT t.player_name, t.NFL_player_id,
+            COUNT(*)::BIGINT AS exact_leaf_cells,
+            SUM(i.eligible_leagues)::BIGINT AS eligible_leagues,
+            SUM(COALESCE(p.rostered_leagues,0))::BIGINT AS rostered_leagues,
+            SUM(COALESCE(p.started_leagues,0))::BIGINT AS started_leagues,
+            SUM(COALESCE(p.valid_started_outcomes,0))::BIGINT AS valid_started_outcomes,
+            SUM(COALESCE(p.win_equivalent,0)) AS win_equivalent
+          FROM targets t CROSS JOIN inventory i
+          LEFT JOIN player_leaf p
+            ON p.NFL_player_id=t.NFL_player_id
+           AND p.cohort_teams IS NOT DISTINCT FROM i.cohort_teams
+           AND p.cohort_roster IS NOT DISTINCT FROM i.cohort_roster
+           AND p.cohort_scoring IS NOT DISTINCT FROM i.cohort_scoring
+           AND p.cohort_pass_td IS NOT DISTINCT FROM i.cohort_pass_td
+           AND p.cohort_playoff_teams IS NOT DISTINCT FROM i.cohort_playoff_teams
+           AND p.cohort_dynasty IS NOT DISTINCT FROM i.cohort_dynasty
+           AND p.cohort_best_ball IS NOT DISTINCT FROM i.cohort_best_ball
+          GROUP BY 1, 2 ORDER BY 1
+          """
+          started = perf_counter()
+          rows = con.execute(query).fetchall()
+          elapsed = perf_counter() - started
+          assert len(rows) == 5, rows
+          assert all(row[3] > 9000 and row[4] > 0 for row in rows), rows
+          receipt = {
+            "operation": "one_read_only_five_rb_2025_week1_leaf_query",
+            "cpu_count": os.cpu_count(),
+            "players": [
+              {
+                "player": row[0], "id": row[1], "exact_leaf_cells": row[2],
+                "eligible": row[3], "rostered": row[4], "started": row[5],
+                "valid_outcomes": row[6], "win_equivalent": row[7],
+              }
+              for row in rows
+            ],
+            "elapsed_seconds": round(elapsed, 3),
+          }
+          print(json.dumps(receipt, sort_keys=True))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+            summary.write("## Five RB week 1 leaf timing\n")
+            summary.write(f"- Receipt: `{json.dumps(receipt, sort_keys=True)}`\n")
+            summary.write("- Read-only cache restore; no cache save, Fly access, artifact, or publish step.\n")
+          PY
