@@ -7,7 +7,7 @@ import duckdb
 from canonical_player_schema import BASE_PLAYER_COLUMNS, EXPECTED_COHORT_COLUMNS
 
 
-def _base(path):
+def _base(path, *, null_team_identity: bool = False):
     columns = BASE_PLAYER_COLUMNS + sorted(EXPECTED_COHORT_COLUMNS) + ["loss", "tie"]
     con = duckdb.connect(str(path))
     con.execute("CREATE SCHEMA public")
@@ -21,6 +21,9 @@ def _base(path):
         "db_name": "league-a", "year": "2020", "week": "1", "NFL_player_id": "nfl-a",
         "manager": "manager-a", "team_key": "team-a", "team_name": "Team A", "platform": "mfl",
     })
+    if null_team_identity:
+        values["team_key"] = None
+        values["team_name"] = None
     names = ", ".join(f'"{column}"' for column in columns)
     placeholders = ", ".join("?" for _ in columns)
     con.execute(f"INSERT INTO public.player_fantasy ({names}) VALUES ({placeholders})", list(values.values()))
@@ -86,4 +89,23 @@ def test_apply_rejects_conflicting_duplicate_delta_keys(tmp_path):
     assert "conflicting duplicate delta keys: 1" in result.stderr
     con = duckdb.connect(str(base), read_only=True)
     assert con.execute("SELECT loss, tie FROM public.player_fantasy").fetchone() == (None, None)
+    con.close()
+
+
+def test_apply_allows_known_source_team_identity_when_cache_identity_is_null(tmp_path):
+    base = tmp_path / "base.duckdb"
+    delta = tmp_path / "delta.parquet"
+    report = tmp_path / "report.json"
+    _base(base, null_team_identity=True)
+    _delta(delta)
+
+    result = subprocess.run([
+        sys.executable,
+        "scripts/research_cohorts/apply_team_signal_delta_in_place.py",
+        "--base", str(base), "--delta", str(delta), "--report", str(report),
+    ], capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    con = duckdb.connect(str(base), read_only=True)
+    assert con.execute("SELECT loss, tie FROM public.player_fantasy").fetchone() == ("1", "0")
     con.close()

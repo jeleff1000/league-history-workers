@@ -118,8 +118,8 @@ def main() -> None:
        AND d.NFL_player_id=p.NFL_player_id
        AND d.platform=p.platform
        AND d.manager IS NOT DISTINCT FROM p.manager
-       AND d.team_key IS NOT DISTINCT FROM p.team_key
-       AND d.team_name IS NOT DISTINCT FROM p.team_name
+       AND (p.team_key IS NULL OR d.team_key=p.team_key)
+       AND (p.team_name IS NULL OR d.team_name=p.team_name)
     """)
     matched = con.execute("SELECT COUNT(*) FROM matched").fetchone()[0]
     if matched != con.execute("SELECT COUNT(*) FROM delta_unique").fetchone()[0]:
