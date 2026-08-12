@@ -38,7 +38,7 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           path: code
-          ref: 61110be5590dcb6f42b3635ea25d8f7797394470
+          ref: a253322ed58d336c5fa98a11f40313b8c98c6865
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -404,11 +404,13 @@ jobs:
               materialize_season_core_cohort_cells(
                   c, source_table='lake.public.player_fantasy', nfl_stats_table=stats,
                   output_table='cmc_2025_season_core', year=2025, player_id='00-0033280',
+                  position='RB',
                   split_threshold=50,
               )
               materialize_season_bracket_grade_cells(
                   c, source_table='lake.public.player_fantasy', nfl_stats_table=stats,
                   output_table='cmc_2025_season_grade', year=2025, player_id='00-0033280',
+                  position='RB',
                   split_threshold=50,
               )
               c.execute("""
@@ -459,11 +461,13 @@ jobs:
                   materialize_season_core_cohort_cells(
                       c, source_table='lake.public.player_fantasy', nfl_stats_table=stats,
                       output_table='cmc_one_season_core', year=season_year, player_id='00-0033280',
+                      position='RB',
                       split_threshold=50,
                   )
                   materialize_season_bracket_grade_cells(
                       c, source_table='lake.public.player_fantasy', nfl_stats_table=stats,
                       output_table='cmc_one_season_grade', year=season_year, player_id='00-0033280',
+                      position='RB',
                       split_threshold=50,
                   )
                   c.execute("""
