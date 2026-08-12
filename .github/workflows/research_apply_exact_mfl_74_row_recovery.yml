@@ -1,0 +1,242 @@
+name: Apply exact MFL 74-row recovery to approved cache
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Must equal APPLY_EXACT_MFL_74_ROW_RECOVERY"
+        required: true
+        default: ""
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: canonical-research-cache-replacement
+  cancel-in-progress: false
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+  BRIDGE_RUN_ID: "31616814643"
+  BRIDGE_ARTIFACT: mfl-roster-bridge-pilot-31616814643
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pytest==8.3.5
+      - run: >-
+          python -m pytest -q
+          tests/research_cohorts/test_extract_mfl_target_roster_memberships.py
+          tests/research_cohorts/test_build_exact_mfl_missing_player_rows.py
+          tests/research_cohorts/test_apply_exact_player_row_additions_in_place.py
+
+  apply:
+    needs: tests
+    if: ${{ inputs.confirm == 'APPLY_EXACT_MFL_74_ROW_RECOVERY' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - name: Checkout MFL client only
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pandas==2.2.3 pyarrow==15.0.2 requests==2.32.4
+      - name: Record immutable pre-state
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/ops_cache.duckdb > out_ops_before.sha256
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          Path('out_prestate.json').write_text(json.dumps({
+              'player_schema': con.execute('DESCRIBE public.player_fantasy').fetchall(),
+              'player_rows': int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]),
+          }, indent=2)+'\n')
+          con.close()
+          PY
+      - name: Download immutable 74-row target receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p bridge
+          gh run download "$BRIDGE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "$BRIDGE_ARTIFACT" --dir bridge
+          target=$(find bridge -name mfl_roster_bridge_diagnostic.parquet -print -quit)
+          test -s "$target"
+          echo "TARGET_RECEIPT=$target" >> "$GITHUB_ENV"
+      - name: Materialize exactly fifteen source MFL weeks
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('mfl_74_manifest.json').write_text(json.dumps({'groups': [
+              {'db_name':'smpl_mfl_2015_10030','year':2012,'week':week,'source_id':'60221'}
+              for week in range(1, 16)
+          ]}, indent=2)+'\n')
+          PY
+          mkdir -p out
+          PYTHONPATH="$GITHUB_WORKSPACE/code/fantasy_football_data_scripts" MFL_RATE_LIMIT_PER_MIN=25 \
+          python scripts/research_cohorts/extract_mfl_target_roster_memberships.py \
+            --manifest mfl_74_manifest.json --shard 0 --shards 1 \
+            --out-memberships out/memberships.parquet \
+            --out-player-directory out/directory.parquet \
+            --out-report out/extract_report.json
+      - name: Build strict ESPN-to-NFL source crosswalk
+        run: |
+          python scripts/research_cohorts/build_mfl_roster_player_crosswalk.py \
+            --directory out/directory.parquet \
+            --ops-cache research_public_lake/ops_cache.duckdb \
+            --out out/crosswalk.parquet --report out/crosswalk_report.json
+      - name: Build the exact current-schema 74-row candidate
+        run: |
+          python scripts/research_cohorts/build_exact_mfl_missing_player_rows.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --ops research_public_lake/ops_cache.duckdb \
+            --memberships out/memberships.parquet --directory out/directory.parquet \
+            --crosswalk out/crosswalk.parquet --targets "$TARGET_RECEIPT" \
+            --out out/candidate.parquet --report out/candidate_report.json --expected-rows 74
+      - name: Apply exact absent rows and recompute the affected league-year clutch
+        run: |
+          python scripts/research_cohorts/apply_exact_player_row_additions_in_place.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --candidates out/candidate.parquet --report out/apply_report.json
+          python scripts/research_cohorts/recompute_cache_league_year_clutch.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --db-name smpl_mfl_2015_10030 --year 2012 --report out/clutch_report.json
+      - name: Fail fast before same-key replacement
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, hashlib, json
+          from pathlib import Path
+          pre=json.loads(Path('out_prestate.json').read_text())
+          candidate=json.loads(Path('out/candidate_report.json').read_text())
+          applied=json.loads(Path('out/apply_report.json').read_text())
+          clutch=json.loads(Path('out/clutch_report.json').read_text())
+          assert candidate['candidate_rows'] == 74 and not candidate['cache_mutated'] and not candidate['new_lineage']
+          assert applied['inserted_rows'] == 74 and applied['before_player_rows'] == pre['player_rows']
+          assert applied['after_player_rows'] == pre['player_rows'] + 74
+          assert clutch['player_rows'] == clutch['clutch_rows_recomputed'] and clutch['null_clutch_rows_after'] == 0
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          assert con.execute('DESCRIBE public.player_fantasy').fetchall() == [tuple(r) for r in pre['player_schema']]
+          assert int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]) == pre['player_rows'] + 74
+          con.execute("CREATE TEMP VIEW c AS SELECT * FROM read_parquet('out/candidate.parquet')")
+          missing=int(con.execute('''SELECT COUNT(*) FROM c WHERE NOT EXISTS (
+            SELECT 1 FROM public.player_fantasy p WHERE p.db_name=c.db_name AND p.year=c.year AND p.week=c.week
+             AND p.NFL_player_id=c.NFL_player_id AND p.manager=c.manager)''').fetchone()[0])
+          incomplete=int(con.execute('''SELECT COUNT(*) FROM c JOIN public.player_fantasy p
+            ON p.db_name=c.db_name AND p.year=c.year AND p.week=c.week AND p.NFL_player_id=c.NFL_player_id AND p.manager=c.manager
+            WHERE p.is_rostered<>1 OR p.is_started IS NULL OR p.fantasy_points IS NULL OR p.manager_lamar IS NULL
+              OR p.espn_player_id IS NULL OR p.mfl_player_id IS NULL OR p.clutch_equity IS NULL''').fetchone()[0])
+          assert missing == 0 and incomplete == 0, (missing, incomplete)
+          con.close()
+          digest=hashlib.sha256()
+          with Path('research_public_lake/ops_cache.duckdb').open('rb') as f:
+              for chunk in iter(lambda:f.read(1024*1024), b''): digest.update(chunk)
+          assert digest.hexdigest() == Path('out_ops_before.sha256').read_text().split()[0]
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-mfl-74-recovery-evidence-${{ github.run_id }}
+          path: |
+            out/
+            out_prestate.json
+            out_ops_before.sha256
+            mfl_74_manifest.json
+          retention-days: 90
+          compression-level: 0
+      - name: Replace only the one approved cache object under the same key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${ids[0]}"
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+      - name: Assert exactly one approved cache object exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          echo "cache_id=${ids[0]}" | tee out/canonical_cache_receipt.txt
+
+  readback:
+    needs: apply
+    if: ${{ inputs.confirm == 'APPLY_EXACT_MFL_74_ROW_RECOVERY' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: exact-mfl-74-recovery-evidence-${{ github.run_id }}
+          path: evidence
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1
+      - name: Independently restore and read back all 74 exact keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          con.execute("CREATE TEMP VIEW c AS SELECT * FROM read_parquet('evidence/out/candidate.parquet')")
+          total=int(con.execute('SELECT COUNT(*) FROM c').fetchone()[0])
+          present=int(con.execute('''SELECT COUNT(*) FROM c JOIN public.player_fantasy p
+            ON p.db_name=c.db_name AND p.year=c.year AND p.week=c.week AND p.NFL_player_id=c.NFL_player_id AND p.manager=c.manager''').fetchone()[0])
+          valid=int(con.execute('''SELECT COUNT(*) FROM c JOIN public.player_fantasy p
+            ON p.db_name=c.db_name AND p.year=c.year AND p.week=c.week AND p.NFL_player_id=c.NFL_player_id AND p.manager=c.manager
+            WHERE p.is_rostered=1 AND p.is_started IS NOT NULL AND p.fantasy_points IS NOT NULL AND p.manager_lamar IS NOT NULL
+              AND p.espn_player_id IS NOT NULL AND p.mfl_player_id IS NOT NULL AND p.clutch_equity IS NOT NULL''').fetchone()[0])
+          con.close()
+          result={'canonical_cache_key':'research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613', 'target_rows':total, 'present_rows':present, 'complete_rows':valid, 'independent_restore':True, 'new_lineage':False}
+          assert result['target_rows']==74 and result['present_rows']==74 and result['complete_rows']==74, result
+          Path('exact_mfl_74_readback.json').write_text(json.dumps(result, indent=2)+'\n')
+          print(json.dumps(result, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-mfl-74-recovery-readback-${{ github.run_id }}
+          path: exact_mfl_74_readback.json
+          retention-days: 90

@@ -19,7 +19,7 @@ from typing import Any, Protocol
 _DB_SEED = re.compile(r"^smpl_mfl_(?P<year>\d{4})_(?P<league_id>\d+)$", re.IGNORECASE)
 MEMBERSHIP_COLUMNS = [
     "db_name", "year", "week", "source_id", "source_year", "source_franchise_id",
-    "source_manager", "source_manager_origin", "mfl_player_id", "is_started",
+    "source_manager", "source_manager_origin", "mfl_player_id", "is_started", "fantasy_points",
 ]
 DIRECTORY_COLUMNS = ["source_year", "mfl_player_id", "espn_id", "raw_name", "raw_position", "raw_team"]
 
@@ -180,6 +180,10 @@ def extract_group(group: dict[str, Any], client: MFLClient) -> dict[str, Any]:
                     "source_manager_origin": manager_origin,
                     "mfl_player_id": player_id,
                     "is_started": int(str(raw_player.get("status") or "").strip().lower() == "starter"),
+                    "fantasy_points": (
+                        float(str(raw_player["score"]).strip())
+                        if _clean(raw_player.get("score")) is not None else None
+                    ),
                 })
         try:
             players = client.fetch_players(source_year, source_id) or {}

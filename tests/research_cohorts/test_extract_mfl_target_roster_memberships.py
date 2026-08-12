@@ -64,19 +64,19 @@ def test_resolver_tries_historical_candidates_and_preserves_raw_franchise_proven
             "db_name": "smpl_mfl_2015_456", "year": 2004, "week": 14,
             "source_id": "456", "source_year": 2004, "source_franchise_id": "0001",
             "source_manager": "Owner One", "source_manager_origin": "mfl_franchise_owner_name",
-            "mfl_player_id": "10", "is_started": 1,
+            "mfl_player_id": "10", "is_started": 1, "fantasy_points": 21.5,
         },
         {
             "db_name": "smpl_mfl_2015_456", "year": 2004, "week": 14,
             "source_id": "456", "source_year": 2004, "source_franchise_id": "0001",
             "source_manager": "Owner One", "source_manager_origin": "mfl_franchise_owner_name",
-            "mfl_player_id": "11", "is_started": 0,
+            "mfl_player_id": "11", "is_started": 0, "fantasy_points": 5.2,
         },
         {
             "db_name": "smpl_mfl_2015_456", "year": 2004, "week": 14,
             "source_id": "456", "source_year": 2004, "source_franchise_id": "0002",
             "source_manager": "Named Franchise", "source_manager_origin": "mfl_franchise_name",
-            "mfl_player_id": "12", "is_started": 1,
+            "mfl_player_id": "12", "is_started": 1, "fantasy_points": None,
         },
     ]
     assert result["player_directory"] == [
