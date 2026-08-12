@@ -297,21 +297,25 @@ jobs:
           if mode == 'rb_2025_bucket_inventory':
               players = c.execute(f"""
                 SELECT
-                  CAST(NFL_player_id AS VARCHAR) AS NFL_player_id,
-                  ANY_VALUE(CAST(player AS VARCHAR)) AS player,
+                  CAST(p.NFL_player_id AS VARCHAR) AS NFL_player_id,
+                  ANY_VALUE(CAST(p.player AS VARCHAR)) AS player,
                   COUNT(*)::BIGINT AS guarded_rows,
-                  COUNT(DISTINCT CAST(db_name AS VARCHAR)) FILTER (
-                    WHERE is_rostered IS NULL OR CAST(is_rostered AS INTEGER) <> 0
+                  COUNT(DISTINCT CAST(p.db_name AS VARCHAR)) FILTER (
+                    WHERE p.is_rostered IS NULL OR CAST(p.is_rostered AS INTEGER) <> 0
                   )::BIGINT AS rostered_leagues,
-                  COUNT(DISTINCT CAST(week AS INTEGER)) FILTER (
-                    WHERE is_rostered IS NULL OR CAST(is_rostered AS INTEGER) <> 0
+                  COUNT(DISTINCT CAST(p.week AS INTEGER)) FILTER (
+                    WHERE p.is_rostered IS NULL OR CAST(p.is_rostered AS INTEGER) <> 0
                   )::BIGINT AS rostered_weeks
-                FROM {rollup_source}
-                WHERE CAST(year AS INTEGER)=2025
-                  AND {_canonical_position_sql('position')}='RB'
+                FROM {rollup_source} AS p
+                INNER JOIN cached_regular_player_weeks AS g
+                  ON g.NFL_player_id = CAST(p.NFL_player_id AS VARCHAR)
+                 AND g.year = CAST(p.year AS INTEGER)
+                 AND g.week = CAST(p.week AS INTEGER)
+                WHERE CAST(p.year AS INTEGER)=2025
+                  AND {_canonical_position_sql('p.position')}='RB'
                 GROUP BY 1
                 HAVING COUNT(*) FILTER (
-                  WHERE is_rostered IS NULL OR CAST(is_rostered AS INTEGER) <> 0
+                    WHERE p.is_rostered IS NULL OR CAST(p.is_rostered AS INTEGER) <> 0
                 ) > 0
                 ORDER BY guarded_rows DESC, NFL_player_id
               """).fetchall()
