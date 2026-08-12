@@ -23,6 +23,11 @@ on:
           - rb_2025_week1_distribution
           - rb_2025_week1_residual_shapes
           - rb_2025_bucket_inventory
+          - rb_2025_bucket
+      bucket:
+        description: One deterministic balanced 2025 RB bucket (1-15)
+        required: true
+        default: '3'
           - local_cache_export
 
 permissions:
@@ -39,7 +44,7 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           path: code
-          ref: cc071882a2cab76eb5dc940aec86a263429d8e8e
+          ref: eaa003ac3656478b3147ab787168d9a6d615d5e6
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -54,6 +59,7 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}/code
           CACHE_KEY: ${{ inputs.cache_key }}
           PILOT_MODE: ${{ inputs.mode }}
+          PILOT_BUCKET: ${{ inputs.bucket }}
         run: |
           python - <<'PY'
           import duckdb
@@ -66,6 +72,7 @@ jobs:
               materialize_career_cohort_grade_cells,
               materialize_career_core_cohort_cells,
               materialize_narrow_position_year_source,
+              materialize_player_id_subset_source,
               materialize_season_bracket_grade_cells,
               materialize_season_bracket_grade_position_batch,
               materialize_season_core_cohort_cells,
@@ -84,7 +91,7 @@ jobs:
             WHERE COALESCE(season_type, 'REG') = 'REG' AND week IS NOT NULL
           """)
           mode = os.environ['PILOT_MODE']
-          if mode not in {'cmc_week1', 'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'rb_2025_bucket_inventory', 'local_cache_export'}:
+          if mode not in {'cmc_week1', 'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'rb_2025_bucket_inventory', 'rb_2025_bucket', 'local_cache_export'}:
             raise ValueError(f'unsupported pilot mode: {mode}')
           if mode == 'local_cache_export':
               receipt = {
@@ -343,6 +350,97 @@ jobs:
                   summary.write('## RB 2025 fifteen-bucket immutable-cache inventory\n')
                   summary.write(f'- Receipt: `{receipt}`\n')
                   summary.write('- Cache-only inventory; no cache save, aggregation table, Fly access, API request, artifact, or publish step.\n')
+              raise SystemExit(0)
+          if mode == 'rb_2025_bucket':
+              bucket_number = int(os.environ['PILOT_BUCKET'])
+              assert 1 <= bucket_number <= 15, bucket_number
+              players = c.execute(f"""
+                SELECT
+                  CAST(p.NFL_player_id AS VARCHAR) AS NFL_player_id,
+                  COUNT(*)::BIGINT AS guarded_rows
+                FROM {rollup_source} AS p
+                INNER JOIN cached_regular_player_weeks AS g
+                  ON g.NFL_player_id = CAST(p.NFL_player_id AS VARCHAR)
+                 AND g.year = CAST(p.year AS INTEGER)
+                 AND g.week = CAST(p.week AS INTEGER)
+                WHERE CAST(p.year AS INTEGER)=2025
+                  AND {_canonical_position_sql('p.position')}='RB'
+                GROUP BY 1
+                HAVING COUNT(*) FILTER (
+                  WHERE p.is_rostered IS NULL OR CAST(p.is_rostered AS INTEGER) <> 0
+                ) > 0
+                ORDER BY guarded_rows DESC, NFL_player_id
+              """).fetchall()
+              assert len(players) == 163, len(players)
+              buckets = [{'weight': 0, 'ids': []} for _ in range(15)]
+              for player_id, weight in players:
+                  bucket = min(buckets, key=lambda value: value['weight'])
+                  bucket['weight'] += weight
+                  bucket['ids'].append(player_id)
+              selected_bucket = buckets[bucket_number - 1]
+              assert selected_bucket['ids'], selected_bucket
+              if bucket_number == 3:
+                  assert '00-0033280' in selected_bucket['ids'], selected_bucket
+              materialize_narrow_position_year_source(
+                  c, source_table='lake.public.player_fantasy', output_table='rb_2025_lane',
+                  year=2025, position='RB',
+              )
+              materialize_player_id_subset_source(
+                  c, source_table='rb_2025_lane', output_table='rb_2025_bucket_source',
+                  player_ids=selected_bucket['ids'],
+              )
+              weekly_started = perf_counter()
+              materialize_weekly_core_cohort_cells(
+                  c, source_table='rb_2025_bucket_source',
+                  valid_player_weeks_table='cached_regular_player_weeks', output_table='rb_2025_bucket_weekly',
+                  year=2025, week=None, player_id=None, position='RB', split_threshold=150,
+              )
+              weekly_seconds = perf_counter() - weekly_started
+              core_started = perf_counter()
+              materialize_season_core_cohort_position_batch(
+                  c, source_table='rb_2025_bucket_source', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+                  output_table='rb_2025_bucket_season_core', year=2025, position='RB', split_threshold=50,
+              )
+              core_seconds = perf_counter() - core_started
+              grade_started = perf_counter()
+              materialize_season_bracket_grade_position_batch(
+                  c, source_table='rb_2025_bucket_source', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+                  output_table='rb_2025_bucket_season_grade', year=2025, position='RB', split_threshold=50,
+              )
+              grade_seconds = perf_counter() - grade_started
+              weekly_rows, weekly_cells = c.execute("""
+                SELECT COUNT(*), COALESCE(SUM(list_count(cohort_cells)), 0)
+                FROM rb_2025_bucket_weekly
+              """).fetchone()
+              core_rows, grade_rows = c.execute("""
+                SELECT (SELECT COUNT(*) FROM rb_2025_bucket_season_core),
+                  (SELECT COUNT(*) FROM rb_2025_bucket_season_grade)
+              """).fetchone()
+              assert weekly_rows > 0 and weekly_cells <= weekly_rows * 145, (weekly_rows, weekly_cells)
+              assert core_rows > 0 and grade_rows > 0, (core_rows, grade_rows)
+              cmc_week1 = None
+              if bucket_number == 3:
+                  cmc_week1 = c.execute("""
+                    SELECT cell.eligible_leagues, cell.rostered_leagues, cell.started_leagues
+                    FROM rb_2025_bucket_weekly, UNNEST(cohort_cells) AS u(cell)
+                    WHERE NFL_player_id='00-0033280' AND week=1
+                      AND cell.q_teams='ALL' AND cell.q_roster='ALL' AND cell.q_scoring='ALL'
+                      AND cell.q_pass_td='ALL' AND cell.q_dynasty='ALL' AND cell.q_best_ball='ALL'
+                  """).fetchone()
+                  assert cmc_week1 == (9837, 9766, 9600), cmc_week1
+              receipt = {
+                  'mode': mode, 'bucket': bucket_number, 'bucket_weight': selected_bucket['weight'],
+                  'bucket_players': len(selected_bucket['ids']), 'weekly_seconds': round(weekly_seconds, 3),
+                  'core_seconds': round(core_seconds, 3), 'grade_seconds': round(grade_seconds, 3),
+                  'weekly_outer_rows': weekly_rows, 'weekly_nested_cells': weekly_cells,
+                  'season_core_rows': core_rows, 'season_grade_rows': grade_rows,
+                  'cmc_week1_all': cmc_week1,
+              }
+              print(receipt)
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                  summary.write('## One balanced RB 2025 compact rollup bucket\n')
+                  summary.write(f'- Receipt: `{receipt}`\n')
+                  summary.write('- Cache-only temporary tables; no cache save, artifact, Fly access, API request, or publish step.\n')
               raise SystemExit(0)
           started_at = perf_counter()
           materialize_weekly_core_cohort_cells(
