@@ -35,7 +35,7 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           path: code
-          ref: 8fac800442452df57c7053695896a37bc7c587da
+          ref: 61110be5590dcb6f42b3635ea25d8f7797394470
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
