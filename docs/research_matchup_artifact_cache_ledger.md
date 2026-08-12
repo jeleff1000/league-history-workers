@@ -93,11 +93,24 @@ remaining 2,676 `no_canonical_recipient` memberships were not yet split into
 "canonical player-week absent" versus "same player under a different canonical
 manager," so this run cannot close or promote any open artifact.
 
-The same retained 15 groups are now being re-run by
-[31614575246](https://github.com/jeleff1000/league-history-workers/actions/runs/31614575246)
-against commit `c13d45f`. That read-only receipt adds the required two-way
-partition. It is in progress and must not be counted as evidence or a cache
-change until its uploaded report is inspected and appended to the CSV ledger.
+The two-way re-run, [31614575246](https://github.com/jeleff1000/league-history-workers/actions/runs/31614575246),
+completed successfully against commit `c13d45f`, with cache schema, canonical
+row count, and ops SHA-256 unchanged before versus after. It establishes the
+following bridge partition for the same 15 source groups:
+
+| Receipt outcome | Memberships | Meaning |
+| --- | ---: | --- |
+| Exact canonical player-team recipient | 1,785 | Valid player-team bridge evidence. This is not a promotion receipt yet. |
+| Same canonical player-week, different manager | 2,602 | The player identity exists. The unresolved edge is MFL franchise to canonical manager/team identity. |
+| Canonical player-week absent | 74 | No corresponding canonical player-week exists for the mapped player. This cannot be a cell update. |
+| Missing player crosswalk | 271 | 20 MFL IDs have no ESPN identity and two ESPN IDs are absent from ops; repeated memberships produce the total. |
+
+This receipt proves the next task is a franchise-to-canonical-manager resolver,
+not another broad MFL pull. The resolver must derive a one-to-one edge from
+raw franchise identity and existing league-week evidence, then emit only exact
+canonical player-row recipients. It must leave the 74 absent player-weeks and
+all non-unique franchise-manager cases explicitly unresolved. No artifact
+status is closed or promoted by this bridge diagnostic alone.
 
 Existing `mfl-underpopulated-week-rescue-*` artifacts are retained source-team
 signals, not roster bridges. A direct schema receipt from
