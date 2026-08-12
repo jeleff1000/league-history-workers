@@ -25,6 +25,11 @@ jobs:
     timeout-minutes: 355
     steps:
       - uses: actions/checkout@v5
+      - name: Immutable lineage guard
+        shell: bash
+        run: |
+          echo "Promotion is disabled: GitHub Actions cache objects are immutable, and replacing this cache would violate the one-cache lineage contract." >&2
+          exit 2
       - name: Checkout private research code
         uses: actions/checkout@v5
         with:
@@ -144,25 +149,3 @@ jobs:
           if-no-files-found: error
           retention-days: 90
           compression-level: 0
-      - name: Replace only the exact canonical cache key
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
-          test "${#ids[@]}" -eq 1
-          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${ids[0]}"
-      - uses: actions/cache/save@v5
-        with:
-          path: research_public_lake
-          key: ${{ env.CANONICAL_CACHE_KEY }}
-      - name: Verify canonical cache exists under the same key
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
-          test "${#ids[@]}" -eq 1
-          echo "canonical_cache_key=${CANONICAL_CACHE_KEY} cache_id=${ids[0]}"
