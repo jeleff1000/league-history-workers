@@ -10,6 +10,8 @@ on:
       - scripts/research_cohorts/test_validate_artifact_cache_ledger.py
       - scripts/research_cohorts/enrich_artifact_cache_ledger_bridge_evidence.py
       - scripts/research_cohorts/test_enrich_artifact_cache_ledger_bridge_evidence.py
+      - scripts/research_cohorts/refresh_artifact_cache_ledger.py
+      - scripts/research_cohorts/test_refresh_artifact_cache_ledger.py
 
 jobs:
   validate:
@@ -25,6 +27,7 @@ jobs:
           pytest -q
           scripts/research_cohorts/test_validate_artifact_cache_ledger.py
           scripts/research_cohorts/test_enrich_artifact_cache_ledger_bridge_evidence.py
+          scripts/research_cohorts/test_refresh_artifact_cache_ledger.py
       - name: Fail fast on invalid ledger evidence
         run: >-
           python scripts/research_cohorts/validate_artifact_cache_ledger.py

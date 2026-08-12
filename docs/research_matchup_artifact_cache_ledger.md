@@ -213,6 +213,22 @@ cells and 139,082 non-null conflicts. Therefore a successful schema migration
 must not mark the source family complete by itself: it can close only the four
 schema-only artifacts and any later candidates with an exact proven recipient.
 
+### Non-null conflict inventory
+
+There are 233 artifacts with a source value that differs from an existing
+non-null cache value. The ledger guard requires every one to name
+`precedence` in `next_action`; no current workflow is allowed to overwrite
+these values implicitly.
+
+| Evidence family | Artifacts | Conflict cells | Source fields represented | Required decision |
+| --- | ---: | ---: | --- | --- |
+| Team-week signal evidence | 221 | 137,881 | `win`, `loss`, `tie`, `team_points`, `is_playoffs`, `champion` | Compare exact platform provenance at the proven player-team recipient; preserve same-tier disagreement. |
+| Direct MFL player evidence | 12 | 1,201 | `win`, `team_points`, `is_playoffs` | Direct player-week source may outrank a derived cache value only after its identity is unique; otherwise preserve. |
+
+Championship precedence remains especially strict: a season-level champion
+marker never outranks or creates championship-game credit. Only an explicit
+championship-week marker with a champion result is eligible evidence.
+
 ## Canonical promotion contract
 
 The approved GitHub Actions cache is immutable: a runner can restore and

@@ -71,6 +71,10 @@ def validate_rows(rows: list[dict[str, str]]) -> dict:
         if status not in CLOSED_STATUSES:
             if gap_total == 0:
                 issues.append(_issue(artifact_id, "open_row_has_no_quantified_gap"))
+        if _number(row, "cache_conflict_cells") and "precedence" not in str(
+            row.get("next_action", "") or ""
+        ).lower():
+            issues.append(_issue(artifact_id, "conflict_missing_precedence_action"))
 
         # A bridge claim is evidence, not a vague note.  If an artifact says
         # it has player-to-team evidence, retain enough receipt information to

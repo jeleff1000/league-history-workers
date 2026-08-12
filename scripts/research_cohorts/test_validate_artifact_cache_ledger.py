@@ -91,3 +91,19 @@ def test_rejects_incomplete_player_team_bridge_evidence():
         {"artifact_id": "1", "issue": "bridge_evidence_missing_strength"},
         {"artifact_id": "1", "issue": "bridge_evidence_missing_receipt"},
     ]
+
+
+def test_rejects_conflict_without_precedence_action():
+    result = validate_rows([
+        _row(
+            final_status="cache_conflict_preserved",
+            final_reason="Source conflicts with a canonical non-null value.",
+            next_action="preserve_conflicts",
+            cache_conflict_cells="1",
+        )
+    ])
+
+    assert result["ok"] is False
+    assert result["issues"] == [
+        {"artifact_id": "1", "issue": "conflict_missing_precedence_action"},
+    ]

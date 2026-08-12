@@ -77,4 +77,4 @@ def test_refresh_records_current_direct_player_reaudit(tmp_path):
     assert row["cache_conflict_cells"] == "3"
     assert row["unmatched_cache_cells"] == "2"
     assert row["final_status"] == "partial_schema_blocked_direct_identity"
-    assert row["next_action"] == "add_loss_tie_schema_then_resolve_direct_identity_or_preserve_conflicts"
+    assert row["next_action"] == "add_loss_tie_schema_then_resolve_direct_identity_and_precedence_adjudication"
