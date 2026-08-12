@@ -174,6 +174,7 @@ def build(
         seen: set[tuple[Any, ...]] = set()
         candidate_rows: list[list[Any]] = []
         roster_only_rows = 0
+        inactive_started_rows = 0
         for source in source_rows:
             required_source = ("source_franchise_id", "mfl_player_id", "espn_id", "NFL_player_id", "canonical_manager")
             absent = [field for field in required_source if source.get(field) is None]
@@ -186,8 +187,13 @@ def build(
             if not resolved_player or not resolved_position:
                 raise ValueError(f"player identity/position absent from both ops stat and bio tables: {source}")
             started = int(bool(source["is_started"]))
-            if started and (source.get("fantasy_points") is None or source.get("ops_lamar") is None):
+            source_points = source.get("fantasy_points")
+            source_points_zero = source_points is None or float(source_points) == 0.0
+            inactive_started = started and source_points_zero and source.get("ops_lamar") is None
+            if started and not inactive_started and (source_points is None or source.get("ops_lamar") is None):
                 raise ValueError(f"started source row lacks direct score or player-week LAMAR: {source}")
+            if inactive_started:
+                inactive_started_rows += 1
             if not started and source.get("fantasy_points") is None:
                 roster_only_rows += 1
             logical_key = (
@@ -216,7 +222,7 @@ def build(
                 "manager": source["canonical_manager"],
                 "is_started": started,
                 "is_rostered": 1,
-                "fantasy_points": float(source["fantasy_points"]) if source.get("fantasy_points") is not None else source.get("ops_fantasy_points"),
+                "fantasy_points": float(source_points) if source_points is not None else (0.0 if inactive_started else source.get("ops_fantasy_points")),
                 "manager_lamar": float(source["ops_lamar"]) if source.get("ops_lamar") is not None else 0.0,
                 "player": resolved_player,
                 "position": resolved_position,
@@ -249,6 +255,7 @@ def build(
             "schema": names,
             "source_fields": ["MFL roster membership", "MFL score", "MFL player directory", "ESPN-to-NFL crosswalk", "ops player/week", "existing canonical team-week"],
             "source_roster_only_rows": roster_only_rows,
+            "source_inactive_started_rows": inactive_started_rows,
         }
         report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")

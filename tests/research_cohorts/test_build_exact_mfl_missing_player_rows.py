@@ -55,7 +55,6 @@ def test_builds_one_complete_exact_schema_mfl_row_from_source_membership_and_tea
         position VARCHAR, lamar_12t_idp_ppr_6pt DOUBLE
       )
     """)
-    con.execute("INSERT INTO nfl_historical.nfl_player_stats_all VALUES ('nfl-missing', 2012, 1, 'Missing Player', 'WR', 7.5)")
     con.execute("CREATE TABLE nfl_historical.player_bio (NFL_player_id VARCHAR, player VARCHAR, position VARCHAR)")
     con.execute("INSERT INTO nfl_historical.player_bio VALUES ('nfl-missing', 'Missing Player', 'WR')")
     con.close()
@@ -66,7 +65,7 @@ def test_builds_one_complete_exact_schema_mfl_row_from_source_membership_and_tea
         ("source_year", "INTEGER"), ("source_franchise_id", "VARCHAR"), ("source_manager", "VARCHAR"),
         ("mfl_player_id", "VARCHAR"), ("is_started", "INTEGER"), ("fantasy_points", "DOUBLE"),
     ], [
-        ("league", 2012, 1, 2012, "0001", "Manager", "100", 1, 12.5),
+        ("league", 2012, 1, 2012, "0001", "Manager", "100", 1, None),
         ("league", 2012, 1, 2012, "0001", "Manager", "101", 1, 8.0),
     ])
     directory = tmp_path / "directory.parquet"
@@ -103,8 +102,8 @@ def test_builds_one_complete_exact_schema_mfl_row_from_source_membership_and_tea
     assert values["NFL_player_id"] == "nfl-missing"
     assert values["is_rostered"] == 1
     assert values["is_started"] == 1
-    assert values["fantasy_points"] == 12.5
-    assert values["manager_lamar"] == 7.5
+    assert values["fantasy_points"] == 0.0
+    assert values["manager_lamar"] == 0.0
     assert values["fantasy_position"] == "WR"
     assert values["win"] == 1
     assert values["team_points"] == 101.5
