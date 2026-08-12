@@ -64,10 +64,39 @@ def main() -> None:
         """).fetchone()[0]
         if existing_new:
             raise SystemExit(f"new-row candidates already present in canonical table: {existing_new}")
-    key = "db_name,year,week,NFL_player_id,manager,team_key,team_name,platform"
+    key_columns = ["db_name", "year", "week", "NFL_player_id", "manager", "team_key", "team_name", "platform"]
+    key = ",".join('"' + column + '"' for column in key_columns)
+    raw_delta_rows = int(con.execute("SELECT COUNT(*) FROM delta_raw").fetchone()[0])
     dup = con.execute(f"SELECT COUNT(*) FROM (SELECT {key} FROM delta_raw GROUP BY ALL HAVING COUNT(*)>1)").fetchone()[0]
+    value_columns = sorted(
+        column for column in dcols
+        if column not in key_columns and column not in {"source_file", "source_files"}
+    )
     if dup:
-        raise SystemExit(f"duplicate delta keys: {dup}")
+        conflicts = con.execute(f"""
+            SELECT COUNT(*) FROM (
+              SELECT {key} FROM delta_raw GROUP BY ALL HAVING
+              {' OR '.join(f"COUNT(DISTINCT COALESCE(CAST(\"{column}\" AS VARCHAR), '<NULL>')) > 1" for column in value_columns)}
+            )
+        """).fetchone()[0]
+        if conflicts:
+            raise SystemExit(f"conflicting duplicate delta keys: {conflicts}")
+        expressions = [key]
+        for column in value_columns:
+            expressions.append(f'MAX("{column}") AS "{column}"')
+        for column in ("source_file", "source_files"):
+            if column in dcols:
+                expressions.append(
+                    f"STRING_AGG(DISTINCT CAST(\"{column}\" AS VARCHAR), '|') AS \"{column}\""
+                )
+        con.execute(
+            "CREATE OR REPLACE TEMP TABLE delta_unique AS SELECT "
+            + ", ".join(expressions)
+            + " FROM delta_raw GROUP BY "
+            + key
+        )
+    else:
+        con.execute("CREATE OR REPLACE TEMP TABLE delta_unique AS SELECT * FROM delta_raw")
     before_rows = con.execute("SELECT COUNT(*) FROM public.player_fantasy").fetchone()[0]
     con.execute(f"""
       CREATE OR REPLACE TEMP TABLE matched AS
@@ -83,7 +112,7 @@ def main() -> None:
              p.final_playoff_seed canonical_final_playoff_seed,
              p.made_playoffs canonical_made_playoffs,
              d.*
-      FROM public.player_fantasy p JOIN delta_raw d
+      FROM public.player_fantasy p JOIN delta_unique d
         ON d.db_name=p.db_name AND CAST(d.year AS INTEGER)=CAST(p.year AS INTEGER)
        AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER)
        AND d.NFL_player_id=p.NFL_player_id
@@ -93,7 +122,7 @@ def main() -> None:
        AND d.team_name IS NOT DISTINCT FROM p.team_name
     """)
     matched = con.execute("SELECT COUNT(*) FROM matched").fetchone()[0]
-    if matched != con.execute("SELECT COUNT(*) FROM delta_raw").fetchone()[0]:
+    if matched != con.execute("SELECT COUNT(*) FROM delta_unique").fetchone()[0]:
         raise SystemExit("delta contains unmatched canonical player rows")
     fields = {
         "win": "source_win",
@@ -119,8 +148,11 @@ def main() -> None:
         "is_playoffs=CASE WHEN p.is_playoffs IS NULL THEN m.source_playoffs ELSE p.is_playoffs END",
         "champion=CASE WHEN p.champion IS NULL THEN m.source_champion ELSE p.champion END",
         "final_playoff_seed=CASE WHEN p.final_playoff_seed IS NULL THEN m.source_final_playoff_seed ELSE p.final_playoff_seed END",
-        "made_playoffs=CASE WHEN p.made_playoffs IS NULL THEN m.source_made_playoffs ELSE p.made_playoffs END",
     ]
+    if "source_made_playoffs" in dcols:
+        update_assignments.append(
+            "made_playoffs=CASE WHEN p.made_playoffs IS NULL THEN m.source_made_playoffs ELSE p.made_playoffs END"
+        )
     if "loss" in pcols and "source_loss" in dcols:
         update_assignments.insert(1, "loss=CASE WHEN p.loss IS NULL THEN m.source_loss ELSE p.loss END")
     if "tie" in pcols and "source_tie" in dcols:
@@ -152,7 +184,9 @@ def main() -> None:
     report = {
         "in_place": True, "cache_mutated": True, "new_lineage": False,
         "ops_untouched": True, "schema_unchanged": True,
-        "delta_rows": int(con.execute("SELECT COUNT(*) FROM delta_raw").fetchone()[0]),
+        "delta_rows_raw": raw_delta_rows,
+        "delta_duplicate_rows_collapsed": raw_delta_rows - int(con.execute("SELECT COUNT(*) FROM delta_unique").fetchone()[0]),
+        "delta_rows": int(con.execute("SELECT COUNT(*) FROM delta_unique").fetchone()[0]),
         "matched_rows": int(matched),
         "inserted_rows": int(new_count),
         "improvements_by_field": {k:int(v) for k,v in improvements.items()},
@@ -160,13 +194,13 @@ def main() -> None:
     if "source_file" in dcols:
         report["source_file_rows"] = {
             str(r[0]): int(r[1]) for r in con.execute(
-                "SELECT source_file, COUNT(*) FROM delta_raw GROUP BY 1 ORDER BY 1"
+                "SELECT source_file, COUNT(*) FROM delta_unique GROUP BY 1 ORDER BY 1"
             ).fetchall()
         }
     if "source_files" in dcols:
         report["source_file_rows"] = {
             str(r[0]): int(r[1]) for r in con.execute(
-                "SELECT source_files, COUNT(*) FROM delta_raw GROUP BY 1 ORDER BY 1"
+                "SELECT source_files, COUNT(*) FROM delta_unique GROUP BY 1 ORDER BY 1"
             ).fetchall()
         }
     args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
