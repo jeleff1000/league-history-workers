@@ -14,6 +14,7 @@ on:
         options:
           - cmc_week1
           - cmc_2025_all_grains
+          - myles_2025_season
 
 permissions:
   contents: read
@@ -69,7 +70,7 @@ jobs:
             WHERE COALESCE(season_type, 'REG') = 'REG' AND week IS NOT NULL
           """)
           mode = os.environ['PILOT_MODE']
-          if mode not in {'cmc_week1', 'cmc_2025_all_grains'}:
+          if mode not in {'cmc_week1', 'cmc_2025_all_grains', 'myles_2025_season'}:
               raise ValueError(f'unsupported pilot mode: {mode}')
           source_rows = c.execute("SELECT COUNT(*) FROM lake.public.player_fantasy WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1").fetchone()[0]
           started_at = perf_counter()
@@ -277,6 +278,77 @@ jobs:
               with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
                   summary.write('## CMC 2025 all-grain compact cache pilot\n')
                   summary.write(f'- Receipt: `{full_receipt}`\n')
+                  summary.write('- Cache-only computation; no Fly read/write, settings join, API request, artifact, or publish step.\n')
+
+          if mode == 'myles_2025_season':
+              myles_ids = c.execute("""
+                SELECT DISTINCT CAST(NFL_player_id AS VARCHAR)
+                FROM ops.nfl_historical.nfl_player_stats_all
+                WHERE CAST(year AS INTEGER)=2025
+                  AND LOWER(TRIM(CAST(player AS VARCHAR)))='myles garrett'
+              """).fetchall()
+              assert len(myles_ids) == 1, myles_ids
+              myles_id = myles_ids[0][0]
+              cache_positions = c.execute("""
+                SELECT DISTINCT CAST(position AS VARCHAR)
+                FROM lake.public.player_fantasy
+                WHERE CAST(year AS INTEGER)=2025 AND CAST(NFL_player_id AS VARCHAR)=?
+              """, [myles_id]).fetchall()
+              assert cache_positions == [('DL',)], cache_positions
+              materialize_weekly_core_cohort_cells(
+                  c, source_table='lake.public.player_fantasy',
+                  valid_player_weeks_table='cached_regular_player_weeks', output_table='myles_2025_weekly',
+                  year=2025, week=None, player_id=myles_id, split_threshold=150,
+              )
+              materialize_season_core_cohort_cells(
+                  c, source_table='lake.public.player_fantasy', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+                  output_table='myles_2025_season_core', year=2025, player_id=myles_id, split_threshold=50,
+              )
+              materialize_season_bracket_grade_cells(
+                  c, source_table='lake.public.player_fantasy', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+                  output_table='myles_2025_season_grade', year=2025, player_id=myles_id, split_threshold=50,
+              )
+              c.execute("""
+                CREATE OR REPLACE TABLE myles_2025_season AS
+                SELECT core.*, grades.grade_cells
+                FROM myles_2025_season_core AS core
+                INNER JOIN myles_2025_season_grade AS grades USING (NFL_player_id, year, position)
+              """)
+              weekly_rows, weekly_min, weekly_max, weekly_cells = c.execute("""
+                SELECT COUNT(*), MIN(week), MAX(week), COALESCE(SUM(list_count(cohort_cells)), 0)
+                FROM myles_2025_weekly
+              """).fetchone()
+              assert weekly_rows > 0 and weekly_min >= 1 and weekly_max <= 18, (weekly_rows, weekly_min, weekly_max)
+              assert weekly_cells <= weekly_rows * 145, weekly_cells
+              assert c.execute('SELECT COUNT(*) FROM myles_2025_season').fetchone()[0] == 1
+              season_position, season_core_cells, season_grade_cells = c.execute("""
+                SELECT position, list_count(cohort_cells), list_count(grade_cells) FROM myles_2025_season
+              """).fetchone()
+              assert season_position == 'DL', season_position
+              assert season_core_cells <= 145 and season_grade_cells <= 577
+              core_invalid = c.execute("""
+                SELECT COUNT(*) FROM myles_2025_season, UNNEST(cohort_cells) AS u(cell)
+                WHERE cell.eligible_league_weeks < 0 OR cell.rostered_league_weeks < 0
+                   OR cell.started_league_weeks < 0 OR cell.started_league_weeks > cell.eligible_league_weeks
+                   OR cell.healthy_started_league_weeks > cell.healthy_eligible_league_weeks
+                   OR cell.valid_started_outcomes > cell.started_league_weeks
+              """).fetchone()[0]
+              grade_invalid = c.execute("""
+                SELECT COUNT(*) FROM myles_2025_season, UNNEST(grade_cells) AS u(cell)
+                WHERE cell.eligible_leagues < 0 OR cell.playoff_leagues < 0 OR cell.champ_leagues < 0
+                   OR cell.champ_leagues > cell.playoff_leagues OR cell.playoff_leagues > cell.eligible_leagues
+              """).fetchone()[0]
+              assert core_invalid == 0 and grade_invalid == 0, (core_invalid, grade_invalid)
+              myles_receipt = {
+                  'mode': mode, 'myles_id': myles_id, 'canonical_position': season_position,
+                  'weekly_outer_rows': weekly_rows, 'weekly_week_range': (weekly_min, weekly_max),
+                  'weekly_nested_cells': weekly_cells, 'season_core_cells': season_core_cells,
+                  'season_grade_cells': season_grade_cells,
+              }
+              print(myles_receipt)
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                  summary.write('## Myles Garrett 2025 compact IDP cache pilot\n')
+                  summary.write(f'- Receipt: `{myles_receipt}`\n')
                   summary.write('- Cache-only computation; no Fly read/write, settings join, API request, artifact, or publish step.\n')
           PY
 
