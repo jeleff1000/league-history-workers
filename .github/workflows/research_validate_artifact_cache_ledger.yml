@@ -1,0 +1,26 @@
+name: Validate research artifact cache ledger
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - docs/research_matchup_artifact_cache_ledger.csv
+      - docs/research_matchup_artifact_cache_ledger.md
+      - scripts/research_cohorts/validate_artifact_cache_ledger.py
+      - scripts/research_cohorts/test_validate_artifact_cache_ledger.py
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install pytest
+      - name: Run ledger validator tests
+        run: pytest -q scripts/research_cohorts/test_validate_artifact_cache_ledger.py
+      - name: Fail fast on invalid ledger evidence
+        run: >-
+          python scripts/research_cohorts/validate_artifact_cache_ledger.py
+          --ledger docs/research_matchup_artifact_cache_ledger.csv
