@@ -315,7 +315,7 @@ jobs:
                 ) > 0
                 ORDER BY guarded_rows DESC, NFL_player_id
               """).fetchall()
-              assert len(players) == 163, len(players)
+              assert len(players) == 164, len(players)
               buckets = [{'weight': 0, 'players': []} for _ in range(15)]
               for player in players:
                   bucket = min(buckets, key=lambda value: value['weight'])
