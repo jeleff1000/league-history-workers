@@ -730,8 +730,8 @@ jobs:
                   (SELECT COUNT(*) FROM myles_2025_season_core),
                   (SELECT COUNT(*) FROM myles_2025_season_grade)
               """).fetchone()
-              weekly_rows, weekly_min, weekly_max, weekly_cells = c.execute("""
-                SELECT COUNT(*), MIN(week), MAX(week), COALESCE(SUM(list_count(cohort_cells)), 0)
+              weekly_rows, weekly_players, weekly_min, weekly_max, weekly_cells = c.execute("""
+                SELECT COUNT(*), COUNT(DISTINCT NFL_player_id), MIN(week), MAX(week), COALESCE(SUM(list_count(cohort_cells)), 0)
                 FROM myles_2025_weekly
               """).fetchone()
               assert weekly_rows > 0 and weekly_min >= 1 and weekly_max <= 18, (weekly_rows, weekly_min, weekly_max)
@@ -743,7 +743,7 @@ jobs:
                   receipt = {
                       'mode': mode, 'canonical_position': lane_position,
                       'weekly_seconds': round(weekly_seconds, 3),
-                      'weekly_batch_outer_rows': weekly_batch_rows,
+                      'weekly_batch_outer_rows': weekly_batch_rows, 'weekly_distinct_players': weekly_players,
                       'cmc_weekly_outer_rows': weekly_rows,
                       'cmc_week_range': (weekly_min, weekly_max),
                       'cmc_nested_cells': weekly_cells,
