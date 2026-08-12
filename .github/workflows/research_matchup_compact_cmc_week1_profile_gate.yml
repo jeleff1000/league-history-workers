@@ -18,6 +18,7 @@ on:
           - cmc_2025_season
           - cmc_2025_all_grains
           - myles_2025_season
+          - rb_2025_weekly
           - rb_2025_lane
           - rb_2025_week1_inventory
           - rb_2025_week1_distribution
@@ -91,7 +92,7 @@ jobs:
             WHERE COALESCE(season_type, 'REG') = 'REG' AND week IS NOT NULL
           """)
           mode = os.environ['PILOT_MODE']
-          if mode not in {'cmc_week1', 'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'rb_2025_bucket_inventory', 'rb_2025_bucket', 'local_cache_export'}:
+          if mode not in {'cmc_week1', 'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_weekly', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'rb_2025_bucket_inventory', 'rb_2025_bucket', 'local_cache_export'}:
             raise ValueError(f'unsupported pilot mode: {mode}')
           if mode == 'local_cache_export':
               receipt = {
@@ -674,7 +675,7 @@ jobs:
                   summary.write('## CMC 2025 all-grain compact cache pilot\n')
                   summary.write(f'- Receipt: `{full_receipt}`\n')
                   summary.write('- Cache-only computation; no Fly read/write, settings join, API request, artifact, or publish step.\n')
-          if mode in {'myles_2025_season', 'rb_2025_lane'}:
+          if mode in {'myles_2025_season', 'rb_2025_weekly', 'rb_2025_lane'}:
               player_name, lane_position = (
                   ('myles garrett', 'DL') if mode == 'myles_2025_season'
                   else ('christian mccaffrey', 'RB')
@@ -696,13 +697,9 @@ jobs:
                   assert set(cache_positions).issubset({('DL',), ('DE',), ('DT',), ('NT',), ('EDGE',)}), cache_positions
               else:
                   assert (lane_position,) in set(cache_positions), cache_positions
-              materialize_narrow_position_year_source(
-                  c, source_table='lake.public.player_fantasy', output_table='lane_2025_source',
-                  year=2025, position=lane_position,
-              )
               weekly_started = perf_counter()
               materialize_weekly_core_cohort_cells(
-                  c, source_table='lane_2025_source',
+                  c, source_table='lake.public.player_fantasy',
                   valid_player_weeks_table='cached_regular_player_weeks', output_table='weekly_2025_dl',
                   year=2025, week=None, player_id=None, position=lane_position, split_threshold=150,
               )
@@ -711,13 +708,13 @@ jobs:
               c.execute('CREATE OR REPLACE TABLE myles_2025_weekly AS SELECT * FROM weekly_2025_dl WHERE NFL_player_id=?', [myles_id])
               core_started = perf_counter()
               materialize_season_core_cohort_position_batch(
-                  c, source_table='lane_2025_source', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+                  c, source_table='lake.public.player_fantasy', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
                   output_table='myles_2025_season_core', year=2025, position=lane_position, split_threshold=50,
               )
               core_seconds = perf_counter() - core_started
               grade_started = perf_counter()
               materialize_season_bracket_grade_position_batch(
-                  c, source_table='lane_2025_source', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+                  c, source_table='lake.public.player_fantasy', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
                   output_table='myles_2025_season_grade', year=2025, position=lane_position, split_threshold=50,
               )
               grade_seconds = perf_counter() - grade_started
@@ -738,9 +735,25 @@ jobs:
                 FROM myles_2025_weekly
               """).fetchone()
               assert weekly_rows > 0 and weekly_min >= 1 and weekly_max <= 18, (weekly_rows, weekly_min, weekly_max)
-              if mode == 'rb_2025_lane':
+              if mode in {'rb_2025_weekly', 'rb_2025_lane'}:
                   assert weekly_rows == 17 and (weekly_min, weekly_max) == (1, 18), (weekly_rows, weekly_min, weekly_max)
               assert weekly_cells <= weekly_rows * 145, weekly_cells
+              if mode == 'rb_2025_weekly':
+                  assert weekly_batch_rows > weekly_rows, weekly_batch_rows
+                  receipt = {
+                      'mode': mode, 'canonical_position': lane_position,
+                      'weekly_seconds': round(weekly_seconds, 3),
+                      'weekly_batch_outer_rows': weekly_batch_rows,
+                      'cmc_weekly_outer_rows': weekly_rows,
+                      'cmc_week_range': (weekly_min, weekly_max),
+                      'cmc_nested_cells': weekly_cells,
+                  }
+                  print(receipt)
+                  with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                      summary.write('## All rostered RB 2025 weekly compact cache pilot\n')
+                      summary.write(f'- Receipt: `{receipt}`\n')
+                      summary.write('- Direct immutable-cache read; no lane copy, cache save, Fly access, artifact, or publish step.\n')
+                  raise SystemExit(0)
               assert c.execute('SELECT COUNT(*) FROM myles_2025_season').fetchone()[0] == 1
               season_position, season_core_cells, season_grade_cells = c.execute("""
                 SELECT position, list_count(cohort_cells), list_count(grade_cells) FROM myles_2025_season
