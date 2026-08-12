@@ -220,7 +220,7 @@ jobs:
     if: ${{ (inputs.directory_only || 'false') != 'true' && (inputs.merge_only || 'false') != 'true' }}
     needs: prepare
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       max-parallel: ${{ fromJSON(needs.prepare.outputs.max_parallel) }}
