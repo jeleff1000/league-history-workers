@@ -297,11 +297,15 @@ jobs:
                 WHERE CAST(year AS INTEGER)=2025 AND CAST(NFL_player_id AS VARCHAR)=?
               """, [myles_id]).fetchall()
               assert set(cache_positions).issubset({('DL',), ('DE',), ('DT',), ('NT',), ('EDGE',)}), cache_positions
+              weekly_started = perf_counter()
               materialize_weekly_core_cohort_cells(
                   c, source_table='lake.public.player_fantasy',
-                  valid_player_weeks_table='cached_regular_player_weeks', output_table='myles_2025_weekly',
-                  year=2025, week=None, player_id=myles_id, split_threshold=150,
+                  valid_player_weeks_table='cached_regular_player_weeks', output_table='weekly_2025_all',
+                  year=2025, week=None, player_id=None, split_threshold=150,
               )
+              weekly_seconds = perf_counter() - weekly_started
+              weekly_batch_rows = c.execute('SELECT COUNT(*) FROM weekly_2025_all').fetchone()[0]
+              c.execute('CREATE OR REPLACE TABLE myles_2025_weekly AS SELECT * FROM weekly_2025_all WHERE NFL_player_id=?', [myles_id])
               core_started = perf_counter()
               materialize_season_core_cohort_position_batch(
                   c, source_table='lake.public.player_fantasy', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
@@ -353,6 +357,7 @@ jobs:
               assert core_invalid == 0 and grade_invalid == 0, (core_invalid, grade_invalid)
               myles_receipt = {
                   'mode': mode, 'myles_id': myles_id, 'canonical_position': season_position,
+                  'weekly_seconds': round(weekly_seconds, 3), 'weekly_batch_outer_rows': weekly_batch_rows,
                   'core_seconds': round(core_seconds, 3), 'grade_seconds': round(grade_seconds, 3),
                   'batch_core_outer_rows': batch_core_rows, 'batch_grade_outer_rows': batch_grade_rows,
                   'weekly_outer_rows': weekly_rows, 'weekly_week_range': (weekly_min, weekly_max),
