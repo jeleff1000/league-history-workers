@@ -22,6 +22,7 @@ on:
           - rb_2025_week1_inventory
           - rb_2025_week1_distribution
           - rb_2025_week1_residual_shapes
+          - rb_2025_bucket_inventory
           - local_cache_export
 
 permissions:
@@ -61,6 +62,7 @@ jobs:
           from time import perf_counter
           from scripts.research_cohorts.compact_matchup_cells import (
               _source_without_bad_identity_rows,
+              _canonical_position_sql,
               materialize_career_cohort_grade_cells,
               materialize_career_core_cohort_cells,
               materialize_narrow_position_year_source,
@@ -82,7 +84,7 @@ jobs:
             WHERE COALESCE(season_type, 'REG') = 'REG' AND week IS NOT NULL
           """)
           mode = os.environ['PILOT_MODE']
-          if mode not in {'cmc_week1', 'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'local_cache_export'}:
+          if mode not in {'cmc_week1', 'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'rb_2025_bucket_inventory', 'local_cache_export'}:
             raise ValueError(f'unsupported pilot mode: {mode}')
           if mode == 'local_cache_export':
               receipt = {
@@ -291,6 +293,52 @@ jobs:
                   summary.write('## RB 2025 week 1 residual-shape diagnostic\n')
                   summary.write(f'- Receipt: `{receipt}`\n')
                   summary.write('- Cache-only diagnostic; no cache save, Fly access, API request, aggregation output, or publish step.\n')
+              raise SystemExit(0)
+          if mode == 'rb_2025_bucket_inventory':
+              players = c.execute(f"""
+                SELECT
+                  CAST(NFL_player_id AS VARCHAR) AS NFL_player_id,
+                  ANY_VALUE(CAST(player AS VARCHAR)) AS player,
+                  COUNT(*)::BIGINT AS guarded_rows,
+                  COUNT(DISTINCT CAST(db_name AS VARCHAR)) FILTER (
+                    WHERE is_rostered IS NULL OR CAST(is_rostered AS INTEGER) <> 0
+                  )::BIGINT AS rostered_leagues,
+                  COUNT(DISTINCT CAST(week AS INTEGER)) FILTER (
+                    WHERE is_rostered IS NULL OR CAST(is_rostered AS INTEGER) <> 0
+                  )::BIGINT AS rostered_weeks
+                FROM {rollup_source}
+                WHERE CAST(year AS INTEGER)=2025
+                  AND {_canonical_position_sql('position')}='RB'
+                GROUP BY 1
+                HAVING COUNT(*) FILTER (
+                  WHERE is_rostered IS NULL OR CAST(is_rostered AS INTEGER) <> 0
+                ) > 0
+                ORDER BY guarded_rows DESC, NFL_player_id
+              """).fetchall()
+              assert len(players) == 163, len(players)
+              buckets = [{'weight': 0, 'players': []} for _ in range(15)]
+              for player in players:
+                  bucket = min(buckets, key=lambda value: value['weight'])
+                  bucket['weight'] += player[2]
+                  bucket['players'].append({
+                    'id': player[0], 'player': player[1], 'guarded_rows': player[2],
+                    'rostered_leagues': player[3], 'rostered_weeks': player[4],
+                  })
+              receipt = {
+                'mode': mode, 'valid_rostered_rb_players': len(players),
+                'total_guarded_rows': sum(player[2] for player in players),
+                'buckets': [
+                  {'bucket': index + 1, 'weight': bucket['weight'],
+                   'player_count': len(bucket['players']), 'players': bucket['players']}
+                  for index, bucket in enumerate(buckets)
+                ],
+              }
+              assert max(bucket['weight'] for bucket in buckets) <= min(bucket['weight'] for bucket in buckets) * 1.10
+              print(receipt)
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                  summary.write('## RB 2025 fifteen-bucket immutable-cache inventory\n')
+                  summary.write(f'- Receipt: `{receipt}`\n')
+                  summary.write('- Cache-only inventory; no cache save, aggregation table, Fly access, API request, artifact, or publish step.\n')
               raise SystemExit(0)
           started_at = perf_counter()
           materialize_weekly_core_cohort_cells(
