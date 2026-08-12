@@ -253,9 +253,34 @@ jobs:
                 WHERE e.rostered_leagues < 50
                 GROUP BY 1,5 ORDER BY e.rostered_leagues, e.NFL_player_id LIMIT 100
               """).fetchall()
+              candidate_impact = c.execute(f"""
+                WITH active_2025 AS (
+                  SELECT DISTINCT CAST(NFL_player_id AS VARCHAR) AS NFL_player_id
+                  FROM lake.public.player_active_week
+                  WHERE CAST(year AS INTEGER)=2025
+                ), rb AS (
+                  SELECT CAST(NFL_player_id AS VARCHAR) AS NFL_player_id,
+                    CAST(db_name AS VARCHAR) AS db_name,
+                    CASE WHEN active_2025.NFL_player_id IS NULL
+                              AND COALESCE(TRIM(CAST(team_key AS VARCHAR)), '')=''
+                              AND COALESCE(TRIM(CAST(team_name AS VARCHAR)), '')=''
+                         THEN 1 ELSE 0 END AS would_exclude
+                  FROM {rollup_source}
+                  LEFT JOIN active_2025 USING (NFL_player_id)
+                  WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1
+                    AND UPPER(TRIM(CAST(position AS VARCHAR)))='RB'
+                )
+                SELECT COUNT(*)::BIGINT AS rows_after_first_guard,
+                  SUM(would_exclude)::BIGINT AS candidate_rows,
+                  COUNT(DISTINCT NFL_player_id)::BIGINT AS rb_ids_after_first_guard,
+                  COUNT(DISTINCT NFL_player_id) FILTER (WHERE would_exclude=1)::BIGINT AS candidate_rb_ids,
+                  COUNT(DISTINCT NFL_player_id) FILTER (WHERE would_exclude=0)::BIGINT AS rb_ids_after_candidate
+                FROM rb
+              """).fetchone()
               receipt = {
                 'mode': mode, 'source_rows_read': source_rows, 'filtered_source_rows': filtered_source_rows,
                 'residual_shapes': residual_shapes, 'residual_player_sample': residual_players,
+                'inactive_identityless_candidate_impact': candidate_impact,
               }
               print(receipt)
               with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
