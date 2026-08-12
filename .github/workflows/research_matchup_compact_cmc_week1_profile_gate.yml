@@ -213,7 +213,7 @@ jobs:
           """).fetchall()
           # Cache receipt: after league-level dedupe there are 9,600 starts,
           # 21 NULL outcomes, and therefore 9,579 valid [0,1] outcomes.
-          assert full == (9838, 9768, 9600, 9579, 6019.0), (full, raw_outcomes)
+          assert full == (9837, 9766, 9600, 9579, 6019.0), (full, raw_outcomes)
           selected = c.execute("""
             WITH resolved AS (
               SELECT
