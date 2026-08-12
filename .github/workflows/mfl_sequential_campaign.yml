@@ -1,4 +1,4 @@
-name: MFL Sequential Quota Campaign
+﻿name: MFL Sequential Ledger Task Campaign
 
 on:
   workflow_dispatch:
@@ -8,60 +8,524 @@ permissions:
   contents: read
 
 concurrency:
-  group: mfl-sequential-quota-campaign
+  group: mfl-sequential-ledger-task-campaign
   cancel-in-progress: false
 
-# Reusable-workflow jobs hold no runner while waiting on `needs`. Each child
-# discovery workflow still runs 256 shards with max-parallel=15.
 jobs:
-  window_2018_24000:
+  window_00:
     uses: ./.github/workflows/mfl_historical_discovery_256.yml
     with:
       shard_count: "256"
       max_parallel: "15"
-      start_year: "2018"
+      start_year: "1993"
       end_year: "2018"
-      id_start: "24000"
-      id_end: "24999"
-      request_sleep: "5.0"
-    secrets: inherit
-
-  window_2017_00000:
-    needs: window_2018_24000
-    uses: ./.github/workflows/mfl_historical_discovery_256.yml
-    with:
-      shard_count: "256"
-      max_parallel: "15"
-      start_year: "2017"
-      end_year: "2017"
       id_start: "0"
-      id_end: "9999"
+      id_end: "0"
       request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "0"
     secrets: inherit
-
-  window_2018_25600:
-    needs: window_2017_00000
+  window_01:
+    needs: window_00
     uses: ./.github/workflows/mfl_historical_discovery_256.yml
     with:
       shard_count: "256"
       max_parallel: "15"
-      start_year: "2018"
+      start_year: "1993"
       end_year: "2018"
-      id_start: "25600"
-      id_end: "29999"
+      id_start: "0"
+      id_end: "0"
       request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "1"
     secrets: inherit
-
-  window_2015_2016_00000:
-    needs: window_2018_25600
+  window_02:
+    needs: window_01
     uses: ./.github/workflows/mfl_historical_discovery_256.yml
     with:
       shard_count: "256"
       max_parallel: "15"
-      start_year: "2015"
-      end_year: "2016"
+      start_year: "1993"
+      end_year: "2018"
       id_start: "0"
-      id_end: "9999"
+      id_end: "0"
       request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "2"
     secrets: inherit
-
+  window_03:
+    needs: window_02
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "3"
+    secrets: inherit
+  window_04:
+    needs: window_03
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "4"
+    secrets: inherit
+  window_05:
+    needs: window_04
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "5"
+    secrets: inherit
+  window_06:
+    needs: window_05
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "6"
+    secrets: inherit
+  window_07:
+    needs: window_06
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "7"
+    secrets: inherit
+  window_08:
+    needs: window_07
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "8"
+    secrets: inherit
+  window_09:
+    needs: window_08
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "9"
+    secrets: inherit
+  window_10:
+    needs: window_09
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "10"
+    secrets: inherit
+  window_11:
+    needs: window_10
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "11"
+    secrets: inherit
+  window_12:
+    needs: window_11
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "12"
+    secrets: inherit
+  window_13:
+    needs: window_12
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "13"
+    secrets: inherit
+  window_14:
+    needs: window_13
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "14"
+    secrets: inherit
+  window_15:
+    needs: window_14
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "15"
+    secrets: inherit
+  window_16:
+    needs: window_15
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "16"
+    secrets: inherit
+  window_17:
+    needs: window_16
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "17"
+    secrets: inherit
+  window_18:
+    needs: window_17
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "18"
+    secrets: inherit
+  window_19:
+    needs: window_18
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "19"
+    secrets: inherit
+  window_20:
+    needs: window_19
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "20"
+    secrets: inherit
+  window_21:
+    needs: window_20
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "21"
+    secrets: inherit
+  window_22:
+    needs: window_21
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "22"
+    secrets: inherit
+  window_23:
+    needs: window_22
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "23"
+    secrets: inherit
+  window_24:
+    needs: window_23
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "24"
+    secrets: inherit
+  window_25:
+    needs: window_24
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "25"
+    secrets: inherit
+  window_26:
+    needs: window_25
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "26"
+    secrets: inherit
+  window_27:
+    needs: window_26
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "27"
+    secrets: inherit
+  window_28:
+    needs: window_27
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "28"
+    secrets: inherit
+  window_29:
+    needs: window_28
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "29"
+    secrets: inherit
+  window_30:
+    needs: window_29
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "30"
+    secrets: inherit
+  window_31:
+    needs: window_30
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "31"
+    secrets: inherit
+  window_32:
+    needs: window_31
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "32"
+    secrets: inherit
+  window_33:
+    needs: window_32
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "33"
+    secrets: inherit
+  window_34:
+    needs: window_33
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "34"
+    secrets: inherit
+  window_35:
+    needs: window_34
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "35"
+    secrets: inherit
+  window_36:
+    needs: window_35
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "256"
+      max_parallel: "15"
+      start_year: "1993"
+      end_year: "2018"
+      id_start: "0"
+      id_end: "0"
+      request_sleep: "5.0"
+      task_manifest: "corpus_seed/mfl_uncovered_task_plan.json"
+      task_window: "36"
+    secrets: inherit
