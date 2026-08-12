@@ -203,10 +203,15 @@ jobs:
                 ), residual AS (
                   SELECT rb.* FROM rb INNER JOIN exposure USING (NFL_player_id)
                   WHERE rostered_leagues < 50
+                ), classified AS (
+                  SELECT residual.*,
+                    CASE WHEN active_2025.NFL_player_id IS NULL THEN 'not_active_2025' ELSE 'active_2025' END AS active_status
+                  FROM residual
+                  LEFT JOIN active_2025 USING (NFL_player_id)
                 )
                 SELECT
-                  CASE WHEN active_2025.NFL_player_id IS NULL THEN 'not_active_2025' ELSE 'active_2025' END,
-                  COALESCE(NULLIF(TRIM(CAST(residual.platform AS VARCHAR)), ''), '<blank_platform>'),
+                  active_status,
+                  COALESCE(NULLIF(TRIM(CAST(platform AS VARCHAR)), ''), '<blank_platform>'),
                   CASE WHEN COALESCE(TRIM(CAST(player AS VARCHAR)), '')='' THEN 'blank_player' ELSE 'named_player' END,
                   CASE WHEN COALESCE(TRIM(CAST(manager AS VARCHAR)), '')='' THEN 'blank_manager' ELSE 'manager_present' END,
                   CASE WHEN COALESCE(TRIM(CAST(team_key AS VARCHAR)), '')='' THEN 'blank_team_key' ELSE 'team_key_present' END,
@@ -216,8 +221,7 @@ jobs:
                   COUNT(*)::BIGINT AS rows,
                   COUNT(DISTINCT CAST(NFL_player_id AS VARCHAR))::BIGINT AS players,
                   COUNT(DISTINCT CAST(db_name AS VARCHAR))::BIGINT AS leagues
-                FROM residual
-                LEFT JOIN active_2025 USING (NFL_player_id)
+                FROM classified
                 GROUP BY ALL ORDER BY rows DESC
               """).fetchall()
               residual_players = c.execute(f"""
@@ -237,7 +241,7 @@ jobs:
                   WHERE CAST(year AS INTEGER)=2025
                 )
                 SELECT e.NFL_player_id, ANY_VALUE(CAST(rb.player AS VARCHAR)) AS player,
-                  CASE WHEN active_2025.NFL_player_id IS NULL THEN 'not_active_2025' ELSE 'active_2025' END AS active_status,
+                  CASE WHEN MAX(active_2025.NFL_player_id) IS NULL THEN 'not_active_2025' ELSE 'active_2025' END AS active_status,
                   ANY_VALUE(CAST(rb.platform AS VARCHAR)) AS platform,
                   e.rostered_leagues, COUNT(*)::BIGINT AS rows,
                   SUM(CASE WHEN COALESCE(TRIM(CAST(rb.manager AS VARCHAR)), '')='' THEN 1 ELSE 0 END)::BIGINT AS blank_manager_rows,
