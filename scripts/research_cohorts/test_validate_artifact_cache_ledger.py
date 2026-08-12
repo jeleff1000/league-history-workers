@@ -1,10 +1,11 @@
-from validate_artifact_cache_ledger import validate_rows
+from validate_artifact_cache_ledger import summarize_rows, validate_rows
 from enrich_artifact_cache_ledger_completion_gates import derive_gate_states
 
 
 def _row(**overrides):
     with_gates = overrides.pop("_with_gates", True)
     row = {
+        "record_type": "artifact_inventory",
         "artifact_id": "1",
         "artifact": "artifact-a",
         "workflow_run_id": "10",
@@ -26,6 +27,31 @@ def _row(**overrides):
     return row
 
 
+def test_summarize_rows_separates_raw_artifacts_from_cache_recovery_receipts():
+    raw_closed = _row(artifact_id="1")
+    raw_open = _row(
+        artifact_id="2",
+        final_status="partial_schema_blocked_unmatched",
+        final_reason="Source team identity has no safe player recipient.",
+        next_action="reconcile_source_identity_or_close_source_only",
+        unmatched_cache_cells="4",
+    )
+    recovery = _row(
+        record_type="cache_recovery_receipt",
+        artifact_id="mfl-74-row-recovery-31624673691",
+        cache_admission_state="closed_independent_cache_readback",
+    )
+
+    assert summarize_rows([raw_closed, raw_open, recovery]) == {
+        "ledger_rows": 3,
+        "raw_artifact_rows": 2,
+        "raw_artifact_closed_rows": 1,
+        "raw_artifact_open_rows": 1,
+        "cache_recovery_receipt_rows": 1,
+        "unknown_record_type_rows": 0,
+    }
+
+
 def test_rejects_cache_verified_row_with_remaining_gap():
     result = validate_rows([_row(cache_missing_cells="1")])
 
@@ -35,6 +61,18 @@ def test_rejects_cache_verified_row_with_remaining_gap():
             "artifact_id": "1",
             "issue": "cache_verified_has_nonzero_gap",
         }
+    ]
+
+
+def test_rejects_row_without_explicit_record_type():
+    row = _row()
+    del row["record_type"]
+
+    result = validate_rows([row])
+
+    assert result["ok"] is False
+    assert result["issues"] == [
+        {"artifact_id": "1", "issue": "missing_record_type"},
     ]
 
 

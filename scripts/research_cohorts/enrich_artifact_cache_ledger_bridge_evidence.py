@@ -59,8 +59,17 @@ def enrich(*, ledger_path: Path, receipt_path: Path, receipt_run_id: str, out_pa
     ledger_rows = list(csv.DictReader(ledger_path.open(newline="", encoding="utf-8-sig")))
     if not ledger_rows:
         raise SystemExit("ledger is empty")
-    ledger_ids = {int(row["artifact_id"]) for row in ledger_rows}
-    if len(ledger_ids) != len(ledger_rows):
+    raw_rows = [
+        row for row in ledger_rows
+        if row.get("record_type") == "artifact_inventory"
+    ]
+    if any(
+        row.get("record_type") not in {"artifact_inventory", "cache_recovery_receipt"}
+        for row in ledger_rows
+    ):
+        raise SystemExit("ledger has an unknown record type")
+    ledger_ids = {int(row["artifact_id"]) for row in raw_rows}
+    if len(ledger_ids) != len(raw_rows):
         raise SystemExit("ledger has duplicate artifact IDs")
 
     receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
@@ -93,6 +102,8 @@ def enrich(*, ledger_path: Path, receipt_path: Path, receipt_run_id: str, out_pa
     player_team_candidate = 0
     manager_only = 0
     for row in ledger_rows:
+        if row.get("record_type") != "artifact_inventory":
+            continue
         artifact_evidence = evidence.get(int(row["artifact_id"]), [])
         for column in BRIDGE_COLUMNS:
             row[column] = ""

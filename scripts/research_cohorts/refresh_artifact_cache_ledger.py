@@ -41,7 +41,19 @@ def refresh(
     ledger_rows = list(csv.DictReader(ledger_path.open(newline="", encoding="utf-8")))
     if not ledger_rows:
         raise SystemExit("ledger is empty")
-    ids = [int(row["artifact_id"]) for row in ledger_rows]
+    raw_rows = [
+        row for row in ledger_rows
+        if row.get("record_type") == "artifact_inventory"
+    ]
+    unknown_record_types = [
+        row.get("record_type", "") for row in ledger_rows
+        if row.get("record_type") not in {
+            "artifact_inventory", "cache_recovery_receipt"
+        }
+    ]
+    if unknown_record_types:
+        raise SystemExit("ledger has an unknown record type")
+    ids = [int(row["artifact_id"]) for row in raw_rows]
     if len(ids) != len(set(ids)):
         raise SystemExit("ledger has duplicate artifact IDs")
     selected = json.loads(selected_path.read_text(encoding="utf-8-sig"))
@@ -66,6 +78,8 @@ def refresh(
     digest = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
     updated = 0
     for row in ledger_rows:
+        if row.get("record_type") != "artifact_inventory":
+            continue
         artifact_id = int(row["artifact_id"])
         if artifact_id not in selected_ids:
             continue

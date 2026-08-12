@@ -79,8 +79,17 @@ def enrich(*, ledger_path: Path, profile_paths: list[Path], out_path: Path) -> d
     ledger_rows = list(csv.DictReader(ledger_path.open(newline="", encoding="utf-8")))
     if not ledger_rows:
         raise SystemExit("ledger is empty")
-    ids = {int(row["artifact_id"]) for row in ledger_rows}
-    if len(ids) != len(ledger_rows):
+    raw_rows = [
+        row for row in ledger_rows
+        if row.get("record_type") == "artifact_inventory"
+    ]
+    if any(
+        row.get("record_type") not in {"artifact_inventory", "cache_recovery_receipt"}
+        for row in ledger_rows
+    ):
+        raise SystemExit("ledger has an unknown record type")
+    ids = {int(row["artifact_id"]) for row in raw_rows}
+    if len(ids) != len(raw_rows):
         raise SystemExit("ledger has duplicate artifact IDs")
 
     latest: dict[int, tuple[int, Path, dict]] = {}
@@ -103,6 +112,8 @@ def enrich(*, ledger_path: Path, profile_paths: list[Path], out_path: Path) -> d
         if column not in fields:
             fields.append(column)
     for ledger_row in ledger_rows:
+        if ledger_row.get("record_type") != "artifact_inventory":
+            continue
         profile = latest.get(int(ledger_row["artifact_id"]))
         for column in IDENTITY_COLUMNS:
             ledger_row[column] = ""

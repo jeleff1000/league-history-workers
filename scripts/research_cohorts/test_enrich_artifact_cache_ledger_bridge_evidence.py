@@ -7,12 +7,12 @@ from enrich_artifact_cache_ledger_bridge_evidence import enrich
 def test_attaches_player_team_bridge_receipt_to_existing_ledger_rows(tmp_path):
     ledger = tmp_path / "ledger.csv"
     with ledger.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["artifact_id", "artifact"])
+        writer = csv.DictWriter(handle, fieldnames=["record_type", "artifact_id", "artifact"])
         writer.writeheader()
         writer.writerows([
-            {"artifact_id": "1", "artifact": "candidate-team"},
-            {"artifact_id": "2", "artifact": "manager-only"},
-            {"artifact_id": "3", "artifact": "not-a-bridge"},
+            {"record_type": "artifact_inventory", "artifact_id": "1", "artifact": "candidate-team"},
+            {"record_type": "artifact_inventory", "artifact_id": "2", "artifact": "manager-only"},
+            {"record_type": "artifact_inventory", "artifact_id": "3", "artifact": "not-a-bridge"},
         ])
 
     receipt = tmp_path / "receipt.json"
@@ -65,9 +65,9 @@ def test_excludes_derived_player_delta_from_independent_bridge_evidence(tmp_path
     """A cache-derived delta cannot prove the source player-to-team edge."""
     ledger = tmp_path / "ledger.csv"
     with ledger.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=["artifact_id", "artifact"])
+        writer = csv.DictWriter(handle, fieldnames=["record_type", "artifact_id", "artifact"])
         writer.writeheader()
-        writer.writerow({"artifact_id": "1", "artifact": "derived-delta"})
+        writer.writerow({"record_type": "artifact_inventory", "artifact_id": "1", "artifact": "derived-delta"})
 
     receipt = tmp_path / "receipt.json"
     receipt.write_text(json.dumps({"files": [{
@@ -88,3 +88,34 @@ def test_excludes_derived_player_delta_from_independent_bridge_evidence(tmp_path
     assert result["bridge_artifacts"] == 0
     row = next(csv.DictReader(out.open(newline="", encoding="utf-8")))
     assert row["bridge_evidence_strength"] == ""
+
+
+def test_skips_supplemental_cache_recovery_receipts_when_attaching_artifact_bridge_evidence(tmp_path):
+    ledger = tmp_path / "ledger.csv"
+    with ledger.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["record_type", "artifact_id", "artifact"])
+        writer.writeheader()
+        writer.writerows([
+            {"record_type": "artifact_inventory", "artifact_id": "1", "artifact": "candidate-team"},
+            {"record_type": "cache_recovery_receipt", "artifact_id": "mfl-74-row-recovery-31624673691", "artifact": "receipt"},
+        ])
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text(json.dumps({"files": [{
+        "artifact_id": 1,
+        "file": "players.parquet",
+        "rows": 12,
+        "columns": ["db_name", "year", "week", "NFL_player_id", "manager", "team_name"],
+    }]}), encoding="utf-8")
+    out = tmp_path / "out.csv"
+
+    result = enrich(
+        ledger_path=ledger,
+        receipt_path=receipt,
+        receipt_run_id="31448116124",
+        out_path=out,
+    )
+
+    assert result["ledger_rows"] == 2
+    rows = list(csv.DictReader(out.open(newline="", encoding="utf-8")))
+    assert rows[1]["artifact_id"] == "mfl-74-row-recovery-31624673691"
+    assert rows[1]["bridge_evidence_file_count"] == ""

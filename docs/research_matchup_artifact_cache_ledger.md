@@ -19,16 +19,26 @@ audit [31515802840](https://github.com/jeleff1000/league-history-workers/actions
 receipt SHA-256
 `4c7608c16ccd8cfc35390d5d3f1980ad02f955b221522451433caedabf5f5f24`.
 
+The CSV now has an explicit `record_type` on every row. The frozen inventory
+is exactly 9,479 `artifact_inventory` rows; cache-changing work is recorded as
+a separate `cache_recovery_receipt` row in the *same* ledger, not smuggled into
+the 9,479-artifact denominator. There is currently one such recovery receipt:
+the independently restored 74-row MFL repair documented below. The ledger
+validator fails if a row lacks this distinction.
+
 ## Current approved-cache contract
 
-The current authority is the later read-only key-profile receipt
+The pre-recovery cache profile is the read-only key-profile receipt
 [31609240997](https://github.com/jeleff1000/league-history-workers/actions/runs/31609240997).
 It restored the approved cache, made no write, and confirmed the same cache
-key before and after the audit. Its primary facts are:
+key before and after the audit. The 74-row recovery later changed the player
+row count, so its count is historical context only; every future mutation must
+take a fresh before-count from the currently restored approved cache. Its
+identity facts remain relevant:
 
 | Fact | Verified value | Consequence |
 | --- | ---: | --- |
-| Canonical player rows | 269,197,734 | This is the current row-count baseline for every future mutation receipt. |
+| Canonical player rows | 269,197,734 | Pre-recovery row-count baseline; do not reuse as a current mutation baseline. |
 | MFL player rows | 13,158,043 | The MFL bridge must cover this actual cache population, not an older snapshot. |
 | MFL rows with canonical `mfl_player_id` | 0 | A direct native-MFL-ID cache join is prohibited: it cannot resolve any row. |
 | MFL rows with `NFL_player_id` | 12,803,086 | The only available MFL player bridge terminus is the protected NFL-player identity. |
@@ -627,6 +637,8 @@ without a schema change, a second cache key, or an ops-cache change.
 
 The durable readback receipt SHA-256 is
 `ae0917ae66f45ac2e66661e8505b4d515829d71603fe80cab6026dccccf35c50`.
+It is the one `cache_recovery_receipt` record in the ledger; it does not alter
+the frozen 9,479-artifact partition.
 
 ## Remaining worklist
 

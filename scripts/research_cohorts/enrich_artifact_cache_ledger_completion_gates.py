@@ -22,6 +22,21 @@ CLOSED_STATUSES = {
     "no_promotable_candidate_emitted",
     "not_data_bearing",
 }
+RAW_ARTIFACT_RECORD_TYPE = "artifact_inventory"
+CACHE_RECOVERY_RECORD_TYPE = "cache_recovery_receipt"
+
+
+def _record_type(row: dict[str, str]) -> str:
+    """Classify legacy numeric artifact rows separately from cache receipts."""
+    recorded = str(row.get("record_type", "") or "").strip()
+    if recorded:
+        return recorded
+    artifact_id = str(row.get("artifact_id", "") or "").strip()
+    return (
+        RAW_ARTIFACT_RECORD_TYPE
+        if artifact_id.isdigit()
+        else CACHE_RECOVERY_RECORD_TYPE
+    )
 
 
 def _number(row: dict[str, str], field: str) -> int:
@@ -76,10 +91,13 @@ def enrich(*, ledger_path: Path, out_path: Path) -> dict[str, int]:
         fields = list(reader.fieldnames or [])
     if not rows:
         raise SystemExit("ledger is empty")
+    if "record_type" not in fields:
+        fields.insert(0, "record_type")
     for field in GATE_COLUMNS:
         if field not in fields:
             fields.append(field)
     for row in rows:
+        row["record_type"] = _record_type(row)
         row.update(derive_gate_states(row))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", newline="", encoding="utf-8") as handle:
@@ -88,8 +106,22 @@ def enrich(*, ledger_path: Path, out_path: Path) -> dict[str, int]:
         writer.writerows(rows)
     return {
         "ledger_rows": len(rows),
-        "closed_rows": sum(row["cache_admission_state"].startswith("closed_") for row in rows),
-        "open_rows": sum(row["cache_admission_state"].startswith("open_") for row in rows),
+        "raw_artifact_rows": sum(
+            row["record_type"] == RAW_ARTIFACT_RECORD_TYPE for row in rows
+        ),
+        "cache_recovery_receipt_rows": sum(
+            row["record_type"] == CACHE_RECOVERY_RECORD_TYPE for row in rows
+        ),
+        "closed_rows": sum(
+            row["record_type"] == RAW_ARTIFACT_RECORD_TYPE
+            and row["cache_admission_state"].startswith("closed_")
+            for row in rows
+        ),
+        "open_rows": sum(
+            row["record_type"] == RAW_ARTIFACT_RECORD_TYPE
+            and row["cache_admission_state"].startswith("open_")
+            for row in rows
+        ),
     }
 
 

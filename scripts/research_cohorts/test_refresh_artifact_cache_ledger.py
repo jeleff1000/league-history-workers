@@ -5,7 +5,7 @@ from refresh_artifact_cache_ledger import _next_action, refresh
 
 
 FIELDS = [
-    "receipt_run_id", "canonical_cache_key", "receipt_json_sha256", "artifact_id",
+    "record_type", "receipt_run_id", "canonical_cache_key", "receipt_json_sha256", "artifact_id",
     "artifact", "workflow_run_id", "dispositions", "candidate_delta_rows",
     "candidate_fields", "candidate_file_count", "candidate_files", "source_cells",
     "cache_match_cells", "cache_missing_cells", "cache_conflict_cells",
@@ -21,6 +21,7 @@ FIELDS = [
 def _ledger_row():
     row = {field: "" for field in FIELDS}
     row.update({
+        "record_type": "artifact_inventory",
         "receipt_run_id": "old-receipt",
         "canonical_cache_key": "canonical",
         "receipt_json_sha256": "old-sha",
@@ -87,3 +88,47 @@ def test_next_action_keeps_identity_closure_visible_with_loss_tie_schema_work():
         "cache_conflict_cells": 0,
         "unmatched_cache_cells": 2,
     }) == "add_loss_tie_schema_then_reconcile_source_identity_or_close_source_only"
+
+
+def test_refresh_ignores_supplemental_cache_recovery_receipts_when_selecting_raw_artifacts(tmp_path):
+    ledger = tmp_path / "ledger.csv"
+    with ledger.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIELDS)
+        writer.writeheader()
+        writer.writerow(_ledger_row())
+        recovery = _ledger_row()
+        recovery.update({
+            "record_type": "cache_recovery_receipt",
+            "artifact_id": "mfl-74-row-recovery-31624673691",
+            "final_status": "cache_verified",
+            "cache_missing_cells": "0",
+            "cache_conflict_cells": "0",
+            "unmatched_cache_cells": "0",
+            "blocked_schema_cells": "0",
+        })
+        writer.writerow(recovery)
+    selected = tmp_path / "selected.json"
+    selected.write_text(json.dumps([{"artifact_id": 7}]))
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text(json.dumps({
+        "artifact_current_state": [{
+            "artifact_id": 7,
+            "source_rows": 40,
+            "cache_equal_cells": 81,
+            "safe_null_candidates": 0,
+            "cache_conflict_cells": 3,
+            "ambiguous_null_cells": 2,
+        }],
+    }))
+    out = tmp_path / "out.csv"
+
+    assert refresh(
+        ledger_path=ledger,
+        receipt_path=receipt,
+        selected_path=selected,
+        receipt_run_id="new-receipt",
+        out_path=out,
+    ) == {"ledger_rows": 2, "updated_rows": 1}
+    rows = list(csv.DictReader(out.open(newline="", encoding="utf-8")))
+    assert rows[1]["artifact_id"] == "mfl-74-row-recovery-31624673691"
+    assert rows[1]["receipt_run_id"] == "old-receipt"

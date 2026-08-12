@@ -46,7 +46,8 @@ def select(
         rows = list(csv.DictReader(handle))
     selected = [
         row for row in rows
-        if row.get("final_status") in eligible_statuses
+        if row.get("record_type") == "artifact_inventory"
+        and row.get("final_status") in eligible_statuses
         and (int(row["artifact_id"]) in requested_ids if requested_ids else row["artifact"].startswith(prefix))
     ]
     if not selected:

@@ -41,16 +41,29 @@ def materialize(
         raise SystemExit("artifact ledger CSV is empty")
     if any(not row.get("artifact_id") for row in rows):
         raise SystemExit("artifact ledger contains a row without artifact_id")
+    if any(
+        row.get("record_type") not in {"artifact_inventory", "cache_recovery_receipt"}
+        for row in rows
+    ):
+        raise SystemExit("artifact ledger contains an unknown record type")
+    raw_rows = [
+        row for row in rows
+        if row.get("record_type") == "artifact_inventory"
+    ]
 
     ledger_json.write_text(json.dumps({"rows": rows}, indent=2) + "\n", encoding="utf-8")
     excluded = exclude_artifact_ids or set()
     prior_rows = [
         {"artifact_id": row["artifact_id"], **{column: _count(row.get(column)) for column in COUNT_COLUMNS}}
-        for row in rows
+        for row in raw_rows
         if row["artifact_id"] not in excluded
     ]
     prior_receipts.write_text(json.dumps({"rows": prior_rows}, indent=2) + "\n", encoding="utf-8")
-    return {"ledger_rows": len(rows), "prior_receipt_rows": len(prior_rows)}
+    return {
+        "ledger_rows": len(rows),
+        "raw_artifact_rows": len(raw_rows),
+        "prior_receipt_rows": len(prior_rows),
+    }
 
 
 def main() -> None:

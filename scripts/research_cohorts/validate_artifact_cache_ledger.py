@@ -18,7 +18,10 @@ CLOSED_STATUSES = {
     "no_promotable_candidate_emitted",
     "not_data_bearing",
 }
+RAW_ARTIFACT_RECORD_TYPE = "artifact_inventory"
+CACHE_RECOVERY_RECORD_TYPE = "cache_recovery_receipt"
 REQUIRED_FIELDS = (
+    "record_type",
     "artifact_id",
     "artifact",
     "workflow_run_id",
@@ -35,6 +38,30 @@ def _number(row: dict[str, str], field: str) -> int:
 
 def _issue(artifact_id: str, issue: str) -> dict[str, str]:
     return {"artifact_id": str(artifact_id), "issue": issue}
+
+
+def summarize_rows(rows: list[dict[str, str]]) -> dict[str, int]:
+    """Keep the frozen artifact inventory distinct from supplemental receipts."""
+    raw_rows = [
+        row for row in rows
+        if row.get("record_type") == RAW_ARTIFACT_RECORD_TYPE
+    ]
+    recovery_rows = [
+        row for row in rows
+        if row.get("record_type") == CACHE_RECOVERY_RECORD_TYPE
+    ]
+    closed_raw_rows = [
+        row for row in raw_rows
+        if row.get("final_status") in CLOSED_STATUSES
+    ]
+    return {
+        "ledger_rows": len(rows),
+        "raw_artifact_rows": len(raw_rows),
+        "raw_artifact_closed_rows": len(closed_raw_rows),
+        "raw_artifact_open_rows": len(raw_rows) - len(closed_raw_rows),
+        "cache_recovery_receipt_rows": len(recovery_rows),
+        "unknown_record_type_rows": len(rows) - len(raw_rows) - len(recovery_rows),
+    }
 
 
 def validate_rows(rows: list[dict[str, str]]) -> dict:
@@ -102,7 +129,7 @@ def validate_rows(rows: list[dict[str, str]]) -> dict:
 
     return {
         "ok": not issues,
-        "ledger_rows": len(rows),
+        **summarize_rows(rows),
         "status_counts": dict(sorted(Counter(row.get("final_status", "") for row in rows).items())),
         "issues": issues,
     }
