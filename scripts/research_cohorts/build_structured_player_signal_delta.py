@@ -219,6 +219,50 @@ def build(
                 f"WHERE rejection_reason = '{reason}'"
             ).fetchone()[0])
 
+    artifact_current_state = []
+    for artifact_id in sorted(int(entry["artifact_id"]) for entry in entries):
+        metrics = con.execute(f"""
+            WITH artifact_source AS (
+              SELECT {', '.join(_q(column) for column in KEY)},
+                     {', '.join(f'MAX({_q(source_field)}) FILTER (WHERE {_q(source_field)} IS NOT NULL) AS {_q(source_field)}' for source_field in SUPPORTED)},
+                     {', '.join(f'COUNT(DISTINCT {_q(source_field)}) FILTER (WHERE {_q(source_field)} IS NOT NULL) AS {_q(source_field + "_variants")}' for source_field in SUPPORTED)}
+              FROM raw_source
+              WHERE artifact_id = {artifact_id}
+              GROUP BY {', '.join(_q(column) for column in KEY)}
+            ), joined AS (
+              SELECT s.*, b.canonical_rows,
+                     {', '.join(f'p.{_q(target)} AS {_q(target)}' for target, _ in SUPPORTED.values())}
+              FROM artifact_source s
+              JOIN source_base_matches b ON {_join('b', 's')}
+              LEFT JOIN public.player_fantasy p ON p.rowid = b.player_rowid
+            ), fields AS (
+              {' UNION ALL '.join(f"SELECT canonical_rows, {_q(source_field)} AS source_value, {_q(source_field + '_variants')} AS variants, {_q(target)} AS canonical_value FROM joined" for source_field, (target, _) in SUPPORTED.items())}
+            )
+            SELECT
+              (SELECT COUNT(*) FROM raw_source WHERE artifact_id = {artifact_id}) AS source_rows,
+              COALESCE(SUM(CASE WHEN variants <= 1 AND source_value IS NOT NULL AND canonical_rows = 1
+                                 AND canonical_value IS NOT NULL AND canonical_value IS NOT DISTINCT FROM source_value
+                                THEN 1 ELSE 0 END), 0) AS cache_equal_cells,
+              COALESCE(SUM(CASE WHEN variants <= 1 AND source_value IS NOT NULL AND canonical_rows = 1
+                                 AND canonical_value IS NULL
+                                THEN 1 ELSE 0 END), 0) AS safe_null_candidates,
+              COALESCE(SUM(CASE WHEN variants <= 1 AND source_value IS NOT NULL AND canonical_rows = 1
+                                 AND canonical_value IS NOT NULL AND canonical_value IS DISTINCT FROM source_value
+                                THEN 1 ELSE 0 END), 0) AS cache_conflict_cells,
+              COALESCE(SUM(CASE WHEN variants <= 1 AND source_value IS NOT NULL AND canonical_rows > 1
+                                 AND canonical_value IS NULL
+                                THEN 1 ELSE 0 END), 0) AS ambiguous_null_cells
+            FROM fields
+        """).fetchone()
+        artifact_current_state.append({
+            "artifact_id": artifact_id,
+            "source_rows": int(metrics[0]),
+            "cache_equal_cells": int(metrics[1]),
+            "safe_null_candidates": int(metrics[2]),
+            "cache_conflict_cells": int(metrics[3]),
+            "ambiguous_null_cells": int(metrics[4]),
+        })
+
     result = {
         "read_only": True,
         "cache_mutated": False,
@@ -233,6 +277,7 @@ def build(
         "ambiguous_identity_nullness": ambiguous_identity_nullness,
         "delta_rows": delta_rows,
         "residual_null_cells_by_reason": residual_null_cells_by_reason,
+        "artifact_current_state": artifact_current_state,
         "supported_fields": report_fields,
     }
     _write_json(report, result)

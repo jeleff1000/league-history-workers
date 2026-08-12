@@ -59,3 +59,13 @@ def test_reports_ambiguous_null_cells_without_promoting_them(tmp_path):
         ("team_points", "ambiguous_canonical_identity", 1),
         ("win", "ambiguous_canonical_identity", 1),
     ]
+    assert result["artifact_current_state"] == [
+        {
+            "artifact_id": 7,
+            "ambiguous_null_cells": 3,
+            "cache_conflict_cells": 0,
+            "cache_equal_cells": 0,
+            "safe_null_candidates": 0,
+            "source_rows": 1,
+        }
+    ]
