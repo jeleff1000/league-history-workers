@@ -1,7 +1,9 @@
 from validate_artifact_cache_ledger import validate_rows
+from enrich_artifact_cache_ledger_completion_gates import derive_gate_states
 
 
 def _row(**overrides):
+    with_gates = overrides.pop("_with_gates", True)
     row = {
         "artifact_id": "1",
         "artifact": "artifact-a",
@@ -19,6 +21,8 @@ def _row(**overrides):
         "blocked_schema_cells": "0",
     }
     row.update(overrides)
+    if with_gates:
+        row.update(derive_gate_states(row))
     return row
 
 
@@ -106,4 +110,45 @@ def test_rejects_conflict_without_precedence_action():
     assert result["ok"] is False
     assert result["issues"] == [
         {"artifact_id": "1", "issue": "conflict_missing_precedence_action"},
+    ]
+
+
+def test_rejects_open_row_without_machine_gate_states():
+    result = validate_rows([
+        _row(
+            _with_gates=False,
+            final_status="partial_schema_blocked_unmatched",
+            final_reason="Source team identity has no safe player recipient.",
+            next_action="reconcile_source_identity_or_close_source_only",
+            unmatched_cache_cells="4",
+        )
+    ])
+
+    assert result["ok"] is False
+    assert result["issues"] == [
+        {"artifact_id": "1", "issue": "missing_loss_tie_gate"},
+        {"artifact_id": "1", "issue": "missing_player_team_bridge_gate"},
+        {"artifact_id": "1", "issue": "missing_source_precedence_gate"},
+        {"artifact_id": "1", "issue": "missing_cache_admission_state"},
+    ]
+
+
+def test_rejects_gate_state_that_claims_bridge_is_not_required():
+    result = validate_rows([
+        _row(
+            _with_gates=False,
+            final_status="partial_schema_blocked_unmatched",
+            final_reason="Source team identity has no safe player recipient.",
+            next_action="reconcile_source_identity_or_close_source_only",
+            unmatched_cache_cells="4",
+            loss_tie_gate="not_required",
+            player_team_bridge_gate="not_required",
+            source_precedence_gate="not_required",
+            cache_admission_state="open_player_team_bridge",
+        )
+    ])
+
+    assert result["ok"] is False
+    assert result["issues"] == [
+        {"artifact_id": "1", "issue": "incorrect_player_team_bridge_gate"},
     ]

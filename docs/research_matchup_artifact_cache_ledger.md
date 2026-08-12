@@ -114,6 +114,29 @@ The final three open categories overlap: for example, a sparse-playoff source
 may need loss/tie schema support **and** a player-team bridge. The artifact
 partition is still exact: **8,764 closed, 715 open**.
 
+### Machine-checkable cache-admission gates
+
+The CSV carries four derived columns for every artifact:
+`loss_tie_gate`, `player_team_bridge_gate`, `source_precedence_gate`, and
+`cache_admission_state`. They are derived only from the existing quantified
+receipt fields; they do not assert a cache write. The ledger validator rejects
+an open artifact if any gate is missing or inconsistent with its recorded
+schema-blocked, unmatched, or conflict cells.
+
+| Admission state | Artifacts | Required work before any cache write |
+| --- | ---: | --- |
+| `open_loss_tie` | 4 | Add only canonical `loss`/`tie`, then exact candidate/readback. |
+| `open_player_team_bridge` | 2 | Produce raw roster-membership evidence or an explicit source-only closure. |
+| `open_loss_tie_and_player_team_bridge` | 476 | Complete both schema and raw player/team bridge gates. |
+| `open_player_team_bridge_and_source_precedence` | 7 | Complete bridge proof and field-level conflict adjudication. |
+| `open_all_required_gates` | 226 | Complete schema, raw bridge, and precedence gates. |
+| `closed_*` | 8,764 | Closed by the final status shown above; no cache update is implied unless the status is `closed_cache_verified`. |
+
+The only state that proves a cache value is present is `closed_cache_verified`
+with its restored-cache receipt. `closed_no_promotable_candidate_emitted` and
+`closed_not_data_bearing` mean, respectively, that no safe candidate existed or
+that the artifact was never a source of canonical cells.
+
 The cell totals in this section are receipt totals, not a count of distinct
 cache cells: retained artifacts can contain duplicate source snapshots. A
 promotion run must deduplicate on its approved field-level key before writing

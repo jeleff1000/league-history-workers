@@ -7,6 +7,11 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from enrich_artifact_cache_ledger_completion_gates import (
+    GATE_COLUMNS,
+    derive_gate_states,
+)
+
 
 CLOSED_STATUSES = {
     "cache_verified",
@@ -71,6 +76,13 @@ def validate_rows(rows: list[dict[str, str]]) -> dict:
         if status not in CLOSED_STATUSES:
             if gap_total == 0:
                 issues.append(_issue(artifact_id, "open_row_has_no_quantified_gap"))
+            expected_gates = derive_gate_states(row)
+            for field in GATE_COLUMNS:
+                actual = str(row.get(field, "") or "").strip()
+                if not actual:
+                    issues.append(_issue(artifact_id, f"missing_{field}"))
+                elif actual != expected_gates[field]:
+                    issues.append(_issue(artifact_id, f"incorrect_{field}"))
         if _number(row, "cache_conflict_cells") and "precedence" not in str(
             row.get("next_action", "") or ""
         ).lower():
