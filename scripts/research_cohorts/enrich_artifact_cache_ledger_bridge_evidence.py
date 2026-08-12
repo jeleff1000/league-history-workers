@@ -20,6 +20,20 @@ BRIDGE_COLUMNS = (
     "bridge_evidence_receipt_run_id",
 )
 REQUIRED_PLAYER_WEEK = {"db_name", "year", "week", "NFL_player_id"}
+DERIVED_PLAYER_FILES = {
+    "promotable_delta.parquet",
+}
+
+
+def _is_independent_membership_source(record: dict) -> bool:
+    """Reject outputs made by rejoining the canonical cache to team signals.
+
+    A derived delta can repeat a player row's manager/team columns, but that
+    is not independent source evidence of roster membership.  Letting it
+    qualify would make the bridge circular.
+    """
+    name = str(record.get("file") or "").strip().lower()
+    return name not in DERIVED_PLAYER_FILES and not name.startswith("outcome_targets_")
 
 
 def _strength(columns: set[str]) -> tuple[str, str] | None:
@@ -54,6 +68,8 @@ def enrich(*, ledger_path: Path, receipt_path: Path, receipt_run_id: str, out_pa
     unknown: set[int] = set()
     for record in receipt.get("files", []):
         if record.get("artifact_id") is None:
+            continue
+        if not _is_independent_membership_source(record):
             continue
         # A zero-row Parquet file proves only that a producer ran, not that it
         # retained a player/team membership edge usable by the bridge.

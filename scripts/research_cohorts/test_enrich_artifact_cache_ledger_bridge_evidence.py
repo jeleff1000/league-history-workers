@@ -59,3 +59,32 @@ def test_attaches_player_team_bridge_receipt_to_existing_ledger_rows(tmp_path):
     assert rows["1"]["bridge_evidence_receipt_run_id"] == "31448116124"
     assert rows["2"]["bridge_evidence_strength"] == "candidate_player_manager_only"
     assert rows["3"]["bridge_evidence_file_count"] == ""
+
+
+def test_excludes_derived_player_delta_from_independent_bridge_evidence(tmp_path):
+    """A cache-derived delta cannot prove the source player-to-team edge."""
+    ledger = tmp_path / "ledger.csv"
+    with ledger.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["artifact_id", "artifact"])
+        writer.writeheader()
+        writer.writerow({"artifact_id": "1", "artifact": "derived-delta"})
+
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text(json.dumps({"files": [{
+        "artifact_id": 1,
+        "file": "promotable_delta.parquet",
+        "rows": 12,
+        "columns": ["db_name", "year", "week", "NFL_player_id", "manager", "team_key"],
+    }]}), encoding="utf-8")
+
+    out = tmp_path / "out.csv"
+    result = enrich(
+        ledger_path=ledger,
+        receipt_path=receipt,
+        receipt_run_id="31500000000",
+        out_path=out,
+    )
+
+    assert result["bridge_artifacts"] == 0
+    row = next(csv.DictReader(out.open(newline="", encoding="utf-8")))
+    assert row["bridge_evidence_strength"] == ""

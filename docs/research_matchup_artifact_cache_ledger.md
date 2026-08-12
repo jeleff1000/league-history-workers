@@ -179,17 +179,18 @@ must retain `ambiguous` or `source_only`, never infer a recipient.
 
 The completed artifact receipt
 [`31448116124`](https://github.com/jeleff1000/league-history-workers/actions/runs/31448116124)
-was mechanically joined into this same ledger. It found **526 non-empty
-artifacts with candidate bridge fields**; zero-row Parquet files are
-explicitly excluded because they prove no membership. A source schema is not
-itself a completed bridge: every candidate still requires an exact source-team
-to canonical-player join receipt before it can fan out a team signal.
+initially identified 526 non-empty files whose *schemas* contained player and
+team-like fields. A follow-up provenance review excluded 508 of them: 507
+`promotable_delta.parquet` files and one `outcome_targets_*.parquet` file are
+derived from the canonical target/cache plus team signals, so they cannot
+independently prove player-to-team membership. The remaining 18 artifacts
+have only `(db_name, year, week, NFL_player_id, manager)`; none retains a raw,
+populated player-to-team key.
 
 | Candidate class | Artifacts | Required source fields | Meaning |
 | --- | ---: | --- | --- |
-| `candidate_player_manager_team_name` | 417 | `db_name`, `year`, `week`, `NFL_player_id`, `manager`, `team_name` | Candidate source membership. It cannot join by `team_name` until cache-side membership is proven. |
-| `candidate_player_team_key` | 91 | `db_name`, `year`, `week`, `NFL_player_id`, `team_key` | Strongest source candidate, but still needs a unique canonical-player recipient because canonical team keys are empty. |
-| `candidate_player_manager_only` | 18 | `db_name`, `year`, `week`, `NFL_player_id`, `manager` | Candidate only when the manager resolves to exactly one fantasy team in that league-week. |
+| Independent raw player/team membership evidence | 0 | — | No retained artifact currently proves a player belonged to a particular source fantasy team. |
+| `candidate_player_manager_only` | 18 | `db_name`, `year`, `week`, `NFL_player_id`, `manager` | Insufficient alone. It may be used only after a complete source league-week proves the manager owned exactly one team. |
 
 The CSV columns `bridge_evidence_file_count`, `bridge_evidence_row_count`,
 `bridge_evidence_strength`, `bridge_evidence_schemas`, and
