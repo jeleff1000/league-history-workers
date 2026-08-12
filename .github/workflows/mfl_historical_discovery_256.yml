@@ -251,6 +251,25 @@ jobs:
       - name: Run historical MFL shard
         run: |
           mkdir -p out
+          task_args=()
+          # A zero-width ID sentinel is used by the quota campaign. Keep the
+          # normal numeric workflow unchanged, but make the quota manifest a
+          # local default so a dispatch that drops optional inputs cannot
+          # silently run empty shards.
+          if [ "${{ inputs.id_start || '0' }}" = "0" ] && [ "${{ inputs.id_end || '999' }}" = "0" ]; then
+            task_manifest="${{ inputs.task_manifest || 'corpus_seed/mfl_uncovered_task_plan.json' }}"
+            task_window="${{ inputs.task_window || '0' }}"
+            if [ -f "code/${task_manifest}" ]; then
+              task_args=(--task-manifest "code/${task_manifest}" --task-window "${task_window}")
+              echo "task_mode manifest=${task_manifest} window=${task_window}"
+            else
+              echo "task manifest not found: code/${task_manifest}" >&2
+              exit 2
+            fi
+          elif [ -n "${{ inputs.task_manifest || '' }}" ]; then
+            task_args=(--task-manifest "code/${{ inputs.task_manifest }}" --task-window "${{ inputs.task_window || '0' }}")
+            echo "task_mode manifest=${{ inputs.task_manifest }} window=${{ inputs.task_window || '0' }}"
+          fi
           python code/scripts/extraplatform_corpus/discover_mfl_shard.py \
             --shard-index "${{ matrix.shard }}" \
             --shard-count "${{ inputs.shard_count || '256' }}" \
@@ -260,7 +279,7 @@ jobs:
             --id-end "${{ inputs.id_end || '999' }}" \
             --id-bands "${{ inputs.id_bands || '1-9999,10000-29999,30000-59999,60000-80000' }}" \
             --sleep "${{ inputs.request_sleep || '5.0' }}" \
-            ${{ inputs.task_manifest && format('--task-manifest "code/{0}" --task-window "{1}"', inputs.task_manifest, inputs.task_window || '0') || '' }} \
+            "${task_args[@]}" \
             --out "out/mfl_shard_${{ matrix.shard }}.json"
 
       - name: Upload shard artifact
