@@ -35,6 +35,7 @@ def main() -> None:
     all_files = sorted(args.candidates.rglob("*.parquet"))
     files = []
     bridge_files = []
+    file_inventory = []
     for path in all_files:
         parquet_path = "'" + str(path.resolve()).replace("'", "''") + "'"
         cols = {r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet({parquet_path})").fetchall()}
@@ -53,6 +54,12 @@ def main() -> None:
         # the usable identity.
         if {"db_name", "year", "week", "NFL_player_id", "manager", "team_name"}.issubset(cols):
             bridge_files.append(path)
+        file_inventory.append({
+            "path": str(path),
+            "columns": sorted(cols),
+            "team_candidate": path in files,
+            "player_bridge": path in bridge_files,
+        })
     if not files:
         raise SystemExit("no team candidate parquet files")
 
@@ -372,6 +379,7 @@ def main() -> None:
         "new_lineage": False,
         "canonical_schema_unchanged": True,
         "candidate_files": len(files),
+        "candidate_file_inventory": file_inventory,
         "bridge_files": len(bridge_files),
         "source_rows": int(con.execute("SELECT COUNT(*) FROM source_raw").fetchone()[0]),
         "source_team_keys": int(source_keys),

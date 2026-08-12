@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -120,3 +121,10 @@ def test_candidate_audit_accepts_manager_only_source_without_team_key(
     ).fetchone()[0]
     con.close()
     assert emitted == 1
+    report = json.loads((out / "team_signal_candidate_report.json").read_text(encoding="utf-8"))
+    assert report["candidate_file_inventory"] == [{
+        "path": str(candidates / "manager-only.parquet"),
+        "columns": ["db_name", "is_playoffs", "manager", "week", "year"],
+        "team_candidate": True,
+        "player_bridge": False,
+    }]
