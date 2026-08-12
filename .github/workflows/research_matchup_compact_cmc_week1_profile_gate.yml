@@ -34,7 +34,7 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           path: code
-          ref: 2d98750e59fa7f454ffb32170a532cccb4dfed06
+          ref: 8fac800442452df57c7053695896a37bc7c587da
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -56,6 +56,7 @@ jobs:
           import resource
           from time import perf_counter
           from scripts.research_cohorts.compact_matchup_cells import (
+              _source_without_bad_identity_rows,
               materialize_career_cohort_grade_cells,
               materialize_career_core_cohort_cells,
               materialize_season_bracket_grade_cells,
@@ -92,12 +93,14 @@ jobs:
                   summary.write('- No cache save, source mutation, Fly access, API request, aggregation output, or publish step.\n')
               raise SystemExit(0)
           source_rows = c.execute("SELECT COUNT(*) FROM lake.public.player_fantasy WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1").fetchone()[0]
+          rollup_source = _source_without_bad_identity_rows(c, 'lake.public.player_fantasy')
+          filtered_source_rows = c.execute(f"SELECT COUNT(*) FROM {rollup_source} WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1").fetchone()[0]
           if mode == 'rb_2025_week1_inventory':
-              inventory = c.execute("""
+              inventory = c.execute(f"""
                 WITH rb AS (
                   SELECT CAST(NFL_player_id AS VARCHAR) AS NFL_player_id,
                     CASE WHEN is_rostered IS NULL OR CAST(is_rostered AS INTEGER) <> 0 THEN 1 ELSE 0 END AS rostered
-                  FROM lake.public.player_fantasy
+                  FROM {rollup_source}
                   WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1
                     AND UPPER(TRIM(CAST(position AS VARCHAR)))='RB'
                 )
@@ -107,7 +110,7 @@ jobs:
                 FROM rb
               """).fetchone()
               receipt = {
-                'mode': mode, 'source_rows_read': source_rows,
+                'mode': mode, 'source_rows_read': source_rows, 'filtered_source_rows': filtered_source_rows,
                 'distinct_rb_players': inventory[0],
                 'rostered_rb_players': inventory[1],
                 'explicitly_unrostered_rb_players': inventory[2],
@@ -119,13 +122,13 @@ jobs:
                   summary.write('- Cache-only count; no aggregation table, cache save, Fly access, API request, artifact, or publish step.\n')
               raise SystemExit(0)
           if mode == 'rb_2025_week1_distribution':
-              c.execute("""
+              c.execute(f"""
                 CREATE TEMP TABLE rb_week1_exposure AS
                 SELECT CAST(NFL_player_id AS VARCHAR) AS NFL_player_id,
                   COUNT(DISTINCT db_name) FILTER (
                     WHERE is_rostered IS NULL OR CAST(is_rostered AS INTEGER) <> 0
                   )::BIGINT AS rostered_leagues
-                FROM lake.public.player_fantasy
+                FROM {rollup_source}
                 WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER)=1
                   AND UPPER(TRIM(CAST(position AS VARCHAR)))='RB'
                 GROUP BY 1
@@ -169,7 +172,8 @@ jobs:
                 LIMIT 20
               """).fetchall()
               receipt = {
-                'mode': mode, 'distribution': distribution,
+                'mode': mode, 'source_rows_read': source_rows, 'filtered_source_rows': filtered_source_rows,
+                'distribution': distribution,
                 'lowest_exposure': lowest, 'highest_exposure': highest,
               }
               print(receipt)
