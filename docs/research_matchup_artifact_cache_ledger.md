@@ -121,6 +121,28 @@ The two real player-bio gaps are source ESPN IDs `14946` (Bruce Irvin) and
 repair, verified by an exact player/year/team match, before they can enter any
 MFL recipient bridge.
 
+The retained diagnostic receipt from
+[31616814643](https://github.com/jeleff1000/league-history-workers/actions/runs/31616814643)
+also resolved the prior generic `canonical_player_week_absent: 74` count. All
+74 are real NFL-player memberships in `smpl_mfl_2015_10030`, 2012, that are
+absent from the canonical player table for the listed league-weeks:
+
+| MFL player | NFL player ID | Missing weeks | Memberships |
+| --- | --- | --- | ---: |
+| Michael Vick | `00-0020245` | 1–15 | 15 |
+| Stevie Johnson | `00-0026364` | 1–15 | 15 |
+| Steve Smith (CAR) | `00-0020337` | 1–15 | 15 |
+| Steve Smith (STL) | `00-0025438` | 1–15 | 15 |
+| Beanie Wells | `00-0027007` | 1–8 | 8 |
+| Christopher Ivory | `00-0027531` | 10–15 | 6 |
+
+This is a historical canonical **player-row omission** for that MFL league,
+not a bye, no-opponent week, coach record, or unresolved source-player
+identity. The source membership and protected NFL-player mapping both exist,
+but the canonical cache has zero player rows for each exact league/week/player
+key. These 74 have no existing cell to update; recovery requires an approved
+row-addition path with the same schema and an exact source-to-player receipt.
+
 Existing `mfl-underpopulated-week-rescue-*` artifacts are retained source-team
 signals, not roster bridges. A direct schema receipt from
 `mfl-underpopulated-week-rescue-17-31217899167` shows team/franchise IDs,
