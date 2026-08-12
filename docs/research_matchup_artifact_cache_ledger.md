@@ -112,6 +112,15 @@ canonical player-row recipients. It must leave the 74 absent player-weeks and
 all non-unique franchise-manager cases explicitly unresolved. No artifact
 status is closed or promoted by this bridge diagnostic alone.
 
+The 20 no-ESPN MFL IDs are not unresolved NFL players: the source directory
+identifies all of them as `Coach` records (for example Bill Belichick, Pete
+Carroll, and Mike Tomlin). They have no canonical NFL-player recipient and
+must be closed as `source_non_player_coach`, not treated as a player-map gap.
+The two real player-bio gaps are source ESPN IDs `14946` (Bruce Irvin) and
+`13213` (LeGarrette Blount). They require a protected player-bio identity
+repair, verified by an exact player/year/team match, before they can enter any
+MFL recipient bridge.
+
 Existing `mfl-underpopulated-week-rescue-*` artifacts are retained source-team
 signals, not roster bridges. A direct schema receipt from
 `mfl-underpopulated-week-rescue-17-31217899167` shows team/franchise IDs,
