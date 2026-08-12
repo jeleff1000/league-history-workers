@@ -18,6 +18,40 @@ create a cache or lineage. The latest is the read-only direct MFL player-key
 audit [31515802840](https://github.com/jeleff1000/league-history-workers/actions/runs/31515802840),
 receipt SHA-256
 `4c7608c16ccd8cfc35390d5d3f1980ad02f955b221522451433caedabf5f5f24`.
+
+## Current approved-cache contract
+
+The current authority is the later read-only key-profile receipt
+[31609240997](https://github.com/jeleff1000/league-history-workers/actions/runs/31609240997).
+It restored the approved cache, made no write, and confirmed the same cache
+key before and after the audit. Its primary facts are:
+
+| Fact | Verified value | Consequence |
+| --- | ---: | --- |
+| Canonical player rows | 269,197,734 | This is the current row-count baseline for every future mutation receipt. |
+| MFL player rows | 13,158,043 | The MFL bridge must cover this actual cache population, not an older snapshot. |
+| MFL rows with canonical `mfl_player_id` | 0 | A direct native-MFL-ID cache join is prohibited: it cannot resolve any row. |
+| MFL rows with `NFL_player_id` | 12,803,086 | The only available MFL player bridge terminus is the protected NFL-player identity. |
+| Populated `team_key` / `team_name` player rows | 0 / 0 | Neither can be used as a cache-side fantasy-team join key. |
+
+The cache is no longer the historical base-29-column snapshot: it also has
+the user-approved propagated cohort dimensions. Those columns are part of the
+current fixed cache schema and are not a separate lineage. They do not provide
+MFL franchise or native-player identity.
+
+Consequently, every MFL promotion must first produce a read-only bridge
+receipt with the following proof chain:
+
+`weeklyResults.franchise + weeklyResults.player.id`
+`-> MFL players.espn_id -> protected ops ESPN-to-NFL crosswalk`
+`-> exactly one canonical recipient, or an explicit unresolved exception.`
+
+The bridge receipt must also prove the source franchise maps to the recipient's
+canonical fantasy team. It may not infer that edge from a copied target
+`manager` field, a manager-name similarity, or an empty cache team field.
+Raw MFL records without an ESPN ID are separate explicit cases: deterministic
+DST team/year resolution or a one-to-one protected player-bio proof is
+required; otherwise they remain source-only.
 The latest corrected raw-team identity receipt is
 [31532904897](https://github.com/jeleff1000/league-history-workers/actions/runs/31532904897).
 It is read-only and uses the safe team-to-player fan-out hierarchy: direct
@@ -375,12 +409,14 @@ ESPN-to-NFL map -> (db_name, year, week, NFL_player_id)`. All other ambiguous
 identities remain unpromoted. Non-null disagreements remain preserved until
 source precedence is decided.
 
-## Verified current cache join contract
+## Historical base-player join contract
 
 The approved-cache read-only audit
 [31547677629](https://github.com/jeleff1000/league-history-workers/actions/runs/31547677629)
-is the current authority for cache-side identity. It verified the cache and
-ops seed were unchanged before and after the read.
+verified the base-player join behavior and the unchanged cache/ops seed for
+that receipt. The current row count, schema, and MFL-native-ID availability
+are governed by the later receipt 31609240997 above. This older receipt remains
+valid only for the key behavior it measured.
 
 | Cache-side candidate | Evidence | Contract decision |
 | --- | ---: | --- |
