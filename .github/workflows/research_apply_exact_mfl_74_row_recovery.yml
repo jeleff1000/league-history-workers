@@ -151,9 +151,12 @@ jobs:
              AND p.NFL_player_id=c.NFL_player_id AND p.manager=c.manager)''').fetchone()[0])
           incomplete=int(con.execute('''SELECT COUNT(*) FROM c JOIN public.player_fantasy p
             ON p.db_name=c.db_name AND p.year=c.year AND p.week=c.week AND p.NFL_player_id=c.NFL_player_id AND p.manager=c.manager
-            WHERE p.is_rostered<>1 OR p.is_started IS NULL OR p.fantasy_points IS NULL OR p.manager_lamar IS NULL
+            WHERE p.is_rostered<>1 OR p.is_started IS NULL OR p.player IS NULL OR p.position IS NULL
               OR p.espn_player_id IS NULL OR p.mfl_player_id IS NULL OR p.clutch_equity IS NULL''').fetchone()[0])
-          assert missing == 0 and incomplete == 0, (missing, incomplete)
+          started_incomplete=int(con.execute('''SELECT COUNT(*) FROM c JOIN public.player_fantasy p
+            ON p.db_name=c.db_name AND p.year=c.year AND p.week=c.week AND p.NFL_player_id=c.NFL_player_id AND p.manager=c.manager
+            WHERE p.is_started=1 AND (p.fantasy_points IS NULL OR p.manager_lamar IS NULL)''').fetchone()[0])
+          assert missing == 0 and incomplete == 0 and started_incomplete == 0, (missing, incomplete, started_incomplete)
           con.close()
           digest=hashlib.sha256()
           with Path('research_public_lake/ops_cache.duckdb').open('rb') as f:
@@ -225,13 +228,19 @@ jobs:
           total=int(con.execute('SELECT COUNT(*) FROM c').fetchone()[0])
           present=int(con.execute('''SELECT COUNT(*) FROM c JOIN public.player_fantasy p
             ON p.db_name=c.db_name AND p.year=c.year AND p.week=c.week AND p.NFL_player_id=c.NFL_player_id AND p.manager=c.manager''').fetchone()[0])
-          valid=int(con.execute('''SELECT COUNT(*) FROM c JOIN public.player_fantasy p
+          structural=int(con.execute('''SELECT COUNT(*) FROM c JOIN public.player_fantasy p
             ON p.db_name=c.db_name AND p.year=c.year AND p.week=c.week AND p.NFL_player_id=c.NFL_player_id AND p.manager=c.manager
-            WHERE p.is_rostered=1 AND p.is_started IS NOT NULL AND p.fantasy_points IS NOT NULL AND p.manager_lamar IS NOT NULL
+            WHERE p.is_rostered=1 AND p.is_started IS NOT NULL AND p.player IS NOT NULL AND p.position IS NOT NULL
               AND p.espn_player_id IS NOT NULL AND p.mfl_player_id IS NOT NULL AND p.clutch_equity IS NOT NULL''').fetchone()[0])
+          started_complete=int(con.execute('''SELECT COUNT(*) FROM c JOIN public.player_fantasy p
+            ON p.db_name=c.db_name AND p.year=c.year AND p.week=c.week AND p.NFL_player_id=c.NFL_player_id AND p.manager=c.manager
+            WHERE p.is_started=1 AND p.fantasy_points IS NOT NULL AND p.manager_lamar IS NOT NULL''').fetchone()[0])
+          started_total=int(con.execute('''SELECT COUNT(*) FROM c JOIN public.player_fantasy p
+            ON p.db_name=c.db_name AND p.year=c.year AND p.week=c.week AND p.NFL_player_id=c.NFL_player_id AND p.manager=c.manager
+            WHERE p.is_started=1''').fetchone()[0])
           con.close()
-          result={'canonical_cache_key':'research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613', 'target_rows':total, 'present_rows':present, 'complete_rows':valid, 'independent_restore':True, 'new_lineage':False}
-          assert result['target_rows']==74 and result['present_rows']==74 and result['complete_rows']==74, result
+          result={'canonical_cache_key':'research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613', 'target_rows':total, 'present_rows':present, 'structurally_complete_rows':structural, 'started_rows':started_total, 'started_rows_with_score_and_lamar':started_complete, 'independent_restore':True, 'new_lineage':False}
+          assert result['target_rows']==74 and result['present_rows']==74 and result['structurally_complete_rows']==74 and result['started_rows_with_score_and_lamar']==result['started_rows'], result
           Path('exact_mfl_74_readback.json').write_text(json.dumps(result, indent=2)+'\n')
           print(json.dumps(result, sort_keys=True))
           PY

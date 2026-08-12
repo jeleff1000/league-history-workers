@@ -56,6 +56,8 @@ def test_builds_one_complete_exact_schema_mfl_row_from_source_membership_and_tea
       )
     """)
     con.execute("INSERT INTO nfl_historical.nfl_player_stats_all VALUES ('nfl-missing', 2012, 1, 'Missing Player', 'WR', 7.5)")
+    con.execute("CREATE TABLE nfl_historical.player_bio (NFL_player_id VARCHAR, player VARCHAR, position VARCHAR)")
+    con.execute("INSERT INTO nfl_historical.player_bio VALUES ('nfl-missing', 'Missing Player', 'WR')")
     con.close()
 
     memberships = tmp_path / "memberships.parquet"

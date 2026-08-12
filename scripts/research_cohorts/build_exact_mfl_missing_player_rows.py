@@ -96,6 +96,12 @@ def build(
         if missing:
             raise ValueError(f"canonical player schema missing required fields: {missing}")
         con.execute(f"ATTACH {_path(ops)} AS ops (READ_ONLY)")
+        stats_columns = {name for name, _ in _columns(con, "ops.nfl_historical.nfl_player_stats_all")}
+        bio_columns = {name for name, _ in _columns(con, "ops.nfl_historical.player_bio")}
+        def stats_field(field: str, alias: str) -> str:
+            return f"o.{_q(field)} AS {_q(alias)}" if field in stats_columns else f"NULL::VARCHAR AS {_q(alias)}"
+        def bio_field(field: str, alias: str) -> str:
+            return f"b.{_q(field)} AS {_q(alias)}" if field in bio_columns else f"NULL::VARCHAR AS {_q(alias)}"
         directory_conflicts = int(con.execute(f"""
           SELECT COUNT(*) FROM (
             SELECT source_year, mfl_player_id
@@ -130,8 +136,10 @@ def build(
           SELECT m.db_name, m.year, m.week, m.source_year, m.source_franchise_id, m.source_manager,
                  m.mfl_player_id, m.is_started, m.fantasy_points,
                  d.espn_id, d.raw_team, c.NFL_player_id,
-                 o.player AS ops_player, o.position AS ops_position,
-                 o.lamar_12t_idp_ppr_6pt AS ops_lamar,
+                 {stats_field('player', 'stats_player')}, {stats_field('position', 'stats_position')},
+                 {stats_field('lamar_12t_idp_ppr_6pt', 'ops_lamar')},
+                 {stats_field('fantasy_points_ppr', 'ops_fantasy_points')},
+                 {bio_field('player', 'bio_player')}, {bio_field('position', 'bio_position')},
                  b.canonical_manager_count, b.canonical_manager
           FROM read_parquet({_path(memberships)}) m
           JOIN read_parquet({_path(targets)}) t
@@ -150,6 +158,8 @@ def build(
            AND b.source_franchise_id=m.source_franchise_id
           LEFT JOIN ops.nfl_historical.nfl_player_stats_all o
             ON o.NFL_player_id=c.NFL_player_id AND o.year=m.year AND o.week=m.week
+          LEFT JOIN ops.nfl_historical.player_bio b
+            ON b.NFL_player_id=c.NFL_player_id
           ORDER BY m.db_name, m.year, m.week, c.NFL_player_id, m.source_manager
         """
         source_columns = [row[0] for row in con.execute(source_sql).description]
@@ -158,13 +168,23 @@ def build(
             raise ValueError(f"source rows {len(source_rows)} != expected_rows {expected_rows}")
         seen: set[tuple[Any, ...]] = set()
         candidate_rows: list[list[Any]] = []
+        roster_only_rows = 0
         for source in source_rows:
-            required_source = ("source_franchise_id", "mfl_player_id", "fantasy_points", "espn_id", "NFL_player_id", "ops_player", "ops_position", "ops_lamar", "canonical_manager")
+            required_source = ("source_franchise_id", "mfl_player_id", "espn_id", "NFL_player_id", "canonical_manager")
             absent = [field for field in required_source if source.get(field) is None]
             if absent:
                 raise ValueError(f"source-proven row lacks required fields {absent}: {source}")
             if int(source["canonical_manager_count"] or 0) != 1:
                 raise ValueError(f"source franchise does not map to exactly one cache manager: {source}")
+            resolved_player = source.get("stats_player") or source.get("bio_player")
+            resolved_position = source.get("stats_position") or source.get("bio_position")
+            if not resolved_player or not resolved_position:
+                raise ValueError(f"player identity/position absent from both ops stat and bio tables: {source}")
+            started = int(bool(source["is_started"]))
+            if started and (source.get("fantasy_points") is None or source.get("ops_lamar") is None):
+                raise ValueError(f"started source row lacks direct score or player-week LAMAR: {source}")
+            if not started and source.get("fantasy_points") is None:
+                roster_only_rows += 1
             logical_key = (
                 source["db_name"], source["year"], source["week"], source["NFL_player_id"], source["canonical_manager"],
             )
@@ -189,13 +209,13 @@ def build(
                 "week": source["week"],
                 "NFL_player_id": source["NFL_player_id"],
                 "manager": source["canonical_manager"],
-                "is_started": int(bool(source["is_started"])),
+                "is_started": started,
                 "is_rostered": 1,
-                "fantasy_points": float(source["fantasy_points"]),
-                "manager_lamar": float(source["ops_lamar"]),
-                "player": source["ops_player"],
-                "position": source["ops_position"],
-                "fantasy_position": _slot(source["ops_position"], source["is_started"]),
+                "fantasy_points": float(source["fantasy_points"]) if source.get("fantasy_points") is not None else source.get("ops_fantasy_points"),
+                "manager_lamar": float(source["ops_lamar"]) if source.get("ops_lamar") is not None else 0.0,
+                "player": resolved_player,
+                "position": resolved_position,
+                "fantasy_position": _slot(resolved_position, started),
                 # Clutch is a league-week allocation, never a team-template
                 # attribute.  The recovery workflow recomputes it for the full
                 # affected league-year after these rows are inserted.
@@ -223,6 +243,7 @@ def build(
             "logical_key": list(KEY),
             "schema": names,
             "source_fields": ["MFL roster membership", "MFL score", "MFL player directory", "ESPN-to-NFL crosswalk", "ops player/week", "existing canonical team-week"],
+            "source_roster_only_rows": roster_only_rows,
         }
         report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
