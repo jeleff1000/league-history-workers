@@ -2,17 +2,6 @@ name: MFL Sequential Quota Campaign
 
 on:
   workflow_dispatch:
-    inputs:
-      wait_for_run_ids:
-        description: "Comma-separated MFL discovery runs that must finish first"
-        required: false
-        default: "31607758068,31608384891"
-        type: string
-      batches_json:
-        description: "JSON array of sequential discovery batches"
-        required: true
-        default: '[{"start_year":2018,"end_year":2018,"id_start":25000,"id_end":29999},{"start_year":2015,"end_year":2016,"id_start":0,"id_end":9999}]'
-        type: string
 
 permissions:
   actions: write
@@ -22,91 +11,56 @@ concurrency:
   group: mfl-sequential-quota-campaign
   cancel-in-progress: false
 
+# Reusable-workflow jobs hold no runner while waiting on `needs`. Each child
+# discovery workflow still runs 250 shards with max-parallel=15.
 jobs:
-  run-sequentially:
-    runs-on: ubuntu-latest
-    timeout-minutes: 1440
-    steps:
-      - name: Dispatch and await each MFL batch
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          WAIT_FOR_RUN_IDS: ${{ inputs.wait_for_run_ids }}
-          BATCHES_JSON: ${{ inputs.batches_json }}
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          import subprocess
-          import time
-          from datetime import datetime, timezone
+  window_2018_24000:
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "250"
+      max_parallel: "15"
+      start_year: "2018"
+      end_year: "2018"
+      id_start: "24000"
+      id_end: "24999"
+      request_sleep: "5.0"
+    secrets: inherit
 
-          repo = os.environ["REPO"]
+  window_2017_00000:
+    needs: window_2018_24000
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "250"
+      max_parallel: "15"
+      start_year: "2017"
+      end_year: "2017"
+      id_start: "0"
+      id_end: "9999"
+      request_sleep: "5.0"
+    secrets: inherit
 
-          def gh(*args):
-              return subprocess.check_output(["gh", *args], text=True).strip()
+  window_2018_25000:
+    needs: window_2017_00000
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "250"
+      max_parallel: "15"
+      start_year: "2018"
+      end_year: "2018"
+      id_start: "25000"
+      id_end: "29999"
+      request_sleep: "5.0"
+    secrets: inherit
 
-          def run_json(run_id):
-              return json.loads(gh("api", f"repos/{repo}/actions/runs/{run_id}"))
-
-          # Existing windows are allowed to finish first; this controller never
-          # duplicates their ID ranges.
-          for raw_id in filter(None, (x.strip() for x in os.environ["WAIT_FOR_RUN_IDS"].split(","))):
-              run_id = int(raw_id)
-              print(f"[campaign] waiting for prerequisite run {run_id}", flush=True)
-              while True:
-                  state = run_json(run_id)
-                  if state["status"] == "completed":
-                      print(f"[campaign] prerequisite {run_id} finished: {state.get('conclusion')}", flush=True)
-                      break
-                  time.sleep(60)
-
-          batches = json.loads(os.environ["BATCHES_JSON"])
-          if not isinstance(batches, list) or not batches:
-              raise SystemExit("batches_json must be a non-empty JSON array")
-
-          for index, batch in enumerate(batches, start=1):
-              required = ("start_year", "end_year", "id_start", "id_end")
-              missing = [key for key in required if key not in batch]
-              if missing:
-                  raise SystemExit(f"batch {index} missing: {', '.join(missing)}")
-              dispatch_started = datetime.now(timezone.utc)
-              args = [
-                  "workflow", "run", "mfl_historical_discovery_256.yml",
-                  "--repo", repo, "--ref", "main",
-                  "-f", "shard_count=250", "-f", "max_parallel=15",
-                  "-f", f"start_year={batch['start_year']}",
-                  "-f", f"end_year={batch['end_year']}",
-                  "-f", f"id_start={batch['id_start']}",
-                  "-f", f"id_end={batch['id_end']}",
-                  "-f", "request_sleep=5.0",
-              ]
-              subprocess.run(["gh", *args], check=True)
-              print(f"[campaign] dispatched batch {index}: {batch}", flush=True)
-
-              run_id = None
-              for _ in range(12):
-                  runs = json.loads(gh("api", f"repos/{repo}/actions/runs?event=workflow_dispatch&per_page=20"))["workflow_runs"]
-                  candidates = [
-                      run for run in runs
-                      if run.get("name") == "MFL Historical Discovery (250 contiguous ID shards)"
-                      and datetime.fromisoformat(run["created_at"].replace("Z", "+00:00")) >= dispatch_started
-                  ]
-                  if candidates:
-                      run_id = max(candidates, key=lambda run: run["created_at"])["id"]
-                      break
-                  time.sleep(5)
-              if run_id is None:
-                  raise SystemExit("could not identify dispatched MFL run")
-
-              while True:
-                  state = run_json(run_id)
-                  if state["status"] == "completed":
-                      conclusion = state.get("conclusion")
-                      print(f"[campaign] batch {index} run {run_id} finished: {conclusion}", flush=True)
-                      if conclusion not in {"success", "cancelled"}:
-                          raise SystemExit(f"batch {index} failed: {conclusion}")
-                      break
-                  time.sleep(60)
-          PY
+  window_2015_2016_00000:
+    needs: window_2018_25000
+    uses: ./.github/workflows/mfl_historical_discovery_256.yml
+    with:
+      shard_count: "250"
+      max_parallel: "15"
+      start_year: "2015"
+      end_year: "2016"
+      id_start: "0"
+      id_end: "9999"
+      request_sleep: "5.0"
+    secrets: inherit
