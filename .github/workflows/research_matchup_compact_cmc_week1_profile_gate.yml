@@ -13,6 +13,7 @@ on:
         default: cmc_week1
         options:
           - cmc_week1
+          - cmc_2025_season
           - cmc_2025_all_grains
           - myles_2025_season
           - rb_2025_lane
@@ -78,7 +79,7 @@ jobs:
             WHERE COALESCE(season_type, 'REG') = 'REG' AND week IS NOT NULL
           """)
           mode = os.environ['PILOT_MODE']
-          if mode not in {'cmc_week1', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'local_cache_export'}:
+          if mode not in {'cmc_week1', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'local_cache_export'}:
             raise ValueError(f'unsupported pilot mode: {mode}')
           if mode == 'local_cache_export':
               receipt = {
@@ -355,7 +356,7 @@ jobs:
               summary.write(f'- Source rows read: `{source_rows}`; outer rows: `{outer_rows}`; nested cells: `{cell_count}`\n')
               summary.write(f'- Build wall time: `{elapsed_s:.3f}s`; peak RSS: `{peak_rss_kb} KB`\n')
 
-          if mode == 'cmc_2025_all_grains':
+          if mode in {'cmc_2025_season', 'cmc_2025_all_grains'}:
               stats = 'ops.nfl_historical.nfl_player_stats_all'
               source_rows_2025 = c.execute("""
                 SELECT COUNT(*) FROM lake.public.player_fantasy
@@ -425,6 +426,21 @@ jobs:
               """).fetchone()
               assert season_core_cells <= 145, season_core_cells
               assert season_grade_cells <= 577, season_grade_cells
+              if mode == 'cmc_2025_season':
+                  season_receipt = {
+                      'mode': mode, 'cmc_2025_source_rows': source_rows_2025,
+                      'weekly_outer_rows': len(weekly_weeks), 'weekly_selected_cells': weekly_selected,
+                      'weekly_nested_cells': weekly_cells, 'season_outer_rows': 1,
+                      'season_selected': season_selected, 'season_core_cells': season_core_cells,
+                      'season_grade_cells': season_grade_cells,
+                      'wall_seconds': round(perf_counter() - full_started, 3),
+                  }
+                  print(season_receipt)
+                  with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                      summary.write('## CMC 2025 compact cache pilot\n')
+                      summary.write(f'- Receipt: `{season_receipt}`\n')
+                      summary.write('- Cache-only computation; no Fly read/write, settings join, API request, artifact, or publish step.\n')
+                  raise SystemExit(0)
 
               c.execute('CREATE OR REPLACE TABLE cmc_career_seasons AS SELECT * FROM cmc_2025_season WHERE FALSE')
               for season_year in range(2017, 2026):
@@ -494,7 +510,6 @@ jobs:
                   summary.write('## CMC 2025 all-grain compact cache pilot\n')
                   summary.write(f'- Receipt: `{full_receipt}`\n')
                   summary.write('- Cache-only computation; no Fly read/write, settings join, API request, artifact, or publish step.\n')
-
           if mode in {'myles_2025_season', 'rb_2025_lane'}:
               player_name, lane_position = (
                   ('myles garrett', 'DL') if mode == 'myles_2025_season'
