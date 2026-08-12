@@ -23,6 +23,7 @@ concurrency:
 env:
   CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
   EXPECTED_CANDIDATE_ARTIFACTS: '256'
+  SOURCE_ARTIFACT_ID: '8952555354'
 
 jobs:
   tests:
@@ -141,6 +142,7 @@ jobs:
           Path('combined_candidate_manifest.json').write_text(json.dumps({
               'candidate_artifacts':len(reports),'candidate_rows':total,'improvements_by_field':expected,
               'source_run_id':'${{ inputs.candidate_run_id }}','cache_mutated':False,'new_lineage':False,
+              'source_artifact_id':'${{ env.SOURCE_ARTIFACT_ID }}',
           },indent=2,sort_keys=True)+'\n')
           PY
       - name: Apply only exact existing-player NULL fills
@@ -261,6 +263,7 @@ jobs:
           result={'canonical_cache_key':'research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613',
                   'candidate_run_id':'${{ inputs.candidate_run_id }}','candidate_artifacts':expected['candidate_artifacts'],
                   'candidate_rows':expected['candidate_rows'],'matched_player_rows':matched,'unmatched_candidate_keys':unmatched,
+                  'source_artifact_id':expected['source_artifact_id'],
                   'remaining_source_backed_nulls':remaining,
                   'schema_unchanged':schema==[tuple(row) for row in before['schema']],
                   'player_rows_unchanged':rows==before['player_rows'],

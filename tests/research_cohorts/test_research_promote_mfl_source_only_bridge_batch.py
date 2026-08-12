@@ -16,6 +16,7 @@ def test_batch_promotion_workflow_requires_only_safe_read_only_mfl_candidates() 
     assert "canonical_schema_unchanged" in workflow
     assert "positive_mismatches_not_auto_promoted" in workflow
     assert "inserted_rows" in workflow
+    assert "source_artifact_id" in workflow
     assert "actions/cache/save@v5" in workflow
     assert "Prove exactly one same-key cache object remains" in workflow
     assert "restore-keys:" not in workflow
