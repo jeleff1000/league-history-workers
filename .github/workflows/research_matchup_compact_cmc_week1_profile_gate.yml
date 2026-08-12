@@ -24,11 +24,11 @@ on:
           - rb_2025_week1_residual_shapes
           - rb_2025_bucket_inventory
           - rb_2025_bucket
+          - local_cache_export
       bucket:
         description: One deterministic balanced 2025 RB bucket (1-15)
         required: true
         default: '3'
-          - local_cache_export
 
 permissions:
   contents: read
