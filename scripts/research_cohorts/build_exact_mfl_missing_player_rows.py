@@ -102,6 +102,11 @@ def build(
             return f"o.{_q(field)} AS {_q(alias)}" if field in stats_columns else f"NULL::VARCHAR AS {_q(alias)}"
         def bio_field(field: str, alias: str) -> str:
             return f"b.{_q(field)} AS {_q(alias)}" if field in bio_columns else f"NULL::VARCHAR AS {_q(alias)}"
+        bio_position_fields = [field for field in ("position", "nfl_position", "primary_position", "fantasy_position") if field in bio_columns]
+        bio_position = (
+            "COALESCE(" + ", ".join(f"b.{_q(field)}" for field in bio_position_fields) + ") AS \"bio_position\""
+            if bio_position_fields else "NULL::VARCHAR AS \"bio_position\""
+        )
         directory_conflicts = int(con.execute(f"""
           SELECT COUNT(*) FROM (
             SELECT source_year, mfl_player_id
@@ -139,7 +144,7 @@ def build(
                  {stats_field('player', 'stats_player')}, {stats_field('position', 'stats_position')},
                  {stats_field('lamar_12t_idp_ppr_6pt', 'ops_lamar')},
                  {stats_field('fantasy_points_ppr', 'ops_fantasy_points')},
-                 {bio_field('player', 'bio_player')}, {bio_field('position', 'bio_position')},
+                 {bio_field('player', 'bio_player')}, {bio_position},
                  b.canonical_manager_count, b.canonical_manager
           FROM read_parquet({_path(memberships)}) m
           JOIN read_parquet({_path(targets)}) t
