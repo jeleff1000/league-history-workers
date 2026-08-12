@@ -306,6 +306,13 @@ Every artifact now has a direct cache disposition. The remaining open work is
 either a strict promotion transaction, a source-identity decision, or an
 explicit schema/precedence closure. None requires a new API pull.
 
+The CSV is the machine-readable authority: **8,771 of 9,479 artifacts are
+closed** and **708 remain open**. The open partition is 473 identity-unmatched,
+214 precedence conflicts, 15 schema-blocked safe-null repairs, 4 schema-only
+items, and 2 source-only player-identity gaps. Every one of the 708 has a
+non-empty reason and next action in the CSV; an artifact is never considered
+closed merely because its parent workflow completed.
+
 | Family | Artifacts | Current state | Required action |
 | --- | ---: | ---: | --- |
 | `sleeper-missing-outcome-*` | 56 | Direct manager-week fan-out receipt complete: 24,382,006 supported cells equal cache; zero supported null fills; 90 non-null conflicts; 171,648 source cells identity-unmatched; 466,458 loss/tie cells outside the prior schema. | Resolve/close residual source-only identities and adjudicate conflicts; no null-cell promotion for this family. |
