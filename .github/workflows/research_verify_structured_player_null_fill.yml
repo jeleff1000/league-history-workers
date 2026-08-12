@@ -1,0 +1,95 @@
+name: Verify structured player null-fill promotion after cache restore
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        required: true
+        default: '31518641442'
+      canonical_cache_key:
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.canonical_cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Download exact promoted candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir candidate
+          gh run download '${{ inputs.candidate_run_id }}' --repo '${{ github.repository }}' \
+            --name 'research-mfl-outcome-null-fill-candidate-${{ inputs.candidate_run_id }}' --dir candidate
+      - name: Prove every candidate source cell is in the restored cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          delta=next(Path('candidate').rglob('mfl_direct_player_null_fill_delta.parquet'))
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          escaped=str(delta.resolve()).replace("'", "''")
+          con.execute(f"CREATE TEMP VIEW d AS SELECT * FROM read_parquet('{escaped}')")
+          matched=con.execute('''
+            SELECT COUNT(*) FROM d JOIN public.player_fantasy p
+              ON p.rowid=d.player_rowid
+             AND p.db_name IS NOT DISTINCT FROM d.db_name
+             AND p.year IS NOT DISTINCT FROM d.year
+             AND p.week IS NOT DISTINCT FROM d.week
+             AND p.NFL_player_id IS NOT DISTINCT FROM d.NFL_player_id
+             AND p.manager IS NOT DISTINCT FROM d.manager
+          ''').fetchone()[0]
+          total=con.execute('SELECT COUNT(*) FROM d').fetchone()[0]
+          if matched != total:
+            raise SystemExit(f'stale or unmatched restored candidate: total={total}, matched={matched}')
+          fields={'win':'source_win','team_points':'source_team_points','is_playoffs':'source_is_playoffs'}
+          remaining={field:con.execute(f'''
+            SELECT COUNT(*) FROM d JOIN public.player_fantasy p
+              ON p.rowid=d.player_rowid
+             AND p.db_name IS NOT DISTINCT FROM d.db_name
+             AND p.year IS NOT DISTINCT FROM d.year
+             AND p.week IS NOT DISTINCT FROM d.week
+             AND p.NFL_player_id IS NOT DISTINCT FROM d.NFL_player_id
+             AND p.manager IS NOT DISTINCT FROM d.manager
+            WHERE d."{source}" IS NOT NULL AND p."{field}" IS DISTINCT FROM d."{source}"
+          ''').fetchone()[0] for field,source in fields.items()}
+          if any(remaining.values()):
+            raise SystemExit(f'restored cache missing promoted cells: {remaining}')
+          artifact_rows=con.execute('''
+            SELECT artifact_id, COUNT(*) AS candidate_rows,
+                   SUM(CASE WHEN source_win IS NOT NULL THEN 1 ELSE 0 END) AS win_cells,
+                   SUM(CASE WHEN source_team_points IS NOT NULL THEN 1 ELSE 0 END) AS team_point_cells,
+                   SUM(CASE WHEN source_is_playoffs IS NOT NULL THEN 1 ELSE 0 END) AS playoff_cells
+            FROM (SELECT UNNEST(string_split(source_artifact_ids, '|'))::BIGINT AS artifact_id, * EXCLUDE(source_artifact_ids) FROM d)
+            GROUP BY artifact_id ORDER BY artifact_id
+          ''').fetchall()
+          result={'candidate_run_id':'${{ inputs.candidate_run_id }}','restored_cache_key':'${{ inputs.canonical_cache_key }}','candidate_rows':total,'matched_rows':matched,'remaining':remaining,'artifact_rows':[dict(zip(['artifact_id','candidate_rows','win_cells','team_point_cells','playoff_cells'],row)) for row in artifact_rows]}
+          Path('structured_player_null_fill_restored_readback.json').write_text(json.dumps(result,indent=2)+'\n')
+          print(json.dumps(result,sort_keys=True))
+          con.close()
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: structured-player-null-fill-restored-readback-${{ github.run_id }}
+          path: structured_player_null_fill_restored_readback.json
+          retention-days: 90
+          compression-level: 6
