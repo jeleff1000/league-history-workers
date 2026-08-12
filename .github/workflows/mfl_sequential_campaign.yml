@@ -12,12 +12,12 @@ concurrency:
   cancel-in-progress: false
 
 # Reusable-workflow jobs hold no runner while waiting on `needs`. Each child
-# discovery workflow still runs 250 shards with max-parallel=15.
+# discovery workflow still runs 256 shards with max-parallel=15.
 jobs:
   window_2018_24000:
     uses: ./.github/workflows/mfl_historical_discovery_256.yml
     with:
-      shard_count: "250"
+      shard_count: "256"
       max_parallel: "15"
       start_year: "2018"
       end_year: "2018"
@@ -30,7 +30,7 @@ jobs:
     needs: window_2018_24000
     uses: ./.github/workflows/mfl_historical_discovery_256.yml
     with:
-      shard_count: "250"
+      shard_count: "256"
       max_parallel: "15"
       start_year: "2017"
       end_year: "2017"
@@ -39,24 +39,24 @@ jobs:
       request_sleep: "5.0"
     secrets: inherit
 
-  window_2018_25000:
+  window_2018_25600:
     needs: window_2017_00000
     uses: ./.github/workflows/mfl_historical_discovery_256.yml
     with:
-      shard_count: "250"
+      shard_count: "256"
       max_parallel: "15"
       start_year: "2018"
       end_year: "2018"
-      id_start: "25000"
+      id_start: "25600"
       id_end: "29999"
       request_sleep: "5.0"
     secrets: inherit
 
   window_2015_2016_00000:
-    needs: window_2018_25000
+    needs: window_2018_25600
     uses: ./.github/workflows/mfl_historical_discovery_256.yml
     with:
-      shard_count: "250"
+      shard_count: "256"
       max_parallel: "15"
       start_year: "2015"
       end_year: "2016"
@@ -64,3 +64,4 @@ jobs:
       id_end: "9999"
       request_sleep: "5.0"
     secrets: inherit
+

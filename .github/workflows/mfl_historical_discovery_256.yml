@@ -1,12 +1,12 @@
-name: MFL Historical Discovery (250 contiguous ID shards)
+name: MFL Historical Discovery (256 contiguous ID shards)
 
 on:
   workflow_dispatch:
     inputs:
       shard_count:
-        description: "Deterministic discovery shards (250 for the reconnaissance pass)"
+        description: "Deterministic discovery shards (256 per workflow)"
         required: false
-        default: "250"
+        default: "256"
         type: string
       max_parallel:
         description: "Concurrent runners; kept at 15 for MFL API safety"
@@ -92,7 +92,7 @@ on:
     inputs:
       shard_count:
         required: false
-        default: "250"
+        default: "256"
         type: string
       max_parallel:
         required: false
@@ -182,7 +182,7 @@ jobs:
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
-          n = min(max(int("${{ inputs.shard_count || '250' }}"), 1), 250)
+          n = min(max(int("${{ inputs.shard_count || '256' }}"), 1), 256)
           mp = min(max(int("${{ inputs.max_parallel || '15' }}"), 1), 15, n)
           directory_only = "${{ inputs.directory_only || 'false' }}".strip().lower() == "true"
           raw = "${{ inputs.shard_indices || '' }}".strip()
@@ -234,7 +234,7 @@ jobs:
           mkdir -p out
           python code/scripts/extraplatform_corpus/discover_mfl_shard.py \
             --shard-index "${{ matrix.shard }}" \
-            --shard-count "${{ inputs.shard_count || '250' }}" \
+            --shard-count "${{ inputs.shard_count || '256' }}" \
             --start-year "${{ inputs.start_year || '1997' }}" \
             --end-year "${{ inputs.end_year || '1998' }}" \
             --id-start "${{ inputs.id_start || '0' }}" \
@@ -455,7 +455,7 @@ jobs:
           # Feed named-directory results through the same season/id dedupe and
           # lineage merge as numeric shards.
           mkdir -p shards
-          MFL_EXPECTED_SHARDS="${{ inputs.shard_count || '250' }}" \
+          MFL_EXPECTED_SHARDS="${{ inputs.shard_count || '256' }}" \
           MFL_SHARD_INDICES="${{ inputs.shard_indices || '' }}" \
           MFL_DIRECTORY_ONLY="${{ inputs.directory_only || 'false' }}" \
           python3 - <<'PY'
@@ -491,7 +491,7 @@ jobs:
         env:
           MFL_START_YEAR: ${{ inputs.start_year || '1997' }}
           MFL_END_YEAR: ${{ inputs.end_year || '1998' }}
-          MFL_SHARD_COUNT: ${{ inputs.shard_count || '250' }}
+          MFL_SHARD_COUNT: ${{ inputs.shard_count || '256' }}
           MFL_MAX_PARALLEL: ${{ inputs.max_parallel || '15' }}
           MFL_ID_BANDS: ${{ inputs.id_bands || '1-9999,10000-29999,30000-59999,60000-80000' }}
           MFL_REQUEST_SLEEP: ${{ inputs.request_sleep || '5.0' }}

@@ -50,7 +50,7 @@ jobs:
           set -euo pipefail
           if [ "$GITHUB_EVENT_NAME" != "workflow_run" ]; then
             cat >> "$GITHUB_OUTPUT" <<EOF
-          shard_count=250
+          shard_count=256
           max_parallel=15
           id_bands=1-9999,10000-29999,30000-59999,60000-80000
           request_sleep=5.0
