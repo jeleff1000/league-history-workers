@@ -82,8 +82,22 @@ approved cache and passed its no-mutation gate, and it successfully returned
 extractor called the MFL client directory method with its `(year, league_id)`
 arguments reversed. All 15 directory calls were therefore invalid and the
 crosswalk had 451 `missing_espn_id` keys / zero resolved recipients. Commit
-`010d954` adds a regression test and fixes only that argument order. The same
-15 targets must be rerun before any ledger disposition may change.
+`03eb5da` fixes only that argument order and adds its regression test.
+
+The corrected re-run, [31613754399](https://github.com/jeleff1000/league-history-workers/actions/runs/31613754399),
+is valid **source and identity evidence**, but is still not a cache promotion:
+all 15 source groups resolved, producing 4,732 memberships and 4,732 player
+directory rows. The protected crosswalk resolved 429 of 451 MFL player IDs;
+1,785 memberships reached an exact canonical player-team recipient. The
+remaining 2,676 `no_canonical_recipient` memberships were not yet split into
+"canonical player-week absent" versus "same player under a different canonical
+manager," so this run cannot close or promote any open artifact.
+
+The same retained 15 groups are now being re-run by
+[31614575246](https://github.com/jeleff1000/league-history-workers/actions/runs/31614575246)
+against commit `c13d45f`. That read-only receipt adds the required two-way
+partition. It is in progress and must not be counted as evidence or a cache
+change until its uploaded report is inspected and appended to the CSV ledger.
 
 Existing `mfl-underpopulated-week-rescue-*` artifacts are retained source-team
 signals, not roster bridges. A direct schema receipt from
