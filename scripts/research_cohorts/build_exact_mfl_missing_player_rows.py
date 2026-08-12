@@ -96,7 +96,22 @@ def build(
         if missing:
             raise ValueError(f"canonical player schema missing required fields: {missing}")
         con.execute(f"ATTACH {_path(ops)} AS ops (READ_ONLY)")
+        directory_conflicts = int(con.execute(f"""
+          SELECT COUNT(*) FROM (
+            SELECT source_year, mfl_player_id
+            FROM read_parquet({_path(directory)})
+            GROUP BY 1, 2
+            HAVING COUNT(DISTINCT espn_id) > 1 OR COUNT(DISTINCT raw_team) > 1
+          )
+        """).fetchone()[0])
+        if directory_conflicts:
+            raise ValueError(f"MFL directory has {directory_conflicts} conflicting source-year/native-ID records")
         source_sql = f"""
+          WITH directory_one AS (
+            SELECT source_year, mfl_player_id, MIN(espn_id) AS espn_id, MIN(raw_team) AS raw_team
+            FROM read_parquet({_path(directory)})
+            GROUP BY 1, 2
+          )
           SELECT m.db_name, m.year, m.week, m.source_year, m.source_manager,
                  m.mfl_player_id, m.is_started, m.fantasy_points,
                  d.espn_id, d.raw_team, c.NFL_player_id,
@@ -109,7 +124,7 @@ def build(
            AND t.mfl_player_id=m.mfl_player_id
            AND t.bridge_status='no_canonical_recipient'
            AND t.canonical_player_week_count=0
-          JOIN read_parquet({_path(directory)}) d
+          JOIN directory_one d
             ON d.source_year=m.source_year AND d.mfl_player_id=m.mfl_player_id
           JOIN read_parquet({_path(crosswalk)}) c
             ON c.source_year=m.source_year AND c.mfl_player_id=m.mfl_player_id
