@@ -13,6 +13,8 @@ on:
         default: cmc_week1
         options:
           - cmc_week1
+          - cmc_2025_weekly
+          - cmc_2025_season_only
           - cmc_2025_season
           - cmc_2025_all_grains
           - myles_2025_season
@@ -79,7 +81,7 @@ jobs:
             WHERE COALESCE(season_type, 'REG') = 'REG' AND week IS NOT NULL
           """)
           mode = os.environ['PILOT_MODE']
-          if mode not in {'cmc_week1', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'local_cache_export'}:
+          if mode not in {'cmc_week1', 'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'local_cache_export'}:
             raise ValueError(f'unsupported pilot mode: {mode}')
           if mode == 'local_cache_export':
               receipt = {
@@ -357,7 +359,7 @@ jobs:
               summary.write(f'- Source rows read: `{source_rows}`; outer rows: `{outer_rows}`; nested cells: `{cell_count}`\n')
               summary.write(f'- Build wall time: `{elapsed_s:.3f}s`; peak RSS: `{peak_rss_kb} KB`\n')
 
-          if mode in {'cmc_2025_season', 'cmc_2025_all_grains'}:
+          if mode in {'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains'}:
               stats = 'ops.nfl_historical.nfl_player_stats_all'
               source_rows_2025 = c.execute("""
                 SELECT COUNT(*) FROM lake.public.player_fantasy
@@ -365,16 +367,20 @@ jobs:
                   AND CAST(NFL_player_id AS VARCHAR)='00-0033280'
               """).fetchone()[0]
               full_started = perf_counter()
-              materialize_weekly_core_cohort_cells(
-                  c, source_table='lake.public.player_fantasy', output_table='cmc_2025_weekly',
-                  valid_player_weeks_table='cached_regular_player_weeks',
-                  year=2025, week=None, player_id='00-0033280', position='RB', split_threshold=150,
-              )
-              weekly_weeks = [r[0] for r in c.execute(
-                  'SELECT week FROM cmc_2025_weekly ORDER BY week'
-              ).fetchall()]
-              assert weekly_weeks == list(range(1, 14)) + list(range(15, 19)), weekly_weeks
-              weekly_selected = c.execute("""
+              weekly_weeks = []
+              weekly_selected = 0
+              weekly_cells = 0
+              if mode != 'cmc_2025_season_only':
+                  materialize_weekly_core_cohort_cells(
+                      c, source_table='lake.public.player_fantasy', output_table='cmc_2025_weekly',
+                      valid_player_weeks_table='cached_regular_player_weeks',
+                      year=2025, week=None, player_id='00-0033280', position='RB', split_threshold=150,
+                  )
+                  weekly_weeks = [r[0] for r in c.execute(
+                      'SELECT week FROM cmc_2025_weekly ORDER BY week'
+                  ).fetchall()]
+                  assert weekly_weeks == list(range(1, 14)) + list(range(15, 19)), weekly_weeks
+                  weekly_selected = c.execute("""
                 SELECT COUNT(*)
                 FROM cmc_2025_weekly, UNNEST(cohort_cells) AS u(cell)
                 WHERE cell.q_teams=CASE WHEN cohort_profile.teams_12t_split=1 THEN '12t' ELSE 'ALL' END
@@ -383,12 +389,17 @@ jobs:
                   AND cell.q_pass_td=CASE WHEN cohort_profile.pass_td_4pt_split=1 THEN '4pt' ELSE 'ALL' END
                   AND cell.q_dynasty=CASE WHEN cohort_profile.dynasty_redraft_split=1 THEN 'redraft' ELSE 'ALL' END
                   AND cell.q_best_ball=CASE WHEN cohort_profile.best_ball_managed_split=1 THEN 'managed' ELSE 'ALL' END
-              """).fetchone()[0]
-              weekly_cells = c.execute(
-                  'SELECT COALESCE(SUM(list_count(cohort_cells)), 0) FROM cmc_2025_weekly'
-              ).fetchone()[0]
-              assert weekly_selected == 17, weekly_selected
-              assert weekly_cells <= 17 * 145, weekly_cells
+                  """).fetchone()[0]
+                  weekly_cells = c.execute(
+                      'SELECT COALESCE(SUM(list_count(cohort_cells)), 0) FROM cmc_2025_weekly'
+                  ).fetchone()[0]
+                  assert weekly_selected == 17, weekly_selected
+                  assert weekly_cells <= 17 * 145, weekly_cells
+                  if mode == 'cmc_2025_weekly':
+                      print({'mode': mode, 'weekly_outer_rows': len(weekly_weeks),
+                             'weekly_selected_cells': weekly_selected, 'weekly_nested_cells': weekly_cells,
+                             'wall_seconds': round(perf_counter() - full_started, 3)})
+                      raise SystemExit(0)
 
               materialize_season_core_cohort_cells(
                   c, source_table='lake.public.player_fantasy', nfl_stats_table=stats,
@@ -427,7 +438,7 @@ jobs:
               """).fetchone()
               assert season_core_cells <= 145, season_core_cells
               assert season_grade_cells <= 577, season_grade_cells
-              if mode == 'cmc_2025_season':
+              if mode in {'cmc_2025_season', 'cmc_2025_season_only'}:
                   season_receipt = {
                       'mode': mode, 'cmc_2025_source_rows': source_rows_2025,
                       'weekly_outer_rows': len(weekly_weeks), 'weekly_selected_cells': weekly_selected,
