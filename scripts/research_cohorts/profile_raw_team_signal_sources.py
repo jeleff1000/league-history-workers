@@ -1,10 +1,10 @@
 """Batch-profile retained team/week artifacts against the frozen player cache.
 
-This is diagnostic evidence for the artifact ledger.  It intentionally uses
-the same exact team-week identity as the receipt reader:
-``(db_name, year, week, canonical_team_key)``.  All raw sources are
-materialized once, then joined to ``player_fantasy`` once; it must never scan
-the canonical table once per source artifact.
+This is diagnostic evidence for the artifact ledger.  It uses an exact
+source-team identity where available, then a fail-closed manager-week identity
+only when the source has exactly one team for that manager/week.  All raw
+sources are materialized once, then joined to ``player_fantasy`` once; it must
+never scan the canonical table once per source artifact.
 
 MFL is deliberately special-cased: its raw ``team_key`` is a four-digit roster
 slot, while the canonical player rows identify the same team with the stable
@@ -120,8 +120,16 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
               END AS canonical_team_key,
               CASE
                 WHEN {platform}='mfl' AND COALESCE({manager_guid}, {franchise_id}) IS NOT NULL
+                  THEN 'team:' || COALESCE({manager_guid}, {franchise_id})
+                WHEN {raw_team_key} IS NOT NULL THEN 'team:' || {raw_team_key}
+                WHEN {manager_key} IS NOT NULL THEN 'manager:' || {manager_key}
+                ELSE NULL::VARCHAR
+              END AS source_identity_key,
+              CASE
+                WHEN {platform}='mfl' AND COALESCE({manager_guid}, {franchise_id}) IS NOT NULL
                   THEN 'mfl_manager_guid'
                 WHEN {raw_team_key} IS NOT NULL THEN 'team_key'
+                WHEN {manager_key} IS NOT NULL THEN 'manager_only'
                 ELSE 'missing_identity'
               END AS identity_strategy
             FROM raw_sources r
@@ -133,12 +141,12 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
             raise SystemExit("source manifest produced zero attributable rows")
         con.execute("""
             CREATE OR REPLACE TEMP TABLE source_team_keys AS
-            SELECT artifact_id, db_name, year, week, canonical_team_key, identity_strategy,
-                   manager_key, team_name_key,
+            SELECT artifact_id, db_name, year, week, source_identity_key AS source_team_key,
+                   canonical_team_key, identity_strategy, manager_key, team_name_key,
                    COUNT(*) AS source_rows
             FROM source_rows
-            WHERE canonical_team_key IS NOT NULL
-            GROUP BY 1,2,3,4,5,6,7,8
+            WHERE source_identity_key IS NOT NULL
+            GROUP BY 1,2,3,4,5,6,7,8,9
         """)
         # This is the sole canonical-table access: DuckDB builds from the small
         # source key relation.  First prefer an exact canonical team key.  If
@@ -147,7 +155,7 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
         con.execute("""
             CREATE OR REPLACE TEMP TABLE primary_team_matches AS
             SELECT DISTINCT s.artifact_id, s.db_name, s.year, s.week,
-                            s.canonical_team_key AS source_team_key,
+                            s.source_team_key,
                             p.team_key AS cache_team_key,
                             s.manager_key,
                             s.identity_strategy AS match_strategy
@@ -156,13 +164,14 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
               ON p.db_name IS NOT DISTINCT FROM s.db_name
              AND p."year" IS NOT DISTINCT FROM s.year
              AND p.week IS NOT DISTINCT FROM s.week
+             AND s.canonical_team_key IS NOT NULL
              AND p.team_key IS NOT DISTINCT FROM s.canonical_team_key
         """)
         if {"manager", "team_name"} <= player_columns:
             con.execute("""
                 CREATE OR REPLACE TEMP TABLE manager_team_matches AS
                 SELECT s.artifact_id, s.db_name, s.year, s.week,
-                       s.canonical_team_key AS source_team_key,
+                       s.source_team_key,
                        p.team_key AS cache_team_key,
                        s.manager_key,
                        'manager_team_name' AS match_strategy
@@ -195,7 +204,7 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
             con.execute("""
                 CREATE OR REPLACE TEMP TABLE unique_manager_matches AS
                 SELECT DISTINCT s.artifact_id, s.db_name, s.year, s.week,
-                                s.canonical_team_key AS source_team_key,
+                                s.source_team_key,
                                 CAST(NULL AS VARCHAR) AS cache_team_key,
                                 s.manager_key,
                                 'unique_manager' AS match_strategy
@@ -213,7 +222,7 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
                     AND other.year IS NOT DISTINCT FROM s.year
                     AND other.week IS NOT DISTINCT FROM s.week
                     AND other.manager_key IS NOT DISTINCT FROM s.manager_key
-                    AND other.canonical_team_key IS DISTINCT FROM s.canonical_team_key
+                    AND other.source_team_key IS DISTINCT FROM s.source_team_key
                 )
             """)
         else:
@@ -314,13 +323,13 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
                AND r.db_name IS NOT DISTINCT FROM s.db_name
                AND r.year IS NOT DISTINCT FROM s.year
                AND r.week IS NOT DISTINCT FROM s.week
-               AND r.source_team_key IS NOT DISTINCT FROM s.canonical_team_key
+               AND r.source_team_key IS NOT DISTINCT FROM s.source_team_key
               LEFT JOIN resolved_player_fanout f
                 ON f.artifact_id=s.artifact_id
                AND f.db_name IS NOT DISTINCT FROM s.db_name
                AND f.year IS NOT DISTINCT FROM s.year
                AND f.week IS NOT DISTINCT FROM s.week
-               AND f.source_team_key IS NOT DISTINCT FROM s.canonical_team_key
+               AND f.source_team_key IS NOT DISTINCT FROM s.source_team_key
               GROUP BY s.artifact_id
             )
             SELECT r.artifact_id, r.source_team_rows,
@@ -390,13 +399,13 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
                         AND r.db_name IS NOT DISTINCT FROM s.db_name
                         AND r.year IS NOT DISTINCT FROM s.year
                         AND r.week IS NOT DISTINCT FROM s.week
-                        AND r.source_team_key IS NOT DISTINCT FROM s.canonical_team_key
+                        AND r.source_team_key IS NOT DISTINCT FROM s.source_team_key
                     )
-                  ORDER BY s.artifact_id, s.db_name, s.year, s.week, s.canonical_team_key
+                  ORDER BY s.artifact_id, s.db_name, s.year, s.week, s.source_team_key
                   LIMIT 10
                 )
                 SELECT u.artifact_id, u.db_name, u.year, u.week,
-                       u.canonical_team_key, u.manager_key, u.team_name_key,
+                       u.source_team_key, u.manager_key, u.team_name_key,
                        STRING_AGG(DISTINCT CONCAT_WS(' | ',
                          CAST(p.team_key AS VARCHAR), CAST(p.manager AS VARCHAR),
                          CAST(p.team_name AS VARCHAR)), ' || ')
