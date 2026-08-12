@@ -315,7 +315,13 @@ jobs:
                 SELECT core.*, grades.grade_cells
                 FROM myles_2025_season_core AS core
                 INNER JOIN myles_2025_season_grade AS grades USING (NFL_player_id, year, position)
-              """)
+                WHERE core.NFL_player_id = ?
+              """, [myles_id])
+              batch_core_rows, batch_grade_rows = c.execute("""
+                SELECT
+                  (SELECT COUNT(*) FROM myles_2025_season_core),
+                  (SELECT COUNT(*) FROM myles_2025_season_grade)
+              """).fetchone()
               weekly_rows, weekly_min, weekly_max, weekly_cells = c.execute("""
                 SELECT COUNT(*), MIN(week), MAX(week), COALESCE(SUM(list_count(cohort_cells)), 0)
                 FROM myles_2025_weekly
@@ -343,6 +349,7 @@ jobs:
               assert core_invalid == 0 and grade_invalid == 0, (core_invalid, grade_invalid)
               myles_receipt = {
                   'mode': mode, 'myles_id': myles_id, 'canonical_position': season_position,
+                  'batch_core_outer_rows': batch_core_rows, 'batch_grade_outer_rows': batch_grade_rows,
                   'weekly_outer_rows': weekly_rows, 'weekly_week_range': (weekly_min, weekly_max),
                   'weekly_nested_cells': weekly_cells, 'season_core_cells': season_core_cells,
                   'season_grade_cells': season_grade_cells,
