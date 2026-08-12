@@ -32,6 +32,14 @@ on:
           - championship_probe
           - structured_player
           - canonical_player_snapshot
+      emit_strict_null_candidate:
+        description: For championship probes only, emit a read-only, strict-null player-cell candidate artifact.
+        required: true
+        type: choice
+        default: 'false'
+        options:
+          - 'false'
+          - 'true'
 
 permissions:
   actions: read
@@ -74,6 +82,7 @@ jobs:
           ARTIFACT_IDS: ${{ inputs.artifact_ids }}
           DOWNLOAD_MODE: ${{ inputs.download_mode }}
           SOURCE_KIND: ${{ inputs.source_kind }}
+          EMIT_STRICT_NULL_CANDIDATE: ${{ inputs.emit_strict_null_candidate }}
         shell: bash
         run: |
           set -euo pipefail
@@ -298,6 +307,24 @@ jobs:
             --prior-receipts prior_receipts_input.json \
             --base research_public_lake/corpus_snapshot.duckdb \
             --out final_artifact_cache_receipts.json "${args[@]}"
+      - name: Materialize strict-null championship-probe candidates
+        env:
+          SOURCE_KIND: ${{ inputs.source_kind }}
+          EMIT_STRICT_NULL_CANDIDATE: ${{ inputs.emit_strict_null_candidate }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$EMIT_STRICT_NULL_CANDIDATE" = "false" ]; then
+            exit 0
+          fi
+          if [ "$SOURCE_KIND" != "championship_probe" ]; then
+            echo "strict-null candidate materialization is limited to championship_probe sources" >&2
+            exit 2
+          fi
+          python scripts/research_cohorts/audit_team_signal_candidates.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --candidates championship_identity_probe_parquet \
+            --out strict_null_candidate
       - name: Fail fast on cache, schema, row, or ops mutation
         shell: bash
         run: |
@@ -330,6 +357,7 @@ jobs:
             raw_signal_join_key_profile.json
             prestate.json
             ops_before.sha256
+            strict_null_candidate/*
           if-no-files-found: error
           retention-days: 90
           compression-level: 0
