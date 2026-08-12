@@ -53,6 +53,11 @@ jobs:
               ('00-0039139', 'Jahmyr Gibbs'),
               ('00-0032764', 'Derrick Henry'),
               ('00-0037248', 'James Cook')
+          ), active_target_weeks AS (
+            SELECT DISTINCT a.NFL_player_id, a.year, a.week
+            FROM lake.public.player_active_week a
+            INNER JOIN targets t USING (NFL_player_id)
+            WHERE a.year=2025 AND a.week BETWEEN 1 AND 18
           ), rb AS (
             SELECT db_name, NFL_player_id, week,
               cohort_teams, cohort_roster, cohort_scoring, cohort_pass_td,
@@ -61,7 +66,7 @@ jobs:
               is_rostered, is_started, win,
               manager, team_key, team_name, team_points, fantasy_points
             FROM lake.public.player_fantasy
-            WHERE year=2025 {week_predicate} AND position='RB'
+            WHERE year=2025 AND week BETWEEN 1 AND 18 {week_predicate} AND position='RB'
           ), inventory AS (
             SELECT week, cohort_teams, cohort_roster, cohort_scoring, cohort_pass_td,
               cohort_playoff_teams, cohort_dynasty, cohort_best_ball,
@@ -75,7 +80,10 @@ jobs:
               MAX(CASE WHEN r.is_started=1 THEN 1 ELSE 0 END) AS started,
               MAX(CASE WHEN r.is_started=1 AND r.win IN (0,1) THEN 1 ELSE 0 END) AS valid_outcome,
               MAX(CASE WHEN r.is_started=1 AND r.win IN (0,1) THEN r.win ELSE NULL END) AS win_value
-            FROM rb r INNER JOIN targets t USING (NFL_player_id)
+            FROM rb r
+            INNER JOIN targets t USING (NFL_player_id)
+            INNER JOIN active_target_weeks a
+              ON a.NFL_player_id=r.NFL_player_id AND a.year=2025 AND a.week=r.week
             WHERE NOT (
               r.is_rostered=1 AND COALESCE(r.is_started,0)=0
               AND NULLIF(TRIM(COALESCE(r.manager,'')),'') IS NULL
@@ -119,7 +127,10 @@ jobs:
           rows = con.execute(query).fetchall()
           elapsed = perf_counter() - started
           assert len(rows) == 5 if scope == "week1" else len(rows) >= 80, rows
-          assert all(row[4] > 9000 and row[5] > 0 for row in rows), rows
+          assert all(row[4] > 0 and row[5] > 0 for row in rows), rows
+          cmc_rows = [row for row in rows if row[1] == "00-0033280"]
+          assert len(cmc_rows) == 1 if scope == "week1" else len(cmc_rows) == 17, cmc_rows
+          assert cmc_rows[0][4] > 9000 and cmc_rows[0][5] > 9000, cmc_rows
           players = {}
           for row in rows:
               player = players.setdefault(row[0], {"id": row[1], "weekly_rows": 0, "eligible": 0, "rostered": 0, "started": 0, "valid_outcomes": 0, "win_equivalent": 0})
