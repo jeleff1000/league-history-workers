@@ -119,7 +119,11 @@ archive before candidate assembly. Its first execution exposed a temporary-file
 race (`zips/.zip`): Bash expanded `zip_path` before assigning `artifact_id`.
 That attempt also stopped before candidate construction or cache mutation. The
 download function now assigns the artifact ID before deriving its unique ZIP
-path. The retry is still allowed to mutate only the already-approved
+path. The following retry proved that Ubuntu's `unzip` rejects the GitHub
+archive layout as an overlap/zip-bomb; Python's standard `zipfile.ZipFile`
+reads the same archive and extracts only the two required Parquet members.
+That attempt likewise stopped before candidate construction or cache mutation.
+The retry is still allowed to mutate only the already-approved
 same-key cache after its test/preflight gate proves the selected artifact list
 exactly matches the 223 retained shards. Its fresh restore/readback receipt is
 required before this checkpoint, any affected artifact, or any player cell is
