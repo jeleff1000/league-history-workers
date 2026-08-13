@@ -96,13 +96,16 @@ jobs:
           direct=sorted(Path('out/direct').glob('*.parquet'))
           check=duckdb.connect()
           paths=','.join("'"+str(path).replace("'", "''")+"'" for path in direct)
-          check.execute("CREATE TEMP VIEW d AS SELECT * FROM read_parquet(["+paths+"], union_by_name=true)")
-          rows=int(check.execute('SELECT COUNT(*) FROM d').fetchone()[0])
-          duplicate=int(check.execute('SELECT COUNT(*) FROM (SELECT source_year,mfl_player_id FROM d GROUP BY 1,2 HAVING COUNT(*)>1)').fetchone()[0])
-          bad=int(check.execute("SELECT COUNT(*) FROM d WHERE NFL_player_id IS NULL OR crosswalk_status <> 'resolved_name_position_team_year'").fetchone()[0])
+          check.execute("CREATE TEMP VIEW raw_d AS SELECT * FROM read_parquet(["+paths+"], union_by_name=true)")
+          raw_rows=int(check.execute('SELECT COUNT(*) FROM raw_d').fetchone()[0])
+          bad=int(check.execute("SELECT COUNT(*) FROM raw_d WHERE NFL_player_id IS NULL OR crosswalk_status <> 'resolved_name_position_team_year'").fetchone()[0])
           check.close()
-          if duplicate or bad:
-              raise SystemExit(f'unsafe direct crosswalk: duplicate={duplicate}, bad={bad}')
+          if bad:
+              raise SystemExit(f'unsafe direct crosswalk: invalid_candidate_rows={bad}')
+          from scripts.research_cohorts.build_mfl_direct_player_crosswalk import consolidate_candidates
+          consolidation=consolidate_candidates(direct, Path('out/mfl_direct_player_crosswalk_candidates.parquet'))
+          rows=consolidation['candidate_rows']
+          duplicate=raw_rows-rows
           reports=[json.loads(path.read_text()) for path in sorted(Path('out/direct').glob('*.json'))]
           receipt={
               'read_only':True,
@@ -110,15 +113,18 @@ jobs:
               'new_lineage':False,
               'source_run_id':'31663728938',
               'source_shards':[52,116,143,167,197],
+              'raw_candidate_rows':raw_rows,
               'candidate_rows':rows,
-              'duplicate_source_keys':duplicate,
+              'identical_duplicate_rows_collapsed':duplicate,
+              'conflicting_native_keys':consolidation['conflicting_native_keys'],
               'invalid_candidate_rows':bad,
               'shard_reports':reports,
           }
           Path('out/mfl_direct_player_crosswalk_receipt.json').write_text(json.dumps(receipt, indent=2, sort_keys=True)+'\n')
           print(json.dumps(receipt, sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+      - if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: mfl-direct-player-crosswalk-candidate-${{ github.run_id }}
           path: |

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import duckdb
 import pandas as pd
+import pytest
 
 
 def _parquet(path: Path, rows: list[dict]) -> None:
@@ -112,3 +113,48 @@ def test_direct_crosswalk_accepts_a_real_historical_team_column_alias(tmp_path: 
 
     assert result["candidate_rows"] == 1
     assert result["historical_team_column"] == "team"
+
+
+def test_consolidate_direct_candidates_collapses_identical_native_key(tmp_path: Path) -> None:
+    """Repeated source catalogs may repeat one resolved native MFL identity."""
+    from scripts.research_cohorts.build_mfl_direct_player_crosswalk import consolidate_candidates
+
+    first = tmp_path / "first.parquet"
+    second = tmp_path / "second.parquet"
+    _parquet(first, [{
+        "source_year": 2003, "mfl_player_id": "1", "NFL_player_id": "morten",
+        "crosswalk_status": "resolved_name_position_team_year",
+    }])
+    _parquet(second, [{
+        "source_year": 2003, "mfl_player_id": "1", "NFL_player_id": "morten",
+        "crosswalk_status": "resolved_name_position_team_year",
+    }])
+
+    out = tmp_path / "consolidated.parquet"
+    result = consolidate_candidates([first, second], out)
+
+    assert result == {"input_rows": 2, "candidate_rows": 1, "conflicting_native_keys": 0}
+    con = duckdb.connect()
+    assert con.execute("SELECT * FROM read_parquet(?)", [str(out)]).fetchall() == [
+        (2003, "1", "morten", "resolved_name_position_team_year"),
+    ]
+    con.close()
+
+
+def test_consolidate_direct_candidates_rejects_conflicting_native_key(tmp_path: Path) -> None:
+    """One MFL native ID may never be silently assigned to two NFL players."""
+    from scripts.research_cohorts.build_mfl_direct_player_crosswalk import consolidate_candidates
+
+    first = tmp_path / "first.parquet"
+    second = tmp_path / "second.parquet"
+    _parquet(first, [{
+        "source_year": 2003, "mfl_player_id": "1", "NFL_player_id": "morten",
+        "crosswalk_status": "resolved_name_position_team_year",
+    }])
+    _parquet(second, [{
+        "source_year": 2003, "mfl_player_id": "1", "NFL_player_id": "other",
+        "crosswalk_status": "resolved_name_position_team_year",
+    }])
+
+    with pytest.raises(ValueError, match="conflicting MFL native identities: 1"):
+        consolidate_candidates([first, second], tmp_path / "consolidated.parquet")

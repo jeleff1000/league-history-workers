@@ -67,6 +67,44 @@ def _position_key(expr: str) -> str:
     )
 
 
+def consolidate_candidates(paths: list[Path], out: Path) -> dict[str, int]:
+    """Deduplicate repeated source catalogs while rejecting identity disagreements."""
+    if not paths:
+        raise ValueError("no direct candidate files supplied")
+    con = duckdb.connect()
+    try:
+        files = ",".join(_path(path) for path in paths)
+        con.execute(f"CREATE TEMP VIEW candidates AS SELECT * FROM read_parquet([{files}])")
+        input_rows = int(con.execute("SELECT COUNT(*) FROM candidates").fetchone()[0])
+        conflicts = int(con.execute("""
+            SELECT COUNT(*)
+            FROM (
+              SELECT source_year, mfl_player_id
+              FROM candidates
+              GROUP BY 1, 2
+              HAVING COUNT(DISTINCT NFL_player_id) > 1
+            )
+        """).fetchone()[0])
+        if conflicts:
+            raise ValueError(f"conflicting MFL native identities: {conflicts}")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        con.execute(f"""
+            COPY (
+              SELECT source_year, mfl_player_id, NFL_player_id, crosswalk_status
+              FROM candidates
+              GROUP BY 1, 2, 3, 4
+              ORDER BY 1, 2
+            ) TO {_path(out)} (FORMAT PARQUET, COMPRESSION ZSTD)
+        """)
+        return {
+            "input_rows": input_rows,
+            "candidate_rows": int(con.execute("SELECT COUNT(*) FROM read_parquet(?)", [str(out)]).fetchone()[0]),
+            "conflicting_native_keys": conflicts,
+        }
+    finally:
+        con.close()
+
+
 def build(
     *, directory: Path, existing_crosswalk: Path, ops_cache: Path, out: Path, report: Path,
 ) -> dict[str, Any]:
