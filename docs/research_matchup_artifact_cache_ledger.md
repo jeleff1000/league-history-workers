@@ -97,6 +97,26 @@ can save a cache, alter the schema, or create a lineage.
 | [31668247614](https://github.com/jeleff1000/league-history-workers/actions/runs/31668247614) | Two championship-probe artifacts, `8956468822` and `8956471264`, read back with the corrected dynamic ledger guard. | Inspect the retained receipt and strict-null candidate. Apply only if exact existing-player recipients and source-backed null cells are present. |
 | [31668497497](https://github.com/jeleff1000/league-history-workers/actions/runs/31668497497) | The two smallest blocked sparse playoff/championship artifacts, `9016485043` and `9016453846`, totaling 2,816 source cells. It emitted an exact 600-key, loss/tie-only NULL-fill delta with zero source conflicts. | **Complete.** Its dedicated promotion/readback [31669704187](https://github.com/jeleff1000/league-history-workers/actions/runs/31669704187) freshly restored the approved cache and proved 600/600 loss cells and 600/600 tie cells are filled, with zero unmatched keys; schema, player rows, ops seed, and the single approved cache lineage are unchanged. Receipt SHA-256: `746936c0fce4ba25df78513b0787e84223f736d0d733c64c6db22370da4888e0`. |
 
+### Fleaflicker team-to-player identity recovery
+
+The two historical championship-probe artifacts above have expired. That does
+**not** make their target data unrecoverable: the probe workflow built them
+from the approved cache's `player_fantasy` and `matchup` tables. The next
+read-only target builder must therefore regenerate the exact *current* set of
+Fleaflicker player-week rows that lack cache-side team identity, together with
+their matching cache matchup team signals.
+
+For each resulting `(db_name, year, week, team_key)`, the only external call is
+Fleaflicker's `FetchLeagueRosters`. It returns the same `team_key` and stable
+`fleaflicker_player_id` for every roster member. The safe bridge is then:
+
+`cache matchup team signal -> roster team_key/fleaflicker_player_id -> existing cache player row`
+
+The final promotion remains NULL-fill-only and must use
+`(db_name, year, week, fleaflicker_player_id)`, followed by the standard
+fresh-cache readback. No name matching, new columns, new cache, or new lineage
+is permitted.
+
 An Action completion by itself never changes the frozen-artifact disposition.
 Only a current approved-cache readback may set `cache_verified` or add a
 `cache_recovery_receipt`.
