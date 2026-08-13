@@ -81,6 +81,29 @@ These eight no-output records do not conceal unapplied data: there is no source
 artifact to join. They are an execution-recovery queue, separate from the
 711 source-identity/source-precedence rows in the frozen inventory.
 
+## Why the remaining team-signal artifacts cannot be directly upserted
+
+This is now source-schema evidence, not an inference from a failed join. Two
+retained artifact reads are representative of the remaining raw team-signal
+families:
+
+| Artifact | Rows read | Present identity | Missing identity required for player upsert |
+| --- | ---: | --- | --- |
+| `9013217044` / `sleeper-missing-outcome-rescue-3-31229249246` | 4,140 | `db_name`, year/week, manager, `manager_guid`, team key/name, outcome and playoff fields | No NFL player ID, Sleeper player ID, roster membership, or player-to-team edge. |
+| `9016426057` / `research-sparse-playoff-championship-rescue-5-31239084738` | 80 | `db_name`, year/week, manager/franchise/team keys, outcome and playoff/championship fields | No NFL player ID, native player ID, roster membership, or player-to-team edge. |
+
+The 711-open partition has the same ledgered shape: 694 artifacts have only a
+safe manager-week fan-out and 15 have a strict player-key profile; the final
+two have no cache-side player/team identity. Therefore a direct upsert from
+these team-week files would be a fabricated player attribution. The next
+eligible cache change must instead prove, for each source team-week:
+
+`source roster membership -> canonical NFL player -> existing player week -> source team`.
+
+Where that chain is unique, outcome/playoff/championship cells can be promoted
+and read back. Where it is absent or ambiguous, the ledger must retain the
+specific source-only/precedence reason rather than invent a recipient.
+
 The new MFL classification roster-identity receipt is Actions
 [31660451544](https://github.com/jeleff1000/league-history-workers/actions/runs/31660451544).
 It independently restored the approved cache after apply run `31659880241` and
