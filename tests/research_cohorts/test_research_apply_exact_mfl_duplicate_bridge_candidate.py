@@ -14,3 +14,6 @@ def test_exact_mfl_duplicate_promotion_workflow_is_same_lineage_and_readback_gua
     assert "ops cache changed" in workflow
     assert "fresh_restore" in workflow
     assert "new_lineage" in workflow
+    assert "read_parquet('{str(delta).replace(" not in workflow
+    assert "escaped_delta=str(delta).replace" in workflow
+    assert "for block in iter(lambda:handle.read(1024*1024),b'')" in workflow

@@ -112,7 +112,8 @@ jobs:
               raise SystemExit('candidate/cache schema hash mismatch')
           delta=next(root.rglob('mfl_exact_duplicate_candidate.parquet'))
           con=duckdb.connect()
-          con.execute(f"CREATE TEMP VIEW d AS SELECT * FROM read_parquet('{str(delta).replace("'", "''")}')")
+          escaped_delta=str(delta).replace("'", "''")
+          con.execute("CREATE TEMP VIEW d AS SELECT * FROM read_parquet('" + escaped_delta + "')")
           n=int(con.execute('SELECT COUNT(*) FROM d').fetchone()[0])
           duplicate=int(con.execute('SELECT COUNT(*) FROM (SELECT player_rowid FROM d GROUP BY player_rowid HAVING COUNT(*)>1)').fetchone()[0])
           null_source=int(con.execute('''SELECT COUNT(*) FROM d WHERE source_manager IS NULL OR source_team_key IS NULL OR source_team_name IS NULL OR source_mfl_player_id IS NULL OR source_win IS NULL OR source_loss IS NULL OR source_tie IS NULL OR source_team_points IS NULL OR source_is_playoffs IS NULL''').fetchone()[0])
@@ -153,7 +154,10 @@ jobs:
           con.close()
           if schema != before['player_schema'] or rows != before['player_rows']:
               raise SystemExit('canonical player schema or row count changed')
-          ops=hashlib.sha256(Path('research_public_lake/ops_cache.duckdb').read_bytes()).hexdigest()
+          digest=hashlib.sha256()
+          with Path('research_public_lake/ops_cache.duckdb').open('rb') as handle:
+              for block in iter(lambda:handle.read(1024*1024),b''): digest.update(block)
+          ops=digest.hexdigest()
           if ops != Path('ops_before.sha256').read_text().split()[0]:
               raise SystemExit('ops cache changed')
           PY
@@ -213,7 +217,8 @@ jobs:
           before=json.loads(Path('evidence/prestate.json').read_text())
           delta=next(Path('evidence').rglob('mfl_exact_duplicate_candidate.parquet'))
           con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
-          con.execute(f"CREATE TEMP VIEW d AS SELECT * FROM read_parquet('{str(delta).replace("'", "''")}')")
+          escaped_delta=str(delta).replace("'", "''")
+          con.execute("CREATE TEMP VIEW d AS SELECT * FROM read_parquet('" + escaped_delta + "')")
           match=int(con.execute('SELECT COUNT(*) FROM public.player_fantasy p JOIN d ON p.rowid=d.player_rowid').fetchone()[0])
           mismatches={}
           for field in ('manager','team_key','team_name','mfl_player_id','win','loss','tie','team_points','is_playoffs'):
@@ -222,7 +227,10 @@ jobs:
           schema=[r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()]
           rows=int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])
           con.close()
-          ops=hashlib.sha256(Path('research_public_lake/ops_cache.duckdb').read_bytes()).hexdigest()
+          digest=hashlib.sha256()
+          with Path('research_public_lake/ops_cache.duckdb').open('rb') as handle:
+              for block in iter(lambda:handle.read(1024*1024),b''): digest.update(block)
+          ops=digest.hexdigest()
           result={
               'canonical_cache_key':'research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613',
               'candidate_run_id':'${{ inputs.candidate_run_id }}',
