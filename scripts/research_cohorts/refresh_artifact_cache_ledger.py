@@ -117,7 +117,7 @@ def refresh(
             row["next_action"] = (
                 "resolve_direct_identity_and_precedence_adjudication"
                 if int(evidence.get("cache_conflict_cells", 0) or 0)
-                else "resolve_direct_identity_or_preserve_conflicts"
+                else "resolve_direct_identity_or_close_source_only"
             )
             updated += 1
             continue

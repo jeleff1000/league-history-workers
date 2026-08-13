@@ -71,8 +71,8 @@ cache before it can be closed or kept open with a current, specific reason.
 | `unmatched_cache_key` | 1 | Separate already-filled recipients from true source-only player/team records and preserve the residual count. |
 
 The machine-derived **current** frozen-inventory admission queue is simpler than those
-historical labels: 478 artifacts require only an exact player/team bridge, and
-233 require that bridge plus explicit source-precedence adjudication. Of the
+historical labels: 490 artifacts require only an exact player/team bridge, and
+221 require that bridge plus explicit source-precedence adjudication. Of the
 711 open rows, 701 carry pre-schema loss/tie evidence, but every one is now
 marked `closed_schema_supported`; no open row may ask for a loss/tie schema
 migration again.
