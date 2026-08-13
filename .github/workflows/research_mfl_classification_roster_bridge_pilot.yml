@@ -1,0 +1,139 @@
+name: Research MFL classification roster bridge pilot
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_run_id:
+        description: Read-only approved-cache target inventory run.
+        required: true
+        default: '31657516457'
+      classification_run_id:
+        description: Existing MFL player-outcome classification run.
+        required: true
+        default: '31192594062'
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+jobs:
+  pilot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pandas==2.2.3 pyarrow==15.0.2 requests==2.32.4 polars==1.35.2
+      - name: Record immutable cache prestate
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          Path('cache_before.json').write_text(json.dumps({
+            'schema':con.execute('DESCRIBE public.player_fantasy').fetchall(),
+            'rows':int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]),
+          })+'\n')
+          con.close()
+          PY
+      - name: Download only current targets and existing classification evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p target classification
+          gh run download '${{ inputs.target_run_id }}' --repo '${{ github.repository }}' \
+            --name 'research-mfl-classification-bridge-targets-${{ inputs.target_run_id }}' --dir target
+          gh run download '${{ inputs.classification_run_id }}' --repo '${{ github.repository }}' --dir classification
+          test -f target/research_mfl_classification_bridge_targets.json
+          test "$(find classification -name 'mfl_outcome_classification_*.parquet' | wc -l)" = '15'
+      - name: Select 15 exact current target league-weeks
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          source=json.loads(Path('target/research_mfl_classification_bridge_targets.json').read_text())
+          groups=source['groups'][:15]
+          if len(groups) != 15:
+              raise SystemExit(f'need 15 target groups, got {len(groups)}')
+          Path('pilot_targets.json').write_text(json.dumps({'groups':groups}, indent=2)+'\n')
+          PY
+      - name: Fetch only source roster memberships for the 15 target league-weeks
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
+          MFL_RATE_LIMIT_PER_MIN: '25'
+        run: |
+          mkdir -p out
+          python scripts/research_cohorts/extract_mfl_target_roster_memberships.py \
+            --manifest pilot_targets.json --shard 0 --shards 1 --max-groups 15 \
+            --out-memberships out/memberships.parquet \
+            --out-player-directory out/player_directory.parquet \
+            --out-report out/extract_report.json
+      - name: Build source franchise/player identity and source team signals
+        run: |
+          set -euo pipefail
+          args=()
+          while IFS= read -r source; do args+=(--classification "$source"); done < <(find classification -name 'mfl_outcome_classification_*.parquet' | sort)
+          python scripts/research_cohorts/build_mfl_roster_player_crosswalk.py \
+            --directory out/player_directory.parquet --ops-cache research_public_lake/ops_cache.duckdb \
+            --out out/crosswalk.parquet --report out/crosswalk_report.json
+          python scripts/research_cohorts/build_mfl_classification_team_signals.py \
+            "${args[@]}" --memberships out/memberships.parquet --crosswalk out/crosswalk.parquet \
+            --out out/team_signals.parquet --report out/team_signal_report.json
+          python scripts/research_cohorts/build_mfl_source_team_player_bridge.py \
+            --memberships out/memberships.parquet --crosswalk out/crosswalk.parquet \
+            --team-signals out/team_signals.parquet --out out/player_bridge.parquet --report out/bridge_report.json
+      - name: Audit exact existing-player null-fill candidates
+        run: |
+          set -euo pipefail
+          mkdir -p candidate_input out/candidate
+          cp out/team_signals.parquet candidate_input/team_signals.parquet
+          cp out/player_bridge.parquet candidate_input/player_bridge.parquet
+          python scripts/research_cohorts/audit_team_signal_candidates.py \
+            --base research_public_lake/corpus_snapshot.duckdb --candidates candidate_input --out out/candidate
+      - name: Fail fast on pilot mutation or unsafe evidence
+        run: |
+          python - <<'PY'
+          import duckdb, hashlib, json
+          from pathlib import Path
+          before=json.loads(Path('cache_before.json').read_text())
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          assert con.execute('DESCRIBE public.player_fantasy').fetchall()==[tuple(x) for x in before['schema']]
+          assert int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])==before['rows']
+          con.close()
+          h=hashlib.sha256()
+          with Path('research_public_lake/ops_cache.duckdb').open('rb') as f:
+              for block in iter(lambda:f.read(1024*1024), b''): h.update(block)
+          assert h.hexdigest()==Path('ops_before.sha256').read_text().split()[0]
+          for path in ['out/extract_report.json','out/crosswalk_report.json','out/team_signal_report.json','out/bridge_report.json','out/candidate/team_signal_candidate_report.json']:
+              report=json.loads(Path(path).read_text())
+              assert report.get('cache_mutated') is False
+              assert report.get('new_lineage') is False
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-mfl-classification-roster-bridge-pilot-${{ github.run_id }}
+          path: |
+            pilot_targets.json
+            out/
+            cache_before.json
+            ops_before.sha256
+          retention-days: 90
+          compression-level: 0
