@@ -66,7 +66,17 @@ def refresh(
     elif direct_reaudit_receipt:
         receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_current_state"]}
     else:
-        receipt_rows = {int(row["artifact_id"]): row for row in receipt["rows"]}
+        # Combined readback receipts include supplemental cache-recovery
+        # entries whose IDs are descriptive strings.  This refresher updates
+        # frozen raw artifact rows only, so those entries are not candidates
+        # for this numeric raw-artifact lookup.
+        receipt_rows = {}
+        for row in receipt["rows"]:
+            try:
+                artifact_id = int(row["artifact_id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            receipt_rows[artifact_id] = row
     team_profile_rows: dict[int, dict] = {}
     if team_profile_path is not None:
         profile = json.loads(team_profile_path.read_text(encoding="utf-8"))
