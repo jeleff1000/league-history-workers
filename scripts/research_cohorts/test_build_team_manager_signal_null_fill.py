@@ -52,6 +52,9 @@ def test_manager_fanout_fills_only_null_cells_on_exact_team_week(tmp_path: Path)
     assert result['safe_source_team_weeks'] == 1
     assert result['matched_player_rows'] == 2
     assert result['delta_rows'] == 1
+    assert result['comparison_cells_by_field']['win'] == {
+        'source_non_null': 2, 'cache_equal': 0, 'cache_conflict': 1, 'cache_null': 1,
+    }
     check = duckdb.connect()
     row = check.execute('SELECT NFL_player_id, source_win, source_team_points, source_is_playoffs, source_champion FROM read_parquet(?)', [str(out)]).fetchone()
     assert row == ('p1', 0, 100.0, 1, 1)

@@ -112,11 +112,28 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
         fields: list[str] = []
         filters: list[str] = []
         fill_cells: dict[str, int] = {}
+        comparison_cells: dict[str, dict[str, int]] = {}
         for field, (target, type_name) in SUPPORTED.items():
             predicate = f"{_q('source_' + field)} IS NOT NULL AND {_q('canonical_' + target)} IS NULL"
             fields.append(f"CASE WHEN {predicate} THEN {_q('source_' + field)} ELSE NULL::{type_name} END AS {_q('source_' + field)}")
             filters.append(f"({predicate})")
             fill_cells[target] = int(con.execute(f"SELECT COUNT(*) FROM matched WHERE {predicate}").fetchone()[0])
+            comparison_cells[target] = {
+                "source_non_null": int(con.execute(
+                    f"SELECT COUNT(*) FROM matched WHERE {_q('source_' + field)} IS NOT NULL"
+                ).fetchone()[0]),
+                "cache_equal": int(con.execute(
+                    f"SELECT COUNT(*) FROM matched WHERE {_q('source_' + field)} IS NOT NULL "
+                    f"AND {_q('canonical_' + target)} IS NOT NULL "
+                    f"AND {_q('canonical_' + target)} IS NOT DISTINCT FROM {_q('source_' + field)}"
+                ).fetchone()[0]),
+                "cache_conflict": int(con.execute(
+                    f"SELECT COUNT(*) FROM matched WHERE {_q('source_' + field)} IS NOT NULL "
+                    f"AND {_q('canonical_' + target)} IS NOT NULL "
+                    f"AND {_q('canonical_' + target)} IS DISTINCT FROM {_q('source_' + field)}"
+                ).fetchone()[0]),
+                "cache_null": fill_cells[target],
+            }
         out.parent.mkdir(parents=True, exist_ok=True)
         con.execute(f"""
             COPY (
@@ -142,6 +159,7 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
             "matched_player_rows": matched_player_rows,
             "delta_rows": delta_rows,
             "null_fill_cells_by_field": fill_cells,
+            "comparison_cells_by_field": comparison_cells,
             "join_contract": ["db_name", "year", "week", "normalized_manager"],
         }
         _write_json(report, result)
