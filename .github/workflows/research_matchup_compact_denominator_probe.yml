@@ -36,6 +36,8 @@ jobs:
           con = duckdb.connect()
           con.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
           table = 'lake.public.player_fantasy'
+          team_week_table = 'lake.public.player_team_game_week'
+          active_week_table = 'lake.public.player_active_week'
           described = con.execute(f'DESCRIBE {table}').fetchall()
           available = {str(name).lower() for name, *_ in described}
           required = {
@@ -62,6 +64,20 @@ jobs:
           """
           payload = {
               'schema': [list(row) for row in described],
+              'player_team_game_week_schema': [list(row) for row in con.execute(f'DESCRIBE {team_week_table}').fetchall()],
+              'player_active_week_schema': [list(row) for row in con.execute(f'DESCRIBE {active_week_table}').fetchall()],
+              'cmc_player_team_game_weeks': con.execute(f"""
+                SELECT CAST(NFL_player_id AS VARCHAR), CAST(year AS INTEGER), CAST(week AS INTEGER)
+                FROM {team_week_table}
+                WHERE CAST(NFL_player_id AS VARCHAR)='00-0033280' AND CAST(year AS INTEGER)=2019
+                ORDER BY 3
+              """).fetchall(),
+              'cmc_player_active_weeks': con.execute(f"""
+                SELECT CAST(NFL_player_id AS VARCHAR), CAST(year AS INTEGER), CAST(week AS INTEGER)
+                FROM {active_week_table}
+                WHERE CAST(NFL_player_id AS VARCHAR)='00-0033280' AND CAST(year AS INTEGER)=2019
+                ORDER BY 3
+              """).fetchall(),
               'cmc_by_week': con.execute(f"""
                 SELECT CAST(week AS INTEGER) AS week,
                   COUNT(*) AS rows,
