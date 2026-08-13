@@ -11,6 +11,10 @@ on:
         description: Completed read-only residual MFL classification shard run.
         required: true
         default: '31663728938'
+      excluded_shards:
+        description: Comma-separated rescue shard indexes explicitly excluded from this one apply. Empty requires every shard.
+        required: false
+        default: ''
 
 permissions:
   actions: write
@@ -37,6 +41,7 @@ jobs:
           python -m pytest -q
           scripts/research_cohorts/test_apply_team_signal_delta_in_place.py
           tests/research_cohorts/test_audit_team_signal_candidates.py
+          tests/research_cohorts/test_validate_mfl_shard_artifacts.py
           tests/research_cohorts/test_research_apply_mfl_classification_roster_bridge_batch.py
 
   apply:
@@ -74,6 +79,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          EXCLUDED_SHARDS: ${{ inputs.excluded_shards }}
         shell: bash
         run: |
           set -euo pipefail
@@ -81,14 +87,13 @@ jobs:
           mkdir -p raw candidate_input
           gh run view "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --json jobs --jq '.jobs[] | select(.name | startswith("rescue (")) | [.name,.conclusion] | @tsv' > rescue_jobs.tsv
           test -s rescue_jobs.tsv
-          if awk -F '\t' '$2=="cancelled" || $2=="skipped" || $2=="" {exit 1}' rescue_jobs.tsv; then :; else
-            echo 'candidate run has incomplete rescue jobs' >&2; exit 1
-          fi
           gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/artifacts?per_page=100" \
             --jq '.artifacts[] | select(.expired == false and (.name | startswith("research-mfl-classification-roster-bridge-shard-"))) | .name' \
             | sort -u > artifact_names.txt
           test -s artifact_names.txt
-          test "$(wc -l < rescue_jobs.tsv)" -eq "$(wc -l < artifact_names.txt)"
+          python scripts/research_cohorts/validate_mfl_shard_artifacts.py \
+            --jobs rescue_jobs.tsv --artifacts artifact_names.txt \
+            --excluded-shards "$EXCLUDED_SHARDS" --report shard_set_report.json
           gh run download "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
             --pattern 'research-mfl-classification-roster-bridge-shard-*' --dir raw
           test "$(find raw -name team_signals.parquet | wc -l)" -eq "$(wc -l < artifact_names.txt)"
@@ -177,6 +182,7 @@ jobs:
           path: |
             cache_before.json
             ops_before.sha256
+            shard_set_report.json
             assembly_report.json
             apply_report.json
             candidate/team_signal_candidate_report.json
@@ -245,6 +251,7 @@ jobs:
           digest=hashlib.sha256()
           with Path('research_public_lake/ops_cache.duckdb').open('rb') as handle:
               for block in iter(lambda:handle.read(1024*1024),b''): digest.update(block)
+          shard_set=json.loads(Path('evidence/shard_set_report.json').read_text())
           result={'canonical_cache_key':'${{ env.CANONICAL_CACHE_KEY }}','candidate_run_id':'${{ inputs.candidate_run_id }}',
                   'candidate_rows':total,'unmatched_candidate_keys':unmatched,'source_value_disagreements':disagreements,
                   'schema_unchanged':schema==[tuple(row) for row in before['schema']],
@@ -263,9 +270,15 @@ jobs:
               **result,
               'candidate_artifacts':int(assembly['candidate_artifacts']),
               'matched_player_rows':total,
-              'source_artifact_id':'mfl-classification-roster-bridge-batch',
+              'source_artifact_id':(
+                  'mfl-classification-roster-bridge-batch-full'
+                  if not shard_set['excluded_shards']
+                  else 'mfl-classification-roster-bridge-batch-excluding-' + '-'.join(str(item) for item in shard_set['excluded_shards'])
+              ),
               'promotion_disposition':'exact_existing_player_null_fill|direct_mfl_win_replacement',
               'candidate_fields':fields,
+              'excluded_shards':shard_set['excluded_shards'],
+              'selected_shards':shard_set['selected_shards'],
               'null_fill_rows':int(assembly['normal_delta_rows']),
               'direct_mfl_win_replacement_rows':int(assembly['direct_mfl_win_replacement_rows']),
               'improvements_by_field':improvements,
