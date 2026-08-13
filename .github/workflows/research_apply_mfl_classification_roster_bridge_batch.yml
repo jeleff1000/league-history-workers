@@ -42,6 +42,7 @@ jobs:
           scripts/research_cohorts/test_apply_team_signal_delta_in_place.py
           tests/research_cohorts/test_audit_team_signal_candidates.py
           tests/research_cohorts/test_validate_mfl_shard_artifacts.py
+          tests/research_cohorts/test_extract_mfl_artifact_members.py
           tests/research_cohorts/test_research_apply_mfl_classification_roster_bridge_batch.py
       - name: Parse MFL artifact-download shell before any cache restore
         shell: bash
@@ -162,25 +163,8 @@ jobs:
                 -H 'Accept: application/vnd.github+json' \
                 "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
                 -o "$zip_path"; then
-                if python - "$zip_path" "$output_dir" <<'PY'
-              import shutil
-              import sys
-              import zipfile
-              from pathlib import Path
-
-              archive = Path(sys.argv[1])
-              output = Path(sys.argv[2])
-              wanted = {
-                  'out/team_signals.parquet': 'team_signals.parquet',
-                  'out/player_bridge.parquet': 'player_bridge.parquet',
-              }
-              output.mkdir(parents=True, exist_ok=True)
-              with zipfile.ZipFile(archive) as source:
-                  for member, target_name in wanted.items():
-                      with source.open(member) as src, (output / target_name).open('wb') as dst:
-                          shutil.copyfileobj(src, dst)
-          PY
-                then
+                if python scripts/research_cohorts/extract_mfl_artifact_members.py \
+                  --archive "$zip_path" --out "$output_dir"; then
                   if test -f "$output_dir/team_signals.parquet" \
                     && test -f "$output_dir/player_bridge.parquet"; then
                     return 0
