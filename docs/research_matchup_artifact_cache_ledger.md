@@ -976,6 +976,9 @@ year-matching roster rows.  One of the four apparent successes (`105788`,
 requested 2011/week 18) was a false historical response: it contained current
 players including Baker Mayfield, Bucky Irving, and Jordan Addison.  The
 endpoint accepted the requested old period but did not serve the old roster.
+The companion `FetchLeagueScoreboard(105788, 2011, 1)` is independently
+genuine (week-one epoch 2011-09-06), which isolates the defect to the roster
+endpoint rather than the league-year resolver.
 
 This is a source contract issue, not a cache defect.  A Fleaflicker roster
 bridge is admissible only when its roster membership independently passes a
