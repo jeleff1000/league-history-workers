@@ -68,7 +68,7 @@ def _require_verified(payload: dict) -> None:
     if isinstance(nulls, dict) and nulls:
         if any(int(value or 0) != 0 for value in nulls.values()):
             failed.append("remaining_source_backed_nulls")
-    elif isinstance(disagreements, dict) and disagreements:
+    elif isinstance(disagreements, dict) and disagreements and not legacy_receipt:
         if any(int(value or 0) != 0 for value in disagreements.values()):
             failed.append("source_value_disagreements")
     else:
