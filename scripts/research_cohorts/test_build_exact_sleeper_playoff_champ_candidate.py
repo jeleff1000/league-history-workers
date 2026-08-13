@@ -99,6 +99,7 @@ def test_emits_only_actual_playoff_starters_and_title_winner(tmp_path):
 
     assert result["source_playoff_starter_events"] == 6
     assert result["source_championship_starter_events"] == 1
+    assert result["canonical_player_rows_for_league_year"] == 2
     assert result["candidate_rows"] == 2
     con = duckdb.connect()
     rows = con.execute(

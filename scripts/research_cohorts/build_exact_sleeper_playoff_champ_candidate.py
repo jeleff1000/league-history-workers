@@ -173,6 +173,10 @@ def build(*, base: Path, source: Path, out: Path, report: Path) -> dict[str, Any
     con = duckdb.connect(str(base), read_only=True)
     player_columns = [row[0] for row in con.execute("DESCRIBE public.player_fantasy").fetchall()]
     validate_player_schema(player_columns)
+    canonical_player_rows_for_league_year = int(con.execute(
+        "SELECT COUNT(*) FROM public.player_fantasy WHERE db_name=? AND CAST(year AS INTEGER)=?",
+        [db_name, year],
+    ).fetchone()[0])
     required = {"sleeper_player_id", "team_key", "platform", "is_playoffs", "champion", "has_po_signal"}
     if missing := sorted(required - set(player_columns)):
         raise ValueError(f"canonical player schema lacks source-recipient fields: {missing}")
@@ -302,6 +306,7 @@ def build(*, base: Path, source: Path, out: Path, report: Path) -> dict[str, Any
         "schema_unchanged": True,
         "db_name": db_name,
         "year": year,
+        "canonical_player_rows_for_league_year": canonical_player_rows_for_league_year,
         **event_counts,
         "source_unique_starter_events": len(events),
         "unmatched_recipient_events": unmatched_events,
