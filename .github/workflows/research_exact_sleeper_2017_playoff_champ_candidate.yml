@@ -1,0 +1,123 @@
+name: Research Exact Sleeper 2017 Playoff Candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+  TARGET_DB_NAME: smpl_1257417276856999936
+  TARGET_YEAR: "2017"
+  TARGET_SOURCE_LEAGUE_ID: "201755304520589312"
+
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Restore the one approved research cache
+        uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Record immutable cache and schema prestate
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/corpus_snapshot.duckdb > cache.before.sha256
+          python - <<'PY' > schema.before.txt
+          import duckdb, hashlib
+          con = duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          cols = [row[0] for row in con.execute('DESCRIBE public.player_fantasy').fetchall()]
+          print(hashlib.sha256('\n'.join(cols).encode()).hexdigest())
+          print(len(cols))
+          PY
+      - name: Fetch one historical Sleeper source snapshot
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from urllib.request import urlopen
+          import os
+
+          base = 'https://api.sleeper.app/v1'
+          league_id = os.environ['TARGET_SOURCE_LEAGUE_ID']
+          def get(endpoint):
+              with urlopen(base + endpoint, timeout=30) as response:
+                  return json.load(response)
+          league = get(f'/league/{league_id}')
+          bracket = get(f'/league/{league_id}/winners_bracket')
+          settings = league.get('settings') or {}
+          start_week = int(settings['playoff_week_start'])
+          title_round = max(
+              int(item['r']) for item in bracket
+              if item.get('p') in (None, 1, '1')
+          )
+          payload = {
+              'db_name': os.environ['TARGET_DB_NAME'],
+              'year': int(os.environ['TARGET_YEAR']),
+              'league': league,
+              'winners_bracket': bracket,
+              'matchups_by_week': {
+                  str(week): get(f'/league/{league_id}/matchups/{week}')
+                  for week in range(start_week, start_week + title_round)
+              },
+          }
+          Path('sleeper_2017_source.json').write_text(json.dumps(payload), encoding='utf-8')
+          print(json.dumps({
+              'source_league_id': league_id,
+              'source_season': league.get('season'),
+              'playoff_week_start': start_week,
+              'title_round': title_round,
+          }, sort_keys=True))
+          PY
+      - name: Build exact read-only candidate
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/build_exact_sleeper_playoff_champ_candidate.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --source sleeper_2017_source.json \
+            --out sleeper_2017_candidate.parquet \
+            --report sleeper_2017_candidate_report.json
+      - name: Fail fast on cache or schema mutation
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/corpus_snapshot.duckdb > cache.after.sha256
+          cmp cache.before.sha256 cache.after.sha256
+          python - <<'PY' > schema.after.txt
+          import duckdb, hashlib
+          con = duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          cols = [row[0] for row in con.execute('DESCRIBE public.player_fantasy').fetchall()]
+          print(hashlib.sha256('\n'.join(cols).encode()).hexdigest())
+          print(len(cols))
+          PY
+          cmp schema.before.txt schema.after.txt
+          python - <<'PY'
+          import json
+          report = json.load(open('sleeper_2017_candidate_report.json', encoding='utf-8'))
+          assert report['read_only'] is True
+          assert report['cache_mutated'] is False
+          assert report['new_lineage'] is False
+          assert report['schema_unchanged'] is True
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-exact-sleeper-2017-candidate-${{ github.run_id }}
+          path: |
+            sleeper_2017_source.json
+            sleeper_2017_candidate.parquet
+            sleeper_2017_candidate_report.json
+            cache.before.sha256
+            cache.after.sha256
+            schema.before.txt
+            schema.after.txt
+          retention-days: 180

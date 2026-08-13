@@ -79,12 +79,15 @@ the remaining team/player identities are independently resolved or explicitly
 classified as having no canonical recipient.
 
 The two remaining championship-probe source artifacts (`8956468822` and
-`8956471264`) are now expired in GitHub Actions. Their retained ledger receipt
-documents 151 overlapping cache league-weeks with source team signals but no
-player-team recipient edge. They therefore remain open as **source-unavailable
-identity gaps**: they cannot be promoted from the expired artifact, and require
-either a new targeted source retrieval with roster membership or an explicit
-source-only closure. Expiry is not treated as completion.
+`8956471264`) are expired in GitHub Actions. Expiry is not completion, nor does
+it prove that their source data is unavailable. Fresh targeted source pilots
+establish two different facts: Fleaflicker `100365` / 2010 exposes genuine
+scoreboards and rosters for weeks 14–17 but no playoff/championship flags, while
+the stale Sleeper ID resolves through its `previous_league_id` chain to the
+actual 2017 league and a recoverable bracket. The former remains source-
+unsupported for player playoff/championship credit unless an independent bracket
+source is found; the latter remains open for an exact native-ID candidate. Both
+require a current approved-cache readback before any closure.
 
 ## Latest loss/tie promotion receipts
 
@@ -337,37 +340,24 @@ can save a cache, alter the schema, or create a lineage.
 
 ### Fleaflicker team-to-player identity recovery
 
-The two historical championship-probe artifacts above have expired. That does
-**not** make their target data unrecoverable: the probe workflow built them
-from the approved cache's `player_fantasy` and `matchup` tables. The next
-read-only target builder must therefore regenerate the exact *current* set of
-Fleaflicker player-week rows that lack cache-side team identity, together with
-their matching cache matchup team signals.
+The expired probes do not warrant a generic rerun. The targeted 2010 pilot
+showed the actual limitation: `FetchLeagueScoreboard` and
+`FetchLeagueRosters` return real historical team and player data, but the
+scoreboards for weeks 14–17 expose no playoff, championship, or consolation
+flags. The roster response also lacks its normal requested-season marker.
+Those endpoints can support narrowly verified roster/outcome recovery; they
+cannot alone establish player playoff-start or championship-start credit.
 
-For each resulting `(db_name, year, week, team_key)`, the only external call is
-Fleaflicker's `FetchLeagueRosters`. It returns the same `team_key` and stable
-`fleaflicker_player_id` for every roster member. The safe bridge is then:
-
-`cache matchup team signal -> roster team_key/fleaflicker_player_id -> existing cache player row`
-
-The final promotion remains NULL-fill-only and must use
-`(db_name, year, week, fleaflicker_player_id)`, followed by the standard
-fresh-cache readback. No name matching, new columns, new cache, or new lineage
-is permitted.
-
-**Current correction, recorded 2026-08-13.** The read-only target receipt
-[31672174378](https://github.com/jeleff1000/league-history-workers/actions/runs/31672174378)
-proved that this final native-ID join is not currently executable: all
-2,730,186 cache player rows without cache-side team identity also lack a
-populated `fleaflicker_player_id`; the corresponding source-signal overlap is
-4,197,680 rows and likewise has zero populated native IDs. It produced zero
-candidate team-weeks and made no cache mutation. Therefore `FetchLeagueRosters`
-must first be used only to form a strict source roster identity bridge to an
-existing canonical `NFL_player_id` (including the existing DEF franchise map).
-Only exact one-to-one source-player-to-NFL-player results may then populate the
-already-existing `fleaflicker_player_id` cells and fan out team signals. Any
-ambiguous player, missing canonical recipient, or unresolved DEF identity stays
-blocked with a receipt; display-name or manager fallbacks remain prohibited.
+The broader native-ID bridge is independently blocked by current cache facts.
+Receipt [31672174378](https://github.com/jeleff1000/league-history-workers/actions/runs/31672174378)
+found zero populated `fleaflicker_player_id` values on the relevant cache-side
+team-identity gaps, so `(db_name, year, week, fleaflicker_player_id)` cannot be
+used as a recipient key yet. A future recovery may only form a strict
+source-roster-to-existing-`NFL_player_id` bridge (including the established DEF
+franchise map), require one recipient, and then fill existing NULL cells. It
+must not infer playoff/championship status from a season winner, name-match, or
+manager fallback. Ambiguous players and source-only records remain ledgered
+open with their receipt.
 
 An Action completion by itself never changes the frozen-artifact disposition.
 Only a current approved-cache readback may set `cache_verified` or add a
