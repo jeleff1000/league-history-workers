@@ -46,6 +46,7 @@ jobs:
             --before evidence/cache_before.json \
             --ops research_public_lake/ops_cache.duckdb \
             --ops-before evidence/ops_before.sha256 \
+            --apply-report evidence/apply_report.json \
             --out mfl_classification_roster_bridge_batch_readback.json
       - name: Produce ledger receipt without mutating the cache
         shell: bash

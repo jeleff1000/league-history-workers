@@ -155,7 +155,11 @@ including deliberately preserved non-null cache values. The cache is therefore
 **not marked complete**. A read-only verifier now uses the saved apply evidence
 to prove only the authorized NULL fills and direct MFL `win=0 -> 1`
 replacements, while also checking that schema, row count, ops hash, and the
-single cache object remain unchanged.
+single cache object remain unchanged. Because this historical saved delta
+lacks its per-cell canonical prestate, the receipt is explicitly labeled
+`legacy_apply_receipt_minimum_match`: the transaction's own apply report is
+the authoritative count, and fresh readback proves at least that many matching
+source-backed cells while reporting preserved non-null source conflicts.
 The retry is still allowed to mutate only the already-approved
 same-key cache after its test/preflight gate proves the selected artifact list
 exactly matches the complete non-diagnostic shard set. Its fresh restore/readback receipt is
