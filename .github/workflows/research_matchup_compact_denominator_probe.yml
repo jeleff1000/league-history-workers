@@ -35,6 +35,7 @@ jobs:
 
           con = duckdb.connect()
           con.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          con.execute("ATTACH 'research_public_lake/ops_cache.duckdb' AS ops (READ_ONLY)")
           table = 'lake.public.player_fantasy'
           team_week_table = 'lake.public.player_team_game_week'
           active_week_table = 'lake.public.player_active_week'
@@ -64,6 +65,14 @@ jobs:
           """
           payload = {
               'schema': [list(row) for row in described],
+              'mark_ingram_2017_stats_identity': con.execute("""
+                SELECT DISTINCT CAST(NFL_player_id AS VARCHAR), CAST(player AS VARCHAR),
+                  CAST(position AS VARCHAR)
+                FROM ops.nfl_historical.nfl_player_stats_all
+                WHERE CAST(year AS INTEGER)=2017
+                  AND LOWER(CAST(player AS VARCHAR)) LIKE '%mark ingram%'
+                ORDER BY 1
+              """).fetchall(),
               'player_team_game_week_schema': [list(row) for row in con.execute(f'DESCRIBE {team_week_table}').fetchall()],
               'player_active_week_schema': [list(row) for row in con.execute(f'DESCRIBE {active_week_table}').fetchall()],
               'cmc_player_team_game_weeks': con.execute(f"""
