@@ -166,3 +166,21 @@ def test_uses_exact_gsis_bridge_when_native_and_espn_ids_are_missing(tmp_path):
     assert result["espn_bridge_recipient_events"] == 0
     assert result["gsis_bridge_recipient_events"] == 2
     assert result["candidate_rows"] == 2
+
+
+def test_uses_unique_gsis_player_week_when_cache_team_identity_is_missing(tmp_path):
+    base = tmp_path / "base.duckdb"
+    source = tmp_path / "source.json"
+    out = tmp_path / "delta.parquet"
+    report = tmp_path / "report.json"
+    _base(base, missing_sleeper_native_ids=True)
+    con = duckdb.connect(str(base))
+    con.execute("UPDATE public.player_fantasy SET espn_player_id=NULL, NFL_player_id='gsis-3', team_key=NULL, team_name=NULL, manager=NULL WHERE NFL_player_id='nfl-3'")
+    con.execute("UPDATE public.player_fantasy SET espn_player_id=NULL, NFL_player_id='gsis-5', team_key=NULL, team_name=NULL, manager=NULL WHERE NFL_player_id='nfl-5'")
+    con.close()
+    _source(source)
+
+    result = build(base=base, source=source, out=out, report=report)
+
+    assert result["gsis_bridge_recipient_events"] == 2
+    assert result["candidate_rows"] == 2

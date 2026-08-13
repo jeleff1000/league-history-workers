@@ -213,11 +213,11 @@ def build(*, base: Path, source: Path, out: Path, report: Path) -> dict[str, Any
                 AND CAST(p.NFL_player_id AS VARCHAR) = e.source_nfl_player_id
             )
        )
-       AND CASE WHEN p.team_key IS NULL THEN NULL
-                WHEN INSTR(TRIM(CAST(p.team_key AS VARCHAR)), '_') > 0
-                  THEN REGEXP_EXTRACT(TRIM(CAST(p.team_key AS VARCHAR)), '([^_]+)$', 1)
-                ELSE TRIM(CAST(p.team_key AS VARCHAR)) END = e.source_roster_id
     """, [db_name, year])
+    # The source roster is essential evidence, but this cache cohort has lost
+    # its team identity. An exact player-week still has one safe recipient when
+    # and only when there is exactly one canonical player row. A duplicate is a
+    # trade/identity ambiguity and remains blocked by recipient_cardinality.
     con.execute("""
       CREATE OR REPLACE TEMP TABLE recipient_cardinality AS
       SELECT week, source_roster_id, sleeper_player_id, COUNT(*) AS recipient_rows
