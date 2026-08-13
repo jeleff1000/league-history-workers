@@ -27,6 +27,7 @@ on:
           - rb_2025_bucket_inventory
           - rb_2025_bucket
           - rb_2025_bucket_core
+          - rb_2025_bucket_grade
           - rb_2025_bucket_grade_shapes
           - cache_schedule_lookup_probe
           - local_cache_export
@@ -103,7 +104,7 @@ jobs:
             WHERE week BETWEEN 1 AND 18
           """)
           mode = os.environ['PILOT_MODE']
-          if mode not in {'cmc_week1', 'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_weekly', 'all_2025_weekly', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'rb_2025_bucket_inventory', 'rb_2025_bucket', 'rb_2025_bucket_core', 'rb_2025_bucket_grade_shapes', 'cache_schedule_lookup_probe', 'local_cache_export'}:
+          if mode not in {'cmc_week1', 'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_weekly', 'all_2025_weekly', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'rb_2025_bucket_inventory', 'rb_2025_bucket', 'rb_2025_bucket_core', 'rb_2025_bucket_grade', 'rb_2025_bucket_grade_shapes', 'cache_schedule_lookup_probe', 'local_cache_export'}:
             raise ValueError(f'unsupported pilot mode: {mode}')
           if mode == 'cache_schedule_lookup_probe':
               required = {
@@ -396,7 +397,7 @@ jobs:
                   summary.write(f'- Receipt: `{receipt}`\n')
                   summary.write('- Cache-only inventory; no cache save, aggregation table, Fly access, API request, artifact, or publish step.\n')
               raise SystemExit(0)
-          if mode in {'rb_2025_bucket', 'rb_2025_bucket_core', 'rb_2025_bucket_grade_shapes'}:
+          if mode in {'rb_2025_bucket', 'rb_2025_bucket_core', 'rb_2025_bucket_grade', 'rb_2025_bucket_grade_shapes'}:
               bucket_number = int(os.environ['PILOT_BUCKET'])
               assert 1 <= bucket_number <= 15, bucket_number
               players = c.execute(f"""
@@ -474,6 +475,36 @@ jobs:
                       summary.write('## RB 2025 season grade cardinality gate\n')
                       summary.write(f'- Receipt: `{receipt}`\n')
                       summary.write('- Cache-only shape probe; no grade output, cache save, artifact, Fly access, API request, or publish step.\n')
+                  raise SystemExit(0)
+              if mode == 'rb_2025_bucket_grade':
+                  grade_started = perf_counter()
+                  materialize_season_bracket_grade_position_batch(
+                      c, source_table='rb_2025_bucket_source', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+                      player_regular_weeks_table='cached_regular_player_weeks',
+                      output_table='rb_2025_bucket_season_grade', year=2025, position='RB', split_threshold=50,
+                  )
+                  grade_seconds = perf_counter() - grade_started
+                  grade_rows, grade_cells = c.execute("""
+                    SELECT COUNT(*), COALESCE(SUM(list_count(grade_cells)),0)
+                    FROM rb_2025_bucket_season_grade
+                  """).fetchone()
+                  bad = c.execute("""
+                    SELECT COUNT(*) FROM rb_2025_bucket_season_grade, UNNEST(grade_cells) u(cell)
+                    WHERE cell.champ_leagues > cell.playoff_leagues
+                       OR cell.playoff_leagues > cell.eligible_leagues
+                  """).fetchone()[0]
+                  assert grade_rows == len(selected_bucket['ids']), (grade_rows, len(selected_bucket['ids']))
+                  assert grade_cells <= grade_rows * 577 and bad == 0, (grade_cells, bad)
+                  receipt = {
+                    'mode': mode, 'bucket': bucket_number, 'bucket_players': len(selected_bucket['ids']),
+                    'bucket_weight': selected_bucket['weight'], 'grade_seconds': round(grade_seconds,3),
+                    'season_grade_rows': grade_rows, 'season_grade_cells': grade_cells,
+                  }
+                  print(receipt)
+                  with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                      summary.write('## One balanced RB 2025 season grade gate\n')
+                      summary.write(f'- Receipt: `{receipt}`\n')
+                      summary.write('- Cache-only temporary tables; no cache save, artifact, Fly access, API request, or publish step.\n')
                   raise SystemExit(0)
               weekly_started = perf_counter()
               materialize_weekly_core_cohort_cells(
