@@ -19,6 +19,7 @@ GATE_COLUMNS = (
 )
 CLOSED_STATUSES = {
     "cache_verified",
+    "cache_conflict_preserved",
     "no_promotable_candidate_emitted",
     "not_data_bearing",
 }

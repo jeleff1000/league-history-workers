@@ -153,7 +153,7 @@ def test_rejects_incomplete_player_team_bridge_evidence():
 def test_rejects_conflict_without_precedence_action():
     result = validate_rows([
         _row(
-            final_status="cache_conflict_preserved",
+            final_status="partial_schema_blocked_conflicts",
             final_reason="Source conflicts with a canonical non-null value.",
             next_action="preserve_conflicts",
             cache_conflict_cells="1",
@@ -164,6 +164,20 @@ def test_rejects_conflict_without_precedence_action():
     assert result["issues"] == [
         {"artifact_id": "1", "issue": "conflict_missing_precedence_action"},
     ]
+
+
+def test_allows_closed_team_champion_marker_conflict_without_precedence_replacement():
+    result = validate_rows([_row(
+        final_status="cache_conflict_preserved",
+        final_reason=(
+            "Team-level championship flags cannot be promoted as player championship-start credit."
+        ),
+        next_action="require_championship_start_evidence_not_team_champion_flag",
+        cache_conflict_cells="4",
+    )])
+
+    assert result["ok"] is True
+    assert result["issues"] == []
 
 
 def test_rejects_open_row_without_machine_gate_states():

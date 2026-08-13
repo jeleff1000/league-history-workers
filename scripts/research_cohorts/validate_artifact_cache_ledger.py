@@ -15,6 +15,7 @@ from enrich_artifact_cache_ledger_completion_gates import (
 
 CLOSED_STATUSES = {
     "cache_verified",
+    "cache_conflict_preserved",
     "no_promotable_candidate_emitted",
     "not_data_bearing",
 }
@@ -116,9 +117,11 @@ def validate_rows(rows: list[dict[str, str]]) -> dict:
                     issues.append(_issue(artifact_id, f"missing_{field}"))
                 elif actual != expected_gates[field]:
                     issues.append(_issue(artifact_id, f"incorrect_{field}"))
-        if _number(row, "cache_conflict_cells") and "precedence" not in str(
-            row.get("next_action", "") or ""
-        ).lower():
+        if (
+            status != "cache_conflict_preserved"
+            and _number(row, "cache_conflict_cells")
+            and "precedence" not in str(row.get("next_action", "") or "").lower()
+        ):
             issues.append(_issue(artifact_id, "conflict_missing_precedence_action"))
 
         # A bridge claim is evidence, not a vague note.  If an artifact says
