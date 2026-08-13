@@ -1,0 +1,55 @@
+name: Audit exact loss-tie candidate recipient cardinality
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+  SLEEPER_RUN: '31700949651'
+  SPARSE_RUN: '31700945044'
+  RESIDUAL_RUN: '31704773378'
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2 pytest==8.3.5
+      - run: python -m pytest -q scripts/research_cohorts/test_audit_candidate_canonical_cardinality.py
+      - name: Download exact candidates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p candidate/sleeper candidate/sparse candidate/residual
+          gh run download "$SLEEPER_RUN" --repo "$GITHUB_REPOSITORY" --name "research-raw-signal-cache-readback-$SLEEPER_RUN" --dir candidate/sleeper
+          gh run download "$SPARSE_RUN" --repo "$GITHUB_REPOSITORY" --name "research-raw-signal-cache-readback-$SPARSE_RUN" --dir candidate/sparse
+          gh run download "$RESIDUAL_RUN" --repo "$GITHUB_REPOSITORY" --name "research-raw-signal-cache-readback-$RESIDUAL_RUN" --dir candidate/residual
+      - name: Combine read-only candidates and audit cardinality
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/combine_exact_team_null_candidates.py             --candidate-root candidate/sleeper             --candidate-root candidate/sparse             --candidate-root candidate/residual             --out-delta combined_delta.parquet             --out-receipt combined_receipt.json
+          python scripts/research_cohorts/audit_candidate_canonical_cardinality.py             --base research_public_lake/corpus_snapshot.duckdb             --delta combined_delta.parquet             --out cardinality_audit.json             --examples cardinality_examples.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-loss-tie-cardinality-audit-${{ github.run_id }}
+          path: |
+            combined_receipt.json
+            cardinality_audit.json
+            cardinality_examples.json
+          retention-days: 90
