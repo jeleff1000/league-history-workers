@@ -47,7 +47,7 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           path: code
-          ref: ae56752a5a04cd7af895ef898660cec5b9ec64bf
+          ref: 4e6f90193827825b226a089ea8a0d2724b7b277c
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -91,6 +91,13 @@ jobs:
             SELECT DISTINCT CAST(NFL_player_id AS VARCHAR) AS NFL_player_id,
               CAST(year AS INTEGER) AS year, CAST(week AS INTEGER) AS week
             FROM lake.public.player_active_week
+            WHERE week BETWEEN 1 AND 18
+          """)
+          c.execute("""
+            CREATE TEMP VIEW cached_regular_team_game_weeks AS
+            SELECT DISTINCT CAST(NFL_player_id AS VARCHAR) AS NFL_player_id,
+              CAST(year AS INTEGER) AS year, CAST(week AS INTEGER) AS week
+            FROM lake.public.player_team_game_week
             WHERE week BETWEEN 1 AND 18
           """)
           mode = os.environ['PILOT_MODE']
@@ -435,6 +442,7 @@ jobs:
               core_started = perf_counter()
               materialize_season_core_cohort_position_batch(
                   c, source_table='rb_2025_bucket_source', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+                  player_team_game_week_table='cached_regular_team_game_weeks', player_active_week_table='cached_regular_player_weeks',
                   output_table='rb_2025_bucket_season_core', year=2025, position='RB', split_threshold=50,
               )
               core_seconds = perf_counter() - core_started
@@ -803,6 +811,7 @@ jobs:
               core_started = perf_counter()
               materialize_season_core_cohort_position_batch(
                   c, source_table='lake.public.player_fantasy', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+                  player_team_game_week_table='cached_regular_team_game_weeks', player_active_week_table='cached_regular_player_weeks',
                   output_table='myles_2025_season_core', year=2025, position=lane_position, split_threshold=50,
               )
               core_seconds = perf_counter() - core_started
