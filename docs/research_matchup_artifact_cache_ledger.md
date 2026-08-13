@@ -964,3 +964,26 @@ identities.
 | `research-source-matchup-rescue-*` | 14 | Corrected fan-out receipt: 28,032,962 cells already equal cache; zero supported null fills; remaining cells are conflicts, schema-blocked loss/tie, or unresolved team identity. | Adjudicate non-null conflicts; resolve/close residual identity gaps; do not run a null-cell promotion for this family. |
 | `research-championship-identity-probe-*` | 9 | Fully adjudicated by receipt 31552757341: seven MFL files have a safe manager-week fan-out but zero valid player-row fills; two files remain source-only because no cache-side identity bridge exists. | Do not promote championship or playoff values from this family; retain the two source-only identity gaps as explicitly unresolved. |
 | `research-sparse-playoff-championship-*` | 621 candidate-bearing | Fully receipted; zero supported null-cell fills. | Close source-only/conflict rows under the explicit precedence and loss/tie schema decisions. |
+
+## Fleaflicker historical-roster bridge â€” source behavior gate discovered
+
+Read-only local source probes on 2026-08-13 established that Fleaflicker has
+two different historical `FetchRoster` behaviors.  League `104989`, season
+2019, week 13 returned a roster consistent with that historical season.  A
+ten-target sparse-playoff sample, however, returned source standings for all
+ten targets but a year-valid roster for only four; six returned no
+year-matching roster rows.  One of the four apparent successes (`105788`,
+requested 2011/week 18) was a false historical response: it contained current
+players including Baker Mayfield, Bucky Irving, and Jordan Addison.  The
+endpoint accepted the requested old period but did not serve the old roster.
+
+This is a source contract issue, not a cache defect.  A Fleaflicker roster
+bridge is admissible only when its roster membership independently passes a
+season-plausibility check against the NFL player universe.  `requested period`
+metadata alone is insufficient.  For genuinely historical roster payloads,
+the existing year + normalized-name + broad-position contract resolved 41 of
+46 members in the `104989` sample; the remaining five are known Fleaflicker
+position aliases (`EDR`, `IL`, `EDR/IL`) and require explicit normalization to
+the canonical `DL` family.  DST continues to use the canonical season-franchise
+ID mapper.  No Fleaflicker source result from this probe has been promoted to
+the approved cache.
