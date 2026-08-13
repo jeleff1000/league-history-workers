@@ -1,0 +1,195 @@
+name: Promote audited null-player team-week loss-tie recipients
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Must equal APPLY_NULL_PLAYER_TEAM_WEEK_LOSS_TIE
+        required: true
+        default: ''
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: canonical-research-cache-replacement
+  cancel-in-progress: false
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+  CANDIDATE_RUN: '31708244500'
+  CANDIDATE_ARTIFACT: research-raw-signal-cache-readback-31708244500
+  REPORT_SHA: f8004ee3495fcf71b2da938a52e90640b027963d0215a07a187aaac4644be507
+  DELTA_SHA: 448e433e77c11a608c4ccb5f74762a76787c139b80cd73f1d54ca3a15ad92fb4
+  EXPECTED_RAW_ROWS: '11713'
+  EXPECTED_TEAM_WEEKS: '5447'
+  EXPECTED_RECIPIENT_ROWS: '11713'
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.12' }
+      - run: python -m pip install duckdb==1.5.1 pytest==8.3.5
+      - run: >-
+          python -m pytest -q
+          scripts/research_cohorts/test_apply_team_signal_delta_in_place.py
+          scripts/research_cohorts/test_verify_exact_team_null_candidate_contract.py
+          scripts/research_cohorts/test_combine_null_team_week_loss_tie_candidates.py
+
+  apply:
+    needs: tests
+    if: ${{ inputs.confirm == 'APPLY_NULL_PLAYER_TEAM_WEEK_LOSS_TIE' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.12' }
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Record cache pre-state
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import duckdb,json
+          from pathlib import Path
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb',read_only=True)
+          Path('prestate.json').write_text(json.dumps({'schema':[r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()],'player_rows':int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])},indent=2)+'\n'); con.close()
+          PY
+      - name: Download and pin audited candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir candidate
+          gh run download "$CANDIDATE_RUN" --repo "$GITHUB_REPOSITORY" --name "$CANDIDATE_ARTIFACT" --dir candidate
+          report="$(find candidate -name team_signal_candidate_report.json -print -quit)"; delta="$(find candidate -name team_promotable_player_delta.parquet -print -quit)"
+          test "$(sha256sum "$report"|awk '{print $1}')" = "$REPORT_SHA"
+          test "$(sha256sum "$delta"|awk '{print $1}')" = "$DELTA_SHA"
+      - name: Build verified null-player team-week delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/verify_exact_team_null_candidate_contract.py --candidate-root candidate --out candidate_contract.json
+          python scripts/research_cohorts/combine_null_team_week_loss_tie_candidates.py --candidate-root candidate --out-delta team_week_delta.parquet --out-receipt team_week_contract.json
+          python - <<'PY'
+          import json,os
+          c=json.load(open('team_week_contract.json'))
+          expected={'candidate_bundles':1,'raw_rows':int(os.environ['EXPECTED_RAW_ROWS']),'unique_team_weeks':int(os.environ['EXPECTED_TEAM_WEEKS']),'conflicting_team_weeks':0}
+          actual={k:c.get(k) for k in expected}
+          if actual!=expected: raise SystemExit({'actual':actual,'expected':expected})
+          PY
+      - name: Fan source loss-tie only to existing null-player recipients
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/apply_team_signal_delta_in_place.py --base research_public_lake/corpus_snapshot.duckdb --delta team_week_delta.parquet --report apply_report.json
+      - name: Fail fast before same-key cache replacement
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb,hashlib,json,os
+          before=json.load(open('prestate.json')); report=json.load(open('apply_report.json')); recipients=int(os.environ['EXPECTED_RECIPIENT_ROWS']); groups=int(os.environ['EXPECTED_TEAM_WEEKS'])
+          allowed=('win','loss','tie','team_points','is_playoffs','champion','final_playoff_seed','made_playoffs')
+          fields={k:int(report['improvements_by_field'].get(k,0)) for k in allowed}; required={k:0 for k in allowed}; required['loss']=recipients; required['tie']=recipients
+          if fields!=required or int(report.get('delta_rows',-1))!=groups or int(report.get('matched_rows',-1))!=recipients or int(report.get('inserted_rows',-1))!=0 or report.get('schema_unchanged') is not True or report.get('ops_untouched') is not True or report.get('new_lineage') is not False: raise SystemExit(json.dumps({'fields':fields,'report':report},sort_keys=True))
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb',read_only=True)
+          if [r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()]!=before['schema'] or int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])!=before['player_rows']: raise SystemExit('schema or player row count changed')
+          con.close(); h=hashlib.sha256()
+          with open('research_public_lake/ops_cache.duckdb','rb') as f:
+            for b in iter(lambda:f.read(1048576),b''): h.update(b)
+          if h.hexdigest()!=open('ops_before.sha256').read().split()[0]: raise SystemExit('ops cache changed')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: null-player-team-week-loss-tie-evidence-${{ github.run_id }}
+          path: |
+            prestate.json
+            ops_before.sha256
+            candidate_contract.json
+            team_week_contract.json
+            team_week_delta.parquet
+            apply_report.json
+          retention-days: 90
+          compression-level: 0
+      - name: Replace exactly one approved cache object under its identical key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/caches?key=$CANONICAL_CACHE_KEY&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/caches/${ids[0]}"
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+
+  readback:
+    needs: apply
+    if: ${{ inputs.confirm == 'APPLY_NULL_PLAYER_TEAM_WEEK_LOSS_TIE' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: null-player-team-week-loss-tie-evidence-${{ github.run_id }}
+          path: evidence
+      - uses: actions/setup-python@v6
+        with: { python-version: '3.12' }
+      - run: python -m pip install duckdb==1.5.1
+      - name: Fresh restore readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb,hashlib,json,os
+          from pathlib import Path
+          before=json.load(open('evidence/prestate.json')); expected=int(os.environ['EXPECTED_RECIPIENT_ROWS'])
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb',read_only=True)
+          d=str(Path('evidence/team_week_delta.parquet').resolve()).replace("'","''"); con.execute(f"CREATE TEMP VIEW d AS SELECT * FROM read_parquet('{d}')")
+          join='''d.db_name=p.db_name AND CAST(d.year AS INTEGER)=CAST(p.year AS INTEGER) AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER) AND d.platform IS NOT DISTINCT FROM p.platform AND d.manager IS NOT DISTINCT FROM p.manager AND p.NFL_player_id IS NULL AND p.team_key IS NOT DISTINCT FROM d.team_key AND p.team_name IS NOT DISTINCT FROM d.team_name'''
+          matched=int(con.execute(f'SELECT COUNT(*) FROM public.player_fantasy p JOIN d ON {join}').fetchone()[0]); unmatched=int(con.execute(f'SELECT COUNT(*) FROM d WHERE NOT EXISTS (SELECT 1 FROM public.player_fantasy p WHERE {join})').fetchone()[0]); loss=int(con.execute(f'SELECT COUNT(*) FROM public.player_fantasy p JOIN d ON {join} WHERE p.loss IS NULL').fetchone()[0]); tie=int(con.execute(f'SELECT COUNT(*) FROM public.player_fantasy p JOIN d ON {join} WHERE p.tie IS NULL').fetchone()[0]); schema=[r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()]; rows=int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]); con.close()
+          h=hashlib.sha256()
+          with open('research_public_lake/ops_cache.duckdb','rb') as f:
+            for b in iter(lambda:f.read(1048576),b''): h.update(b)
+          receipt={'matched_player_rows':matched,'unmatched_candidate_keys':unmatched,'loss_remaining_null_source_cells':loss,'tie_remaining_null_source_cells':tie,'schema_unchanged':schema==before['schema'],'player_rows_unchanged':rows==before['player_rows'],'ops_unchanged':h.hexdigest()==open('evidence/ops_before.sha256').read().split()[0],'fresh_restore':True,'new_lineage':False}
+          if not (matched==expected and unmatched==0 and loss==0 and tie==0 and receipt['schema_unchanged'] and receipt['player_rows_unchanged'] and receipt['ops_unchanged']): raise SystemExit(json.dumps(receipt,sort_keys=True))
+          Path('null_player_team_week_readback.json').write_text(json.dumps(receipt,indent=2)+'\n'); print(json.dumps(receipt,sort_keys=True))
+          PY
+      - name: Verify exactly one approved cache object remains
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/caches?key=$CANONICAL_CACHE_KEY&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          printf '%s\n' "${ids[0]}" > canonical_cache_id.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: null-player-team-week-loss-tie-readback-${{ github.run_id }}
+          path: |
+            null_player_team_week_readback.json
+            canonical_cache_id.txt
+          retention-days: 90
