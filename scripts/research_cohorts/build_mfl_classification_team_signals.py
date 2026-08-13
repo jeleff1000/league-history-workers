@@ -135,6 +135,8 @@ def build(
         con.execute(f"""
             COPY (
               SELECT db_name, year, week, team_key,
+                     NULL::VARCHAR AS manager,
+                     NULL::VARCHAR AS team_name,
                      {', '.join(select_values)}
               FROM signals
               ORDER BY db_name, year, week, team_key

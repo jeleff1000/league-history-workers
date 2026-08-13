@@ -52,8 +52,8 @@ def test_builds_one_team_week_signal_from_consistent_rostered_player_evidence(tm
     assert result["emitted_team_signals"] == 1
     con = duckdb.connect()
     rows = con.execute(
-        "SELECT db_name, year, week, team_key, win, loss, tie, team_points, is_playoffs "
+        "SELECT db_name, year, week, team_key, manager, team_name, win, loss, tie, team_points, is_playoffs "
         "FROM read_parquet(?)", [str(out)]
     ).fetchall()
     con.close()
-    assert rows == [("league", 2015, 12, "0001", 1, 0, 0, 123.4, 1)]
+    assert rows == [("league", 2015, 12, "0001", None, None, 1, 0, 0, 123.4, 1)]
