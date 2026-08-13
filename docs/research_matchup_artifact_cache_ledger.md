@@ -59,9 +59,15 @@ read back all 1,720 exact existing-player candidates from pilot `31658616693`:
 zero unmatched keys and zero source-backed nulls for `win`, `loss`, `tie`,
 `team_points`, and `is_playoffs`. The schema, player-row count, and ops-cache
 hash were unchanged; cache object `6590907333` is the single same-key object.
-This receipt covers the first 15 targeted MFL league-weeks only. The remaining
-1,291 target league-weeks in this direct-identity family stay open until they
-produce the same independent readback evidence.
+This receipt covers the first 15 targeted MFL league-weeks only. A fresh
+post-promotion inventory, [31661107930](https://github.com/jeleff1000/league-history-workers/actions/runs/31661107930),
+found 1,295 target league-weeks / 141,598 candidate cache player rows still
+requiring an exact bridge. Eleven pilot weeks are no longer targets; four of
+the pilot weeks retain other unresolved player rows. Candidate-only recovery
+run [31661452691](https://github.com/jeleff1000/league-history-workers/actions/runs/31661452691)
+partitions those 1,295 weeks into 256 deterministic shards at 15 concurrent
+workers. Every shard remains read-only until an independently validated
+promotion/readback receipt exists.
 
 ## Current approved-cache contract
 
