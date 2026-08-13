@@ -43,6 +43,7 @@ jobs:
           tests/research_cohorts/test_audit_team_signal_candidates.py
           tests/research_cohorts/test_validate_mfl_shard_artifacts.py
           tests/research_cohorts/test_extract_mfl_artifact_members.py
+          tests/research_cohorts/test_merge_team_signal_deltas.py
           tests/research_cohorts/test_research_apply_mfl_classification_roster_bridge_batch.py
       - name: Parse MFL artifact-download shell before any cache restore
         shell: bash
@@ -238,14 +239,19 @@ jobs:
             --base research_public_lake/corpus_snapshot.duckdb \
             --candidates candidate_input --out candidate \
             --emit-direct-mfl-win-replacements
+          python scripts/research_cohorts/merge_team_signal_deltas.py \
+            --normal candidate/team_promotable_player_delta.parquet \
+            --replacement candidate/team_direct_mfl_win_replacement_delta.parquet \
+            --out candidate/combined_delta.parquet \
+            --report candidate/combined_delta_merge_report.json
           python - <<'PY'
           import duckdb, json
           from pathlib import Path
           normal=Path('candidate/team_promotable_player_delta.parquet')
           replacement=Path('candidate/team_direct_mfl_win_replacement_delta.parquet')
           con=duckdb.connect()
-          con.execute("COPY (SELECT * FROM read_parquet([?,?], union_by_name=true)) TO 'candidate/combined_delta.parquet' (FORMAT PARQUET)",[str(normal),str(replacement)])
           report=json.loads(Path('candidate/team_signal_candidate_report.json').read_text())
+          merge_report=json.loads(Path('candidate/combined_delta_merge_report.json').read_text())
           positive={k:int(v) for k,v in report['positive_mismatches_not_auto_promoted'].items()}
           if any(value for key,value in positive.items() if key!='win'):
               raise SystemExit(f'non-win source precedence conflict remains: {positive}')
@@ -260,6 +266,8 @@ jobs:
               'normal_delta_rows':int(con.execute('SELECT COUNT(*) FROM read_parquet(?)',[str(normal)]).fetchone()[0]),
               'direct_mfl_win_replacement_rows':replacement_rows,
               'combined_delta_rows':int(con.execute('SELECT COUNT(*) FROM read_parquet(?)',[str(Path('candidate/combined_delta.parquet'))]).fetchone()[0]),
+              'combined_delta_duplicate_rows_collapsed':int(merge_report['duplicate_rows_collapsed']),
+              'combined_delta_conflicting_source_keys':int(merge_report['conflicting_source_keys']),
               'positive_mismatches':positive,
               'read_only':report['read_only'], 'cache_mutated':report['cache_mutated'],
               'new_lineage':report['new_lineage'], 'canonical_schema_unchanged':report['canonical_schema_unchanged'],
@@ -321,6 +329,7 @@ jobs:
             assembly_report.json
             apply_report.json
             candidate/team_signal_candidate_report.json
+            candidate/combined_delta_merge_report.json
             candidate/combined_delta.parquet
           retention-days: 90
           compression-level: 0

@@ -139,6 +139,15 @@ transfer failures and not cache improvements. The next guarded preflight
 records this state per artifact, excludes those artifacts from candidate
 assembly, and still fails closed for any archive that is neither complete nor
 explicitly diagnostic-only.
+The subsequent candidate build in
+[31679763905](https://github.com/jeleff1000/league-history-workers/actions/runs/31679763905)
+passed artifact admission and stopped at the duplicate-key guard before any
+cache replacement: 247 cache keys appeared in both the NULL-fill and direct
+MFL win-replacement classes. This is an expected overlap in candidate classes,
+not conflicting source evidence. The next preflight merges such overlaps by
+the fixed canonical key, rejects any disagreement among actual `source_*`
+values, and preserves deterministic provenance. It still cannot reach the
+cache until the merge report has zero conflicting source keys.
 The retry is still allowed to mutate only the already-approved
 same-key cache after its test/preflight gate proves the selected artifact list
 exactly matches the complete non-diagnostic shard set. Its fresh restore/readback receipt is
