@@ -66,14 +66,17 @@ def refresh(
     unattributable_source_receipt = "artifact_unattributable_state" in receipt
     if promotion_receipt:
         receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_rows"]}
+    elif unattributable_source_receipt:
+        # This is a stronger terminal classification than the general direct
+        # re-audit: source lacks the fantasy-team identity required to choose
+        # among duplicate cache rows.
+        receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_unattributable_state"]}
     elif direct_reaudit_receipt:
         receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_current_state"]}
     elif team_points_bridge_receipt:
         receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_bridge_state"]}
     elif team_manager_comparison_receipt:
         receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_comparison_state"]}
-    elif unattributable_source_receipt:
-        receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_unattributable_state"]}
     else:
         # Combined readback receipts include supplemental cache-recovery
         # entries whose IDs are descriptive strings.  This refresher updates
@@ -110,8 +113,6 @@ def refresh(
                 raise SystemExit(f"{artifact_id}: no unattributable source evidence")
             if evidence.get("all_ambiguous_source_keys_lack_manager") is not True:
                 raise SystemExit(f"{artifact_id}: source manager/franchise identity is not proven absent")
-            if evidence.get("all_source_signals_are_zero_placeholder") is not True:
-                raise SystemExit(f"{artifact_id}: source values are not proven zero placeholders")
             row["source_cells"] = str(cells)
             row["cache_match_cells"] = "0"
             row["cache_missing_cells"] = "0"
@@ -125,9 +126,8 @@ def refresh(
                 f"Current read-only audit found {keys:,} source player-week keys with outcome values but no "
                 "source manager/franchise identity. Each maps only to duplicate canonical rows whose manager, "
                 "MFL player ID, team key/name, and lineup slot cannot be selected from the source, so no "
-                "player-team recipient can be proven. The source also returned an all-zero placeholder signal, "
-                "not a usable team outcome. The values are deliberately not promoted or used to corroborate "
-                "cache cells."
+                "player-team recipient can be proven. The source values are deliberately not promoted or used "
+                "to corroborate cache cells."
             )
             row["next_action"] = "closed_source_identity_absent_no_recipient"
             updated += 1

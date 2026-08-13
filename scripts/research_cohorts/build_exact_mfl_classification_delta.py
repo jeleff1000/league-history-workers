@@ -314,27 +314,19 @@ def build(
                      + (source_tie IS NOT NULL)::INTEGER
                      + (source_team_points IS NOT NULL)::INTEGER
                      + (source_is_playoffs IS NOT NULL)::INTEGER
-                   ) AS unattributable_source_cells,
-                   BOOL_AND(
-                     COALESCE(source_win, 0)=0
-                     AND COALESCE(source_loss, 0)=0
-                     AND COALESCE(source_tie, 0)=0
-                     AND COALESCE(source_team_points, 0)=0
-                     AND COALESCE(source_is_playoffs, 0)=0
-                   ) AS all_source_signals_are_zero_placeholder
+                   ) AS unattributable_source_cells
             FROM unattributable_ambiguous_keys
             GROUP BY artifact_id
             ORDER BY artifact_id
         """).fetchall():
             (
-                artifact_id, keys, cells, all_zero_placeholder,
+                artifact_id, keys, cells,
             ) = values
             artifact_unattributable_state.append({
                 "artifact_id": int(artifact_id),
                 "unattributable_ambiguous_keys": int(keys),
                 "unattributable_source_cells": int(cells),
                 "all_ambiguous_source_keys_lack_manager": True,
-                "all_source_signals_are_zero_placeholder": bool(all_zero_placeholder),
             })
         result = {
             "read_only": True,

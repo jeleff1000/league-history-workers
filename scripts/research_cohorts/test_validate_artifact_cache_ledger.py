@@ -109,6 +109,21 @@ def test_allows_explicit_null_nfl_player_candidate_closure():
     assert result["issues"] == []
 
 
+def test_allows_managerless_ambiguous_source_closure_with_historical_candidate_count():
+    result = validate_rows([_row(
+        final_status="no_promotable_candidate_emitted",
+        final_reason=(
+            "Source has no source manager/franchise identity and therefore cannot choose "
+            "a player-team recipient among duplicate cache rows."
+        ),
+        next_action="closed_source_identity_absent_no_recipient",
+        candidate_delta_rows="2307",
+    )])
+
+    assert result["ok"] is True
+    assert result["issues"] == []
+
+
 def test_rejects_open_row_without_a_receipt():
     result = validate_rows([
         _row(

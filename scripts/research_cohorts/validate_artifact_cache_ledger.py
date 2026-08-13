@@ -105,7 +105,16 @@ def validate_rows(rows: list[dict[str, str]]) -> dict:
                 "no valid NFL-player fill" in reason
                 and "NFL_player_id null" in reason
             )
-            if _number(row, "candidate_delta_rows") and not has_historical_probe_only:
+            has_managerless_unattributable_source = (
+                "source manager/franchise identity" in reason
+                and (
+                    "cannot choose" in reason
+                    or "cannot be selected from the source" in reason
+                )
+            )
+            if _number(row, "candidate_delta_rows") and not (
+                has_historical_probe_only or has_managerless_unattributable_source
+            ):
                 issues.append(_issue(artifact_id, "no_candidate_has_delta"))
         if status not in CLOSED_STATUSES:
             if gap_total == 0:

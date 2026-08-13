@@ -52,8 +52,8 @@ unchanged.
 
 The latest ledger validation reports 9,725 ledger rows: 9,479 frozen
 raw-artifact rows, 232 later artifact-admission rows, and 14 supplemental
-cache-recovery receipts. Of the frozen artifact rows, 8,786 are closed and 693
-are still open. Those 693 entries are a work queue, **not** a claim that 693 artifacts still
+cache-recovery receipts. Of the frozen artifact rows, 8,790 are closed and 689
+are still open. Those 689 entries are a work queue, **not** a claim that 689 artifacts still
 contain unapplied values: each must be re-read against the current approved
 cache before it can be closed or kept open with a current, specific reason.
 
@@ -61,16 +61,24 @@ cache before it can be closed or kept open with a current, specific reason.
 | --- | ---: | --- |
 | `partial_schema_blocked_unmatched` | 472 | Historical pre-loss/tie label. Current gate is an exact player/team bridge and readback; schema support is already closed. |
 | `partial_schema_blocked_conflicts` | 214 | Historical pre-loss/tie label. Current gates are exact player/team bridge plus explicit source-precedence receipt. |
-| `partial_schema_blocked_direct_identity` | 4 | Direct MFL exact-key re-audit: all other retained direct-MFL artifacts equal the cache; these four retain duplicate-recipient ambiguity. |
 | `source_only_team_signal_missing_player_team_bridge` | 2 | Build a source-roster-to-existing-player bridge or retain as source-only. |
 | `unmatched_cache_key` | 1 | Separate already-filled recipients from true source-only player/team records and preserve the residual count. |
 
 The machine-derived **current** frozen-inventory admission queue is simpler
-than those historical labels: 479 artifacts require a deterministic recipient
+than those historical labels: 475 artifacts require a deterministic recipient
 bridge or an explicit source-only closure, while 214 require field-level
 source-precedence adjudication in addition to their recorded identity work. All
 open rows carrying loss/tie evidence are now marked `closed_schema_supported`;
 no open row may ask for a loss/tie schema migration again.
+
+**Direct-MFL closure, recorded 2026-08-13.** A fresh read-only cache audit
+[31751606495](https://github.com/jeleff1000/league-history-workers/actions/runs/31751606495)
+closed four formerly ambiguous MFL classification artifacts. They contain
+2,765 outcome cells across 553 player-week keys, but the source rows have no
+manager/franchise identity and each key has multiple possible canonical player
+recipients. No source value can be attached to a specific fantasy team, so no
+cell was promoted. The ledger records this as a source-identity-absent closure,
+not as a cache success or a missing schema problem.
 
 The raw source artifact `8952555354` is the last frozen-inventory row above. Its current
 receipt proves 26,936 existing-player fills from 256 source candidates are in

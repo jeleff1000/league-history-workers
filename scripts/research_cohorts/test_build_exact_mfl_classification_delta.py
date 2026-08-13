@@ -56,5 +56,4 @@ def test_reports_unattributable_managerless_ambiguous_source(tmp_path):
         "unattributable_ambiguous_keys": 1,
         "unattributable_source_cells": 5,
         "all_ambiguous_source_keys_lack_manager": True,
-        "all_source_signals_are_zero_placeholder": False,
     }]
