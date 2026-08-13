@@ -1,0 +1,217 @@
+name: Apply MFL Direct Crosswalk Bridge
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Must equal APPLY_MFL_DIRECT_CROSSWALK_BRIDGE
+        required: true
+        default: ""
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: canonical-research-cache-replacement
+  cancel-in-progress: false
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+  CANDIDATE_RUN_ID: "31737829461"
+  EXPECTED_DELTA_ROWS: "14"
+  EXPECTED_WIN_FILLS: "7"
+  EXPECTED_LOSS_FILLS: "14"
+  EXPECTED_TIE_FILLS: "14"
+  EXPECTED_TEAM_POINT_FILLS: "7"
+  EXPECTED_PLAYOFF_FILLS: "7"
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pytest==8.3.5
+      - run: >-
+          python -m pytest -q
+          scripts/research_cohorts/test_apply_team_signal_delta_in_place.py
+          tests/research_cohorts/test_research_apply_mfl_direct_crosswalk_bridge.py
+
+  apply:
+    needs: tests
+    if: ${{ inputs.confirm == 'APPLY_MFL_DIRECT_CROSSWALK_BRIDGE' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Record exact immutable pre-state
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/corpus_snapshot.duckdb > cache_before.sha256
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import duckdb,json
+          from pathlib import Path
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb',read_only=True)
+          Path('prestate.json').write_text(json.dumps({'schema':con.execute('DESCRIBE public.player_fantasy').fetchall(),'player_rows':int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])},indent=2)+'\n')
+          con.close()
+          PY
+      - name: Download one validated candidate artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir candidate
+          gh run download "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "mfl-direct-crosswalk-bridge-candidate-$CANDIDATE_RUN_ID" --dir candidate
+          test "$(find candidate -name team_promotable_player_delta.parquet | wc -l)" -eq 1
+          test "$(find candidate -name team_signal_candidate_report.json | wc -l)" -eq 1
+          test "$(find candidate -name mfl_direct_crosswalk_bridge_candidate_receipt.json | wc -l)" -eq 1
+          cp "$(find candidate -name cache_before.sha256 -print -quit)" candidate_cache_before.sha256
+      - name: Reject stale, broadened, or conflicting evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmp -s cache_before.sha256 candidate_cache_before.sha256
+          python - <<'PY'
+          import duckdb,json,os
+          from pathlib import Path
+          root=Path('candidate')
+          receipt=json.loads(next(root.rglob('mfl_direct_crosswalk_bridge_candidate_receipt.json')).read_text())
+          report=json.loads(next(root.rglob('team_signal_candidate_report.json')).read_text())
+          source=receipt['source_assembly']
+          if not (receipt['read_only'] and not receipt['cache_mutated'] and not receipt['new_lineage']
+                  and source['crosswalk_conflicts']==0 and source['direct_crosswalk_rows']==98
+                  and source['direct_only_bridge_rows']==31): raise SystemExit('unsafe bridge receipt')
+          expected={'win':7,'loss':14,'tie':14,'team_points':7,'is_playoffs':7,'champion':0,'final_playoff_seed':0,'made_playoffs':0}
+          actual={k:int(report['improvements_by_field'].get(k,0)) for k in expected}
+          if actual!=expected or int(report['matched_player_rows'])!=8828 or int(report['bridge_matched_player_rows'])!=8828 or int(report['unmatched_source_team_keys'])!=0 or any(report['positive_mismatches_not_auto_promoted'].values()): raise SystemExit(f'unsafe candidate report {actual}')
+          delta=next(root.rglob('team_promotable_player_delta.parquet'))
+          con=duckdb.connect()
+          n=int(con.execute('SELECT COUNT(*) FROM read_parquet(?)',[str(delta)]).fetchone()[0])
+          unique=int(con.execute('SELECT COUNT(*) FROM (SELECT DISTINCT db_name,year,week,NFL_player_id,manager,team_key,team_name,platform FROM read_parquet(?))',[str(delta)]).fetchone()[0])
+          methods=con.execute('SELECT DISTINCT join_method FROM read_parquet(?) ORDER BY 1',[str(delta)]).fetchall()
+          con.close()
+          if n!=14 or unique!=14 or methods!=[('player_bridge',)]: raise SystemExit(f'unsafe delta n={n} unique={unique} methods={methods}')
+          PY
+      - name: Apply only exact existing-player NULL fills
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/apply_team_signal_delta_in_place.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --delta "$(find candidate -name team_promotable_player_delta.parquet -print -quit)" \
+            --report apply_report.json
+      - name: Fail fast before same-key replacement
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb,hashlib,json
+          from pathlib import Path
+          expected={'win':7,'loss':14,'tie':14,'team_points':7,'is_playoffs':7,'champion':0,'final_playoff_seed':0,'made_playoffs':0}
+          report=json.loads(Path('apply_report.json').read_text())
+          actual={k:int(report['improvements_by_field'].get(k,0)) for k in expected}
+          if actual!=expected or int(report['matched_rows'])!=14 or int(report['inserted_rows'])!=0 or not report['schema_unchanged'] or not report['ops_untouched'] or report['new_lineage']: raise SystemExit(f'apply gate {report}')
+          before=json.loads(Path('prestate.json').read_text())
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb',read_only=True)
+          assert con.execute('DESCRIBE public.player_fantasy').fetchall()==[tuple(r) for r in before['schema']]
+          assert int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])==before['player_rows']
+          con.close()
+          h=hashlib.sha256()
+          with Path('research_public_lake/ops_cache.duckdb').open('rb') as f:
+              for b in iter(lambda:f.read(1048576),b''): h.update(b)
+          assert h.hexdigest()==Path('ops_before.sha256').read_text().split()[0]
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-direct-crosswalk-bridge-promotion-evidence-${{ github.run_id }}
+          path: |
+            prestate.json
+            ops_before.sha256
+            apply_report.json
+            candidate/**
+          retention-days: 90
+          compression-level: 0
+      - name: Replace only the one approved cache object under its same key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${ids[0]}"
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+
+  readback:
+    needs: apply
+    if: ${{ inputs.confirm == 'APPLY_MFL_DIRECT_CROSSWALK_BRIDGE' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: mfl-direct-crosswalk-bridge-promotion-evidence-${{ github.run_id }}
+          path: evidence
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1
+      - name: Independently restore and prove all 14 cells landed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/verify_team_signal_delta_readback.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --delta "$(find evidence -name team_promotable_player_delta.parquet -print -quit)" \
+            --before evidence/prestate.json --ops research_public_lake/ops_cache.duckdb \
+            --ops-before evidence/ops_before.sha256 --apply-report evidence/apply_report.json \
+            --out mfl_direct_crosswalk_bridge_readback.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          result=json.loads(Path('mfl_direct_crosswalk_bridge_readback.json').read_text())
+          expected={'win':7,'loss':14,'tie':14,'team_points':7,'is_playoffs':7}
+          if result['candidate_rows']!=14 or result['unmatched_candidate_keys']!=0 or result['authorized_cells_by_field']!=expected or any(result['source_value_disagreements'].values()): raise SystemExit(result)
+          PY
+      - name: Prove exactly one same-key cache object remains
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          printf '%s\n' "${ids[0]}" > canonical_cache_id.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-direct-crosswalk-bridge-promotion-readback-${{ github.run_id }}
+          path: |
+            mfl_direct_crosswalk_bridge_readback.json
+            canonical_cache_id.txt
+          retention-days: 90
