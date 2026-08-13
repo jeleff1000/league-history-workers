@@ -10,7 +10,7 @@ on:
       candidate_run_id:
         description: Read-only candidate run containing team_promotable_player_delta.parquet
         required: true
-        default: "31637861567"
+        default: "31668497497"
 
 permissions:
   actions: write
@@ -22,9 +22,9 @@ concurrency:
 
 env:
   CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
-  EXPECTED_SOURCE_ARTIFACT_ID: "8952555354"
-  EXPECTED_DELTA_ROWS: "52667"
-  EXPECTED_DELTA_UNIQUE_KEYS: "52048"
+  EXPECTED_SOURCE_ARTIFACT_ID: "9016453846|9016485043"
+  EXPECTED_DELTA_ROWS: "600"
+  EXPECTED_DELTA_UNIQUE_KEYS: "600"
 
 jobs:
   tests:
@@ -98,13 +98,13 @@ jobs:
               if report.get(key) != expected:
                   raise SystemExit(f'candidate invariant {key}={report.get(key)!r}, expected {expected!r}')
           expected={
-              'win':0, 'loss':52667, 'tie':52667, 'team_points':0,
+              'win':0, 'loss':600, 'tie':600, 'team_points':0,
               'is_playoffs':0, 'champion':0, 'final_playoff_seed':0,
               'made_playoffs':0,
           }
           if {k:int(v) for k,v in report.get('improvements_by_field',{}).items()} != expected:
               raise SystemExit(f'candidate improvements differ: {report.get("improvements_by_field")}')
-          if int(report.get('matched_player_rows',0)) != 52667:
+          if int(report.get('matched_player_rows',0)) != 600:
               raise SystemExit(f'candidate matched player rows differ: {report.get("matched_player_rows")}')
           delta=next(Path('candidate').rglob('team_promotable_player_delta.parquet'))
           con=duckdb.connect()
@@ -124,7 +124,7 @@ jobs:
             )
           """).fetchone()[0])
           con.close()
-          if total != 52667 or unique != 52048 or source_variants:
+          if total != 600 or unique != 600 or source_variants:
               raise SystemExit(f'candidate key gate failed: total={total}, unique={unique}, source_variants={source_variants}')
           PY
       - name: Apply only the existing-player loss and tie null cells
@@ -144,14 +144,14 @@ jobs:
           from pathlib import Path
           before=json.loads(Path('prestate.json').read_text())
           report=json.loads(Path('apply_report.json').read_text())
-          expected={'win':0,'loss':52667,'tie':52667,'team_points':0,'is_playoffs':0,
+          expected={'win':0,'loss':600,'tie':600,'team_points':0,'is_playoffs':0,
                     'champion':0,'final_playoff_seed':0,'made_playoffs':0}
           actual={key:int(report['improvements_by_field'].get(key,0)) for key in expected}
           if actual != expected:
               raise SystemExit(f'only-loss-tie gate failed: {actual}')
           if (report.get('schema_unchanged') is not True or report.get('ops_untouched') is not True
                   or report.get('new_lineage') is not False or int(report.get('inserted_rows',-1)) != 0
-                  or int(report.get('matched_rows',-1)) != 52667):
+                  or int(report.get('matched_rows',-1)) != 600):
               raise SystemExit(f'apply invariant failed: {report}')
           con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
           if [r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()] != before['schema']:
@@ -253,9 +253,9 @@ jobs:
           result={
               'canonical_cache_key':'research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613',
               'candidate_run_id':'${{ inputs.candidate_run_id }}',
-              'source_artifact_id':8952555354,
-              'candidate_rows':52667,
-              'candidate_unique_keys':52048,
+              'source_artifact_id':'9016453846|9016485043',
+              'candidate_rows':600,
+              'candidate_unique_keys':600,
               'matched_player_rows':matched,
               'unmatched_candidate_keys':unmatched,
               'loss_remaining_null_source_cells':remaining_loss,
@@ -266,7 +266,7 @@ jobs:
               'fresh_restore':True,
               'new_lineage':False,
           }
-          if not (matched == 52667 and unmatched == 0 and remaining_loss == 0 and remaining_tie == 0
+          if not (matched == 600 and unmatched == 0 and remaining_loss == 0 and remaining_tie == 0
                   and result['schema_unchanged'] and result['player_rows_unchanged'] and result['ops_unchanged']):
               raise SystemExit(json.dumps(result, sort_keys=True))
           Path('exact_team_null_readback.json').write_text(json.dumps(result, indent=2)+'\n')
