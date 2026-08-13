@@ -22,9 +22,10 @@ receipt SHA-256
 The CSV now has an explicit `record_type` on every row. The frozen inventory
 is exactly 9,479 `artifact_inventory` rows; cache-changing work is recorded as
 a separate `cache_recovery_receipt` row in the *same* ledger, not smuggled into
-the 9,479-artifact denominator. There is currently one such recovery receipt:
-the independently restored 74-row MFL repair documented below. The ledger
-validator fails if a row lacks this distinction.
+the 9,479-artifact denominator. There are currently three such recovery
+receipts: the independently restored 74-row MFL repair, the 204-row direct
+MFL player/team bridge, and the 26,936-row MFL source-only bridge promotion.
+The ledger validator fails if a row lacks this distinction.
 
 ## Current approved-cache contract
 
