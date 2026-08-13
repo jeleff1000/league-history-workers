@@ -51,6 +51,7 @@ def test_builds_exact_mfl_candidate_for_null_manager_cache_recipient(tmp_path: P
     assert report["artifact_current_state"] == [{
         "artifact_id": 1,
         "source_rows": 1,
+        "source_cells": 5,
         "cache_equal_cells": 0,
         "safe_null_candidates": 4,
         "cache_conflict_cells": 1,

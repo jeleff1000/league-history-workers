@@ -204,25 +204,49 @@ def refresh(
                     f"{artifact_id}: direct re-audit has safe null candidates; "
                     "build an exact promotion candidate before refreshing the ledger"
                 )
+            source_cells = int(evidence.get("source_cells", 0) or 0)
+            if source_cells <= 0:
+                source_cells = sum(
+                    int(evidence.get(field, 0) or 0)
+                    for field in (
+                        "cache_equal_cells", "safe_null_candidates",
+                        "cache_conflict_cells", "ambiguous_null_cells",
+                    )
+                )
+            if source_cells <= 0:
+                raise SystemExit(f"{artifact_id}: direct re-audit has no source-cell count")
+            row["source_cells"] = str(source_cells)
             row["cache_match_cells"] = str(int(evidence.get("cache_equal_cells", 0) or 0))
             row["cache_missing_cells"] = "0"
+            # A direct re-audit that compared canonical loss/tie values has
+            # superseded the historical pre-schema loss/tie blocker.
+            row["blocked_schema_cells"] = "0"
             row["cache_conflict_cells"] = str(int(evidence.get("cache_conflict_cells", 0) or 0))
             row["unmatched_cache_cells"] = str(int(evidence.get("ambiguous_null_cells", 0) or 0))
             row["receipt_run_id"] = str(receipt_run_id)
             row["receipt_json_sha256"] = digest
-            row["final_status"] = "partial_schema_blocked_direct_identity"
-            row["final_reason"] = (
-                "Current exact-player re-audit found no safe cache-null candidate; "
-                f"{int(evidence.get('cache_equal_cells', 0) or 0)} supported cells already match, "
-                f"{int(evidence.get('ambiguous_null_cells', 0) or 0)} null cells require identity resolution, "
-                f"and {int(evidence.get('cache_conflict_cells', 0) or 0)} non-null cells require "
-                "source-precedence adjudication."
-            )
-            row["next_action"] = (
-                "resolve_direct_identity_and_precedence_adjudication"
-                if int(evidence.get("cache_conflict_cells", 0) or 0)
-                else "resolve_direct_identity_or_close_source_only"
-            )
+            equal = int(evidence.get("cache_equal_cells", 0) or 0)
+            ambiguous = int(evidence.get("ambiguous_null_cells", 0) or 0)
+            conflicts = int(evidence.get("cache_conflict_cells", 0) or 0)
+            if ambiguous == 0 and conflicts == 0:
+                row["final_status"] = "cache_verified"
+                row["final_reason"] = (
+                    "Current exact-player re-audit found no source-backed cache-null candidates, "
+                    f"no conflicts, and all {equal:,} supported cells already equal the canonical cache."
+                )
+                row["next_action"] = "closed_independent_cache_readback"
+            else:
+                row["final_status"] = "partial_schema_blocked_direct_identity"
+                row["final_reason"] = (
+                    "Current exact-player re-audit found no safe cache-null candidate; "
+                    f"{equal:,} supported cells already match, {ambiguous:,} null cells require "
+                    "identity resolution, and "
+                    f"{conflicts:,} non-null cells require source-precedence adjudication."
+                )
+                row["next_action"] = (
+                    "resolve_direct_identity_and_precedence_adjudication"
+                    if conflicts else "resolve_direct_identity_or_close_source_only"
+                )
             updated += 1
             continue
         if promotion_receipt:

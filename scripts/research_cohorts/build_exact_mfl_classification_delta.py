@@ -221,6 +221,7 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
             artifact_current_state.append({
                 "artifact_id": int(artifact_id),
                 "source_rows": source_rows_by_artifact[int(artifact_id)],
+                "source_cells": equal + nulls + conflicts + ambiguous,
                 "cache_equal_cells": equal,
                 "safe_null_candidates": nulls,
                 "cache_conflict_cells": conflicts,
