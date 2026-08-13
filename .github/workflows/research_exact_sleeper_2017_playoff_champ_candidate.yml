@@ -55,6 +55,7 @@ jobs:
                   return json.load(response)
           league = get(f'/league/{league_id}')
           bracket = get(f'/league/{league_id}/winners_bracket')
+          players = get('/players/nfl')
           settings = league.get('settings') or {}
           start_week = int(settings['playoff_week_start'])
           title_round = max(
@@ -66,6 +67,7 @@ jobs:
               'year': int(os.environ['TARGET_YEAR']),
               'league': league,
               'winners_bracket': bracket,
+              'players': players,
               'matchups_by_week': {
                   str(week): get(f'/league/{league_id}/matchups/{week}')
                   for week in range(start_week, start_week + title_round)

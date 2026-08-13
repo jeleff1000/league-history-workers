@@ -6,7 +6,7 @@ from canonical_player_schema import BASE_PLAYER_COLUMNS, EXPECTED_COHORT_COLUMNS
 from build_exact_sleeper_playoff_champ_candidate import build
 
 
-def _base(path, *, duplicate_week14=False):
+def _base(path, *, duplicate_week14=False, missing_sleeper_native_ids=False):
     columns = BASE_PLAYER_COLUMNS + sorted(EXPECTED_COHORT_COLUMNS) + ["loss", "tie"]
     con = duckdb.connect(str(path))
     con.execute("CREATE SCHEMA public")
@@ -23,7 +23,8 @@ def _base(path, *, duplicate_week14=False):
             "year": "2017",
             "week": str(week),
             "NFL_player_id": nfl_id,
-            "sleeper_player_id": sleeper_id,
+            "sleeper_player_id": None if missing_sleeper_native_ids else sleeper_id,
+            "espn_player_id": "espn-" + sleeper_id.removeprefix("sp-"),
             "team_key": team_key,
             "team_name": f"Team {team_key}",
             "manager": manager,
@@ -76,6 +77,12 @@ def _source(path):
                 {"roster_id": 4, "matchup_id": 4, "starters": ["sp-4"]},
             ],
         },
+        "players": {
+            "sp-3": {"espn_id": "espn-3"},
+            "sp-4": {"espn_id": "espn-4"},
+            "sp-5": {"espn_id": "espn-5"},
+            "sp-6": {"espn_id": "espn-6"},
+        },
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -123,3 +130,18 @@ def test_blocks_ambiguous_cache_recipient_instead_of_fanning_out(tmp_path):
     ).fetchall()
     con.close()
     assert rows == [(15, "nfl-5", 1)]
+
+
+def test_uses_exact_espn_bridge_when_cache_sleeper_id_is_missing(tmp_path):
+    base = tmp_path / "base.duckdb"
+    source = tmp_path / "source.json"
+    out = tmp_path / "delta.parquet"
+    report = tmp_path / "report.json"
+    _base(base, missing_sleeper_native_ids=True)
+    _source(source)
+
+    result = build(base=base, source=source, out=out, report=report)
+
+    assert result["direct_native_recipient_events"] == 0
+    assert result["espn_bridge_recipient_events"] == 2
+    assert result["candidate_rows"] == 2

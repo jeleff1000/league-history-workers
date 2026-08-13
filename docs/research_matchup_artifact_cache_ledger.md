@@ -89,6 +89,19 @@ unsupported for player playoff/championship credit unless an independent bracket
 source is found; the latter remains open for an exact native-ID candidate. Both
 require a current approved-cache readback before any closure.
 
+**Sleeper candidate result, recorded 2026-08-13.** The exact historical-ID
+candidate [31745899774](https://github.com/jeleff1000/league-history-workers/actions/runs/31745899774)
+did recover the real 2017 source bracket: 50 playoff-starter events, including
+10 championship-starter events. It produced **zero** cache updates because all
+50 `(db_name, year, week, roster, sleeper_player_id)` events have no existing
+canonical recipient; none is ambiguous. The workflow restored only the
+approved cache and proved identical before/after cache SHA-256
+`adef4387ae51c40938cb49f6ff05034b0c400fc64071b5d194876cfe467361f6` and
+player-schema SHA-256
+`3601374cf879a461d3fd5b4b834c4101300cf66084d81bd0b1cc78c0b61c8c39`.
+This is a documented native-identity gap, not a missing sidecar promotion and
+not permission to insert source-only player rows.
+
 ## Latest loss/tie promotion receipts
 
 Two further same-key promotions were made only after a read-only candidate

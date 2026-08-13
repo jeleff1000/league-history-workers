@@ -96,6 +96,9 @@ def _source_events(payload: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[
         raise ValueError("title winner is not one of the title matchup rosters")
 
     matchups_by_week = payload.get("matchups_by_week") or {}
+    source_players = payload.get("players") or {}
+    if not isinstance(source_players, dict):
+        raise ValueError("source players directory must be an object")
     source_events: dict[tuple[int, str, str], dict[str, Any]] = {}
     playoff_starter_events = 0
     championship_starter_events = 0
@@ -135,10 +138,15 @@ def _source_events(payload: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[
                 if champion:
                     championship_starter_events += 1
                 key = (week, roster, str(sleeper_player_id))
+                source_player = source_players.get(str(sleeper_player_id)) or {}
+                if not isinstance(source_player, dict):
+                    raise ValueError(f"source player entry is not an object: {sleeper_player_id}")
+                espn_player_id = source_player.get("espn_id")
                 current = source_events.setdefault(key, {
                     "week": week,
                     "source_roster_id": roster,
                     "sleeper_player_id": str(sleeper_player_id),
+                    "source_espn_player_id": str(espn_player_id).strip() if espn_player_id is not None and str(espn_player_id).strip() else None,
                     "source_playoffs": 1,
                     "source_champion": None,
                 })
@@ -167,19 +175,20 @@ def build(*, base: Path, source: Path, out: Path, report: Path) -> dict[str, Any
     if missing := sorted(required - set(player_columns)):
         raise ValueError(f"canonical player schema lacks source-recipient fields: {missing}")
 
-    con.execute("CREATE OR REPLACE TEMP TABLE source_events (week INTEGER, source_roster_id VARCHAR, sleeper_player_id VARCHAR, source_playoffs INTEGER, source_champion INTEGER)")
+    con.execute("CREATE OR REPLACE TEMP TABLE source_events (week INTEGER, source_roster_id VARCHAR, sleeper_player_id VARCHAR, source_espn_player_id VARCHAR, source_playoffs INTEGER, source_champion INTEGER)")
     if events:
         con.executemany(
-            "INSERT INTO source_events VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO source_events VALUES (?, ?, ?, ?, ?, ?)",
             [
-                (event["week"], event["source_roster_id"], event["sleeper_player_id"], event["source_playoffs"], event["source_champion"])
+                (event["week"], event["source_roster_id"], event["sleeper_player_id"], event["source_espn_player_id"], event["source_playoffs"], event["source_champion"])
                 for event in events
             ],
         )
     con.execute("""
       CREATE OR REPLACE TEMP TABLE recipient_matches AS
       SELECT e.*, p.rowid AS player_rowid, p.NFL_player_id, p.manager, p.team_key,
-             p.team_name, p.platform, p.is_playoffs AS canonical_is_playoffs,
+             p.team_name, p.platform, p.sleeper_player_id AS canonical_sleeper_player_id,
+             p.espn_player_id AS canonical_espn_player_id, p.is_playoffs AS canonical_is_playoffs,
              p.champion AS canonical_champion, p.has_po_signal AS canonical_has_po_signal
       FROM source_events e
       JOIN public.player_fantasy p
@@ -187,7 +196,13 @@ def build(*, base: Path, source: Path, out: Path, report: Path) -> dict[str, Any
        AND CAST(p.year AS INTEGER) = ?
        AND CAST(p.week AS INTEGER) = e.week
        AND LOWER(TRIM(CAST(p.platform AS VARCHAR))) = 'sleeper'
-       AND CAST(p.sleeper_player_id AS VARCHAR) = e.sleeper_player_id
+       AND (
+            CAST(p.sleeper_player_id AS VARCHAR) = e.sleeper_player_id
+            OR (
+                e.source_espn_player_id IS NOT NULL
+                AND CAST(p.espn_player_id AS VARCHAR) = e.source_espn_player_id
+            )
+       )
        AND CASE WHEN p.team_key IS NULL THEN NULL
                 WHEN INSTR(TRIM(CAST(p.team_key AS VARCHAR)), '_') > 0
                   THEN REGEXP_EXTRACT(TRIM(CAST(p.team_key AS VARCHAR)), '([^_]+)$', 1)
@@ -214,6 +229,21 @@ def build(*, base: Path, source: Path, out: Path, report: Path) -> dict[str, Any
       )
     """).fetchone()[0])
     ambiguous_events = int(con.execute("SELECT COUNT(*) FROM recipient_cardinality WHERE recipient_rows > 1").fetchone()[0])
+    direct_native_events = int(con.execute("""
+      SELECT COUNT(*) FROM recipient_cardinality c
+      JOIN source_events e USING (week, source_roster_id, sleeper_player_id)
+      JOIN recipient_matches r USING (week, source_roster_id, sleeper_player_id)
+      WHERE c.recipient_rows=1 AND CAST(r.canonical_sleeper_player_id AS VARCHAR)=e.sleeper_player_id
+    """).fetchone()[0])
+    espn_bridge_events = int(con.execute("""
+      SELECT COUNT(*) FROM recipient_cardinality c
+      JOIN source_events e USING (week, source_roster_id, sleeper_player_id)
+      JOIN recipient_matches r USING (week, source_roster_id, sleeper_player_id)
+      WHERE c.recipient_rows=1
+        AND CAST(r.canonical_sleeper_player_id AS VARCHAR) IS DISTINCT FROM e.sleeper_player_id
+        AND e.source_espn_player_id IS NOT NULL
+        AND CAST(r.canonical_espn_player_id AS VARCHAR)=e.source_espn_player_id
+    """).fetchone()[0])
     cache_equal_playoffs = int(con.execute("SELECT COUNT(*) FROM matched WHERE recipient_rows=1 AND canonical_is_playoffs IS NOT NULL").fetchone()[0])
     cache_equal_champions = int(con.execute("SELECT COUNT(*) FROM matched WHERE recipient_rows=1 AND source_champion=1 AND canonical_champion IS NOT NULL").fetchone()[0])
     cache_equal_signal = int(con.execute("SELECT COUNT(*) FROM matched WHERE recipient_rows=1 AND canonical_has_po_signal IS NOT NULL").fetchone()[0])
@@ -260,6 +290,8 @@ def build(*, base: Path, source: Path, out: Path, report: Path) -> dict[str, Any
         "source_unique_starter_events": len(events),
         "unmatched_recipient_events": unmatched_events,
         "ambiguous_recipient_events": ambiguous_events,
+        "direct_native_recipient_events": direct_native_events,
+        "espn_bridge_recipient_events": espn_bridge_events,
         "cache_non_null_playoff_recipients": cache_equal_playoffs,
         "cache_non_null_champion_recipients": cache_equal_champions,
         "cache_non_null_playoff_signal_recipients": cache_equal_signal,
