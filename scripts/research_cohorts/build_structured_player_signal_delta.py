@@ -166,10 +166,18 @@ def build(
         filters.append(f"({safe} AND {_q(target)} IS NULL)")
 
     out.parent.mkdir(parents=True, exist_ok=True)
+    delta_fields = []
+    for source_field, (target, type_name) in SUPPORTED.items():
+        variants = _q(source_field + "_variants")
+        delta_fields.append(
+            f"CASE WHEN {variants} <= 1 AND {_q(source_field)} IS NOT NULL "
+            f"AND canonical_rows = 1 AND {_q(target)} IS NULL "
+            f"THEN {_q(source_field)} ELSE NULL::{type_name} END AS {_q(source_field)}"
+        )
     con.execute(f"""
         COPY (
           SELECT player_rowid, {', '.join(_q(column) for column in KEY)}, source_artifact_ids,
-                 {', '.join(_q(source_field) for source_field in SUPPORTED)}
+                 {', '.join(delta_fields)}
           FROM matched
           WHERE {' OR '.join(filters)}
         ) TO {_lit(out)} (FORMAT PARQUET)

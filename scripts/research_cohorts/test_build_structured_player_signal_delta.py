@@ -90,14 +90,14 @@ def test_emits_loss_and_tie_null_candidates_from_exact_player_source(tmp_path):
     """)
     con.execute("""
         INSERT INTO public.player_fantasy VALUES
-          ('league', 2024, 1, 'player', 'manager', 0, NULL, NULL, 90.0, 0)
+          ('league', 2024, 1, 'player', 'manager', 1, NULL, NULL, 90.0, 0)
     """)
     con.execute("""
         COPY (
           SELECT 'league' AS db_name, 2024 AS year, 1 AS week,
                  'player' AS NFL_player_id, 'manager' AS manager,
                  0 AS source_win, 1 AS source_loss, 0 AS source_tie,
-                 90.0 AS source_team_points, 0 AS source_is_playoffs
+                 99.0 AS source_team_points, 0 AS source_is_playoffs
         ) TO ? (FORMAT PARQUET)
     """, [str(source)])
     con.close()
@@ -120,6 +120,6 @@ def test_emits_loss_and_tie_null_candidates_from_exact_player_source(tmp_path):
         "cache_conflicts": 0,
     }
     assert duckdb.connect().execute(
-        "SELECT source_loss, source_tie FROM read_parquet(?)",
+        "SELECT source_win, source_loss, source_tie, source_team_points, source_is_playoffs FROM read_parquet(?)",
         [str(delta)],
-    ).fetchall() == [(1, 0)]
+    ).fetchall() == [(None, 1, 0, None, None)]
