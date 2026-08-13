@@ -216,7 +216,8 @@ jobs:
           before=json.loads(Path('evidence/cache_before.json').read_text())
           expected_rows=int(os.environ['EXPECTED_DELTA_ROWS'])
           con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
-          con.execute('CREATE TEMP VIEW d AS SELECT * FROM read_parquet(?)',[str(delta)])
+          escaped_delta=str(delta).replace("'", "''")
+          con.execute(f"CREATE TEMP VIEW d AS SELECT * FROM read_parquet('{escaped_delta}')")
           join='''d.db_name=p.db_name
                  AND CAST(d.year AS INTEGER)=CAST(p.year AS INTEGER)
                  AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER)
