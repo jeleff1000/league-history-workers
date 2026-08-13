@@ -1,0 +1,124 @@
+name: Read back exact MFL classification candidates
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_key:
+        description: The sole approved research cache key.
+        required: true
+        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+      source_run_id:
+        description: Existing MFL outcome-classification source run.
+        required: true
+        default: '31192594062'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Record read-only cache prestate
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          Path('cache_before.json').write_text(json.dumps({
+              'schema':con.execute('DESCRIBE public.player_fantasy').fetchall(),
+              'player_rows':int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]),
+          }, indent=2)+'\n')
+          con.close()
+          PY
+      - name: Download exactly the 15 retained direct-MFL artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p classification
+          gh run download "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'mfl-player-outcome-classification-*-31192594062' --dir classification
+          test "$(find classification -name 'mfl_outcome_classification_*.parquet' | wc -l)" = '15'
+          python - <<'PY'
+          import csv, json, re
+          from pathlib import Path
+          ledger=list(csv.DictReader(Path('docs/research_matchup_artifact_cache_ledger.csv').open()))
+          ids={}
+          for row in ledger:
+              if row.get('record_type') != 'artifact_inventory':
+                  continue
+              match=re.fullmatch(r'mfl-player-outcome-classification-(\d+)-31192594062', row.get('artifact',''))
+              if match:
+                  ids[int(match.group(1))]=int(row['artifact_id'])
+          entries=[]
+          for path in sorted(Path('classification').rglob('mfl_outcome_classification_*.parquet')):
+              match=re.search(r'_(\d+)\.parquet$', path.name)
+              if not match or int(match.group(1)) not in ids:
+                  raise SystemExit(f'no ledger artifact ID for {path}')
+              entries.append({'artifact_id':ids[int(match.group(1))], 'path':str(path)})
+          if len(entries) != 15 or len({entry['artifact_id'] for entry in entries}) != 15:
+              raise SystemExit(f'invalid direct-MFL manifest: {entries}')
+          Path('mfl_classification_manifest.json').write_text(json.dumps(entries,indent=2)+'\n')
+          PY
+      - name: Build exact-player candidate without mutating cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/build_exact_mfl_classification_delta.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --manifest mfl_classification_manifest.json \
+            --out exact_mfl_candidate.parquet \
+            --report exact_mfl_candidate_report.json
+      - name: Fail fast if the read-only contract was violated
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json, duckdb
+          from pathlib import Path
+          before=json.loads(Path('cache_before.json').read_text())
+          report=json.loads(Path('exact_mfl_candidate_report.json').read_text())
+          if not (report['read_only'] and not report['cache_mutated'] and not report['new_lineage'] and report['canonical_schema_unchanged']):
+              raise SystemExit(f'candidate violated read-only contract: {report}')
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          if con.execute('DESCRIBE public.player_fantasy').fetchall() != [tuple(row) for row in before['schema']]:
+              raise SystemExit('player schema changed during read-only candidate')
+          if int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]) != before['player_rows']:
+              raise SystemExit('player row count changed during read-only candidate')
+          con.close()
+          digest=hashlib.sha256()
+          with Path('research_public_lake/ops_cache.duckdb').open('rb') as handle:
+              for block in iter(lambda:handle.read(1024*1024),b''):
+                  digest.update(block)
+          if digest.hexdigest()!=Path('ops_before.sha256').read_text().split()[0]:
+              raise SystemExit('ops cache changed during read-only candidate')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-mfl-classification-candidate-${{ github.run_id }}
+          path: |
+            cache_before.json
+            ops_before.sha256
+            mfl_classification_manifest.json
+            exact_mfl_candidate.parquet
+            exact_mfl_candidate_report.json
+          retention-days: 90
+          compression-level: 0

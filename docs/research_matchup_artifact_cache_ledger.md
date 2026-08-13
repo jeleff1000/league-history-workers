@@ -23,14 +23,11 @@ The CSV now has an explicit `record_type` on every row. The frozen inventory
 is exactly 9,479 `artifact_inventory` rows; later artifacts are 231
 `artifact_admission` rows; cache-changing work is recorded as a separate
 `cache_recovery_receipt` row in the *same* ledger. Neither later artifacts nor
-receipts are smuggled into the 9,479-artifact denominator. There are currently eight such recovery
-receipts: the independently restored 74-row MFL repair, the 204-row direct
-MFL player/team bridge, the 26,936-row MFL source-only bridge promotion, the
-1,720-row MFL classification roster-identity promotion, the 600-cell exact
-loss/tie sparse-signal promotion, the 220-artifact residual MFL batch, and the
-28,085-row exact MFL loss/tie sparse-signal promotion.
-The ledger
-validator fails if a row lacks this distinction.
+receipts are smuggled into the 9,479-artifact denominator. There are currently
+11 such recovery receipts. They include the independently restored 74-row MFL
+repair, direct MFL player/team bridge work, exact MFL roster-identity work, and
+the two most recent loss/tie promotions described below. The ledger validator
+fails if a row lacks this distinction.
 
 The seventh receipt is the exact MFL loss/tie promotion: candidate run
 [31689836532](https://github.com/jeleff1000/league-history-workers/actions/runs/31689836532),
@@ -53,11 +50,10 @@ unchanged.
 
 ## Current residual queue
 
-The latest ledger validation, after the exact loss/tie sparse-signal receipt,
-reports 9,717 ledger rows: 9,479 frozen raw-artifact rows, 231 later
-artifact-admission rows, and 8 supplemental cache-recovery receipts. Of the
-frozen artifact rows, 8,768 are closed and 711 are still open.
-Those 711 entries are a work queue, **not** a claim that 711 artifacts still
+The latest ledger validation reports 9,721 ledger rows: 9,479 frozen
+raw-artifact rows, 231 later artifact-admission rows, and 11 supplemental
+cache-recovery receipts. Of the frozen artifact rows, 8,775 are closed and 704
+are still open. Those 704 entries are a work queue, **not** a claim that 704 artifacts still
 contain unapplied values: each must be re-read against the current approved
 cache before it can be closed or kept open with a current, specific reason.
 
@@ -66,22 +62,40 @@ cache before it can be closed or kept open with a current, specific reason.
 | `partial_schema_blocked_unmatched` | 472 | Historical pre-loss/tie label. Current gate is an exact player/team bridge and readback; schema support is already closed. |
 | `partial_schema_blocked_conflicts` | 214 | Historical pre-loss/tie label. Current gates are exact player/team bridge plus explicit source-precedence receipt. |
 | `partial_schema_blocked_direct_identity` | 15 | Historical pre-loss/tie label. Current gate is direct identity; 12 also need source-precedence adjudication. |
-| `cache_conflict_preserved` | 7 | Record an explicit precedence decision and fresh cell-level readback. |
 | `source_only_team_signal_missing_player_team_bridge` | 2 | Build a source-roster-to-existing-player bridge or retain as source-only. |
 | `unmatched_cache_key` | 1 | Separate already-filled recipients from true source-only player/team records and preserve the residual count. |
 
-The machine-derived **current** frozen-inventory admission queue is simpler than those
-historical labels: 490 artifacts require only an exact player/team bridge, and
-221 require that bridge plus explicit source-precedence adjudication. Of the
-711 open rows, 701 carry pre-schema loss/tie evidence, but every one is now
-marked `closed_schema_supported`; no open row may ask for a loss/tie schema
-migration again.
+The machine-derived **current** frozen-inventory admission queue is simpler
+than those historical labels: 490 artifacts require a deterministic recipient
+bridge or an explicit source-only closure, while 214 require field-level
+source-precedence adjudication in addition to their recorded identity work. All
+open rows carrying loss/tie evidence are now marked `closed_schema_supported`;
+no open row may ask for a loss/tie schema migration again.
 
 The raw source artifact `8952555354` is the last frozen-inventory row above. Its current
 receipt proves 26,936 existing-player fills from 256 source candidates are in
 the cache. Its older 19,560 source-only cells are deliberately still open until
 the remaining team/player identities are independently resolved or explicitly
 classified as having no canonical recipient.
+
+## Latest loss/tie promotion receipts
+
+Two further same-key promotions were made only after a read-only candidate
+check, then independently restored and read back. Neither changed the cache
+schema, the protected ops-cache hash, or the approved cache key.
+
+| Receipt | Candidate type | Verified canonical fills | Readback result |
+| --- | --- | ---: | --- |
+| [31709912567](https://github.com/jeleff1000/league-history-workers/actions/runs/31709912567) | Exact existing player key: `(db_name, year, week, NFL_player_id)` | 141,354 loss/tie rows | Zero remaining source-backed `loss` or `tie` nulls on all 141,354 recipients. |
+| [31711617686](https://github.com/jeleff1000/league-history-workers/actions/runs/31711617686) | Verified null-player-ID manager/team/week fan-out | 11,713 loss/tie rows | Zero remaining source-backed `loss` or `tie` nulls on all 11,713 recipients. |
+
+The follow-up read-only audit
+[31713108535](https://github.com/jeleff1000/league-history-workers/actions/runs/31713108535)
+re-read the six contributing raw team-signal artifacts against the restored
+approved cache. It found **zero** additional safe null fills for `win`, `loss`,
+`tie`, `team_points`, `is_playoffs`, `champion`, `final_playoff_seed`, or
+`made_playoffs`. One non-null championship disagreement remains quarantined;
+it is not evidence to overwrite a canonical championship-start flag.
 
 The latest bridge-negative receipt,
 [31694545464](https://github.com/jeleff1000/league-history-workers/actions/runs/31694545464),
@@ -964,11 +978,11 @@ team-week identities have no canonical player recipient. Its loss/tie schema
 gate is now closed; its only remaining gate is the documented player-team
 bridge or a source-only closure.
 
-The CSV is the machine-readable authority: **8,768 of 9,479 artifacts are
-closed** and **711 remain open**. The open partition is 473 identity-unmatched,
-214 precedence conflicts, 15 legacy schema-blocked safe-null repairs, 7
-preserved-conflict artifacts, and 2 source-only player-identity gaps. Every one of the 711 has a
-non-empty reason and next action in the CSV; an artifact is never considered
+The CSV is the machine-readable authority: **8,775 of 9,479 artifacts are
+closed** and **704 remain open**. The open partition is 473
+identity-unmatched artifacts, 214 precedence-conflict artifacts, 15 direct
+identity artifacts, and two source-only player-identity gaps. Every one of the
+704 has a non-empty reason and next action in the CSV; an artifact is never considered
 closed merely because its parent workflow completed.
 
 ## MFL source-team player bridge — independently proven
