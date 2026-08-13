@@ -139,6 +139,13 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
             SELECT db_name, year, week, NFL_player_id, COUNT(*) AS recipient_count
             FROM exact_matches GROUP BY ALL
         """)
+        con.execute("""
+            CREATE OR REPLACE TEMP TABLE exact_single_matches AS
+            SELECT m.*
+            FROM exact_matches m JOIN recipient_cardinality c
+              USING (db_name, year, week, NFL_player_id)
+            WHERE c.recipient_count=1
+        """)
         unmatched_source_keys = int(con.execute(f"""
             SELECT COUNT(*) FROM source_unique s
             WHERE ({evidence_predicate}) AND NOT EXISTS (
@@ -151,6 +158,10 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
             con.execute("SELECT COUNT(*) FROM recipient_cardinality WHERE recipient_count <> 1").fetchone()[0]
         )
         candidate_where = f"({evidence_predicate}) AND NOT ({conflict_predicate})"
+        difference_predicate = " OR ".join(
+            f"({_quoted(source)} IS NOT NULL AND {_quoted('canonical_' + target)} IS DISTINCT FROM {_quoted(source)})"
+            for source, target in SOURCE_FIELDS.items()
+        )
         out.parent.mkdir(parents=True, exist_ok=True)
         con.execute(f"""
             COPY (
@@ -159,12 +170,62 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
                        {', '.join(_quoted('canonical_' + target) for target in SOURCE_FIELDS.values())},
                        {', '.join(_quoted(source) for source in SOURCE_FIELDS)},
                        m.source_artifact_ids
-                FROM exact_matches m
-                JOIN recipient_cardinality c USING (db_name, year, week, NFL_player_id)
-                WHERE c.recipient_count=1 AND {candidate_where}
+                FROM exact_single_matches m
+                WHERE {candidate_where} AND ({difference_predicate})
             ) TO {_literal(out)} (FORMAT PARQUET, COMPRESSION ZSTD)
         """)
         candidate_rows = int(con.execute(f"SELECT COUNT(*) FROM read_parquet({_literal(out)})").fetchone()[0])
+        con.execute("""
+            CREATE OR REPLACE TEMP TABLE artifact_source_keys AS
+            SELECT DISTINCT artifact_id, db_name, year, week, NFL_player_id
+            FROM raw_source WHERE NFL_player_id IS NOT NULL
+        """)
+        per_field = []
+        for source, target in SOURCE_FIELDS.items():
+            canonical = _quoted("canonical_" + target)
+            source_q = _quoted(source)
+            usable = f"(e.recipient_count=1 AND NOT ({conflict_predicate}))"
+            per_field.extend([
+                f"COUNT(*) FILTER (WHERE {usable} AND e.{source_q} IS NOT NULL AND e.{canonical} IS NOT DISTINCT FROM e.{source_q})",
+                f"COUNT(*) FILTER (WHERE {usable} AND e.{source_q} IS NOT NULL AND e.{canonical} IS NULL)",
+                f"COUNT(*) FILTER (WHERE {usable} AND e.{source_q} IS NOT NULL AND e.{canonical} IS NOT NULL AND e.{canonical} IS DISTINCT FROM e.{source_q})",
+                f"COUNT(*) FILTER (WHERE (e.recipient_count IS NULL OR e.recipient_count<>1 OR ({conflict_predicate})) AND e.{source_q} IS NOT NULL)",
+            ])
+        con.execute("""
+            CREATE OR REPLACE TEMP TABLE artifact_evaluation AS
+            SELECT a.artifact_id, s.*, c.recipient_count,
+                   m.canonical_win, m.canonical_loss, m.canonical_tie,
+                   m.canonical_team_points, m.canonical_is_playoffs
+            FROM artifact_source_keys a
+            JOIN source_unique s USING (db_name, year, week, NFL_player_id)
+            LEFT JOIN recipient_cardinality c USING (db_name, year, week, NFL_player_id)
+            LEFT JOIN exact_single_matches m USING (db_name, year, week, NFL_player_id)
+        """)
+        source_rows_by_artifact = {
+            int(artifact_id): int(rows)
+            for artifact_id, rows in con.execute(
+                "SELECT artifact_id, COUNT(*) FROM raw_source GROUP BY artifact_id"
+            ).fetchall()
+        }
+        aggregate = con.execute(
+            "SELECT artifact_id, " + ", ".join(per_field)
+            + " FROM artifact_evaluation e GROUP BY artifact_id ORDER BY artifact_id"
+        ).fetchall()
+        artifact_current_state = []
+        for values in aggregate:
+            artifact_id, *counts = values
+            equal = sum(int(counts[index]) for index in range(0, len(counts), 4))
+            nulls = sum(int(counts[index]) for index in range(1, len(counts), 4))
+            conflicts = sum(int(counts[index]) for index in range(2, len(counts), 4))
+            ambiguous = sum(int(counts[index]) for index in range(3, len(counts), 4))
+            artifact_current_state.append({
+                "artifact_id": int(artifact_id),
+                "source_rows": source_rows_by_artifact[int(artifact_id)],
+                "cache_equal_cells": equal,
+                "safe_null_candidates": nulls,
+                "cache_conflict_cells": conflicts,
+                "ambiguous_null_cells": ambiguous,
+            })
         result = {
             "read_only": True,
             "cache_mutated": False,
@@ -178,6 +239,7 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
             "ambiguous_recipient_keys": ambiguous_recipient_keys,
             "candidate_rows": candidate_rows,
             "candidate_key": list(KEY),
+            "artifact_current_state": artifact_current_state,
             "policy": "direct MFL player outcome evidence; candidate only, no cache mutation",
         }
         _write_json(report, result)

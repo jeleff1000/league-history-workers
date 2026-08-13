@@ -48,6 +48,14 @@ def test_builds_exact_mfl_candidate_for_null_manager_cache_recipient(tmp_path: P
     assert report["candidate_rows"] == 1
     assert report["unmatched_source_keys"] == 0
     assert report["source_conflicting_keys"] == 0
+    assert report["artifact_current_state"] == [{
+        "artifact_id": 1,
+        "source_rows": 1,
+        "cache_equal_cells": 0,
+        "safe_null_candidates": 4,
+        "cache_conflict_cells": 1,
+        "ambiguous_null_cells": 0,
+    }]
     con = duckdb.connect()
     row = con.execute(
         "SELECT NFL_player_id, canonical_win, source_win, canonical_loss, source_loss, "
