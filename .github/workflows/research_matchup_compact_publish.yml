@@ -46,7 +46,7 @@ jobs:
           repository: jeleff1000/league-history-workers
           run-id: ${{ inputs.compact_run_id }}
           github-token: ${{ github.token }}
-          pattern: compact-matchup-final-replay-*-${{ inputs.compact_run_id }}
+          pattern: compact-matchup-final-${{ inputs.compact_run_id }}
           path: compact-artifact
           merge-multiple: true
       - name: Locate exactly one compact serving artifact
