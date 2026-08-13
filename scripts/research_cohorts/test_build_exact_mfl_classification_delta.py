@@ -23,7 +23,7 @@ def test_reports_unattributable_managerless_ambiguous_source(tmp_path):
     con.execute("""
         INSERT INTO public.player_fantasy VALUES
         ('smpl_mfl_1', 2023, 15, '00-1', 'mfl', NULL, NULL, NULL, NULL, NULL,
-         NULL, NULL, NULL, NULL, NULL, 1, 1, 10.0),
+         'manager-a', 'team-a', 'A', '1', 'RB', 1, 1, 10.0),
         ('smpl_mfl_1', 2023, 15, '00-1', 'mfl', NULL, NULL, NULL, NULL, NULL,
          NULL, NULL, NULL, NULL, NULL, 1, 1, 10.0)
     """)
@@ -56,5 +56,5 @@ def test_reports_unattributable_managerless_ambiguous_source(tmp_path):
         "unattributable_ambiguous_keys": 1,
         "unattributable_source_cells": 5,
         "all_ambiguous_source_keys_lack_manager": True,
-        "all_ambiguous_canonical_rows_lack_team_identity": True,
+        "all_source_signals_are_zero_placeholder": False,
     }]

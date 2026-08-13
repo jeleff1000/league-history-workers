@@ -110,8 +110,8 @@ def refresh(
                 raise SystemExit(f"{artifact_id}: no unattributable source evidence")
             if evidence.get("all_ambiguous_source_keys_lack_manager") is not True:
                 raise SystemExit(f"{artifact_id}: source manager/franchise identity is not proven absent")
-            if evidence.get("all_ambiguous_canonical_rows_lack_team_identity") is not True:
-                raise SystemExit(f"{artifact_id}: canonical recipient identity is not proven absent")
+            if evidence.get("all_source_signals_are_zero_placeholder") is not True:
+                raise SystemExit(f"{artifact_id}: source values are not proven zero placeholders")
             row["source_cells"] = str(cells)
             row["cache_match_cells"] = "0"
             row["cache_missing_cells"] = "0"
@@ -124,8 +124,10 @@ def refresh(
             row["final_reason"] = (
                 f"Current read-only audit found {keys:,} source player-week keys with outcome values but no "
                 "source manager/franchise identity. Each maps only to duplicate canonical rows whose manager, "
-                "MFL player ID, team key/name, and lineup slot are all absent, so no player-team recipient can "
-                "be proven. The source values are deliberately not promoted or used to corroborate cache cells."
+                "MFL player ID, team key/name, and lineup slot cannot be selected from the source, so no "
+                "player-team recipient can be proven. The source also returned an all-zero placeholder signal, "
+                "not a usable team outcome. The values are deliberately not promoted or used to corroborate "
+                "cache cells."
             )
             row["next_action"] = "closed_source_identity_absent_no_recipient"
             updated += 1

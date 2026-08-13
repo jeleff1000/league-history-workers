@@ -304,52 +304,37 @@ def build(
               AND source_manager IS NULL
               AND ({evidence_predicate})
         """)
-        identity_absent = " AND ".join(
-            f"m.{_quoted('canonical_' + field)} IS NULL"
-            for field in (
-                "manager", "mfl_player_id", "team_key", "team_name", "fantasy_position",
-            )
-        )
         artifact_unattributable_state = []
         for values in con.execute(f"""
-            WITH source_state AS (
-              SELECT artifact_id,
-                     COUNT(*) AS unattributable_ambiguous_keys,
-                     SUM(
-                       (source_win IS NOT NULL)::INTEGER
-                       + (source_loss IS NOT NULL)::INTEGER
-                       + (source_tie IS NOT NULL)::INTEGER
-                       + (source_team_points IS NOT NULL)::INTEGER
-                       + (source_is_playoffs IS NOT NULL)::INTEGER
-                     ) AS unattributable_source_cells
-              FROM unattributable_ambiguous_keys
-              GROUP BY artifact_id
-            ), recipient_state AS (
-              SELECT u.artifact_id,
-                     COUNT(*) AS canonical_recipient_rows,
-                     COUNT(*) FILTER (WHERE {identity_absent}) AS identity_absent_recipient_rows
-              FROM unattributable_ambiguous_keys u
-              JOIN exact_matches m USING (db_name, year, week, NFL_player_id)
-              GROUP BY u.artifact_id
-            )
-            SELECT s.artifact_id, s.unattributable_ambiguous_keys,
-                   s.unattributable_source_cells, r.canonical_recipient_rows,
-                   r.identity_absent_recipient_rows
-            FROM source_state s JOIN recipient_state r USING (artifact_id)
-            ORDER BY s.artifact_id
+            SELECT artifact_id,
+                   COUNT(*) AS unattributable_ambiguous_keys,
+                   SUM(
+                     (source_win IS NOT NULL)::INTEGER
+                     + (source_loss IS NOT NULL)::INTEGER
+                     + (source_tie IS NOT NULL)::INTEGER
+                     + (source_team_points IS NOT NULL)::INTEGER
+                     + (source_is_playoffs IS NOT NULL)::INTEGER
+                   ) AS unattributable_source_cells,
+                   BOOL_AND(
+                     COALESCE(source_win, 0)=0
+                     AND COALESCE(source_loss, 0)=0
+                     AND COALESCE(source_tie, 0)=0
+                     AND COALESCE(source_team_points, 0)=0
+                     AND COALESCE(source_is_playoffs, 0)=0
+                   ) AS all_source_signals_are_zero_placeholder
+            FROM unattributable_ambiguous_keys
+            GROUP BY artifact_id
+            ORDER BY artifact_id
         """).fetchall():
             (
-                artifact_id, keys, cells, recipient_rows, identity_absent_rows,
+                artifact_id, keys, cells, all_zero_placeholder,
             ) = values
             artifact_unattributable_state.append({
                 "artifact_id": int(artifact_id),
                 "unattributable_ambiguous_keys": int(keys),
                 "unattributable_source_cells": int(cells),
                 "all_ambiguous_source_keys_lack_manager": True,
-                "all_ambiguous_canonical_rows_lack_team_identity": (
-                    int(recipient_rows) > 0
-                    and int(recipient_rows) == int(identity_absent_rows)
-                ),
+                "all_source_signals_are_zero_placeholder": bool(all_zero_placeholder),
             })
         result = {
             "read_only": True,

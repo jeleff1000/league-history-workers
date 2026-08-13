@@ -96,7 +96,7 @@ def test_refresh_closes_managerless_source_with_no_player_team_recipient(tmp_pat
             "unattributable_ambiguous_keys": 3,
             "unattributable_source_cells": 15,
             "all_ambiguous_source_keys_lack_manager": True,
-            "all_ambiguous_canonical_rows_lack_team_identity": True,
+            "all_source_signals_are_zero_placeholder": True,
         }],
     }))
     out = tmp_path / "out.csv"
@@ -112,6 +112,7 @@ def test_refresh_closes_managerless_source_with_no_player_team_recipient(tmp_pat
     assert row["final_status"] == "no_promotable_candidate_emitted"
     assert row["next_action"] == "closed_source_identity_absent_no_recipient"
     assert "source manager/franchise identity" in row["final_reason"]
+    assert "zero placeholder" in row["final_reason"]
 
 
 def test_refresh_records_team_points_bridge_that_has_no_safe_recipient(tmp_path):
