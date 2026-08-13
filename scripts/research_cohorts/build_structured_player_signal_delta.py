@@ -18,6 +18,8 @@ import duckdb
 KEY = ["db_name", "year", "week", "NFL_player_id", "manager"]
 SUPPORTED = {
     "source_win": ("win", "INTEGER"),
+    "source_loss": ("loss", "INTEGER"),
+    "source_tie": ("tie", "INTEGER"),
     "source_team_points": ("team_points", "DOUBLE"),
     "source_is_playoffs": ("is_playoffs", "INTEGER"),
 }
