@@ -1,0 +1,75 @@
+name: Research MFL Exact Cache-Grain Source Probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research-mfl-exact-cache-grain-source-probe
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pandas==2.2.3 pyarrow==15.0.2 requests==2.32.4
+      - name: Write the five exact source targets
+        run: |
+          cat > targets.json <<'JSON'
+          {"targets":[
+            {"db_name":"smpl_mfl_2024_30336","year":2022,"platform":"mfl","source_id":"30336","weeks":[13],"reason_codes":["exact_duplicate_cache_grain_repair"]},
+            {"db_name":"smpl_mfl_2024_30336","year":2023,"platform":"mfl","source_id":"30336","weeks":[15],"reason_codes":["exact_duplicate_cache_grain_repair"]},
+            {"db_name":"smpl_mfl_2024_30336","year":2024,"platform":"mfl","source_id":"30336","weeks":[12],"reason_codes":["exact_duplicate_cache_grain_repair"]},
+            {"db_name":"smpl_mfl_2024_30336","year":2025,"platform":"mfl","source_id":"30336","weeks":[14],"reason_codes":["exact_duplicate_cache_grain_repair"]},
+            {"db_name":"smpl_mfl_2024_61736","year":2003,"platform":"mfl","source_id":"49403","weeks":[15],"reason_codes":["exact_duplicate_cache_grain_repair"]}
+          ]}
+          JSON
+      - name: Fetch only the five source league-weeks
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
+          MFL_RATE_LIMIT_PER_MIN: '15'
+        run: |
+          mkdir -p out
+          python code/scripts/research_cohorts/build_source_matchup_rescue_sidecar.py \
+            --targets targets.json --shard 0 --shards 1 --workers 1 \
+            --out out/mfl_exact_cache_grain_source_probe.parquet
+      - name: Record source evidence; never touch a cache
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          rows=[json.loads(line) for line in Path('out/mfl_exact_cache_grain_source_probe.jsonl').read_text().splitlines() if line.strip()]
+          if len(rows) != 5:
+              raise SystemExit(f'expected exactly five target results, got {len(rows)}')
+          disallowed={'source_fetch_failed','missing_historical_source_id','unsupported_platform'}
+          bad=[row for row in rows if row.get('status') in disallowed]
+          if bad:
+              raise SystemExit(f'probe failed to establish source evidence: {bad}')
+          Path('out/probe_receipt.json').write_text(json.dumps({
+              'targets': len(rows),
+              'statuses': {status: sum(row.get('status') == status for row in rows) for status in sorted({row.get('status') for row in rows})},
+              'cache_mutated': False,
+              'new_lineage': False,
+              'schema_changed': False,
+          }, indent=2) + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-mfl-exact-cache-grain-source-probe-${{ github.run_id }}
+          path: |
+            targets.json
+            out/
+          retention-days: 90
+          compression-level: 0
