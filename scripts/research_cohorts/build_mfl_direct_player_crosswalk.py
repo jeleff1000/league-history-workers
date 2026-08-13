@@ -20,6 +20,7 @@ DIRECTORY_REQUIRED = {"source_year", "mfl_player_id", "raw_name", "raw_position"
 CROSSWALK_REQUIRED = {"source_year", "mfl_player_id", "NFL_player_id", "crosswalk_status"}
 NON_NFL_PRODUCTS = {"COACH", "TMQB", "TMPK"}
 OUTPUT_COLUMNS = ("source_year", "mfl_player_id", "NFL_player_id", "crosswalk_status")
+HISTORICAL_TEAM_COLUMNS = ("nfl_team_api", "team", "nfl_team", "team_abbr", "team_abbreviation", "posteam")
 
 
 def _path(path: Path) -> str:
@@ -28,6 +29,10 @@ def _path(path: Path) -> str:
 
 def _columns(con: duckdb.DuckDBPyConnection, relation: str) -> set[str]:
     return {str(row[0]) for row in con.execute(f"DESCRIBE {relation}").fetchall()}
+
+
+def _q(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
 
 
 def _require(*, actual: set[str], required: set[str], label: str) -> None:
@@ -76,9 +81,17 @@ def build(
         stats_columns = _columns(con, "ops.nfl_historical.nfl_player_stats_all")
         _require(
             actual=stats_columns,
-            required={"NFL_player_id", "year", "player", "position", "nfl_team_api"},
+            required={"NFL_player_id", "year", "player", "position"},
             label="ops historical player stats",
         )
+        historical_team_column = next(
+            (name for name in HISTORICAL_TEAM_COLUMNS if name in stats_columns), None
+        )
+        if historical_team_column is None:
+            raise ValueError(
+                "ops historical player stats has no supported historical team field; "
+                f"available columns: {sorted(stats_columns)}"
+            )
 
         con.execute("""
             CREATE TEMP TABLE directory_one AS
@@ -136,13 +149,13 @@ def build(
               TRY_CAST(year AS INTEGER) AS source_year,
               {_name_key('player')} AS name_key,
               {_position_key('position')} AS position_key,
-              {_team_key('nfl_team_api')} AS team_key
+              {_team_key(_q(historical_team_column))} AS team_key
             FROM ops.nfl_historical.nfl_player_stats_all
             WHERE NULLIF(TRIM(CAST(NFL_player_id AS VARCHAR)), '') IS NOT NULL
               AND TRY_CAST(year AS INTEGER) IS NOT NULL
               AND {_name_key('player')} IS NOT NULL
               AND {_position_key('position')} IS NOT NULL
-              AND {_team_key('nfl_team_api')} IS NOT NULL
+              AND {_team_key(_q(historical_team_column))} IS NOT NULL
         """)
         con.execute("""
             CREATE TEMP TABLE candidates AS
@@ -194,6 +207,7 @@ def build(
             "candidate_rows": status_counts.get("resolved_name_position_team_year", 0),
             "status_counts": status_counts,
             "crosswalk_key": ["source_year", "raw_name", "raw_position", "raw_team"],
+            "historical_team_column": historical_team_column,
         }
         report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
