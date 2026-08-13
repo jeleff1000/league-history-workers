@@ -237,16 +237,38 @@ def refresh(
                 row["next_action"] = "closed_independent_cache_readback"
             else:
                 row["final_status"] = "partial_schema_blocked_direct_identity"
-                row["final_reason"] = (
-                    "Current exact-player re-audit found no safe cache-null candidate; "
-                    f"{equal:,} supported cells already match, {ambiguous:,} null cells require "
-                    "identity resolution, and "
-                    f"{conflicts:,} non-null cells require source-precedence adjudication."
+                profile = receipt.get("ambiguous_recipient_profile") or {}
+                profile_rows = int(profile.get("recipient_rows", 0) or 0)
+                identity_free = profile_rows > 0 and all(
+                    int(profile.get(field, 0) or 0) == profile_rows
+                    for field in (
+                        "rows_without_canonical_manager",
+                        "rows_without_canonical_mfl_player_id",
+                        "rows_without_canonical_team_key",
+                        "rows_without_canonical_team_name",
+                        "rows_without_canonical_fantasy_position",
+                    )
                 )
-                row["next_action"] = (
-                    "resolve_direct_identity_and_precedence_adjudication"
-                    if conflicts else "resolve_direct_identity_or_close_source_only"
-                )
+                if identity_free:
+                    row["final_reason"] = (
+                        "Current exact-player re-audit found cache-grain identity loss: "
+                        f"{int(profile.get('keys', 0) or 0):,} duplicate player-week keys fan out to "
+                        f"{profile_rows:,} canonical rows, and every recipient lacks manager, MFL player ID, "
+                        "team key/name, and lineup slot. Source outcome evidence therefore has no safe "
+                        "row recipient despite exact league/week/NFL-player overlap."
+                    )
+                    row["next_action"] = "reconstruct_mfl_player_team_identity_before_outcome_upsert"
+                else:
+                    row["final_reason"] = (
+                        "Current exact-player re-audit found no safe cache-null candidate; "
+                        f"{equal:,} supported cells already match, {ambiguous:,} null cells require "
+                        "identity resolution, and "
+                        f"{conflicts:,} non-null cells require source-precedence adjudication."
+                    )
+                    row["next_action"] = (
+                        "resolve_direct_identity_and_precedence_adjudication"
+                        if conflicts else "resolve_direct_identity_or_close_source_only"
+                    )
             updated += 1
             continue
         if promotion_receipt:

@@ -108,8 +108,17 @@ supported outcome fields: `win`, `loss`, `tie`, `team_points`, and
 
 Eleven of the 15 artifacts are therefore closed by this readback. Four remain
 open solely because their source player key matches multiple canonical rows;
-their retained ambiguous cell counts are 40, 1,000, 1,005, and 720. These are
-not candidates for a manager-name fallback or a cache overwrite.
+their retained ambiguous cell counts are 40, 1,000, 1,005, and 720.
+
+The follow-up receipt
+[31720418092](https://github.com/jeleff1000/league-history-workers/actions/runs/31720418092)
+identifies the precise cache-grain defect: 553 player-week keys fan out to
+2,446 cache rows (2–6 rows per key), and **every one** of those rows lacks a
+manager, MFL player ID, team key/name, and lineup slot. The source rows also
+lack a usable manager identity for these keys. This is neither a source-fetch
+gap nor a safe upsert: the affected cache rows must first be reconstructed from
+the retained MFL roster memberships before outcomes can be attached. A
+manager-name fallback or arbitrary overwrite remains forbidden.
 
 The latest bridge-negative receipt,
 [31694545464](https://github.com/jeleff1000/league-history-workers/actions/runs/31694545464),
