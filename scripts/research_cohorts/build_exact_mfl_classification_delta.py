@@ -134,8 +134,12 @@ def build(
             ]
         )
         diagnostic_select = [
-            f"p.{_quoted(name)} AS {_quoted('canonical_' + name)}"
-            for name in DIAGNOSTIC_CANONICAL_FIELDS if name in pcols
+            (
+                f"p.{_quoted(name)} AS {_quoted('canonical_' + name)}"
+                if name in pcols else
+                f"NULL::VARCHAR AS {_quoted('canonical_' + name)}"
+            )
+            for name in DIAGNOSTIC_CANONICAL_FIELDS
         ]
         con.execute(f"""
             CREATE OR REPLACE TEMP TABLE exact_matches AS
@@ -169,6 +173,38 @@ def build(
         ambiguous_recipient_keys = int(
             con.execute("SELECT COUNT(*) FROM recipient_cardinality WHERE recipient_count <> 1").fetchone()[0]
         )
+        ambiguous_profile_row = con.execute("""
+            SELECT
+              COUNT(DISTINCT (m.db_name, m.year, m.week, m.NFL_player_id)),
+              COUNT(*),
+              COUNT(*) FILTER (WHERE m.canonical_manager IS NULL),
+              COUNT(*) FILTER (WHERE m.canonical_mfl_player_id IS NULL),
+              COUNT(*) FILTER (WHERE m.canonical_team_key IS NULL),
+              COUNT(*) FILTER (WHERE m.canonical_team_name IS NULL),
+              COUNT(*) FILTER (WHERE m.canonical_fantasy_position IS NULL)
+            FROM exact_matches m JOIN recipient_cardinality c
+              USING (db_name, year, week, NFL_player_id)
+            WHERE c.recipient_count <> 1
+        """).fetchone()
+        recipient_count_distribution = {
+            str(recipient_count): int(key_count)
+            for recipient_count, key_count in con.execute("""
+                SELECT recipient_count, COUNT(*)
+                FROM recipient_cardinality
+                WHERE recipient_count <> 1
+                GROUP BY recipient_count ORDER BY recipient_count
+            """).fetchall()
+        }
+        ambiguous_recipient_profile = {
+            "keys": int(ambiguous_profile_row[0]),
+            "recipient_rows": int(ambiguous_profile_row[1]),
+            "recipient_count_distribution": recipient_count_distribution,
+            "rows_without_canonical_manager": int(ambiguous_profile_row[2]),
+            "rows_without_canonical_mfl_player_id": int(ambiguous_profile_row[3]),
+            "rows_without_canonical_team_key": int(ambiguous_profile_row[4]),
+            "rows_without_canonical_team_name": int(ambiguous_profile_row[5]),
+            "rows_without_canonical_fantasy_position": int(ambiguous_profile_row[6]),
+        }
         if ambiguous_out is not None:
             ambiguous_out.parent.mkdir(parents=True, exist_ok=True)
             con.execute(f"""
@@ -176,7 +212,7 @@ def build(
                     SELECT m.db_name, m.year, m.week, m.NFL_player_id,
                            m.player_rowid, c.recipient_count,
                            m.source_manager, m.canonical_platform AS platform,
-                           {', '.join(_quoted('canonical_' + name) for name in DIAGNOSTIC_CANONICAL_FIELDS if name in pcols)},
+                           {', '.join(_quoted('canonical_' + name) for name in DIAGNOSTIC_CANONICAL_FIELDS)},
                            {', '.join(_quoted('canonical_' + target) for target in SOURCE_FIELDS.values())},
                            {', '.join(_quoted(source) for source in SOURCE_FIELDS)}
                     FROM exact_matches m JOIN recipient_cardinality c
@@ -265,6 +301,7 @@ def build(
             "source_conflicting_keys": source_conflicting_keys,
             "unmatched_source_keys": unmatched_source_keys,
             "ambiguous_recipient_keys": ambiguous_recipient_keys,
+            "ambiguous_recipient_profile": ambiguous_recipient_profile,
             "candidate_rows": candidate_rows,
             "candidate_key": list(KEY),
             "artifact_current_state": artifact_current_state,

@@ -118,6 +118,16 @@ def test_emits_each_canonical_recipient_for_an_ambiguous_exact_player_key(tmp_pa
 
     assert report["candidate_rows"] == 0
     assert report["ambiguous_recipient_keys"] == 1
+    assert report["ambiguous_recipient_profile"] == {
+        "keys": 1,
+        "recipient_rows": 2,
+        "recipient_count_distribution": {"2": 1},
+        "rows_without_canonical_manager": 2,
+        "rows_without_canonical_mfl_player_id": 0,
+        "rows_without_canonical_team_key": 2,
+        "rows_without_canonical_team_name": 2,
+        "rows_without_canonical_fantasy_position": 2,
+    }
     con = duckdb.connect()
     rows = con.execute(
         "SELECT recipient_count, canonical_mfl_player_id, canonical_win, source_win FROM read_parquet(?) ORDER BY player_rowid",
