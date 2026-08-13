@@ -90,3 +90,38 @@ def test_quarantines_conflicting_source_values_for_one_exact_player_key(tmp_path
 
     assert report["candidate_rows"] == 0
     assert report["source_conflicting_keys"] == 1
+
+
+def test_emits_each_canonical_recipient_for_an_ambiguous_exact_player_key(tmp_path: Path) -> None:
+    from scripts.research_cohorts.build_exact_mfl_classification_delta import build
+
+    base = tmp_path / "base.duckdb"
+    _base(base)
+    con = duckdb.connect(str(base))
+    con.execute("INSERT INTO public.player_fantasy SELECT * FROM public.player_fantasy")
+    con.close()
+    source = tmp_path / "classification.parquet"
+    _write_parquet(source, [{
+        "db_name": "league", "year": 2013, "week": 9, "NFL_player_id": "nfl-1",
+        "manager": "source manager", "status": "confirmed_outcome",
+        "source_win": 1, "source_loss": 0, "source_tie": 0,
+        "source_team_points": 121.5, "source_is_playoffs": False,
+    }])
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps([{"artifact_id": 3, "path": str(source)}]))
+    ambiguous = tmp_path / "ambiguous.parquet"
+
+    report = build(
+        base=base, manifest=manifest, out=tmp_path / "delta.parquet",
+        report=tmp_path / "report.json", ambiguous_out=ambiguous,
+    )
+
+    assert report["candidate_rows"] == 0
+    assert report["ambiguous_recipient_keys"] == 1
+    con = duckdb.connect()
+    rows = con.execute(
+        "SELECT recipient_count, canonical_win, source_win FROM read_parquet(?) ORDER BY player_rowid",
+        [str(ambiguous)],
+    ).fetchall()
+    con.close()
+    assert rows == [(2, 0, 1), (2, 0, 1)]

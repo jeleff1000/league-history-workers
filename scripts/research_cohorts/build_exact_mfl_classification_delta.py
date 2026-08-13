@@ -38,7 +38,10 @@ def _write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
+def build(
+    *, base: Path, manifest: Path, out: Path, report: Path,
+    ambiguous_out: Path | None = None,
+) -> dict:
     entries = json.loads(manifest.read_text(encoding="utf-8"))
     if not isinstance(entries, list) or not entries:
         raise ValueError("manifest must be a non-empty list")
@@ -157,6 +160,20 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
         ambiguous_recipient_keys = int(
             con.execute("SELECT COUNT(*) FROM recipient_cardinality WHERE recipient_count <> 1").fetchone()[0]
         )
+        if ambiguous_out is not None:
+            ambiguous_out.parent.mkdir(parents=True, exist_ok=True)
+            con.execute(f"""
+                COPY (
+                    SELECT m.db_name, m.year, m.week, m.NFL_player_id,
+                           m.player_rowid, c.recipient_count,
+                           m.source_manager, m.canonical_platform AS platform,
+                           {', '.join(_quoted('canonical_' + target) for target in SOURCE_FIELDS.values())},
+                           {', '.join(_quoted(source) for source in SOURCE_FIELDS)}
+                    FROM exact_matches m JOIN recipient_cardinality c
+                      USING (db_name, year, week, NFL_player_id)
+                    WHERE c.recipient_count <> 1
+                ) TO {_literal(ambiguous_out)} (FORMAT PARQUET, COMPRESSION ZSTD)
+            """)
         candidate_where = f"({evidence_predicate}) AND NOT ({conflict_predicate})"
         difference_predicate = " OR ".join(
             f"({_quoted(source)} IS NOT NULL AND {_quoted('canonical_' + target)} IS DISTINCT FROM {_quoted(source)})"
@@ -255,8 +272,12 @@ def main() -> None:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--ambiguous-out", type=Path)
     args = parser.parse_args()
-    print(json.dumps(build(base=args.base, manifest=args.manifest, out=args.out, report=args.report), sort_keys=True))
+    print(json.dumps(build(
+        base=args.base, manifest=args.manifest, out=args.out, report=args.report,
+        ambiguous_out=args.ambiguous_out,
+    ), sort_keys=True))
 
 
 if __name__ == "__main__":

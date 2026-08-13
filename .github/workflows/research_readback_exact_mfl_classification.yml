@@ -86,7 +86,8 @@ jobs:
             --base research_public_lake/corpus_snapshot.duckdb \
             --manifest mfl_classification_manifest.json \
             --out exact_mfl_candidate.parquet \
-            --report exact_mfl_candidate_report.json
+            --report exact_mfl_candidate_report.json \
+            --ambiguous-out exact_mfl_ambiguous_recipients.parquet
       - name: Fail fast if the read-only contract was violated
         shell: bash
         run: |
@@ -119,6 +120,7 @@ jobs:
             ops_before.sha256
             mfl_classification_manifest.json
             exact_mfl_candidate.parquet
+            exact_mfl_ambiguous_recipients.parquet
             exact_mfl_candidate_report.json
           retention-days: 90
           compression-level: 0
