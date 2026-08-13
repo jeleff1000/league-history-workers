@@ -81,8 +81,8 @@ jobs:
           import json,os,subprocess,sys
           from pathlib import Path
           for task in json.loads(os.environ['TASKS']):
-              name=f"{task['year']}_{task['position']}_{task['player_bucket'] if task['player_bucket'] is not None else 0}.duckdb"
-              cmd=[sys.executable,'code/scripts/research_cohorts/build_compact_matchup_bundle.py','--snapshot','research_public_lake/corpus_snapshot.duckdb','--ops-cache','research_public_lake/ops_cache.duckdb','--output',str(Path('out/tasks')/name),'--year',str(task['year']),'--position',task['position'],'--player-bucket-count',str(task['player_buckets']),'--player-bucket',str(task['player_bucket'] or 0)]
+              name=f"{task['task_id']}.duckdb"
+              cmd=[sys.executable,'code/scripts/research_cohorts/build_compact_matchup_bundle.py','--snapshot','research_public_lake/corpus_snapshot.duckdb','--ops-cache','research_public_lake/ops_cache.duckdb','--output',str(Path('out/tasks')/name),'--year',str(task['year']),'--position',task['position'],'--player-ids-json',json.dumps(task['player_ids'])]
               print(json.dumps(task),flush=True)
               subprocess.run(cmd,check=True)
           PY
