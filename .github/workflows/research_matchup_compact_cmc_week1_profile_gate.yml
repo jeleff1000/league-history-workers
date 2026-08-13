@@ -27,6 +27,7 @@ on:
           - rb_2025_bucket_inventory
           - rb_2025_bucket
           - rb_2025_bucket_core
+          - rb_2025_bucket_grade_shapes
           - cache_schedule_lookup_probe
           - local_cache_export
       bucket:
@@ -102,7 +103,7 @@ jobs:
             WHERE week BETWEEN 1 AND 18
           """)
           mode = os.environ['PILOT_MODE']
-          if mode not in {'cmc_week1', 'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_weekly', 'all_2025_weekly', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'rb_2025_bucket_inventory', 'rb_2025_bucket', 'rb_2025_bucket_core', 'cache_schedule_lookup_probe', 'local_cache_export'}:
+          if mode not in {'cmc_week1', 'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_weekly', 'all_2025_weekly', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'rb_2025_bucket_inventory', 'rb_2025_bucket', 'rb_2025_bucket_core', 'rb_2025_bucket_grade_shapes', 'cache_schedule_lookup_probe', 'local_cache_export'}:
             raise ValueError(f'unsupported pilot mode: {mode}')
           if mode == 'cache_schedule_lookup_probe':
               required = {
@@ -395,7 +396,7 @@ jobs:
                   summary.write(f'- Receipt: `{receipt}`\n')
                   summary.write('- Cache-only inventory; no cache save, aggregation table, Fly access, API request, artifact, or publish step.\n')
               raise SystemExit(0)
-          if mode in {'rb_2025_bucket', 'rb_2025_bucket_core'}:
+          if mode in {'rb_2025_bucket', 'rb_2025_bucket_core', 'rb_2025_bucket_grade_shapes'}:
               bucket_number = int(os.environ['PILOT_BUCKET'])
               assert 1 <= bucket_number <= 15, bucket_number
               players = c.execute(f"""
@@ -433,6 +434,47 @@ jobs:
                   c, source_table='rb_2025_lane', output_table='rb_2025_bucket_source',
                   player_ids=selected_bucket['ids'],
               )
+              if mode == 'rb_2025_bucket_grade_shapes':
+                  shapes = c.execute("""
+                    WITH facts AS (
+                      SELECT * FROM rb_2025_bucket_source p
+                      INNER JOIN cached_regular_player_weeks w
+                        ON w.NFL_player_id=CAST(p.NFL_player_id AS VARCHAR)
+                       AND w.year=CAST(p.year AS INTEGER) AND w.week=CAST(p.week AS INTEGER)
+                    ), player_league AS (
+                      SELECT CAST(NFL_player_id AS VARCHAR) AS player_id, CAST(db_name AS VARCHAR) AS db_name,
+                        CAST(position AS VARCHAR) AS position, CAST(cohort_teams AS VARCHAR) AS teams,
+                        CAST(cohort_roster AS VARCHAR) AS roster, CAST(cohort_scoring AS VARCHAR) AS scoring,
+                        CAST(cohort_pass_td AS VARCHAR) AS pass_td, CAST(cohort_dynasty AS VARCHAR) AS dynasty,
+                        CAST(cohort_best_ball AS VARCHAR) AS best_ball, CAST(cohort_playoff_teams AS VARCHAR) AS bracket
+                      FROM facts GROUP BY ALL
+                    ), player_profile AS (
+                      SELECT player_id, position, teams, roster, scoring, pass_td, dynasty, best_ball, bracket
+                      FROM player_league GROUP BY ALL
+                    ), inventory AS (
+                      SELECT db_name, position, teams, roster, scoring, pass_td, dynasty, best_ball, bracket
+                      FROM player_league GROUP BY ALL
+                    )
+                    SELECT
+                      (SELECT COUNT(*) FROM facts)::BIGINT AS source_rows,
+                      (SELECT COUNT(*) FROM player_league)::BIGINT AS player_league_rows,
+                      (SELECT COUNT(*) FROM player_profile)::BIGINT AS player_profile_rows,
+                      (SELECT COUNT(*) FROM inventory)::BIGINT AS inventory_rows,
+                      (SELECT COUNT(DISTINCT player_id) FROM player_league)::BIGINT AS players,
+                      (SELECT COUNT(DISTINCT db_name) FROM player_league)::BIGINT AS leagues,
+                      (SELECT COUNT(*) FROM player_league)::BIGINT * 128 AS raw_cube_upper_bound,
+                      (SELECT COUNT(*) FROM player_profile)::BIGINT * 128 AS profile_cube_upper_bound
+                  """).fetchone()
+                  receipt = {
+                    'mode': mode, 'bucket': bucket_number, 'bucket_players': len(selected_bucket['ids']),
+                    'bucket_weight': selected_bucket['weight'], 'grade_shapes': shapes,
+                  }
+                  print(receipt)
+                  with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                      summary.write('## RB 2025 season grade cardinality gate\n')
+                      summary.write(f'- Receipt: `{receipt}`\n')
+                      summary.write('- Cache-only shape probe; no grade output, cache save, artifact, Fly access, API request, or publish step.\n')
+                  raise SystemExit(0)
               weekly_started = perf_counter()
               materialize_weekly_core_cohort_cells(
                   c, source_table='rb_2025_bucket_source',
