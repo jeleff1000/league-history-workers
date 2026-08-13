@@ -17,6 +17,10 @@ on:
         description: 'Number of duration-balanced runners; use 1 only for an isolated edge pilot'
         required: false
         default: '15'
+      career_buckets:
+        description: 'Bounded global career aggregation partitions; use 1 to test the spill-capable single-pass path'
+        required: false
+        default: '16'
 
 permissions:
   contents: read
@@ -125,7 +129,7 @@ jobs:
         run: |
           mapfile -t LANES < <(find lanes -name lane.duckdb | sort)
           test "${#LANES[@]}" -eq ${{ needs.plan.outputs.lane_count }}
-          python code/scripts/research_cohorts/merge_compact_matchup_parts.py --parts "${LANES[@]}" --output research_matchup_compact.duckdb
+          python code/scripts/research_cohorts/merge_compact_matchup_parts.py --parts "${LANES[@]}" --output research_matchup_compact.duckdb --career-buckets '${{ inputs.career_buckets }}'
           python - <<'PY'
           import duckdb,json
           c=duckdb.connect('research_matchup_compact.duckdb',read_only=True)
