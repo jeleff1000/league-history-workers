@@ -182,6 +182,12 @@ def test_candidate_audit_blocks_player_bridge_when_cache_player_week_is_duplicat
         SET manager=NULL, team_key=NULL, team_name=NULL, is_playoffs=NULL
     """)
     con.execute("INSERT INTO public.player_fantasy SELECT * FROM public.player_fantasy")
+    con.execute("""
+        INSERT INTO public.player_fantasy
+        SELECT * REPLACE ('unrelated' AS NFL_player_id)
+        FROM public.player_fantasy
+        LIMIT 1
+    """)
     con.close()
     candidates = tmp_path / "candidates"
     candidates.mkdir()
@@ -284,3 +290,5 @@ def test_exact_mfl_duplicate_builder_pairs_matching_roster_copies_and_ignores_by
         ("0001", 0, 1, 90.0, "Alpha"),
         ("0002", 1, 0, 100.0, "Bravo"),
     ]
+    report = json.loads((out / "mfl_exact_duplicate_candidate_report.json").read_text(encoding="utf-8"))
+    assert report["scoped_cache_rows"] == 2

@@ -124,27 +124,40 @@ def build(
       ) c ON c.source_year=CAST(m.source_year AS INTEGER)
          AND c.mfl_player_id=CAST(m.mfl_player_id AS VARCHAR)
     """)
+    # Scope canonical access *before* materializing any cache rows.  These
+    # bridge artifacts describe a few explicit MFL player-weeks; scanning the
+    # entire 269M-row cache would turn an exact rescue into a broad rebuild.
+    con.execute("""
+      CREATE TEMP TABLE target_player_weeks AS
+      SELECT DISTINCT db_name,year,week,NFL_player_id
+      FROM source_memberships
+    """)
     con.execute("""
       CREATE TEMP TABLE cache_rows AS
       SELECT
-        rowid AS player_rowid,
-        CAST(db_name AS VARCHAR) AS db_name,
-        CAST(year AS INTEGER) AS year,
-        CAST(week AS INTEGER) AS week,
-        CAST(NFL_player_id AS VARCHAR) AS NFL_player_id,
-        TRY_CAST(is_rostered AS INTEGER) AS canonical_is_rostered,
-        TRY_CAST(is_started AS INTEGER) AS canonical_is_started,
-        TRY_CAST(fantasy_points AS DOUBLE) AS canonical_fantasy_points,
-        CAST(manager AS VARCHAR) AS canonical_manager,
-        CAST(team_key AS VARCHAR) AS canonical_team_key,
-        CAST(team_name AS VARCHAR) AS canonical_team_name,
-        TRY_CAST(win AS INTEGER) AS canonical_win,
-        TRY_CAST(team_points AS DOUBLE) AS canonical_team_points,
-        TRY_CAST(is_playoffs AS INTEGER) AS canonical_is_playoffs,
-        TRY_CAST(mfl_player_id AS VARCHAR) AS canonical_mfl_player_id,
-        """ + ("TRY_CAST(loss AS INTEGER) AS canonical_loss," if has_loss else "CAST(NULL AS INTEGER) AS canonical_loss,") + """
-        """ + ("TRY_CAST(tie AS INTEGER) AS canonical_tie" if has_tie else "CAST(NULL AS INTEGER) AS canonical_tie") + """
-      FROM public.player_fantasy
+        p.rowid AS player_rowid,
+        CAST(p.db_name AS VARCHAR) AS db_name,
+        CAST(p.year AS INTEGER) AS year,
+        CAST(p.week AS INTEGER) AS week,
+        CAST(p.NFL_player_id AS VARCHAR) AS NFL_player_id,
+        TRY_CAST(p.is_rostered AS INTEGER) AS canonical_is_rostered,
+        TRY_CAST(p.is_started AS INTEGER) AS canonical_is_started,
+        TRY_CAST(p.fantasy_points AS DOUBLE) AS canonical_fantasy_points,
+        CAST(p.manager AS VARCHAR) AS canonical_manager,
+        CAST(p.team_key AS VARCHAR) AS canonical_team_key,
+        CAST(p.team_name AS VARCHAR) AS canonical_team_name,
+        TRY_CAST(p.win AS INTEGER) AS canonical_win,
+        TRY_CAST(p.team_points AS DOUBLE) AS canonical_team_points,
+        TRY_CAST(p.is_playoffs AS INTEGER) AS canonical_is_playoffs,
+        TRY_CAST(p.mfl_player_id AS VARCHAR) AS canonical_mfl_player_id,
+        """ + ("TRY_CAST(p.loss AS INTEGER) AS canonical_loss," if has_loss else "CAST(NULL AS INTEGER) AS canonical_loss,") + """
+        """ + ("TRY_CAST(p.tie AS INTEGER) AS canonical_tie" if has_tie else "CAST(NULL AS INTEGER) AS canonical_tie") + """
+      FROM public.player_fantasy p
+      JOIN target_player_weeks t
+        ON t.db_name=CAST(p.db_name AS VARCHAR)
+       AND t.year=CAST(p.year AS INTEGER)
+       AND t.week=CAST(p.week AS INTEGER)
+       AND t.NFL_player_id=CAST(p.NFL_player_id AS VARCHAR)
     """)
     con.execute("""
       CREATE TEMP TABLE cache_signature AS
@@ -247,6 +260,7 @@ def build(
         "new_lineage": False,
         "canonical_schema_unchanged": True,
         "exact_duplicate_player_weeks": exact_keys,
+        "scoped_cache_rows": int(con.execute("SELECT COUNT(*) FROM cache_rows").fetchone()[0]),
         "candidate_rows": candidate_rows,
         "source_actual_cards": int(con.execute("SELECT COUNT(*) FROM actual_source_cards").fetchone()[0]),
         "safe_source_cards": int(con.execute("SELECT COUNT(*) FROM safe_source_cards").fetchone()[0]),
