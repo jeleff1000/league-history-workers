@@ -132,7 +132,10 @@ jobs:
             --excluded-shards "$EXCLUDED_SHARDS" --report shard_set_report.json
           mkdir -p raw zips
           download_artifact() {
-            local name="$1" artifact_id="$2" zip_path="zips/${artifact_id}.zip" output_dir="raw/${name}"
+            local name="$1"
+            local artifact_id="$2"
+            local zip_path="zips/${artifact_id}.zip"
+            local output_dir="raw/${name}"
             local attempt
             for attempt in 1 2 3 4 5; do
               rm -f "$zip_path"

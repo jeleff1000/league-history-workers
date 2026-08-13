@@ -30,3 +30,5 @@ def test_batch_apply_rebuilds_candidates_from_every_completed_shard_without_new_
     assert "curl --fail --location --silent --show-error" in workflow
     assert "--retry-all-errors" in workflow
     assert "xargs -r -P 15 -n 2" in workflow
+    assert 'local artifact_id="$2"' in workflow
+    assert 'local zip_path="zips/${artifact_id}.zip"' in workflow

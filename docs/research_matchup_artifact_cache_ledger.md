@@ -115,7 +115,11 @@ The first retry also stopped before candidate construction because GitHub's bulk
 `gh run download` transport stalled while pulling all prior-run artifacts. The
 replacement transport fetches only the selected artifact IDs, at 15 concurrent
 bounded/retrying requests, and verifies both required Parquet files in every
-archive before candidate assembly. The retry is still allowed to mutate only the already-approved
+archive before candidate assembly. Its first execution exposed a temporary-file
+race (`zips/.zip`): Bash expanded `zip_path` before assigning `artifact_id`.
+That attempt also stopped before candidate construction or cache mutation. The
+download function now assigns the artifact ID before deriving its unique ZIP
+path. The retry is still allowed to mutate only the already-approved
 same-key cache after its test/preflight gate proves the selected artifact list
 exactly matches the 223 retained shards. Its fresh restore/readback receipt is
 required before this checkpoint, any affected artifact, or any player cell is
