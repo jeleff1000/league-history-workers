@@ -24,13 +24,14 @@ is exactly 9,479 `artifact_inventory` rows; cache-changing work is recorded as
 a separate `cache_recovery_receipt` row in the *same* ledger, not smuggled into
 the 9,479-artifact denominator. There are currently three such recovery
 receipts: the independently restored 74-row MFL repair, the 204-row direct
-MFL player/team bridge, and the 26,936-row MFL source-only bridge promotion.
-The ledger validator fails if a row lacks this distinction.
+MFL player/team bridge, the 26,936-row MFL source-only bridge promotion, and
+the 1,720-row MFL classification roster-identity promotion. The ledger
+validator fails if a row lacks this distinction.
 
 ## Current residual queue
 
-The latest ledger validation, after the 26,936-row receipt, reports 9,482
-ledger rows: 9,479 frozen raw-artifact rows and 3 supplemental cache-recovery
+The latest ledger validation, after the 1,720-row receipt, reports 9,483
+ledger rows: 9,479 frozen raw-artifact rows and 4 supplemental cache-recovery
 receipts. Of the frozen artifact rows, 8,768 are closed and 711 are still open.
 Those 711 entries are a work queue, **not** a claim that 711 artifacts still
 contain unapplied values: each must be re-read against the current approved
@@ -50,6 +51,17 @@ receipt proves 26,936 existing-player fills from 256 source candidates are in
 the cache. Its older 19,560 source-only cells are deliberately still open until
 the remaining team/player identities are independently resolved or explicitly
 classified as having no canonical recipient.
+
+The new MFL classification roster-identity receipt is Actions
+[31660451544](https://github.com/jeleff1000/league-history-workers/actions/runs/31660451544).
+It independently restored the approved cache after apply run `31659880241` and
+read back all 1,720 exact existing-player candidates from pilot `31658616693`:
+zero unmatched keys and zero source-backed nulls for `win`, `loss`, `tie`,
+`team_points`, and `is_playoffs`. The schema, player-row count, and ops-cache
+hash were unchanged; cache object `6590907333` is the single same-key object.
+This receipt covers the first 15 targeted MFL league-weeks only. The remaining
+1,291 target league-weeks in this direct-identity family stay open until they
+produce the same independent readback evidence.
 
 ## Current approved-cache contract
 
