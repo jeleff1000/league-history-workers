@@ -1,0 +1,201 @@
+name: Research MFL Direct Crosswalk Bridge Candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: research-mfl-direct-crosswalk-bridge-candidate
+  cancel-in-progress: false
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+  DIRECT_CROSSWALK_RUN_ID: "31736789016"
+  SOURCE_ROSTER_RUN_ID: "31663728938"
+
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Record immutable cache and ops state
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/corpus_snapshot.duckdb > cache_before.sha256
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          receipt={
+              'player_schema': con.execute('DESCRIBE public.player_fantasy').fetchall(),
+              'player_rows': int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]),
+          }
+          con.close()
+          Path('cache_before.json').write_text(json.dumps(receipt, indent=2)+'\n')
+          PY
+      - name: Download only retained MFL evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p direct inputs
+          gh run download "$DIRECT_CROSSWALK_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "mfl-direct-player-crosswalk-candidate-$DIRECT_CROSSWALK_RUN_ID" --dir direct
+          test -s direct/out/mfl_direct_player_crosswalk_candidates.parquet
+          for shard in 52 116 143 167 197; do
+            mkdir -p "inputs/$shard"
+            gh run download "$SOURCE_ROSTER_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+              --name "research-mfl-classification-roster-bridge-shard-$shard-$SOURCE_ROSTER_RUN_ID" \
+              --dir "inputs/$shard"
+            test -s "inputs/$shard/out/memberships.parquet"
+            test -s "inputs/$shard/out/crosswalk.parquet"
+            test -s "inputs/$shard/out/team_signals.parquet"
+          done
+      - name: Assemble exact source inputs and reject crosswalk conflicts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p assembled out
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+
+          root=Path('inputs')
+          shards=(52,116,143,167,197)
+          def paths(name):
+              return [str((root/str(s)/'out'/name).resolve()) for s in shards]
+          def quoted(items):
+              return ','.join("'"+item.replace("'", "''")+"'" for item in items)
+          con=duckdb.connect()
+          memberships=paths('memberships.parquet')
+          signals=paths('team_signals.parquet')
+          existing=paths('crosswalk.parquet')
+          direct=str(Path('direct/out/mfl_direct_player_crosswalk_candidates.parquet').resolve())
+          con.execute("CREATE TEMP VIEW existing_crosswalk AS SELECT * FROM read_parquet(["+quoted(existing)+"], union_by_name=true)")
+          con.execute("CREATE TEMP VIEW direct_crosswalk AS SELECT * FROM read_parquet('"+direct.replace("'", "''")+"')")
+          con.execute("""
+            CREATE TEMP VIEW all_crosswalk AS
+            SELECT source_year,mfl_player_id,NFL_player_id FROM existing_crosswalk
+            UNION ALL
+            SELECT source_year,mfl_player_id,NFL_player_id FROM direct_crosswalk
+          """)
+          conflicts=int(con.execute("""
+            SELECT COUNT(*) FROM (
+              SELECT source_year,mfl_player_id
+              FROM all_crosswalk
+              GROUP BY 1,2
+              HAVING COUNT(DISTINCT NFL_player_id) FILTER (WHERE NFL_player_id IS NOT NULL) > 1
+            )
+          """).fetchone()[0])
+          if conflicts:
+              raise SystemExit(f'crosswalk identity conflict count={conflicts}')
+          con.execute("COPY (SELECT * FROM read_parquet(["+quoted(memberships)+"], union_by_name=true)) TO 'assembled/memberships.parquet' (FORMAT PARQUET)")
+          con.execute("COPY (SELECT * FROM read_parquet(["+quoted(signals)+"], union_by_name=true)) TO 'assembled/team_signals.parquet' (FORMAT PARQUET)")
+          con.execute("COPY (SELECT * FROM all_crosswalk) TO 'assembled/crosswalk_full.parquet' (FORMAT PARQUET)")
+          con.execute("COPY (SELECT source_year,mfl_player_id,NFL_player_id FROM existing_crosswalk) TO 'assembled/crosswalk_baseline.parquet' (FORMAT PARQUET)")
+          receipt={
+            'read_only': True,
+            'cache_mutated': False,
+            'new_lineage': False,
+            'source_roster_run_id': '31663728938',
+            'direct_crosswalk_run_id': '31736789016',
+            'source_shards': list(shards),
+            'crosswalk_conflicts': conflicts,
+            'direct_crosswalk_rows': int(con.execute('SELECT COUNT(*) FROM direct_crosswalk').fetchone()[0]),
+          }
+          Path('out/source_assembly_receipt.json').write_text(json.dumps(receipt, indent=2, sort_keys=True)+'\n')
+          con.close()
+          PY
+      - name: Build full and baseline franchise to player bridges
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/build_mfl_source_team_player_bridge.py \
+            --memberships assembled/memberships.parquet --crosswalk assembled/crosswalk_full.parquet \
+            --team-signals assembled/team_signals.parquet --out assembled/player_bridge_full.parquet \
+            --report out/full_bridge_report.json
+          python scripts/research_cohorts/build_mfl_source_team_player_bridge.py \
+            --memberships assembled/memberships.parquet --crosswalk assembled/crosswalk_baseline.parquet \
+            --team-signals assembled/team_signals.parquet --out assembled/player_bridge_baseline.parquet \
+            --report out/baseline_bridge_report.json
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          con=duckdb.connect()
+          cols='db_name,year,week,NFL_player_id,team_key,manager,team_name'
+          direct_only=int(con.execute(
+              f"SELECT COUNT(*) FROM (SELECT {cols} FROM read_parquet('assembled/player_bridge_full.parquet') EXCEPT SELECT {cols} FROM read_parquet('assembled/player_bridge_baseline.parquet'))"
+          ).fetchone()[0])
+          receipt=json.loads(Path('out/source_assembly_receipt.json').read_text())
+          receipt['direct_only_bridge_rows']=direct_only
+          Path('out/source_assembly_receipt.json').write_text(json.dumps(receipt, indent=2, sort_keys=True)+'\n')
+          con.close()
+          PY
+      - name: Audit exact player recipients without mutating the cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p candidate_input out/candidate
+          cp assembled/team_signals.parquet candidate_input/team_signals.parquet
+          cp assembled/player_bridge_full.parquet candidate_input/player_bridge.parquet
+          python scripts/research_cohorts/audit_team_signal_candidates.py \
+            --base research_public_lake/corpus_snapshot.duckdb --candidates candidate_input --out out/candidate
+      - name: Fail closed on changed cache or unsafe candidate evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/corpus_snapshot.duckdb > cache_after.sha256
+          sha256sum research_public_lake/ops_cache.duckdb > ops_after.sha256
+          cmp -s cache_before.sha256 cache_after.sha256
+          cmp -s ops_before.sha256 ops_after.sha256
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          before=json.loads(Path('cache_before.json').read_text())
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          assert con.execute('DESCRIBE public.player_fantasy').fetchall()==[tuple(row) for row in before['player_schema']]
+          assert int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])==before['player_rows']
+          con.close()
+          source=json.loads(Path('out/source_assembly_receipt.json').read_text())
+          candidate=json.loads(Path('out/candidate/team_signal_candidate_report.json').read_text())
+          assert source['cache_mutated'] is False and source['new_lineage'] is False
+          assert candidate['cache_mutated'] is False and candidate['new_lineage'] is False
+          assert source['crosswalk_conflicts']==0
+          receipt={
+            'read_only': True,
+            'cache_mutated': False,
+            'new_lineage': False,
+            'source_assembly': source,
+            'candidate_report': candidate,
+          }
+          Path('out/mfl_direct_crosswalk_bridge_candidate_receipt.json').write_text(json.dumps(receipt, indent=2, sort_keys=True)+'\n')
+          PY
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-direct-crosswalk-bridge-candidate-${{ github.run_id }}
+          path: |
+            out/
+            cache_before.sha256
+            cache_after.sha256
+            ops_before.sha256
+            ops_after.sha256
+            cache_before.json
+          retention-days: 90
+          compression-level: 0
