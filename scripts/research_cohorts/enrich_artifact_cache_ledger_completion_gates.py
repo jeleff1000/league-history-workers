@@ -54,11 +54,17 @@ def derive_gate_states(row: dict[str, str]) -> dict[str, str]:
             "cache_admission_state": f"closed_{status}",
         }
 
-    loss_tie = _number(row, "blocked_schema_cells") > 0
+    # `blocked_schema_cells` is frozen historical evidence from artifacts that
+    # predated the approved cache's loss/tie columns.  Loss and tie are now
+    # part of the one canonical schema, so this count cannot remain an active
+    # admission gate.  Keep the count in the raw receipt, but state plainly
+    # that schema support is closed rather than forcing stale work items to
+    # claim a schema migration is still required.
+    historical_loss_tie = _number(row, "blocked_schema_cells") > 0
     bridge = _number(row, "unmatched_cache_cells") > 0
     precedence = _number(row, "cache_conflict_cells") > 0
     gates = {
-        "loss_tie_gate": "open_schema_required" if loss_tie else "not_required",
+        "loss_tie_gate": "closed_schema_supported" if historical_loss_tie else "not_required",
         "player_team_bridge_gate": (
             "open_raw_roster_bridge_required" if bridge else "not_required"
         ),
@@ -69,7 +75,6 @@ def derive_gate_states(row: dict[str, str]) -> dict[str, str]:
     names = [
         name
         for name, required in (
-            ("loss_tie", loss_tie),
             ("player_team_bridge", bridge),
             ("source_precedence", precedence),
         )

@@ -38,14 +38,21 @@ Those 711 entries are a work queue, **not** a claim that 711 artifacts still
 contain unapplied values: each must be re-read against the current approved
 cache before it can be closed or kept open with a current, specific reason.
 
-| Current raw-artifact status | Count | Required disposition |
+| Historical raw-artifact status | Count | Required disposition |
 | --- | ---: | --- |
-| `partial_schema_blocked_unmatched` | 472 | Re-run exact player/team bridge and readback; `loss`/`tie` now exist in schema, so stale schema wording alone cannot block closure. |
-| `partial_schema_blocked_conflicts` | 214 | Compare exact source and canonical non-null cells; preserve or replace only under an explicit source-precedence receipt. |
-| `partial_schema_blocked_direct_identity` | 15 | Resolve the exact direct identity or record the source-only/no-recipient reason. |
+| `partial_schema_blocked_unmatched` | 472 | Historical pre-loss/tie label. Current gate is an exact player/team bridge and readback; schema support is already closed. |
+| `partial_schema_blocked_conflicts` | 214 | Historical pre-loss/tie label. Current gates are exact player/team bridge plus explicit source-precedence receipt. |
+| `partial_schema_blocked_direct_identity` | 15 | Historical pre-loss/tie label. Current gate is direct identity; 12 also need source-precedence adjudication. |
 | `cache_conflict_preserved` | 7 | Record an explicit precedence decision and fresh cell-level readback. |
 | `source_only_team_signal_missing_player_team_bridge` | 2 | Build a source-roster-to-existing-player bridge or retain as source-only. |
 | `unmatched_cache_key` | 1 | Separate already-filled recipients from true source-only player/team records and preserve the residual count. |
+
+The machine-derived **current** admission queue is simpler than those
+historical labels: 478 artifacts require only an exact player/team bridge, and
+233 require that bridge plus explicit source-precedence adjudication. Of the
+711 open rows, 701 carry pre-schema loss/tie evidence, but every one is now
+marked `closed_schema_supported`; no open row may ask for a loss/tie schema
+migration again.
 
 The raw source artifact `8952555354` is the last row above. Its current
 receipt proves 26,936 existing-player fills from 256 source candidates are in
