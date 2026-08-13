@@ -143,6 +143,20 @@ The final promotion remains NULL-fill-only and must use
 fresh-cache readback. No name matching, new columns, new cache, or new lineage
 is permitted.
 
+**Current correction, recorded 2026-08-13.** The read-only target receipt
+[31672174378](https://github.com/jeleff1000/league-history-workers/actions/runs/31672174378)
+proved that this final native-ID join is not currently executable: all
+2,730,186 cache player rows without cache-side team identity also lack a
+populated `fleaflicker_player_id`; the corresponding source-signal overlap is
+4,197,680 rows and likewise has zero populated native IDs. It produced zero
+candidate team-weeks and made no cache mutation. Therefore `FetchLeagueRosters`
+must first be used only to form a strict source roster identity bridge to an
+existing canonical `NFL_player_id` (including the existing DEF franchise map).
+Only exact one-to-one source-player-to-NFL-player results may then populate the
+already-existing `fleaflicker_player_id` cells and fan out team signals. Any
+ambiguous player, missing canonical recipient, or unresolved DEF identity stays
+blocked with a receipt; display-name or manager fallbacks remain prohibited.
+
 An Action completion by itself never changes the frozen-artifact disposition.
 Only a current approved-cache readback may set `cache_verified` or add a
 `cache_recovery_receipt`.
