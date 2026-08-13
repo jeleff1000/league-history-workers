@@ -26,6 +26,7 @@ on:
           - rb_2025_week1_residual_shapes
           - rb_2025_bucket_inventory
           - rb_2025_bucket
+          - cache_schedule_lookup_probe
           - local_cache_export
       bucket:
         description: One deterministic balanced 2025 RB bucket (1-15)
@@ -93,8 +94,40 @@ jobs:
             WHERE week BETWEEN 1 AND 18
           """)
           mode = os.environ['PILOT_MODE']
-          if mode not in {'cmc_week1', 'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_weekly', 'all_2025_weekly', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'rb_2025_bucket_inventory', 'rb_2025_bucket', 'local_cache_export'}:
+          if mode not in {'cmc_week1', 'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_weekly', 'all_2025_weekly', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'rb_2025_bucket_inventory', 'rb_2025_bucket', 'cache_schedule_lookup_probe', 'local_cache_export'}:
             raise ValueError(f'unsupported pilot mode: {mode}')
+          if mode == 'cache_schedule_lookup_probe':
+              required = {
+                  'player_active_week': ['NFL_player_id', 'year', 'week'],
+                  'player_team_game_week': ['NFL_player_id', 'year', 'week'],
+              }
+              probe = {}
+              for table, expected_columns in required.items():
+                  columns = [row[0] for row in c.execute(
+                      f'DESCRIBE lake.public.{table}'
+                  ).fetchall()]
+                  missing = sorted(set(expected_columns) - set(columns))
+                  if missing:
+                      raise RuntimeError(f'{table} missing required columns: {missing}; actual={columns}')
+                  probe[table] = {
+                      'columns': columns,
+                      '2025_regular_rows': c.execute(
+                          f'SELECT COUNT(*) FROM lake.public.{table} '
+                          'WHERE CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER) BETWEEN 1 AND 18'
+                      ).fetchone()[0],
+                      'cmc_2025_regular_rows': c.execute(
+                          f"SELECT COUNT(*) FROM lake.public.{table} "
+                          "WHERE CAST(NFL_player_id AS VARCHAR)='00-0033280' "
+                          'AND CAST(year AS INTEGER)=2025 AND CAST(week AS INTEGER) BETWEEN 1 AND 18'
+                      ).fetchone()[0],
+                  }
+              receipt = {'mode': mode, 'cache_key': os.environ['CACHE_KEY'], 'lookup_probe': probe}
+              print(receipt)
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                  summary.write('## Immutable cache schedule lookup gate\n')
+                  summary.write(f'- Receipt: `{receipt}`\n')
+                  summary.write('- Cache-only schema/count probe; no cache save, aggregation output, Fly access, API request, artifact, or publish step.\n')
+              raise SystemExit(0)
           if mode == 'local_cache_export':
               receipt = {
                 'mode': mode,
