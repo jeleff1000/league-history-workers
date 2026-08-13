@@ -1,0 +1,221 @@
+name: Promote exact loss-tie candidates in approved cache
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Must equal APPLY_EXACT_LOSS_TIE_CANDIDATES
+        required: true
+        default: ''
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: canonical-research-cache-replacement
+  cancel-in-progress: false
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+  SLEEPER_RUN: '31700949651'
+  SPARSE_RUN: '31700945044'
+  RESIDUAL_RUN: '31704773378'
+  SLEEPER_REPORT_SHA: ab37df1d869134ec09d337d9677db28e656bfbd8233d111b8e0c19de6d2f9072
+  SLEEPER_DELTA_SHA: 16f98767a9fc083d6859ab4bac51e5c989a5659fab70723c4d2a1366ef29197b
+  SPARSE_REPORT_SHA: 1be8ec0705530683c85caa69f91372746c3748a1a62c2f197045a749c18d71c7
+  SPARSE_DELTA_SHA: 4b36bca8d60176f022403b5aea0e4a03526d6145018bf10c0c1bc58f425b7dac
+  RESIDUAL_REPORT_SHA: cc245942cea115c021126173cc8e3c626c486ce86a3435518fe4be0849541823
+  RESIDUAL_DELTA_SHA: 6f95304ebc034ded2a1dfb3ebe385b8d1d82d8afa972f0dc89c70966341c0cd8
+  EXPECTED_RAW_ROWS: '7129676'
+  EXPECTED_UNIQUE_ROWS: '7043882'
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pytest==8.3.5
+      - run: >-
+          python -m pytest -q
+          scripts/research_cohorts/test_apply_team_signal_delta_in_place.py
+          scripts/research_cohorts/test_verify_exact_team_null_candidate_contract.py
+          scripts/research_cohorts/test_combine_exact_team_null_candidates.py
+
+  apply:
+    needs: tests
+    if: ${{ inputs.confirm == 'APPLY_EXACT_LOSS_TIE_CANDIDATES' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Record pre-state
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import duckdb,json
+          from pathlib import Path
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          Path('prestate.json').write_text(json.dumps({'schema':[r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()],'player_rows':int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])},indent=2)+'\n')
+          con.close()
+          PY
+      - name: Download and pin three read-only candidates
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p candidate/sleeper candidate/sparse candidate/residual
+          gh run download "$SLEEPER_RUN" --repo "$GITHUB_REPOSITORY" --name "research-raw-signal-cache-readback-$SLEEPER_RUN" --dir candidate/sleeper
+          gh run download "$SPARSE_RUN" --repo "$GITHUB_REPOSITORY" --name "research-raw-signal-cache-readback-$SPARSE_RUN" --dir candidate/sparse
+          gh run download "$RESIDUAL_RUN" --repo "$GITHUB_REPOSITORY" --name "research-raw-signal-cache-readback-$RESIDUAL_RUN" --dir candidate/residual
+          test "$(sha256sum "$(find candidate/sleeper -name team_signal_candidate_report.json -print -quit)" | awk '{print $1}')" = "$SLEEPER_REPORT_SHA"
+          test "$(sha256sum "$(find candidate/sleeper -name team_promotable_player_delta.parquet -print -quit)" | awk '{print $1}')" = "$SLEEPER_DELTA_SHA"
+          test "$(sha256sum "$(find candidate/sparse -name team_signal_candidate_report.json -print -quit)" | awk '{print $1}')" = "$SPARSE_REPORT_SHA"
+          test "$(sha256sum "$(find candidate/sparse -name team_promotable_player_delta.parquet -print -quit)" | awk '{print $1}')" = "$SPARSE_DELTA_SHA"
+          test "$(sha256sum "$(find candidate/residual -name team_signal_candidate_report.json -print -quit)" | awk '{print $1}')" = "$RESIDUAL_REPORT_SHA"
+          test "$(sha256sum "$(find candidate/residual -name team_promotable_player_delta.parquet -print -quit)" | awk '{print $1}')" = "$RESIDUAL_DELTA_SHA"
+      - name: Verify candidates and build deduplicated delta
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/verify_exact_team_null_candidate_contract.py --candidate-root candidate/sleeper --out sleeper_contract.json
+          python scripts/research_cohorts/verify_exact_team_null_candidate_contract.py --candidate-root candidate/sparse --out sparse_contract.json
+          python scripts/research_cohorts/verify_exact_team_null_candidate_contract.py --candidate-root candidate/residual --out residual_contract.json
+          python scripts/research_cohorts/combine_exact_team_null_candidates.py             --candidate-root candidate/sleeper             --candidate-root candidate/sparse             --candidate-root candidate/residual             --out-delta combined_delta.parquet             --out-receipt candidate_contract.json
+          python - <<'PY'
+          import json,os
+          c=json.load(open('candidate_contract.json'))
+          if c['raw_rows'] != int(os.environ['EXPECTED_RAW_ROWS']) or c['unique_rows'] != int(os.environ['EXPECTED_UNIQUE_ROWS']) or c['conflicting_duplicate_keys'] != 0:
+              raise SystemExit(c)
+          PY
+      - name: Apply only existing-player loss/tie NULL cells
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/apply_team_signal_delta_in_place.py --base research_public_lake/corpus_snapshot.duckdb --delta combined_delta.parquet --report apply_report.json
+      - name: Fail fast before same-key cache replacement
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb,hashlib,json,os
+          from pathlib import Path
+          before=json.load(open('prestate.json')); contract=json.load(open('candidate_contract.json')); report=json.load(open('apply_report.json'))
+          expected=int(os.environ['EXPECTED_UNIQUE_ROWS'])
+          fields={k:int(report['improvements_by_field'].get(k,0)) for k in ('win','loss','tie','team_points','is_playoffs','champion','final_playoff_seed','made_playoffs')}
+          required={'win':0,'loss':expected,'tie':expected,'team_points':0,'is_playoffs':0,'champion':0,'final_playoff_seed':0,'made_playoffs':0}
+          if fields != required or report.get('schema_unchanged') is not True or report.get('ops_untouched') is not True or report.get('new_lineage') is not False or int(report.get('inserted_rows',-1)) != 0 or int(report.get('matched_rows',-1)) != expected:
+              raise SystemExit(json.dumps({'fields':fields,'report':report},sort_keys=True))
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb',read_only=True)
+          if [r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()] != before['schema'] or int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]) != before['player_rows']:
+              raise SystemExit('schema or player row count changed')
+          con.close()
+          h=hashlib.sha256()
+          with open('research_public_lake/ops_cache.duckdb','rb') as f:
+              for b in iter(lambda:f.read(1048576),b''): h.update(b)
+          if h.hexdigest()!=open('ops_before.sha256').read().split()[0]: raise SystemExit('ops cache changed')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-loss-tie-promotion-evidence-${{ github.run_id }}
+          path: |
+            prestate.json
+            ops_before.sha256
+            sleeper_contract.json
+            sparse_contract.json
+            residual_contract.json
+            candidate_contract.json
+            combined_delta.parquet
+            apply_report.json
+          retention-days: 90
+          compression-level: 0
+      - name: Replace exactly one approved cache object under its identical key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/caches?key=$CANONICAL_CACHE_KEY&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/caches/${ids[0]}"
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+
+  readback:
+    needs: apply
+    if: ${{ inputs.confirm == 'APPLY_EXACT_LOSS_TIE_CANDIDATES' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: exact-loss-tie-promotion-evidence-${{ github.run_id }}
+          path: evidence
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - name: Fresh restore readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb,hashlib,json,os
+          from pathlib import Path
+          before=json.load(open('evidence/prestate.json')); expected=int(os.environ['EXPECTED_UNIQUE_ROWS'])
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb',read_only=True)
+          dpath=str(Path('evidence/combined_delta.parquet').resolve()).replace("'","''")
+          con.execute(f"CREATE TEMP VIEW d AS SELECT * FROM read_parquet('{dpath}')")
+          join='''d.db_name=p.db_name AND CAST(d.year AS INTEGER)=CAST(p.year AS INTEGER) AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER) AND d.NFL_player_id IS NOT DISTINCT FROM p.NFL_player_id AND d.platform IS NOT DISTINCT FROM p.platform AND d.manager IS NOT DISTINCT FROM p.manager AND (p.team_key IS NULL OR d.team_key=p.team_key) AND (p.team_name IS NULL OR d.team_name=p.team_name)'''
+          matched=int(con.execute(f'SELECT COUNT(*) FROM public.player_fantasy p JOIN d ON {join}').fetchone()[0])
+          unmatched=int(con.execute(f'SELECT COUNT(*) FROM d WHERE NOT EXISTS (SELECT 1 FROM public.player_fantasy p WHERE {join})').fetchone()[0])
+          loss_null=int(con.execute(f'SELECT COUNT(*) FROM public.player_fantasy p JOIN d ON {join} WHERE p.loss IS NULL').fetchone()[0])
+          tie_null=int(con.execute(f'SELECT COUNT(*) FROM public.player_fantasy p JOIN d ON {join} WHERE p.tie IS NULL').fetchone()[0])
+          schema=[r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()]; rows=int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]); con.close()
+          h=hashlib.sha256()
+          with open('research_public_lake/ops_cache.duckdb','rb') as f:
+              for b in iter(lambda:f.read(1048576),b''): h.update(b)
+          receipt={'matched_player_rows':matched,'unmatched_candidate_keys':unmatched,'loss_remaining_null_source_cells':loss_null,'tie_remaining_null_source_cells':tie_null,'schema_unchanged':schema==before['schema'],'player_rows_unchanged':rows==before['player_rows'],'ops_unchanged':h.hexdigest()==open('evidence/ops_before.sha256').read().split()[0],'fresh_restore':True,'new_lineage':False}
+          if not (matched==expected and unmatched==0 and loss_null==0 and tie_null==0 and receipt['schema_unchanged'] and receipt['player_rows_unchanged'] and receipt['ops_unchanged']): raise SystemExit(json.dumps(receipt,sort_keys=True))
+          Path('exact_loss_tie_readback.json').write_text(json.dumps(receipt,indent=2)+'\n'); print(json.dumps(receipt,sort_keys=True))
+          PY
+      - name: Verify exactly one approved cache object remains
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/caches?key=$CANONICAL_CACHE_KEY&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          printf '%s\n' "${ids[0]}" > canonical_cache_id.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-loss-tie-promotion-readback-${{ github.run_id }}
+          path: |
+            exact_loss_tie_readback.json
+            canonical_cache_id.txt
+          retention-days: 90
