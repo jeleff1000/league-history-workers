@@ -123,6 +123,8 @@ path. The following retry proved that Ubuntu's `unzip` rejects the GitHub
 archive layout as an overlap/zip-bomb; Python's standard `zipfile.ZipFile`
 reads the same archive and extracts only the two required Parquet members.
 That attempt likewise stopped before candidate construction or cache mutation.
+The batch test job now renders this exact download block and runs `bash -n`
+before the apply job is even eligible to restore the cache.
 The retry is still allowed to mutate only the already-approved
 same-key cache after its test/preflight gate proves the selected artifact list
 exactly matches the 223 retained shards. Its fresh restore/readback receipt is
