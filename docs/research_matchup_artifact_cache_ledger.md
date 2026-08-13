@@ -104,12 +104,18 @@ set is nevertheless exact and recorded here before promotion:
 | Incomplete cancelled diagnostics | `32, 156` | Each emitted only `cache_before.json` and `ops_before.sha256`, with no extraction, bridge, signal, or candidate-delta file. | Excluded; must be rerun separately. |
 | Cache-restore failures | `190, 191, 192, 193, 194, 195` | Each failed in under 20 seconds at `fail-on-cache-miss`, before recovery code ran, and emitted no artifact. | Excluded; no candidate exists to promote. |
 
-The guarded promotion is Actions
-[31674545745](https://github.com/jeleff1000/league-history-workers/actions/runs/31674545745).
-It is allowed to mutate only the already-approved same-key cache after its
-test/preflight gate proves the selected artifact list exactly matches the 223
-retained shards. Its fresh restore/readback receipt is required before this
-checkpoint, any affected artifact, or any player cell is marked complete.
+The first guarded promotion,
+[31674545745](https://github.com/jeleff1000/league-history-workers/actions/runs/31674545745),
+failed safely at preflight before candidate construction or cache mutation: its
+artifact filter mistakenly required a retained artifact for every explicit
+exclusion, including the six shards that failed before any artifact existed.
+The corrected guard permits an explicit exclusion to have zero or one artifact
+(never more than one), and emits a receipt listing zero-artifact exclusions.
+The retry is still allowed to mutate only the already-approved
+same-key cache after its test/preflight gate proves the selected artifact list
+exactly matches the 223 retained shards. Its fresh restore/readback receipt is
+required before this checkpoint, any affected artifact, or any player cell is
+marked complete.
 
 ## Active work: not yet applied
 
