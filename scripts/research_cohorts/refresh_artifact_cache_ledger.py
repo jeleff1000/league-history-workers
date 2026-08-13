@@ -48,7 +48,7 @@ def refresh(
     unknown_record_types = [
         row.get("record_type", "") for row in ledger_rows
         if row.get("record_type") not in {
-            "artifact_inventory", "cache_recovery_receipt"
+            "artifact_inventory", "artifact_admission", "cache_recovery_receipt"
         }
     ]
     if unknown_record_types:

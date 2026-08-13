@@ -132,3 +132,43 @@ def test_refresh_ignores_supplemental_cache_recovery_receipts_when_selecting_raw
     rows = list(csv.DictReader(out.open(newline="", encoding="utf-8")))
     assert rows[1]["artifact_id"] == "mfl-74-row-recovery-31624673691"
     assert rows[1]["receipt_run_id"] == "old-receipt"
+
+
+def test_refresh_preserves_artifact_admissions_without_rejecting_the_ledger(tmp_path):
+    ledger = tmp_path / "ledger.csv"
+    with ledger.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIELDS)
+        writer.writeheader()
+        writer.writerow(_ledger_row())
+        admission = _ledger_row()
+        admission.update({
+            "record_type": "artifact_admission",
+            "artifact_id": "admission-7",
+            "final_status": "cache_verified",
+        })
+        writer.writerow(admission)
+    selected = tmp_path / "selected.json"
+    selected.write_text(json.dumps([{"artifact_id": 7}]))
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text(json.dumps({
+        "artifact_current_state": [{
+            "artifact_id": 7,
+            "source_rows": 40,
+            "cache_equal_cells": 81,
+            "safe_null_candidates": 0,
+            "cache_conflict_cells": 3,
+            "ambiguous_null_cells": 2,
+        }],
+    }))
+    out = tmp_path / "out.csv"
+
+    assert refresh(
+        ledger_path=ledger,
+        receipt_path=receipt,
+        selected_path=selected,
+        receipt_run_id="new-receipt",
+        out_path=out,
+    ) == {"ledger_rows": 2, "updated_rows": 1}
+    rows = list(csv.DictReader(out.open(newline="", encoding="utf-8")))
+    assert rows[1]["record_type"] == "artifact_admission"
+    assert rows[1]["artifact_id"] == "admission-7"
