@@ -1027,6 +1027,26 @@ It is a supplemental `cache_recovery_receipt`; it does not alter the frozen
 9,479-artifact inventory or falsely close the still-open source-only team
 identities.
 
+## Direct MFL player crosswalk bridge — independently promoted
+
+The retained MFL roster evidence exposed 98 direct MFL-to-NFL mappings after
+collapsing nine identical repeated source records (zero conflicting native
+MFL keys). The resulting franchise-team-to-player bridge contributed 31
+otherwise-unavailable player recipients. A read-only comparison found 14
+safe existing-player NULL-fill rows; its 49 supported cells were seven `win`,
+fourteen `loss`, fourteen `tie`, seven `team_points`, and seven `is_playoffs`.
+
+The guarded promotion [31740148139](https://github.com/jeleff1000/league-history-workers/actions/runs/31740148139)
+applied exactly those 49 cells. Its fresh independent restore read every
+authorized cell back with zero source disagreements. It inserted no rows and
+proved the player schema, player-row count, ops cache, and approved single
+cache lineage were unchanged. The receipt SHA-256 is
+`5d7c6c9753df405c1d31183279d2dc74ec4bd1c592b359285af67cb6770b202f`.
+
+This is a supplemental receipt only: it closes this verified improvement, not
+the broader source-artifact families that still have separately ledgered
+identity gaps or precedence decisions.
+
 | Family | Artifacts | Current state | Required action |
 | --- | ---: | ---: | --- |
 | `sleeper-missing-outcome-*` | 56 | Direct manager-week fan-out receipt complete: 24,382,006 supported cells equal cache; zero supported null fills; 90 non-null conflicts; 171,648 source cells identity-unmatched; 466,458 loss/tie cells outside the prior schema. | Resolve/close residual source-only identities and adjudicate conflicts; no null-cell promotion for this family. |
