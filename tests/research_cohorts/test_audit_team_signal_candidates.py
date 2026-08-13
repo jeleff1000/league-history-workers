@@ -210,3 +210,77 @@ def test_candidate_audit_blocks_player_bridge_when_cache_player_week_is_duplicat
     assert emitted == 0
     report = json.loads((out / "team_signal_candidate_report.json").read_text(encoding="utf-8"))
     assert report["bridge_blocked_duplicate_cache_player_weeks"] == 1
+
+
+def test_exact_mfl_duplicate_builder_pairs_matching_roster_copies_and_ignores_bye_outcome(
+    tmp_path: Path,
+) -> None:
+    """A synthetic MFL BYE row must not replace a real opponent's loss."""
+    from scripts.research_cohorts.build_exact_mfl_duplicate_bridge_candidate import build
+
+    base = tmp_path / "base.duckdb"
+    _base_cache(base)
+    con = duckdb.connect(str(base))
+    con.execute("""
+        UPDATE public.player_fantasy
+        SET manager=NULL, team_key=NULL, team_name=NULL, team_points=NULL,
+            win=NULL
+    """)
+    con.execute("INSERT INTO public.player_fantasy SELECT * FROM public.player_fantasy")
+    con.close()
+
+    memberships = tmp_path / "memberships.parquet"
+    _write_parquet(memberships, [
+        {
+            "db_name": "league", "year": 2024, "week": 15,
+            "source_year": 2024, "source_franchise_id": "0001",
+            "source_manager": "Alpha", "mfl_player_id": "m1",
+            "is_started": 1, "fantasy_points": 10.0,
+        },
+        {
+            "db_name": "league", "year": 2024, "week": 15,
+            "source_year": 2024, "source_franchise_id": "0002",
+            "source_manager": "Bravo", "mfl_player_id": "m2",
+            "is_started": 1, "fantasy_points": 10.0,
+        },
+    ])
+    crosswalk = tmp_path / "crosswalk.parquet"
+    _write_parquet(crosswalk, [
+        {"source_year": 2024, "mfl_player_id": "m1", "NFL_player_id": "p1"},
+        {"source_year": 2024, "mfl_player_id": "m2", "NFL_player_id": "p1"},
+    ])
+    source = tmp_path / "source.parquet"
+    _write_parquet(source, [
+        {
+            "db_name": "league", "year": 2024, "week": 15,
+            "team_key": "0001", "manager": "Alpha", "team_name": "Alpha Team",
+            "opponent_franchise_id": "mfl_team_1_0002", "win": 0, "loss": 1, "tie": 0,
+            "team_points": 90.0, "is_playoffs": 1,
+        },
+        {
+            "db_name": "league", "year": 2024, "week": 15,
+            "team_key": "0001", "manager": "Alpha", "team_name": "Alpha Team",
+            "opponent_franchise_id": "mfl_team_1_BYE", "win": 1, "loss": 0, "tie": 0,
+            "team_points": 90.0, "is_playoffs": 1,
+        },
+        {
+            "db_name": "league", "year": 2024, "week": 15,
+            "team_key": "0002", "manager": "Bravo", "team_name": "Bravo Team",
+            "opponent_franchise_id": "mfl_team_1_0001", "win": 1, "loss": 0, "tie": 0,
+            "team_points": 100.0, "is_playoffs": 1,
+        },
+    ])
+
+    out = tmp_path / "out"
+    build(base=base, memberships=[memberships], crosswalks=[crosswalk], source=source, out=out)
+
+    con = duckdb.connect()
+    rows = con.execute("""
+        SELECT source_team_key, source_win, source_loss, source_team_points, source_manager
+        FROM read_parquet(?) ORDER BY source_team_key
+    """, [str(out / "mfl_exact_duplicate_candidate.parquet")]).fetchall()
+    con.close()
+    assert rows == [
+        ("0001", 0, 1, 90.0, "Alpha"),
+        ("0002", 1, 0, 100.0, "Bravo"),
+    ]

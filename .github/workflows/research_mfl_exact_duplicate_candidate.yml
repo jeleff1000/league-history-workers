@@ -1,0 +1,96 @@
+name: Research MFL Exact Duplicate Candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: research-mfl-exact-duplicate-candidate
+  cancel-in-progress: false
+
+jobs:
+  candidate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.4.4 pandas==2.2.3 pyarrow==15.0.2
+      - name: Restore the one approved cache read-only
+        uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+          fail-on-cache-miss: true
+      - name: Record immutable base proof
+        run: |
+          sha256sum research_public_lake/corpus_snapshot.duckdb | tee before_cache.sha256
+          python - <<'PY'
+          import duckdb, hashlib
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          cols=[row[0] for row in con.execute('DESCRIBE public.player_fantasy').fetchall()]
+          con.close()
+          open('before_schema.sha256','w').write(hashlib.sha256('\n'.join(cols).encode()).hexdigest()+'\n')
+          PY
+      - name: Download five retained MFL roster-bridge artifacts
+        uses: actions/download-artifact@v5
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 31663728938
+          artifact-ids: 9167527400,9168283217,9168649646,9168984613,9169361481
+          path: inputs/bridge
+          merge-multiple: false
+      - name: Download exact source proof
+        uses: actions/download-artifact@v5
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 31725578852
+          name: research-mfl-exact-cache-grain-source-probe-31725578852
+          path: inputs/source
+      - name: Build read-only exact candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t memberships < <(find inputs/bridge -name memberships.parquet | sort)
+          mapfile -t crosswalks < <(find inputs/bridge -name crosswalk.parquet | sort)
+          source_file=$(find inputs/source -name mfl_exact_cache_grain_source_probe.parquet -print -quit)
+          test "${#memberships[@]}" -eq 5
+          test "${#crosswalks[@]}" -eq 5
+          test -n "$source_file"
+          args=(--base research_public_lake/corpus_snapshot.duckdb --source "$source_file" --out out)
+          for file in "${memberships[@]}"; do args+=(--memberships "$file"); done
+          for file in "${crosswalks[@]}"; do args+=(--crosswalk "$file"); done
+          python scripts/research_cohorts/build_exact_mfl_duplicate_bridge_candidate.py "${args[@]}"
+      - name: Prove candidate did not touch cache or schema
+        run: |
+          sha256sum research_public_lake/corpus_snapshot.duckdb | tee after_cache.sha256
+          cmp before_cache.sha256 after_cache.sha256
+          python - <<'PY'
+          import duckdb, hashlib
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          cols=[row[0] for row in con.execute('DESCRIBE public.player_fantasy').fetchall()]
+          con.close()
+          after=hashlib.sha256('\n'.join(cols).encode()).hexdigest()+'\n'
+          before=open('before_schema.sha256').read()
+          if after != before:
+              raise SystemExit('canonical player schema changed in a read-only candidate run')
+          open('after_schema.sha256','w').write(after)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-mfl-exact-duplicate-candidate-${{ github.run_id }}
+          path: |
+            out/
+            before_cache.sha256
+            after_cache.sha256
+            before_schema.sha256
+            after_schema.sha256
+          retention-days: 90
+          compression-level: 0
