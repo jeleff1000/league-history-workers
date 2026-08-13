@@ -33,7 +33,15 @@ def combine(roots: list[Path], out_delta: Path, out_receipt: Path) -> dict[str, 
                 "SELECT " + ", ".join(KEY_COLUMNS) + ", source_loss, source_tie "
                 f"FROM read_parquet('{path}')"
             )
-        con.execute("CREATE TEMP VIEW all_candidates AS " + " UNION ALL ".join(selects))
+        con.execute("CREATE TEMP VIEW all_candidates_raw AS " + " UNION ALL ".join(selects))
+        raw_rows_total = int(con.execute("SELECT COUNT(*) FROM all_candidates_raw").fetchone()[0])
+        blocked_null_nfl_player_id_rows = int(con.execute(
+            "SELECT COUNT(*) FROM all_candidates_raw WHERE NFL_player_id IS NULL"
+        ).fetchone()[0])
+        con.execute("""
+            CREATE TEMP VIEW all_candidates AS
+            SELECT * FROM all_candidates_raw WHERE NFL_player_id IS NOT NULL
+        """)
         key = ", ".join('"' + column + '"' for column in KEY_COLUMNS)
         conflicts = int(con.execute(f"""
             SELECT COUNT(*) FROM (
@@ -65,6 +73,8 @@ def combine(roots: list[Path], out_delta: Path, out_receipt: Path) -> dict[str, 
     result = {
         "candidate_bundles": len(roots),
         "raw_rows": raw_rows,
+        "raw_rows_before_identity_quarantine": raw_rows_total,
+        "blocked_null_nfl_player_id_rows": blocked_null_nfl_player_id_rows,
         "unique_rows": unique_rows,
         "duplicates_collapsed": raw_rows - unique_rows,
         "conflicting_duplicate_keys": conflicts,
