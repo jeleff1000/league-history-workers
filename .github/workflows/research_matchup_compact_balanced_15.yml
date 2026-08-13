@@ -133,7 +133,8 @@ jobs:
           assert tables >= {'research_matchup_compact_weekly','research_matchup_compact_season','research_matchup_compact_career'},tables
           dupe=c.execute("SELECT COUNT(*) FROM (SELECT NFL_player_id,year,week,position FROM research_matchup_compact_weekly GROUP BY 1,2,3,4 HAVING COUNT(*)<>1)").fetchone()[0]
           cmc=None
-          if 2025 <= int('${{ inputs.year_end }}') and 2025 >= int('${{ inputs.year_start }}'):
+          positions={p.strip().upper() for p in '${{ inputs.positions }}'.split(',') if p.strip()}
+          if 2025 <= int('${{ inputs.year_end }}') and 2025 >= int('${{ inputs.year_start }}') and (not positions or 'RB' in positions):
               cmc=c.execute("SELECT cell.eligible_leagues,cell.rostered_leagues,cell.started_leagues,cell.valid_started_outcomes,cell.win_equivalent FROM research_matchup_compact_weekly,UNNEST(cohort_cells) u(cell) WHERE NFL_player_id='00-0033280' AND year=2025 AND week=1 AND position='RB' AND cell.q_teams='ALL' AND cell.q_roster='ALL' AND cell.q_scoring='ALL' AND cell.q_pass_td='ALL' AND cell.q_dynasty='ALL' AND cell.q_best_ball='ALL'").fetchone()
               assert cmc==(9837,9766,9600,9579,6019.0),cmc
           assert dupe==0,dupe
