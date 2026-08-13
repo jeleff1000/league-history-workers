@@ -26,6 +26,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
+      lane_count: ${{ steps.plan.outputs.lane_count }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5
@@ -46,6 +47,7 @@ jobs:
         run: |
           python code/scripts/research_cohorts/plan_balanced_matchup_tasks.py --snapshot research_public_lake/corpus_snapshot.duckdb --ops-cache research_public_lake/ops_cache.duckdb --year-start '${{ inputs.year_start }}' --year-end '${{ inputs.year_end }}' --positions '${{ inputs.positions }}' --runners '${{ inputs.runners }}' --output matrix.json
           echo "matrix=$(tr -d '\n' < matrix.json)" >> "$GITHUB_OUTPUT"
+          echo "lane_count=$(python -c \"import json; print(len(json.load(open('matrix.json'))['include']))\")" >> "$GITHUB_OUTPUT"
 
   build:
     needs: plan
@@ -82,7 +84,9 @@ jobs:
           from pathlib import Path
           for task in json.loads(os.environ['TASKS']):
               name=f"{task['task_id']}.duckdb"
-              cmd=[sys.executable,'code/scripts/research_cohorts/build_compact_matchup_bundle.py','--snapshot','research_public_lake/corpus_snapshot.duckdb','--ops-cache','research_public_lake/ops_cache.duckdb','--output',str(Path('out/tasks')/name),'--year',str(task['year']),'--position',task['position'],'--player-ids-json',json.dumps(task['player_ids'])]
+              cmd=[sys.executable,'code/scripts/research_cohorts/build_compact_matchup_bundle.py','--snapshot','research_public_lake/corpus_snapshot.duckdb','--ops-cache','research_public_lake/ops_cache.duckdb','--output',str(Path('out/tasks')/name),'--year',str(task['year']),'--position',task['position']]
+              if task.get('player_ids'):
+                  cmd.extend(['--player-ids-json',json.dumps(task['player_ids'])])
               print(json.dumps(task),flush=True)
               subprocess.run(cmd,check=True)
           PY
@@ -119,7 +123,7 @@ jobs:
       - name: Merge compact lanes and fail fast on golden output
         run: |
           mapfile -t LANES < <(find lanes -name lane.duckdb | sort)
-          test "${#LANES[@]}" -eq ${{ inputs.runners }}
+          test "${#LANES[@]}" -eq ${{ needs.plan.outputs.lane_count }}
           python code/scripts/research_cohorts/merge_compact_matchup_parts.py --parts "${LANES[@]}" --output research_matchup_compact.duckdb
           python - <<'PY'
           import duckdb,json
