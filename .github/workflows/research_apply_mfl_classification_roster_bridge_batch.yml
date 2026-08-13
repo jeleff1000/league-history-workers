@@ -1,0 +1,276 @@
+name: Apply complete MFL classification roster bridge batch
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Must equal APPLY_BATCH_MFL_CLASSIFICATION_ROSTER_BRIDGE.
+        required: true
+        default: ''
+      candidate_run_id:
+        description: Completed read-only residual MFL classification shard run.
+        required: true
+        default: '31663728938'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: canonical-research-cache-replacement
+  cancel-in-progress: false
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pandas==2.2.3 pytest==8.3.5
+      - run: >-
+          python -m pytest -q
+          scripts/research_cohorts/test_apply_team_signal_delta_in_place.py
+          tests/research_cohorts/test_audit_team_signal_candidates.py
+          tests/research_cohorts/test_research_apply_mfl_classification_roster_bridge_batch.py
+
+  apply:
+    needs: tests
+    if: ${{ inputs.confirm == 'APPLY_BATCH_MFL_CLASSIFICATION_ROSTER_BRIDGE' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Record immutable approved-cache pre-state
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          Path('cache_before.json').write_text(json.dumps({
+              'schema':con.execute('DESCRIBE public.player_fantasy').fetchall(),
+              'player_rows':int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]),
+          }, indent=2)+'\n')
+          con.close()
+          PY
+      - name: Download every completed shard artifact and reject an incomplete candidate run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(gh run view "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --json status --jq .status)" = completed
+          mkdir -p raw candidate_input
+          gh run view "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --json jobs --jq '.jobs[] | select(.name | startswith("rescue (")) | [.name,.conclusion] | @tsv' > rescue_jobs.tsv
+          test -s rescue_jobs.tsv
+          if awk -F '\t' '$2=="cancelled" || $2=="skipped" || $2=="" {exit 1}' rescue_jobs.tsv; then :; else
+            echo 'candidate run has incomplete rescue jobs' >&2; exit 1
+          fi
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired == false and (.name | startswith("research-mfl-classification-roster-bridge-shard-"))) | .name' \
+            | sort -u > artifact_names.txt
+          test -s artifact_names.txt
+          test "$(wc -l < rescue_jobs.tsv)" -eq "$(wc -l < artifact_names.txt)"
+          while IFS= read -r name; do
+            mkdir -p "raw/$name"
+            gh run download "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$name" --dir "raw/$name"
+          done < artifact_names.txt
+          test "$(find raw -name team_signals.parquet | wc -l)" -eq "$(wc -l < artifact_names.txt)"
+          test "$(find raw -name player_bridge.parquet | wc -l)" -eq "$(wc -l < artifact_names.txt)"
+          i=0
+          while IFS= read -r path; do cp "$path" "candidate_input/team_signals_${i}.parquet"; i=$((i+1)); done < <(find raw -name team_signals.parquet -print | sort)
+          i=0
+          while IFS= read -r path; do cp "$path" "candidate_input/player_bridge_${i}.parquet"; i=$((i+1)); done < <(find raw -name player_bridge.parquet -print | sort)
+      - name: Rebuild exact NULL-fill and direct-MFL replacement deltas from retained evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/audit_team_signal_candidates.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --candidates candidate_input --out candidate \
+            --emit-direct-mfl-win-replacements
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          normal=Path('candidate/team_promotable_player_delta.parquet')
+          replacement=Path('candidate/team_direct_mfl_win_replacement_delta.parquet')
+          con=duckdb.connect()
+          con.execute("COPY (SELECT * FROM read_parquet([?,?], union_by_name=true)) TO 'candidate/combined_delta.parquet' (FORMAT PARQUET)",[str(normal),str(replacement)])
+          report=json.loads(Path('candidate/team_signal_candidate_report.json').read_text())
+          positive={k:int(v) for k,v in report['positive_mismatches_not_auto_promoted'].items()}
+          if any(value for key,value in positive.items() if key!='win'):
+              raise SystemExit(f'non-win source precedence conflict remains: {positive}')
+          replacement_rows=int(con.execute('SELECT COUNT(*) FROM read_parquet(?)',[str(replacement)]).fetchone()[0])
+          if replacement_rows != int(report['direct_mfl_win_replacement_rows']) or replacement_rows != positive['win']:
+              raise SystemExit(f'direct win replacement receipt mismatch: {replacement_rows}; {report}')
+          non_mfl=int(con.execute("SELECT COUNT(*) FROM read_parquet(?) WHERE LOWER(TRIM(CAST(platform AS VARCHAR)))<>'mfl'",[str(replacement)]).fetchone()[0])
+          if non_mfl:
+              raise SystemExit(f'non-MFL direct replacement candidates: {non_mfl}')
+          summary={
+              'candidate_artifacts':len(Path('artifact_names.txt').read_text().splitlines()),
+              'normal_delta_rows':int(con.execute('SELECT COUNT(*) FROM read_parquet(?)',[str(normal)]).fetchone()[0]),
+              'direct_mfl_win_replacement_rows':replacement_rows,
+              'combined_delta_rows':int(con.execute('SELECT COUNT(*) FROM read_parquet(?)',[str(Path('candidate/combined_delta.parquet'))]).fetchone()[0]),
+              'positive_mismatches':positive,
+              'read_only':report['read_only'], 'cache_mutated':report['cache_mutated'],
+              'new_lineage':report['new_lineage'], 'canonical_schema_unchanged':report['canonical_schema_unchanged'],
+          }
+          con.close()
+          required={'read_only':True,'cache_mutated':False,'new_lineage':False,'canonical_schema_unchanged':True}
+          if any(summary[key] != value for key,value in required.items()) or summary['combined_delta_rows']==0:
+              raise SystemExit(f'candidate invariant failure: {summary}')
+          Path('assembly_report.json').write_text(json.dumps(summary,indent=2)+'\n')
+          PY
+      - name: Apply only existing-row NULL fills and direct MFL 0-to-1 win replacements
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/apply_team_signal_delta_in_place.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --delta candidate/combined_delta.parquet \
+            --replace-direct-mfl-win --report apply_report.json
+      - name: Fail before same-key cache replacement if any invariant changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, hashlib, json
+          from pathlib import Path
+          before=json.loads(Path('cache_before.json').read_text())
+          assembly=json.loads(Path('assembly_report.json').read_text())
+          report=json.loads(Path('apply_report.json').read_text())
+          if not (report['schema_unchanged'] and report['ops_untouched'] and not report['new_lineage'] and report['inserted_rows']==0):
+              raise SystemExit(f'apply invariant failure: {report}')
+          if report['replacements_by_field'].get('win',0) != assembly['direct_mfl_win_replacement_rows']:
+              raise SystemExit(f'direct win replacement count mismatch: {report}; {assembly}')
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb',read_only=True)
+          schema=con.execute('DESCRIBE public.player_fantasy').fetchall()
+          rows=int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])
+          con.close()
+          if schema != [tuple(row) for row in before['schema']] or rows != before['player_rows']:
+              raise SystemExit('canonical player schema or row count changed')
+          digest=hashlib.sha256()
+          with Path('research_public_lake/ops_cache.duckdb').open('rb') as handle:
+              for block in iter(lambda:handle.read(1024*1024),b''): digest.update(block)
+          if digest.hexdigest()!=Path('ops_before.sha256').read_text().split()[0]:
+              raise SystemExit('ops cache changed')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-classification-roster-bridge-batch-apply-evidence-${{ github.run_id }}
+          path: |
+            cache_before.json
+            ops_before.sha256
+            assembly_report.json
+            apply_report.json
+            candidate/team_signal_candidate_report.json
+            candidate/combined_delta.parquet
+          retention-days: 90
+          compression-level: 0
+      - name: Replace only the approved cache object under its existing key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${ids[0]}"
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+
+  readback:
+    needs: apply
+    if: ${{ inputs.confirm == 'APPLY_BATCH_MFL_CLASSIFICATION_ROSTER_BRIDGE' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: mfl-classification-roster-bridge-batch-apply-evidence-${{ github.run_id }}
+          path: evidence
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - name: Freshly restore and read back every applied source value
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, hashlib, json
+          from pathlib import Path
+          delta=str(Path('evidence/candidate/combined_delta.parquet')).replace("'", "''")
+          before=json.loads(Path('evidence/cache_before.json').read_text())
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb',read_only=True)
+          con.execute(f"CREATE TEMP VIEW d AS SELECT DISTINCT * FROM read_parquet('{delta}')")
+          join='''d.db_name=p.db_name AND CAST(d.year AS INTEGER)=CAST(p.year AS INTEGER)
+                  AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER)
+                  AND d.NFL_player_id IS NOT DISTINCT FROM p.NFL_player_id
+                  AND d.platform IS NOT DISTINCT FROM p.platform AND d.manager IS NOT DISTINCT FROM p.manager
+                  AND (p.team_key IS NULL OR d.team_key=p.team_key)
+                  AND (p.team_name IS NULL OR d.team_name=p.team_name)'''
+          total=int(con.execute('SELECT COUNT(*) FROM d').fetchone()[0])
+          unmatched=int(con.execute(f'SELECT COUNT(*) FROM d WHERE NOT EXISTS (SELECT 1 FROM public.player_fantasy p WHERE {join})').fetchone()[0])
+          fields={'win':'source_win','loss':'source_loss','tie':'source_tie','team_points':'source_team_points','is_playoffs':'source_playoffs','champion':'source_champion','final_playoff_seed':'source_final_playoff_seed','made_playoffs':'source_made_playoffs'}
+          disagreements={field:int(con.execute(f'''SELECT COUNT(*) FROM public.player_fantasy p JOIN d ON {join}
+              WHERE d.{source} IS NOT NULL AND p.{field} IS DISTINCT FROM d.{source}''').fetchone()[0]) for field,source in fields.items()}
+          schema=con.execute('DESCRIBE public.player_fantasy').fetchall()
+          rows=int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])
+          con.close()
+          digest=hashlib.sha256()
+          with Path('research_public_lake/ops_cache.duckdb').open('rb') as handle:
+              for block in iter(lambda:handle.read(1024*1024),b''): digest.update(block)
+          result={'canonical_cache_key':'${{ env.CANONICAL_CACHE_KEY }}','candidate_run_id':'${{ inputs.candidate_run_id }}',
+                  'candidate_rows':total,'unmatched_candidate_keys':unmatched,'source_value_disagreements':disagreements,
+                  'schema_unchanged':schema==[tuple(row) for row in before['schema']],
+                  'player_rows_unchanged':rows==before['player_rows'],
+                  'ops_unchanged':digest.hexdigest()==Path('evidence/ops_before.sha256').read_text().split()[0],
+                  'fresh_restore':True,'new_lineage':False}
+          if not (total>0 and unmatched==0 and not any(disagreements.values()) and result['schema_unchanged'] and result['player_rows_unchanged'] and result['ops_unchanged']):
+              raise SystemExit(json.dumps(result,sort_keys=True))
+          Path('mfl_classification_roster_bridge_batch_readback.json').write_text(json.dumps(result,indent=2)+'\n')
+          print(json.dumps(result,sort_keys=True))
+          PY
+      - name: Prove exactly one approved same-key cache object remains
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          printf '%s\n' "${ids[0]}" > canonical_cache_id.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-classification-roster-bridge-batch-readback-${{ github.run_id }}
+          path: |
+            mfl_classification_roster_bridge_batch_readback.json
+            canonical_cache_id.txt
+          retention-days: 90
