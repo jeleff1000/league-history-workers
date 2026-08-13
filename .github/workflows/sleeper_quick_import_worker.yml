@@ -488,6 +488,14 @@ jobs:
           db.close()
           "
 
+      # Rebuild derived tables from the merged canonical rows on Fly so
+      # historical canonical rows remain represented in homepage tables.
+      - name: Refresh centralized aggregates after merge
+        if: steps.import.outputs.exit_code == '0'
+        run: |
+          python scripts/refresh_aggregates.py \
+            --db "$DB_NAME"
+
       # ==================== REVALIDATE + WARM VERCEL CACHE ====================
       - name: Revalidate and warm Vercel cache
         if: steps.import.outputs.exit_code == '0'
