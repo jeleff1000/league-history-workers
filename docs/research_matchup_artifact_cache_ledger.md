@@ -22,16 +22,17 @@ receipt SHA-256
 The CSV now has an explicit `record_type` on every row. The frozen inventory
 is exactly 9,479 `artifact_inventory` rows; cache-changing work is recorded as
 a separate `cache_recovery_receipt` row in the *same* ledger, not smuggled into
-the 9,479-artifact denominator. There are currently four such recovery
+the 9,479-artifact denominator. There are currently five such recovery
 receipts: the independently restored 74-row MFL repair, the 204-row direct
 MFL player/team bridge, the 26,936-row MFL source-only bridge promotion, and
-the 1,720-row MFL classification roster-identity promotion. The ledger
+the 1,720-row MFL classification roster-identity promotion, and the 600-cell
+exact loss/tie sparse-signal promotion. The ledger
 validator fails if a row lacks this distinction.
 
 ## Current residual queue
 
-The latest ledger validation, after the 1,720-row receipt, reports 9,483
-ledger rows: 9,479 frozen raw-artifact rows and 4 supplemental cache-recovery
+The latest ledger validation, after the exact loss/tie sparse-signal receipt,
+reports 9,484 ledger rows: 9,479 frozen raw-artifact rows and 5 supplemental cache-recovery
 receipts. Of the frozen artifact rows, 8,768 are closed and 711 are still open.
 Those 711 entries are a work queue, **not** a claim that 711 artifacts still
 contain unapplied values: each must be re-read against the current approved
@@ -94,7 +95,7 @@ can save a cache, alter the schema, or create a lineage.
 | --- | --- | --- |
 | [31663728938](https://github.com/jeleff1000/league-history-workers/actions/runs/31663728938) | The 231 residual deterministic MFL roster-identity shards, covering only the 1,165 league-weeks not already examined by the preserved 25 successful shards from 31661452691. | Require every retained diagnostic artifact; materialize exact NULL-fill and approved direct-MFL-win-replacement deltas; apply in place; freshly restore and read back; append one receipt to this same CSV. |
 | [31668247614](https://github.com/jeleff1000/league-history-workers/actions/runs/31668247614) | Two championship-probe artifacts, `8956468822` and `8956471264`, read back with the corrected dynamic ledger guard. | Inspect the retained receipt and strict-null candidate. Apply only if exact existing-player recipients and source-backed null cells are present. |
-| [31668497497](https://github.com/jeleff1000/league-history-workers/actions/runs/31668497497) | The two smallest blocked sparse playoff/championship artifacts, `9016485043` and `9016453846`, totaling 2,816 source cells. It emitted an exact 600-key, loss/tie-only NULL-fill delta with zero source conflicts. | Its dedicated in-place promotion/readback is [31669704187](https://github.com/jeleff1000/league-history-workers/actions/runs/31669704187). Require its fresh cache restore to prove all 600 loss and 600 tie cells are populated, schema/rows/ops are unchanged, and exactly one cache object remains before recording a recovery receipt. |
+| [31668497497](https://github.com/jeleff1000/league-history-workers/actions/runs/31668497497) | The two smallest blocked sparse playoff/championship artifacts, `9016485043` and `9016453846`, totaling 2,816 source cells. It emitted an exact 600-key, loss/tie-only NULL-fill delta with zero source conflicts. | **Complete.** Its dedicated promotion/readback [31669704187](https://github.com/jeleff1000/league-history-workers/actions/runs/31669704187) freshly restored the approved cache and proved 600/600 loss cells and 600/600 tie cells are filled, with zero unmatched keys; schema, player rows, ops seed, and the single approved cache lineage are unchanged. Receipt SHA-256: `746936c0fce4ba25df78513b0787e84223f736d0d733c64c6db22370da4888e0`. |
 
 An Action completion by itself never changes the frozen-artifact disposition.
 Only a current approved-cache readback may set `cache_verified` or add a

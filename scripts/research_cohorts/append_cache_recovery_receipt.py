@@ -37,7 +37,11 @@ def _require_verified(payload: dict) -> None:
     failed = [name for name in REQUIRED_TRUE if payload.get(name) is not True]
     if payload.get("new_lineage") is not False:
         failed.append("new_lineage must be false")
-    if int(payload.get("candidate_artifacts", 0) or 0) <= 0:
+    candidate_artifacts = payload.get("candidate_artifacts")
+    if candidate_artifacts is None:
+        source_ids = str(payload.get("source_artifact_id", "") or "").split("|")
+        candidate_artifacts = len([item for item in source_ids if item.strip()])
+    if int(candidate_artifacts or 0) <= 0:
         failed.append("candidate_artifacts")
     candidate_rows = int(payload.get("candidate_rows", 0) or 0)
     if candidate_rows <= 0:
@@ -47,6 +51,13 @@ def _require_verified(payload: dict) -> None:
     if int(payload.get("unmatched_candidate_keys", 0) or 0) != 0:
         failed.append("unmatched_candidate_keys")
     nulls = payload.get("remaining_source_backed_nulls")
+    if not isinstance(nulls, dict):
+        exact_nulls = {
+            "loss": payload.get("loss_remaining_null_source_cells"),
+            "tie": payload.get("tie_remaining_null_source_cells"),
+        }
+        if any(value is not None for value in exact_nulls.values()):
+            nulls = {field: value for field, value in exact_nulls.items() if value is not None}
     disagreements = payload.get("source_value_disagreements")
     if isinstance(nulls, dict) and nulls:
         if any(int(value or 0) != 0 for value in nulls.values()):
@@ -102,10 +113,23 @@ def append_receipt(
         raise ValueError(f"receipt already exists: {artifact_label}")
 
     candidate_rows = int(payload["candidate_rows"])
-    candidate_artifacts = int(payload["candidate_artifacts"])
+    candidate_artifacts = payload.get("candidate_artifacts")
+    if candidate_artifacts is None:
+        candidate_artifacts = len([
+            item for item in str(payload["source_artifact_id"]).split("|") if item.strip()
+        ])
+    candidate_artifacts = int(candidate_artifacts)
     observed_fields = payload.get("candidate_fields")
     if not isinstance(observed_fields, list):
         observed_fields = set(payload.get("remaining_source_backed_nulls", {}))
+        if not observed_fields:
+            observed_fields = {
+                field for field, key in (
+                    ("loss", "loss_remaining_null_source_cells"),
+                    ("tie", "tie_remaining_null_source_cells"),
+                )
+                if key in payload
+            }
         if not observed_fields:
             observed_fields = set(payload.get("source_value_disagreements", {}))
     candidate_fields = "|".join(field for field in FIELD_ORDER if field in observed_fields)
