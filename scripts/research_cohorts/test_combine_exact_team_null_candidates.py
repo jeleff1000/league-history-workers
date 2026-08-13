@@ -50,3 +50,16 @@ def test_combine_rejects_conflicting_loss_for_same_null_key(tmp_path):
     roots = [_candidate(tmp_path, "first", 0), _candidate(tmp_path, "second", 1)]
     with pytest.raises(SystemExit, match="conflicting duplicate source values"):
         combine(roots, tmp_path / "combined.parquet", tmp_path / "combined.json")
+
+
+def test_combine_quarantines_null_nfl_player_id_rows(tmp_path):
+    valid = _candidate(tmp_path, "valid")
+    blocked = _candidate(tmp_path, "blocked")
+    con = duckdb.connect()
+    con.execute("CREATE TABLE d AS SELECT * FROM read_parquet(?)", [str(blocked / "team_promotable_player_delta.parquet")])
+    con.execute("UPDATE d SET NFL_player_id=NULL")
+    con.execute("COPY d TO ? (FORMAT PARQUET)", [str(blocked / "team_promotable_player_delta.parquet")])
+    con.close()
+    result = combine([valid, blocked], tmp_path / "combined.parquet", tmp_path / "combined.json")
+    assert result["blocked_null_nfl_player_id_rows"] == 1
+    assert result["unique_rows"] == 1
