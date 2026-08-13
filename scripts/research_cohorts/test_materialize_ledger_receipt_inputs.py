@@ -32,3 +32,26 @@ def test_receipt_inputs_exclude_supplemental_cache_recovery_records(tmp_path):
         "unmatched_cache_cells": 0,
         "blocked_schema_cells": 0,
     }]
+
+
+def test_receipt_inputs_preserve_batch_admissions_without_seeding_them(tmp_path):
+    """Admission receipts are ledger evidence, not raw artifacts to reread."""
+    ledger = tmp_path / "ledger.csv"
+    fields = ["record_type", "artifact_id", "source_cells", "cache_match_cells", "cache_missing_cells", "cache_conflict_cells", "unmatched_cache_cells", "blocked_schema_cells"]
+    with ledger.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerows([
+            {"record_type": "artifact_inventory", "artifact_id": "1", "source_cells": "4", "cache_match_cells": "4", "cache_missing_cells": "0", "cache_conflict_cells": "0", "unmatched_cache_cells": "0", "blocked_schema_cells": "0"},
+            {"record_type": "artifact_admission", "artifact_id": "2", "source_cells": "8", "cache_match_cells": "8", "cache_missing_cells": "0", "cache_conflict_cells": "0", "unmatched_cache_cells": "0", "blocked_schema_cells": "0"},
+        ])
+    ledger_json = tmp_path / "ledger.json"
+    prior_receipts = tmp_path / "prior.json"
+
+    assert materialize(ledger, ledger_json, prior_receipts) == {
+        "ledger_rows": 2,
+        "raw_artifact_rows": 1,
+        "prior_receipt_rows": 1,
+    }
+    assert len(json.loads(ledger_json.read_text())["rows"]) == 2
+    assert [row["artifact_id"] for row in json.loads(prior_receipts.read_text())["rows"]] == ["1"]
