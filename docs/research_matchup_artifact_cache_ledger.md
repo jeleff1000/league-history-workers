@@ -96,11 +96,28 @@ a `cache_recovery_receipt`.
 
 Run `31663728938` ended as cancelled only because two long-running shards were
 manually cancelled after their diagnostics had not completed. Its usable source
-set is nevertheless exact and recorded here before promotion:
+set is nevertheless exact. Its final per-artifact admission status is recorded
+in [the durable admission manifest](research_matchup_mfl_batch_31663728938_admission_manifest.csv),
+which covers every one of the 231 residual shards and links the admitted set to
+the independently read-back same-key receipt `31682677203`:
+
+| Final admission state | Artifacts | Meaning |
+| --- | ---: | --- |
+| `included_in_verified_cache_batch` | 219 | The artifact emitted one or more source-backed candidate rows. Those rows are included in the saved apply evidence and in the readback receipt. |
+| `admitted_no_promotable_delta` | 1 | The artifact was structurally valid, but its rows added no candidate after exact comparison with the cache. |
+| `source_diagnostic_only` | 3 | The archive contains diagnostics but neither required `team_signals.parquet` nor `player_bridge.parquet`; it cannot supply a team-to-player promotion. |
+| `explicitly_excluded_no_candidate` | 8 | The recovery shard either stopped before output or failed cache restore before recovery code began; no candidate exists to apply. |
+
+This resolves the former ambiguous "223 retained artifacts" phrasing below.
+Only the 219 candidate-bearing artifacts supplied the source rows in the
+verified cache batch. The one zero-delta artifact was not silently dropped;
+the three diagnostic-only artifacts and eight no-candidate exclusions are
+explicitly preserved for targeted follow-up rather than misrepresented as
+cache improvements.
 
 | Classification | Shards | Evidence | Admission state |
 | --- | --- | --- | --- |
-| Retained named candidate artifacts | 223 | 231 nonempty rescue jobs; 225 emitted artifacts; excluding only the eight rows below leaves 223 named artifacts. Member-level admission must still prove each includes both bridge Parquets. | Pending guarded batch apply/readback. |
+| Retained named candidate artifacts | 220 | 219 candidate-bearing artifacts plus one structurally valid zero-delta artifact. | Fully accounted for in the durable manifest. |
 | Incomplete cancelled diagnostics | `32, 156` | Each emitted only `cache_before.json` and `ops_before.sha256`, with no extraction, bridge, signal, or candidate-delta file. | Excluded; must be rerun separately. |
 | Cache-restore failures | `190, 191, 192, 193, 194, 195` | Each failed in under 20 seconds at `fail-on-cache-miss`, before recovery code ran, and emitted no artifact. | Excluded; no candidate exists to promote. |
 
