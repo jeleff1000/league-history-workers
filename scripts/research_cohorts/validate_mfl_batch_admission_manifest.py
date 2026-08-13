@@ -38,6 +38,8 @@ def validate(
         state = row["admission_state"]
         if state not in STATES:
             raise ValueError(f"invalid admission_state: {state!r}")
+        if state != "explicitly_excluded_no_candidate" and not row["artifact_id"].strip():
+            raise ValueError(f"{state} must have an artifact_id")
         try:
             candidate_rows = int(row["candidate_rows"])
         except ValueError as exc:

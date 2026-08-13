@@ -60,3 +60,20 @@ def test_rejects_included_artifact_without_a_candidate_row(tmp_path: Path) -> No
     )
     assert result.returncode != 0
     assert "must have candidate_rows > 0" in result.stderr
+
+
+def test_rejects_nonexcluded_admission_without_a_github_artifact_id(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.csv"
+    manifest.write_text(
+        "artifact,artifact_id,admission_state,candidate_rows\n"
+        "a,,included_in_verified_cache_batch,1\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--manifest", str(manifest)],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "must have an artifact_id" in result.stderr

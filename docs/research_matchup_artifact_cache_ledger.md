@@ -8,10 +8,10 @@ canonical cache:
 
 The authoritative detailed rows are in
 [`research_matchup_artifact_cache_ledger.csv`](research_matchup_artifact_cache_ledger.csv).
-They were generated from the immutable, read-only cache-receipt Action run
-[31500865474](https://github.com/jeleff1000/league-history-workers/actions/runs/31500865474).
-The source receipt SHA-256 is
-`df8a21d802928f3f0215bff49a272ff7168acb0a6412cc181fd94bd51cf8dbbd`.
+It contains the immutable 9,479-artifact inventory from read-only cache-receipt
+Action run [31500865474](https://github.com/jeleff1000/league-history-workers/actions/runs/31500865474),
+plus every later artifact known to this workstream. The frozen-inventory source
+receipt SHA-256 is `df8a21d802928f3f0215bff49a272ff7168acb0a6412cc181fd94bd51cf8dbbd`.
 
 Direct source readbacks append their evidence to the same CSV; they do not
 create a cache or lineage. The latest is the read-only direct MFL player-key
@@ -20,9 +20,10 @@ receipt SHA-256
 `4c7608c16ccd8cfc35390d5d3f1980ad02f955b221522451433caedabf5f5f24`.
 
 The CSV now has an explicit `record_type` on every row. The frozen inventory
-is exactly 9,479 `artifact_inventory` rows; cache-changing work is recorded as
-a separate `cache_recovery_receipt` row in the *same* ledger, not smuggled into
-the 9,479-artifact denominator. There are currently six such recovery
+is exactly 9,479 `artifact_inventory` rows; later artifacts are 231
+`artifact_admission` rows; cache-changing work is recorded as a separate
+`cache_recovery_receipt` row in the *same* ledger. Neither later artifacts nor
+receipts are smuggled into the 9,479-artifact denominator. There are currently six such recovery
 receipts: the independently restored 74-row MFL repair, the 204-row direct
 MFL player/team bridge, the 26,936-row MFL source-only bridge promotion, the
 1,720-row MFL classification roster-identity promotion, the 600-cell exact
@@ -33,8 +34,9 @@ validator fails if a row lacks this distinction.
 ## Current residual queue
 
 The latest ledger validation, after the exact loss/tie sparse-signal receipt,
-reports 9,485 ledger rows: 9,479 frozen raw-artifact rows and 6 supplemental cache-recovery
-receipts. Of the frozen artifact rows, 8,768 are closed and 711 are still open.
+reports 9,716 ledger rows: 9,479 frozen raw-artifact rows, 231 later
+artifact-admission rows, and 6 supplemental cache-recovery receipts. Of the
+frozen artifact rows, 8,768 are closed and 711 are still open.
 Those 711 entries are a work queue, **not** a claim that 711 artifacts still
 contain unapplied values: each must be re-read against the current approved
 cache before it can be closed or kept open with a current, specific reason.
@@ -48,18 +50,36 @@ cache before it can be closed or kept open with a current, specific reason.
 | `source_only_team_signal_missing_player_team_bridge` | 2 | Build a source-roster-to-existing-player bridge or retain as source-only. |
 | `unmatched_cache_key` | 1 | Separate already-filled recipients from true source-only player/team records and preserve the residual count. |
 
-The machine-derived **current** admission queue is simpler than those
+The machine-derived **current** frozen-inventory admission queue is simpler than those
 historical labels: 478 artifacts require only an exact player/team bridge, and
 233 require that bridge plus explicit source-precedence adjudication. Of the
 711 open rows, 701 carry pre-schema loss/tie evidence, but every one is now
 marked `closed_schema_supported`; no open row may ask for a loss/tie schema
 migration again.
 
-The raw source artifact `8952555354` is the last row above. Its current
+The raw source artifact `8952555354` is the last frozen-inventory row above. Its current
 receipt proves 26,936 existing-player fills from 256 source candidates are in
 the cache. Its older 19,560 source-only cells are deliberately still open until
 the remaining team/player identities are independently resolved or explicitly
 classified as having no canonical recipient.
+
+## Post-inventory MFL execution records
+
+The residual MFL batch ran after the 9,479-artifact inventory was frozen. Its
+231 records are now appended to the **same CSV**, not maintained as a separate
+checklist. Their exact dispositions are also preserved in the source manifest
+[`research_matchup_mfl_batch_31663728938_admission_manifest.csv`](research_matchup_mfl_batch_31663728938_admission_manifest.csv).
+
+| State | Records | Cache consequence |
+| --- | ---: | --- |
+| Candidate-bearing batch member | 219 | Included in the same-key MFL apply/readback receipt `31682677203`. The ledger labels this `batch_member_legacy_cache_readback`: aggregate receipt evidence is retained, while the absence of historical per-cell prestate is explicit. |
+| Valid zero-delta artifact | 1 | Compared against the cache and emitted no eligible change. |
+| Diagnostic-only artifact | 3 | Contains no `team_signals.parquet`/`player_bridge.parquet` pair, so it has no player-table cache candidate. |
+| No GitHub artifact emitted | 8 | The recovery shard stopped before output. The ledger records a deterministic logical receipt ID, not a fabricated GitHub artifact ID, and retains the precise rerun action if its target remains unresolved. |
+
+These eight no-output records do not conceal unapplied data: there is no source
+artifact to join. They are an execution-recovery queue, separate from the
+711 source-identity/source-precedence rows in the frozen inventory.
 
 The new MFL classification roster-identity receipt is Actions
 [31660451544](https://github.com/jeleff1000/league-history-workers/actions/runs/31660451544).

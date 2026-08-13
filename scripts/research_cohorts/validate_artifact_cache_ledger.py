@@ -20,6 +20,7 @@ CLOSED_STATUSES = {
 }
 RAW_ARTIFACT_RECORD_TYPE = "artifact_inventory"
 CACHE_RECOVERY_RECORD_TYPE = "cache_recovery_receipt"
+POST_INVENTORY_ARTIFACT_RECORD_TYPE = "artifact_admission"
 REQUIRED_FIELDS = (
     "record_type",
     "artifact_id",
@@ -50,6 +51,10 @@ def summarize_rows(rows: list[dict[str, str]]) -> dict[str, int]:
         row for row in rows
         if row.get("record_type") == CACHE_RECOVERY_RECORD_TYPE
     ]
+    post_inventory_rows = [
+        row for row in rows
+        if row.get("record_type") == POST_INVENTORY_ARTIFACT_RECORD_TYPE
+    ]
     closed_raw_rows = [
         row for row in raw_rows
         if row.get("final_status") in CLOSED_STATUSES
@@ -60,7 +65,8 @@ def summarize_rows(rows: list[dict[str, str]]) -> dict[str, int]:
         "raw_artifact_closed_rows": len(closed_raw_rows),
         "raw_artifact_open_rows": len(raw_rows) - len(closed_raw_rows),
         "cache_recovery_receipt_rows": len(recovery_rows),
-        "unknown_record_type_rows": len(rows) - len(raw_rows) - len(recovery_rows),
+        "post_inventory_artifact_rows": len(post_inventory_rows),
+        "unknown_record_type_rows": len(rows) - len(raw_rows) - len(recovery_rows) - len(post_inventory_rows),
     }
 
 
