@@ -20,11 +20,11 @@ receipt SHA-256
 `4c7608c16ccd8cfc35390d5d3f1980ad02f955b221522451433caedabf5f5f24`.
 
 The CSV now has an explicit `record_type` on every row. The frozen inventory
-is exactly 9,479 `artifact_inventory` rows; later artifacts are 231
+is exactly 9,479 `artifact_inventory` rows; later artifacts are 232
 `artifact_admission` rows; cache-changing work is recorded as a separate
 `cache_recovery_receipt` row in the *same* ledger. Neither later artifacts nor
 receipts are smuggled into the 9,479-artifact denominator. There are currently
-13 such recovery receipts. They include the independently restored 74-row MFL
+14 such recovery receipts. They include the independently restored 74-row MFL
 repair, direct MFL player/team bridge work, exact MFL roster-identity work,
 the loss/tie promotions, and the latest direct-crosswalk bridge promotion.
 The ledger validator fails if a row lacks this distinction.
@@ -50,8 +50,8 @@ unchanged.
 
 ## Current residual queue
 
-The latest ledger validation reports 9,723 ledger rows: 9,479 frozen
-raw-artifact rows, 231 later artifact-admission rows, and 13 supplemental
+The latest ledger validation reports 9,725 ledger rows: 9,479 frozen
+raw-artifact rows, 232 later artifact-admission rows, and 14 supplemental
 cache-recovery receipts. Of the frozen artifact rows, 8,786 are closed and 693
 are still open. Those 693 entries are a work queue, **not** a claim that 693 artifacts still
 contain unapplied values: each must be re-read against the current approved
