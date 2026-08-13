@@ -26,6 +26,11 @@ def test_builds_one_team_week_signal_from_consistent_rostered_player_evidence(tm
         {"db_name": "league", "year": 2015, "week": 12, "NFL_player_id": "no-franchise",
          "source_win": 0, "source_loss": 1, "source_tie": 0,
          "source_team_points": 90.0, "source_is_playoffs": False},
+        # A classification row outside the requested roster weeks must not
+        # inflate unresolved counts or be considered for a signal.
+        {"db_name": "other-league", "year": 2015, "week": 12, "NFL_player_id": "off-target",
+         "source_win": 0, "source_loss": 1, "source_tie": 0,
+         "source_team_points": 90.0, "source_is_playoffs": False},
     ])
     memberships = tmp_path / "memberships.parquet"
     _parquet(memberships, [
@@ -47,6 +52,7 @@ def test_builds_one_team_week_signal_from_consistent_rostered_player_evidence(tm
         crosswalk=crosswalk, out=out, report=report,
     )
 
+    assert result["classification_rows"] == 3
     assert result["resolved_classification_rows"] == 2
     assert result["unresolved_classification_rows"] == 1
     assert result["emitted_team_signals"] == 1

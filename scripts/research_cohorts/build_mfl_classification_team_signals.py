@@ -54,14 +54,31 @@ def build(
     try:
         classification_paths = ",".join(_path(path) for path in classifications)
         con.execute(
-            "CREATE TEMP VIEW classifications AS SELECT * FROM read_parquet(["
+            "CREATE TEMP VIEW classifications_raw AS SELECT * FROM read_parquet(["
             + classification_paths + "], union_by_name=true)"
         )
         con.execute(f"CREATE TEMP VIEW memberships AS SELECT * FROM read_parquet({_path(memberships)})")
         con.execute(f"CREATE TEMP VIEW crosswalk AS SELECT * FROM read_parquet({_path(crosswalk)})")
-        _require(con, "classifications", CLASSIFICATION_REQUIRED, "classification")
+        _require(con, "classifications_raw", CLASSIFICATION_REQUIRED, "classification")
         _require(con, "memberships", MEMBERSHIP_REQUIRED, "memberships")
         _require(con, "crosswalk", CROSSWALK_REQUIRED, "crosswalk")
+        con.execute("""
+            CREATE TEMP TABLE membership_groups AS
+            SELECT DISTINCT
+              CAST(db_name AS VARCHAR) AS db_name,
+              CAST(year AS INTEGER) AS year,
+              CAST(week AS INTEGER) AS week
+            FROM memberships
+        """)
+        con.execute("""
+            CREATE TEMP VIEW classifications AS
+            SELECT c.*
+            FROM classifications_raw c
+            JOIN membership_groups g
+              ON g.db_name=CAST(c.db_name AS VARCHAR)
+             AND g.year=CAST(c.year AS INTEGER)
+             AND g.week=CAST(c.week AS INTEGER)
+        """)
         con.execute("""
             CREATE TEMP TABLE membership_nfl_raw AS
             SELECT
