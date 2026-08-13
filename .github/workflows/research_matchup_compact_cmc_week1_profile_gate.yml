@@ -26,6 +26,7 @@ on:
           - rb_2025_week1_residual_shapes
           - rb_2025_bucket_inventory
           - rb_2025_bucket
+          - rb_2025_bucket_core
           - cache_schedule_lookup_probe
           - local_cache_export
       bucket:
@@ -101,7 +102,7 @@ jobs:
             WHERE week BETWEEN 1 AND 18
           """)
           mode = os.environ['PILOT_MODE']
-          if mode not in {'cmc_week1', 'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_weekly', 'all_2025_weekly', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'rb_2025_bucket_inventory', 'rb_2025_bucket', 'cache_schedule_lookup_probe', 'local_cache_export'}:
+          if mode not in {'cmc_week1', 'cmc_2025_weekly', 'cmc_2025_season_only', 'cmc_2025_season', 'cmc_2025_all_grains', 'myles_2025_season', 'rb_2025_weekly', 'all_2025_weekly', 'rb_2025_lane', 'rb_2025_week1_inventory', 'rb_2025_week1_distribution', 'rb_2025_week1_residual_shapes', 'rb_2025_bucket_inventory', 'rb_2025_bucket', 'rb_2025_bucket_core', 'cache_schedule_lookup_probe', 'local_cache_export'}:
             raise ValueError(f'unsupported pilot mode: {mode}')
           if mode == 'cache_schedule_lookup_probe':
               required = {
@@ -394,7 +395,7 @@ jobs:
                   summary.write(f'- Receipt: `{receipt}`\n')
                   summary.write('- Cache-only inventory; no cache save, aggregation table, Fly access, API request, artifact, or publish step.\n')
               raise SystemExit(0)
-          if mode == 'rb_2025_bucket':
+          if mode in {'rb_2025_bucket', 'rb_2025_bucket_core'}:
               bucket_number = int(os.environ['PILOT_BUCKET'])
               assert 1 <= bucket_number <= 15, bucket_number
               players = c.execute(f"""
@@ -446,6 +447,37 @@ jobs:
                   output_table='rb_2025_bucket_season_core', year=2025, position='RB', split_threshold=50,
               )
               core_seconds = perf_counter() - core_started
+              if mode == 'rb_2025_bucket_core':
+                  weekly_rows, weekly_cells = c.execute("""
+                    SELECT COUNT(*), COALESCE(SUM(list_count(cohort_cells)), 0)
+                    FROM rb_2025_bucket_weekly
+                  """).fetchone()
+                  core_rows = c.execute(
+                    'SELECT COUNT(*) FROM rb_2025_bucket_season_core'
+                  ).fetchone()[0]
+                  assert weekly_rows > 0 and weekly_cells <= weekly_rows * 145, (weekly_rows, weekly_cells)
+                  assert core_rows > 0, core_rows
+                  cmc_week1 = c.execute("""
+                    SELECT cell.eligible_leagues, cell.rostered_leagues, cell.started_leagues
+                    FROM rb_2025_bucket_weekly, UNNEST(cohort_cells) AS u(cell)
+                    WHERE NFL_player_id='00-0033280' AND week=1
+                      AND cell.q_teams='ALL' AND cell.q_roster='ALL' AND cell.q_scoring='ALL'
+                      AND cell.q_pass_td='ALL' AND cell.q_dynasty='ALL' AND cell.q_best_ball='ALL'
+                  """).fetchone()
+                  assert cmc_week1 == (9800, 9766, 9600), cmc_week1
+                  receipt = {
+                    'mode': mode, 'bucket': bucket_number, 'bucket_weight': selected_bucket['weight'],
+                    'bucket_players': len(selected_bucket['ids']), 'weekly_seconds': round(weekly_seconds, 3),
+                    'core_seconds': round(core_seconds, 3), 'weekly_outer_rows': weekly_rows,
+                    'weekly_nested_cells': weekly_cells, 'season_core_rows': core_rows,
+                    'cmc_week1_all': cmc_week1,
+                  }
+                  print(receipt)
+                  with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                      summary.write('## One balanced RB 2025 cached-calendar core gate\n')
+                      summary.write(f'- Receipt: `{receipt}`\n')
+                      summary.write('- Cache-only temporary tables; no cache save, artifact, Fly access, API request, or publish step.\n')
+                  raise SystemExit(0)
               grade_started = perf_counter()
               materialize_season_bracket_grade_position_batch(
                   c, source_table='rb_2025_bucket_source', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
