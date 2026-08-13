@@ -37,6 +37,12 @@ def _require_verified(payload: dict) -> None:
     failed = [name for name in REQUIRED_TRUE if payload.get(name) is not True]
     if payload.get("new_lineage") is not False:
         failed.append("new_lineage must be false")
+    legacy_receipt = payload.get("readback_proof_mode") == "legacy_apply_receipt_minimum_match"
+    if legacy_receipt and not any(
+        int(value or 0) > 0
+        for value in (payload.get("authorized_cells_by_field") or {}).values()
+    ):
+        failed.append("authorized_cells_by_field")
     candidate_artifacts = payload.get("candidate_artifacts")
     if candidate_artifacts is None:
         source_ids = str(payload.get("source_artifact_id", "") or "").split("|")
@@ -136,6 +142,22 @@ def append_receipt(
     disposition = str(payload.get("promotion_disposition") or "exact_existing_player_null_fill")
     direct_replacement = "direct_mfl_win_replacement" in disposition
     row = dict.fromkeys(fields, "")
+    legacy_receipt = payload.get("readback_proof_mode") == "legacy_apply_receipt_minimum_match"
+    if legacy_receipt:
+        reason = (
+            f"Fresh restore verified the saved legacy apply receipt for {candidate_rows:,} "
+            "existing-player source candidates. The transaction receipt is authoritative for "
+            "the authorized NULL fills/direct MFL win replacements; preserved non-null source "
+            "conflicts remain explicitly reported rather than overwritten. Schema, player-row "
+            "count, ops cache, and the approved single lineage are unchanged."
+        )
+    else:
+        reason = (
+            f"Fresh restore read back all {candidate_rows:,} source-proven existing-player "
+            + ("NULL fills and direct MFL win replacements" if direct_replacement else "NULL-fill candidates")
+            + "; every applied source value now matches the cache, while schema, player-row "
+            "count, ops cache, and the approved single lineage are unchanged."
+        )
     row.update({
         "record_type": "cache_recovery_receipt",
         "receipt_run_id": str(receipt_run_id),
@@ -156,12 +178,7 @@ def append_receipt(
         "unmatched_cache_cells": "0",
         "blocked_schema_cells": "0",
         "final_status": "cache_verified",
-        "final_reason": (
-            f"Fresh restore read back all {candidate_rows:,} source-proven existing-player "
-            + ("NULL fills and direct MFL win replacements" if direct_replacement else "NULL-fill candidates")
-            + "; every applied source value now matches the cache, while schema, player-row "
-            "count, ops cache, and the approved single lineage are unchanged."
-        ),
+        "final_reason": reason,
         "next_action": "closed_independent_cache_readback",
         "identity_profile_run_id": str(receipt_run_id),
         "identity_profile_source": readback_path.name,

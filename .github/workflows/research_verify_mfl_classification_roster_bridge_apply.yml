@@ -66,6 +66,7 @@ jobs:
               'canonical_cache_key':'${{ env.CANONICAL_CACHE_KEY }}',
               'candidate_run_id':'31663728938',
               'source_apply_run_id':'${{ inputs.source_apply_run_id }}',
+              'source_artifact_id':'mfl-classification-roster-bridge-batch-220-complete-artifacts',
               'candidate_artifacts':int(assembly['candidate_artifacts']),
               'matched_player_rows':int(result['candidate_rows']),
               'promotion_disposition':'exact_existing_player_null_fill|direct_mfl_win_replacement',

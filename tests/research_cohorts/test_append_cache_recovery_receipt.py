@@ -196,3 +196,33 @@ def test_append_receipt_accepts_exact_team_null_readback_shape(tmp_path: Path) -
     assert receipt["candidate_file_count"] == "2"
     assert receipt["candidate_fields"] == "loss|tie"
     assert receipt["final_status"] == "cache_verified"
+
+
+def test_append_receipt_accepts_labeled_legacy_apply_receipt(tmp_path: Path) -> None:
+    from scripts.research_cohorts.append_cache_recovery_receipt import append_receipt
+
+    ledger = tmp_path / "ledger.csv"
+    with ledger.open("w", newline="", encoding="utf-8") as handle:
+        csv.DictWriter(handle, fieldnames=FIELDS).writeheader()
+    readback = tmp_path / "readback.json"
+    payload = _clean_readback()
+    payload.update({
+        "readback_proof_mode": "legacy_apply_receipt_minimum_match",
+        "authorized_cells_by_field": {"win": 2},
+        "source_value_disagreements": {"win": 7},
+        "source_artifact_id": "mfl-legacy-batch",
+    })
+    readback.write_text(json.dumps(payload), encoding="utf-8")
+
+    out = tmp_path / "out.csv"
+    append_receipt(
+        ledger_path=ledger,
+        readback_path=readback,
+        out_path=out,
+        receipt_run_id="31682222659",
+        artifact_label="mfl-legacy",
+        source_artifact="mfl saved batch",
+    )
+
+    receipt = list(csv.DictReader(out.open(newline="", encoding="utf-8")))[0]
+    assert "legacy apply receipt" in receipt["final_reason"]
