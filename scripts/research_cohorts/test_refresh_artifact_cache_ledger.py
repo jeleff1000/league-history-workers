@@ -81,6 +81,39 @@ def test_refresh_records_current_direct_player_reaudit(tmp_path):
     assert row["next_action"] == "resolve_direct_identity_and_precedence_adjudication"
 
 
+def test_refresh_closes_managerless_source_with_no_player_team_recipient(tmp_path):
+    ledger = tmp_path / "ledger.csv"
+    with ledger.open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIELDS)
+        writer.writeheader()
+        writer.writerow(_ledger_row())
+    selected = tmp_path / "selected.json"
+    selected.write_text(json.dumps([{"artifact_id": 7}]))
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text(json.dumps({
+        "artifact_unattributable_state": [{
+            "artifact_id": 7,
+            "unattributable_ambiguous_keys": 3,
+            "unattributable_source_cells": 15,
+            "all_ambiguous_source_keys_lack_manager": True,
+            "all_ambiguous_canonical_rows_lack_team_identity": True,
+        }],
+    }))
+    out = tmp_path / "out.csv"
+
+    assert refresh(
+        ledger_path=ledger, receipt_path=receipt, selected_path=selected,
+        receipt_run_id="identity-absent-receipt", out_path=out,
+    ) == {"ledger_rows": 1, "updated_rows": 1}
+    row = next(csv.DictReader(out.open(newline="", encoding="utf-8")))
+    assert row["source_cells"] == "15"
+    assert row["cache_match_cells"] == "0"
+    assert row["unmatched_cache_cells"] == "0"
+    assert row["final_status"] == "no_promotable_candidate_emitted"
+    assert row["next_action"] == "closed_source_identity_absent_no_recipient"
+    assert "source manager/franchise identity" in row["final_reason"]
+
+
 def test_refresh_records_team_points_bridge_that_has_no_safe_recipient(tmp_path):
     ledger = tmp_path / "ledger.csv"
     with ledger.open("w", newline="", encoding="utf-8") as handle:

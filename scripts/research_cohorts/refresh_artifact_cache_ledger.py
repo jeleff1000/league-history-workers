@@ -63,6 +63,7 @@ def refresh(
     direct_reaudit_receipt = "artifact_current_state" in receipt
     team_points_bridge_receipt = "artifact_bridge_state" in receipt
     team_manager_comparison_receipt = "artifact_comparison_state" in receipt
+    unattributable_source_receipt = "artifact_unattributable_state" in receipt
     if promotion_receipt:
         receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_rows"]}
     elif direct_reaudit_receipt:
@@ -71,6 +72,8 @@ def refresh(
         receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_bridge_state"]}
     elif team_manager_comparison_receipt:
         receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_comparison_state"]}
+    elif unattributable_source_receipt:
+        receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_unattributable_state"]}
     else:
         # Combined readback receipts include supplemental cache-recovery
         # entries whose IDs are descriptive strings.  This refresher updates
@@ -100,6 +103,33 @@ def refresh(
         if artifact_id not in selected_ids:
             continue
         evidence = receipt_rows[artifact_id]
+        if unattributable_source_receipt:
+            keys = int(evidence.get("unattributable_ambiguous_keys", 0) or 0)
+            cells = int(evidence.get("unattributable_source_cells", 0) or 0)
+            if keys <= 0 or cells <= 0:
+                raise SystemExit(f"{artifact_id}: no unattributable source evidence")
+            if evidence.get("all_ambiguous_source_keys_lack_manager") is not True:
+                raise SystemExit(f"{artifact_id}: source manager/franchise identity is not proven absent")
+            if evidence.get("all_ambiguous_canonical_rows_lack_team_identity") is not True:
+                raise SystemExit(f"{artifact_id}: canonical recipient identity is not proven absent")
+            row["source_cells"] = str(cells)
+            row["cache_match_cells"] = "0"
+            row["cache_missing_cells"] = "0"
+            row["cache_conflict_cells"] = "0"
+            row["unmatched_cache_cells"] = "0"
+            row["blocked_schema_cells"] = "0"
+            row["receipt_run_id"] = str(receipt_run_id)
+            row["receipt_json_sha256"] = digest
+            row["final_status"] = "no_promotable_candidate_emitted"
+            row["final_reason"] = (
+                f"Current read-only audit found {keys:,} source player-week keys with outcome values but no "
+                "source manager/franchise identity. Each maps only to duplicate canonical rows whose manager, "
+                "MFL player ID, team key/name, and lineup slot are all absent, so no player-team recipient can "
+                "be proven. The source values are deliberately not promoted or used to corroborate cache cells."
+            )
+            row["next_action"] = "closed_source_identity_absent_no_recipient"
+            updated += 1
+            continue
         if team_manager_comparison_receipt:
             fields = ("win", "team_points", "is_playoffs", "champion")
             fills = evidence.get("null_fill_cells_by_field", {})
