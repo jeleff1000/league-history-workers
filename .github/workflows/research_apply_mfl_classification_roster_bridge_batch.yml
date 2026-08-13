@@ -87,9 +87,8 @@ jobs:
           mkdir -p raw candidate_input
           gh run view "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --json jobs --jq '.jobs[] | select(.name | startswith("rescue (")) | [.name,.conclusion] | @tsv' > rescue_jobs.tsv
           test -s rescue_jobs.tsv
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/artifacts?per_page=100" \
-            --jq '.artifacts[] | select(.expired == false and (.name | startswith("research-mfl-classification-roster-bridge-shard-"))) | .name' \
-            | sort -u > all_artifact_names.txt
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/artifacts?per_page=100" \
+            > all_artifacts.json
           # The excluded shard is not a candidate artifact for promotion.
           # An explicitly excluded shard may still have an incomplete pre-state bundle,
           # or it may have failed before it could emit any artifact.  Both are
@@ -97,7 +96,15 @@ jobs:
           python - <<'PY'
           import json, os
           from pathlib import Path
-          names=[item for item in Path('all_artifact_names.txt').read_text().splitlines() if item]
+          pages=json.loads(Path('all_artifacts.json').read_text())
+          artifacts=[artifact for page in pages for artifact in page.get('artifacts', [])
+                     if not artifact.get('expired')
+                     and artifact.get('name', '').startswith('research-mfl-classification-roster-bridge-shard-')]
+          by_name={artifact['name']: int(artifact['id']) for artifact in artifacts}
+          if len(by_name) != len(artifacts):
+              raise SystemExit('duplicate retained artifact names in GitHub artifact inventory')
+          names=sorted(by_name)
+          Path('all_artifact_names.txt').write_text('\n'.join(names)+'\n')
           excluded=[int(item.strip()) for item in os.environ['EXCLUDED_SHARDS'].split(',') if item.strip()]
           selected=list(names)
           missing_artifact_exclusions=[]
@@ -111,6 +118,9 @@ jobs:
               else:
                   missing_artifact_exclusions.append(shard)
           Path('artifact_names.txt').write_text('\n'.join(selected)+'\n')
+          Path('selected_artifacts.tsv').write_text('\n'.join(
+              f'{name}\t{by_name[name]}' for name in selected
+          )+'\n')
           Path('missing_artifact_exclusions.json').write_text(json.dumps({
               'excluded_shards': excluded,
               'missing_artifact_exclusions': missing_artifact_exclusions,
@@ -120,8 +130,31 @@ jobs:
           python scripts/research_cohorts/validate_mfl_shard_artifacts.py \
             --jobs rescue_jobs.tsv --artifacts artifact_names.txt \
             --excluded-shards "$EXCLUDED_SHARDS" --report shard_set_report.json
-          gh run download "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --pattern 'research-mfl-classification-roster-bridge-shard-*' --dir raw
+          mkdir -p raw zips
+          download_artifact() {
+            local name="$1" artifact_id="$2" zip_path="zips/${artifact_id}.zip" output_dir="raw/${name}"
+            local attempt
+            for attempt in 1 2 3 4 5; do
+              rm -f "$zip_path"
+              if curl --fail --location --silent --show-error --retry 4 --retry-all-errors \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H 'Accept: application/vnd.github+json' \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+                -o "$zip_path" \
+                && unzip -q -o "$zip_path" -d "$output_dir" \
+                && test -f "$output_dir/team_signals.parquet" \
+                && test -f "$output_dir/player_bridge.parquet"; then
+                return 0
+              fi
+              rm -rf "$output_dir"
+              sleep "$attempt"
+            done
+            echo "artifact transfer or extraction failed: ${name} (${artifact_id})" >&2
+            return 1
+          }
+          export -f download_artifact
+          export GH_TOKEN GITHUB_REPOSITORY
+          cut -f1,2 selected_artifacts.tsv | xargs -r -P 15 -n 2 bash -c 'download_artifact "$@"' _
           test "$(find raw -name team_signals.parquet | wc -l)" -eq "$(wc -l < artifact_names.txt)"
           test "$(find raw -name player_bridge.parquet | wc -l)" -eq "$(wc -l < artifact_names.txt)"
           i=0
@@ -209,6 +242,7 @@ jobs:
             cache_before.json
             ops_before.sha256
             all_artifact_names.txt
+            selected_artifacts.tsv
             artifact_names.txt
             missing_artifact_exclusions.json
             shard_set_report.json

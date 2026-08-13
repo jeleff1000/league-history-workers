@@ -111,7 +111,11 @@ artifact filter mistakenly required a retained artifact for every explicit
 exclusion, including the six shards that failed before any artifact existed.
 The corrected guard permits an explicit exclusion to have zero or one artifact
 (never more than one), and emits a receipt listing zero-artifact exclusions.
-The retry is still allowed to mutate only the already-approved
+The first retry also stopped before candidate construction because GitHub's bulk
+`gh run download` transport stalled while pulling all prior-run artifacts. The
+replacement transport fetches only the selected artifact IDs, at 15 concurrent
+bounded/retrying requests, and verifies both required Parquet files in every
+archive before candidate assembly. The retry is still allowed to mutate only the already-approved
 same-key cache after its test/preflight gate proves the selected artifact list
 exactly matches the 223 retained shards. Its fresh restore/readback receipt is
 required before this checkpoint, any affected artifact, or any player cell is

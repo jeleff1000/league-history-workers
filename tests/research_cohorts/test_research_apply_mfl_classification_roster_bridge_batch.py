@@ -12,6 +12,7 @@ def test_batch_apply_rebuilds_candidates_from_every_completed_shard_without_new_
     assert "validate_mfl_shard_artifacts.py" in workflow
     assert "--excluded-shards \"$EXCLUDED_SHARDS\"" in workflow
     assert "all_artifact_names.txt" in workflow
+    assert "selected_artifacts.tsv" in workflow
     assert "excluded shard is not a candidate artifact" in workflow
     assert "if len(matches) > 1:" in workflow
     assert "missing_artifact_exclusions" in workflow
@@ -25,4 +26,7 @@ def test_batch_apply_rebuilds_candidates_from_every_completed_shard_without_new_
     assert 'DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${ids[0]}"' in workflow
     assert "mfl_classification_roster_bridge_batch_ledger_receipt.json" in workflow
     assert "promotion_disposition" in workflow
-    assert "--pattern 'research-mfl-classification-roster-bridge-shard-*'" in workflow
+    assert "actions/artifacts/${artifact_id}/zip" in workflow
+    assert "curl --fail --location --silent --show-error" in workflow
+    assert "--retry-all-errors" in workflow
+    assert "xargs -r -P 15 -n 2" in workflow
