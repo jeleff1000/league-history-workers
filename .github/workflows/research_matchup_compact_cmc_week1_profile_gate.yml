@@ -48,7 +48,7 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           path: code
-          ref: 4e6f90193827825b226a089ea8a0d2724b7b277c
+          ref: 6efe66936c6882d0f6e98f009323eefbc2d7ffb5
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -481,6 +481,7 @@ jobs:
               grade_started = perf_counter()
               materialize_season_bracket_grade_position_batch(
                   c, source_table='rb_2025_bucket_source', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+                  player_regular_weeks_table='cached_regular_player_weeks',
                   output_table='rb_2025_bucket_season_grade', year=2025, position='RB', split_threshold=50,
               )
               grade_seconds = perf_counter() - grade_started
@@ -852,6 +853,7 @@ jobs:
               grade_started = perf_counter()
               materialize_season_bracket_grade_position_batch(
                   c, source_table='lake.public.player_fantasy', nfl_stats_table='ops.nfl_historical.nfl_player_stats_all',
+                  player_regular_weeks_table='cached_regular_player_weeks',
                   output_table='myles_2025_season_grade', year=2025, position=lane_position, split_threshold=50,
               )
               grade_seconds = perf_counter() - grade_started
