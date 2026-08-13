@@ -81,6 +81,40 @@ def test_refresh_records_current_direct_player_reaudit(tmp_path):
     assert row["next_action"] == "resolve_direct_identity_and_precedence_adjudication"
 
 
+def test_refresh_records_team_points_bridge_that_has_no_safe_recipient(tmp_path):
+    ledger = tmp_path / "ledger.csv"
+    with ledger.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIELDS)
+        writer.writeheader()
+        writer.writerow(_ledger_row())
+    selected = tmp_path / "selected.json"
+    selected.write_text(json.dumps([{"artifact_id": 7}]))
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text(json.dumps({
+        "artifact_bridge_state": [{
+            "artifact_id": 7,
+            "manager_null_source_keys_with_team_points": 12,
+            "unique_team_points_bridges": 0,
+            "ambiguous_team_points_bridges": 0,
+            "unmatched_team_points_bridges": 12,
+        }],
+    }))
+    out = tmp_path / "out.csv"
+
+    assert refresh(
+        ledger_path=ledger,
+        receipt_path=receipt,
+        selected_path=selected,
+        receipt_run_id="bridge-receipt",
+        out_path=out,
+    ) == {"ledger_rows": 1, "updated_rows": 1}
+    row = next(csv.DictReader(out.open(newline="", encoding="utf-8")))
+    assert row["receipt_run_id"] == "bridge-receipt"
+    assert row["final_status"] == "partial_schema_blocked_direct_identity"
+    assert row["next_action"] == "resolve_direct_identity_or_close_source_only"
+    assert "12 manager-null source player-weeks" in row["final_reason"]
+
+
 def test_next_action_keeps_identity_closure_visible_with_loss_tie_schema_work():
     assert _next_action({
         "blocked_schema_cells": 4,

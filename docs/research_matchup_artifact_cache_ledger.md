@@ -83,6 +83,16 @@ the cache. Its older 19,560 source-only cells are deliberately still open until
 the remaining team/player identities are independently resolved or explicitly
 classified as having no canonical recipient.
 
+The latest bridge-negative receipt,
+[31694545464](https://github.com/jeleff1000/league-history-workers/actions/runs/31694545464),
+tested team-points identity for the 15 direct MFL artifacts after their exact
+source replacement. Across 16,613 manager-null source player-weeks with a
+team-point value, zero identified a canonical recipient with the same
+league/week/player and team total. This does not change the cache or close the
+artifacts; it records that team points cannot resolve this particular missing
+manager identity, so the remaining 4,068 null cells require a roster/team
+identity bridge or an explicit source-only disposition.
+
 ## Post-inventory MFL execution records
 
 The residual MFL batch ran after the 9,479-artifact inventory was frozen. Its

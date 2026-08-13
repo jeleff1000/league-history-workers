@@ -61,10 +61,13 @@ def refresh(
     receipt = json.loads(receipt_path.read_text(encoding="utf-8-sig"))
     promotion_receipt = "artifact_rows" in receipt
     direct_reaudit_receipt = "artifact_current_state" in receipt
+    team_points_bridge_receipt = "artifact_bridge_state" in receipt
     if promotion_receipt:
         receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_rows"]}
     elif direct_reaudit_receipt:
         receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_current_state"]}
+    elif team_points_bridge_receipt:
+        receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_bridge_state"]}
     else:
         # Combined readback receipts include supplemental cache-recovery
         # entries whose IDs are descriptive strings.  This refresher updates
@@ -94,6 +97,29 @@ def refresh(
         if artifact_id not in selected_ids:
             continue
         evidence = receipt_rows[artifact_id]
+        if team_points_bridge_receipt:
+            unique = int(evidence.get("unique_team_points_bridges", 0) or 0)
+            if unique:
+                raise SystemExit(
+                    f"{artifact_id}: team-points bridge found {unique} safe recipients; "
+                    "build and validate an exact candidate before refreshing the ledger"
+                )
+            source_keys = int(evidence.get("manager_null_source_keys_with_team_points", 0) or 0)
+            unmatched = int(evidence.get("unmatched_team_points_bridges", 0) or 0)
+            ambiguous = int(evidence.get("ambiguous_team_points_bridges", 0) or 0)
+            if source_keys != unmatched + ambiguous:
+                raise SystemExit(f"{artifact_id}: team-points bridge metrics do not reconcile")
+            row["receipt_run_id"] = str(receipt_run_id)
+            row["receipt_json_sha256"] = digest
+            row["final_status"] = "partial_schema_blocked_direct_identity"
+            row["final_reason"] = (
+                f"Current team-points bridge audit tested {source_keys:,} manager-null source player-weeks; "
+                f"{unmatched:,} had no canonical row with the same league/week/player and team total, "
+                f"and {ambiguous:,} had non-unique team-total matches. No safe recipient exists for this bridge."
+            )
+            row["next_action"] = "resolve_direct_identity_or_close_source_only"
+            updated += 1
+            continue
         if direct_reaudit_receipt:
             if int(evidence.get("safe_null_candidates", 0) or 0) != 0:
                 raise SystemExit(
