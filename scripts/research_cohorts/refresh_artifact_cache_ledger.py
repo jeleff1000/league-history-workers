@@ -115,7 +115,9 @@ def refresh(
                 "source-precedence adjudication."
             )
             row["next_action"] = (
-                "add_loss_tie_schema_then_resolve_direct_identity_and_precedence_adjudication"
+                "resolve_direct_identity_and_precedence_adjudication"
+                if int(evidence.get("cache_conflict_cells", 0) or 0)
+                else "resolve_direct_identity_or_preserve_conflicts"
             )
             updated += 1
             continue
