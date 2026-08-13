@@ -24,10 +24,10 @@ is exactly 9,479 `artifact_inventory` rows; later artifacts are 231
 `artifact_admission` rows; cache-changing work is recorded as a separate
 `cache_recovery_receipt` row in the *same* ledger. Neither later artifacts nor
 receipts are smuggled into the 9,479-artifact denominator. There are currently
-11 such recovery receipts. They include the independently restored 74-row MFL
-repair, direct MFL player/team bridge work, exact MFL roster-identity work, and
-the two most recent loss/tie promotions described below. The ledger validator
-fails if a row lacks this distinction.
+13 such recovery receipts. They include the independently restored 74-row MFL
+repair, direct MFL player/team bridge work, exact MFL roster-identity work,
+the loss/tie promotions, and the latest direct-crosswalk bridge promotion.
+The ledger validator fails if a row lacks this distinction.
 
 The seventh receipt is the exact MFL loss/tie promotion: candidate run
 [31689836532](https://github.com/jeleff1000/league-history-workers/actions/runs/31689836532),
@@ -50,8 +50,8 @@ unchanged.
 
 ## Current residual queue
 
-The latest ledger validation reports 9,721 ledger rows: 9,479 frozen
-raw-artifact rows, 231 later artifact-admission rows, and 11 supplemental
+The latest ledger validation reports 9,723 ledger rows: 9,479 frozen
+raw-artifact rows, 231 later artifact-admission rows, and 13 supplemental
 cache-recovery receipts. Of the frozen artifact rows, 8,786 are closed and 693
 are still open. Those 693 entries are a work queue, **not** a claim that 693 artifacts still
 contain unapplied values: each must be re-read against the current approved
@@ -77,6 +77,14 @@ receipt proves 26,936 existing-player fills from 256 source candidates are in
 the cache. Its older 19,560 source-only cells are deliberately still open until
 the remaining team/player identities are independently resolved or explicitly
 classified as having no canonical recipient.
+
+The two remaining championship-probe source artifacts (`8956468822` and
+`8956471264`) are now expired in GitHub Actions. Their retained ledger receipt
+documents 151 overlapping cache league-weeks with source team signals but no
+player-team recipient edge. They therefore remain open as **source-unavailable
+identity gaps**: they cannot be promoted from the expired artifact, and require
+either a new targeted source retrieval with roster membership or an explicit
+source-only closure. Expiry is not treated as completion.
 
 ## Latest loss/tie promotion receipts
 
@@ -119,6 +127,15 @@ lack a usable manager identity for these keys. This is neither a source-fetch
 gap nor a safe upsert: the affected cache rows must first be reconstructed from
 the retained MFL roster memberships before outcomes can be attached. A
 manager-name fallback or arbitrary overwrite remains forbidden.
+
+The current-cache read-only rerun
+[31741870887](https://github.com/jeleff1000/league-history-workers/actions/runs/31741870887)
+confirmed the earlier exact duplicate bridge did not drift. Its 1,271
+strict-roster-multiset recipients already equal the direct MFL source on every
+identity and outcome field, and its before/after cache and schema hashes are
+identical. It emitted no new safe cache change. The 2,765 separately ledgered
+ambiguous source cells remain open because they do not pass that multiset
+identity proof.
 
 The latest bridge-negative receipt,
 [31694545464](https://github.com/jeleff1000/league-history-workers/actions/runs/31694545464),
