@@ -46,6 +46,17 @@ def test_combine_deduplicates_agreeing_null_key_rows(tmp_path):
     con.close()
 
 
+def test_combine_accepts_one_pinned_candidate_bundle(tmp_path):
+    root = _candidate(tmp_path, "only")
+    delta = tmp_path / "combined.parquet"
+    result = combine([root], delta, tmp_path / "combined.json")
+
+    assert result["candidate_bundles"] == 1
+    assert result["raw_rows"] == 1
+    assert result["unique_rows"] == 1
+    assert result["conflicting_duplicate_keys"] == 0
+
+
 def test_combine_rejects_conflicting_loss_for_same_null_key(tmp_path):
     roots = [_candidate(tmp_path, "first", 0), _candidate(tmp_path, "second", 1)]
     with pytest.raises(SystemExit, match="conflicting duplicate source values"):
