@@ -424,6 +424,16 @@ jobs:
           db.close()
           "
 
+      # Rebuild derived tables from the merged canonical rows on Fly.  The
+      # delta publish preserves older year partitions, so this refresh keeps
+      # historical canonical rows represented in matchup-derived and homepage
+      # tables after every import.
+      - name: Refresh centralized aggregates after merge
+        if: steps.import.outputs.exit_code == '0'
+        run: |
+          python scripts/refresh_aggregates.py \
+            --db "$DB_NAME"
+
       # ==================== REVALIDATE + WARM VERCEL CACHE ====================
       - name: Revalidate and warm Vercel cache
         if: steps.import.outputs.exit_code == '0'
