@@ -89,10 +89,8 @@ jobs:
             | sort -u > artifact_names.txt
           test -s artifact_names.txt
           test "$(wc -l < rescue_jobs.tsv)" -eq "$(wc -l < artifact_names.txt)"
-          while IFS= read -r name; do
-            mkdir -p "raw/$name"
-            gh run download "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$name" --dir "raw/$name"
-          done < artifact_names.txt
+          gh run download "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'research-mfl-classification-roster-bridge-shard-*' --dir raw
           test "$(find raw -name team_signals.parquet | wc -l)" -eq "$(wc -l < artifact_names.txt)"
           test "$(find raw -name player_bridge.parquet | wc -l)" -eq "$(wc -l < artifact_names.txt)"
           i=0
