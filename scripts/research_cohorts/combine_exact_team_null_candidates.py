@@ -21,8 +21,8 @@ def _one(root: Path) -> Path:
 
 
 def combine(roots: list[Path], out_delta: Path, out_receipt: Path) -> dict[str, int]:
-    if len(roots) < 2:
-        raise SystemExit("at least two candidate roots are required")
+    if not roots:
+        raise SystemExit("at least one candidate root is required")
     contracts = [verify(root) for root in roots]
     con = duckdb.connect()
     try:
