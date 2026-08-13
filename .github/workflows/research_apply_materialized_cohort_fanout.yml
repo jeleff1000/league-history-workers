@@ -3,9 +3,6 @@ name: Apply materialized cohort fan-out to canonical cache
 on:
   workflow_dispatch:
     inputs:
-      cache_key:
-        required: true
-        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
       settings_audit_run_id:
         required: true
         default: '31446334849'
@@ -17,6 +14,9 @@ permissions:
   contents: read
   actions: write
 
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
 concurrency:
   group: canonical-research-cache-replacement
   cancel-in-progress: false
@@ -26,14 +26,12 @@ jobs:
     if: ${{ inputs.confirm == 'APPLY_MATERIALIZED_COHORT_FANOUT' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
-    env:
-      CANONICAL_CACHE_KEY: ${{ inputs.cache_key }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/cache/restore@v5
         with:
           path: research_public_lake
-          key: ${{ inputs.cache_key }}
+          key: ${{ env.CANONICAL_CACHE_KEY }}
           fail-on-cache-miss: true
       - uses: actions/setup-python@v6
         with:
@@ -133,7 +131,7 @@ jobs:
       - uses: actions/cache/save@v5
         with:
           path: research_public_lake
-          key: ${{ inputs.cache_key }}
+          key: ${{ env.CANONICAL_CACHE_KEY }}
       - name: Assert exactly one canonical cache under the same key
         env:
           GH_TOKEN: ${{ github.token }}

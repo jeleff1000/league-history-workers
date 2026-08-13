@@ -3,12 +3,9 @@ name: Retired research cache normalizer (no cache writes)
 on:
   workflow_dispatch:
     inputs:
-      base_cache_key:
-        required: true
-        default: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
-      normalized_cache_key:
-        required: true
-        default: research-public-lake-v5-Linux-20260811-canonical-position-rostered-v1
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
 
 permissions:
   contents: read
@@ -36,7 +33,7 @@ jobs:
       - uses: actions/cache/restore@v5
         with:
           path: research_public_lake
-          key: ${{ inputs.base_cache_key }}
+          key: ${{ env.CANONICAL_CACHE_KEY }}
           fail-on-cache-miss: true
       - name: Fingerprint ops cache before rebuild
         run: |
@@ -88,11 +85,6 @@ jobs:
           print({'player_columns':len(p),'player_rows':c.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0],'platform_null':platform_null,'cohort_null':cohort_null,'cmc_rows_2025':cmc_rows,'cmc_position_null':cmc_position_null,'cmc_week1_eligible':cmc_week1_eligible,'league_years':league_years})
           PY
           python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
-      - name: Save a new immutable canonical cache generation
-        uses: actions/cache/save@v5
-        with:
-          path: research_public_lake
-          key: ${{ inputs.normalized_cache_key }}
       - uses: actions/upload-artifact@v4
         with:
           name: canonical-schema-manifest-${{ github.run_id }}
