@@ -1,0 +1,28 @@
+{
+  "canonical_cache_key": "research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613",
+  "candidate_run_id": 31689836532,
+  "source_artifact_id": "9004815467|9004892405|9005591893|9005685804|9005697100|9005761481|9006118944|9006417376|9006773660|9007017190|9007391861|9007393289|9007476012|9007511852|9007639810",
+  "candidate_artifacts": 15,
+  "candidate_rows": 28085,
+  "candidate_fields": ["loss", "tie"],
+  "matched_player_rows": 28085,
+  "unmatched_candidate_keys": 0,
+  "fresh_restore": true,
+  "schema_unchanged": true,
+  "player_rows_unchanged": true,
+  "ops_unchanged": true,
+  "new_lineage": false,
+  "remaining_source_backed_nulls": {
+    "loss": 0,
+    "tie": 0
+  },
+  "promotion_disposition": "exact_existing_player_null_fill",
+  "promotion_run_id": 31690044486,
+  "postsave_readback_run_id": 31690332564,
+  "evidence": {
+    "apply_report": "structured-player-null-fill-promotion-evidence-31690044486/apply_report.json",
+    "postsave_report": "research-mfl-outcome-null-fill-candidate-31690332564/mfl_direct_player_null_fill_report.json",
+    "verified_loss_cells": 28085,
+    "verified_tie_cells": 27988
+  }
+}
