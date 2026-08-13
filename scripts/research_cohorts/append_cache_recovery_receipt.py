@@ -185,8 +185,15 @@ def append_receipt(
         "identity_profile_run_id": str(receipt_run_id),
         "identity_profile_source": readback_path.name,
         "matched_source_player_rows": str(candidate_rows),
-        "identity_bridge_status": "source_roster_to_nfl_player_to_existing_cache_player",
-        "cache_join_strategy": "db_name|year|week|NFL_player_id",
+        "identity_bridge_status": str(
+            payload.get(
+                "identity_bridge_status",
+                "source_roster_to_nfl_player_to_existing_cache_player",
+            )
+        ),
+        "cache_join_strategy": str(
+            payload.get("cache_join_strategy", "db_name|year|week|NFL_player_id")
+        ),
         "bridge_evidence_file_count": str(candidate_artifacts),
         "bridge_evidence_row_count": str(candidate_rows),
         "bridge_evidence_strength": "direct_source_and_existing_cache_player",
