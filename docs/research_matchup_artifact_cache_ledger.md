@@ -27,6 +27,30 @@ receipts: the independently restored 74-row MFL repair, the 204-row direct
 MFL player/team bridge, and the 26,936-row MFL source-only bridge promotion.
 The ledger validator fails if a row lacks this distinction.
 
+## Current residual queue
+
+The latest ledger validation, after the 26,936-row receipt, reports 9,482
+ledger rows: 9,479 frozen raw-artifact rows and 3 supplemental cache-recovery
+receipts. Of the frozen artifact rows, 8,768 are closed and 711 are still open.
+Those 711 entries are a work queue, **not** a claim that 711 artifacts still
+contain unapplied values: each must be re-read against the current approved
+cache before it can be closed or kept open with a current, specific reason.
+
+| Current raw-artifact status | Count | Required disposition |
+| --- | ---: | --- |
+| `partial_schema_blocked_unmatched` | 472 | Re-run exact player/team bridge and readback; `loss`/`tie` now exist in schema, so stale schema wording alone cannot block closure. |
+| `partial_schema_blocked_conflicts` | 214 | Compare exact source and canonical non-null cells; preserve or replace only under an explicit source-precedence receipt. |
+| `partial_schema_blocked_direct_identity` | 15 | Resolve the exact direct identity or record the source-only/no-recipient reason. |
+| `cache_conflict_preserved` | 7 | Record an explicit precedence decision and fresh cell-level readback. |
+| `source_only_team_signal_missing_player_team_bridge` | 2 | Build a source-roster-to-existing-player bridge or retain as source-only. |
+| `unmatched_cache_key` | 1 | Separate already-filled recipients from true source-only player/team records and preserve the residual count. |
+
+The raw source artifact `8952555354` is the last row above. Its current
+receipt proves 26,936 existing-player fills from 256 source candidates are in
+the cache. Its older 19,560 source-only cells are deliberately still open until
+the remaining team/player identities are independently resolved or explicitly
+classified as having no canonical recipient.
+
 ## Current approved-cache contract
 
 The pre-recovery cache profile is the read-only key-profile receipt
