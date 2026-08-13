@@ -26,11 +26,11 @@ def _write(path: Path, rows: list[tuple[object, ...]]) -> None:
           source_win INTEGER, source_team_points DOUBLE, source_playoffs INTEGER,
           source_champion INTEGER, source_final_playoff_seed INTEGER,
           source_loss INTEGER, source_tie INTEGER, source_made_playoffs INTEGER,
-          source_files VARCHAR
+          source_files VARCHAR, canonical_win INTEGER
         )
         """
     )
-    con.executemany("INSERT INTO d VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+    con.executemany("INSERT INTO d VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
     con.execute("COPY d TO ? (FORMAT PARQUET)", [str(path)])
     con.close()
 
@@ -38,7 +38,7 @@ def _write(path: Path, rows: list[tuple[object, ...]]) -> None:
 def _row(*, win: int | None, points: float | None, source_files: str) -> tuple[object, ...]:
     return (
         "league", 2020, 7, "nfl-1", "manager", "team", "team", "mfl",
-        win, points, None, None, None, None, None, None, source_files,
+        win, points, None, None, None, None, None, None, source_files, 0,
     )
 
 
@@ -58,7 +58,7 @@ def test_merges_overlap_when_source_values_agree(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     con = duckdb.connect()
     assert con.execute(f"SELECT COUNT(*) FROM read_parquet('{out.as_posix()}')").fetchone()[0] == 1
-    assert con.execute(f"SELECT source_win, source_team_points FROM read_parquet('{out.as_posix()}')").fetchone() == (1, 123.0)
+    assert con.execute(f"SELECT source_win, source_team_points, canonical_win FROM read_parquet('{out.as_posix()}')").fetchone() == (1, 123.0, 0)
     assert con.execute(f"SELECT source_files FROM read_parquet('{out.as_posix()}')").fetchone()[0] == "normal|replacement"
     con.close()
 

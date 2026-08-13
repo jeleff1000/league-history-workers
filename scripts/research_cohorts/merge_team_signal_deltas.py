@@ -31,6 +31,9 @@ def merge(*, normal: Path, replacement: Path, out: Path, report: Path) -> dict[s
             column for column in columns
             if column.startswith("source_") and column != "source_files"
         ]
+        canonical_columns = [
+            column for column in columns if column.startswith("canonical_")
+        ]
         if not source_columns:
             raise ValueError("delta has no source values")
         key = ", ".join(f'"{column}"' for column in KEY_COLUMNS)
@@ -51,6 +54,7 @@ def merge(*, normal: Path, replacement: Path, out: Path, report: Path) -> dict[s
             raise ValueError(f"conflicting source values for exact delta keys: {conflicts}")
         select = [key]
         select.extend(f'MAX("{column}") AS "{column}"' for column in source_columns)
+        select.extend(f'MAX("{column}") AS "{column}"' for column in canonical_columns)
         if "source_files" in columns:
             select.append("STRING_AGG(DISTINCT source_files, '|' ORDER BY source_files) AS source_files")
         output_path = str(out.resolve()).replace("'", "''")
@@ -71,6 +75,7 @@ def merge(*, normal: Path, replacement: Path, out: Path, report: Path) -> dict[s
             "conflicting_source_keys": int(conflicts),
             "key_columns": list(KEY_COLUMNS),
             "source_columns": source_columns,
+            "canonical_columns": canonical_columns,
         }
         report.parent.mkdir(parents=True, exist_ok=True)
         report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")

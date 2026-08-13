@@ -148,6 +148,14 @@ not conflicting source evidence. The next preflight merges such overlaps by
 the fixed canonical key, rejects any disagreement among actual `source_*`
 values, and preserves deterministic provenance. It still cannot reach the
 cache until the merge report has zero conflicting source keys.
+Run [31680569001](https://github.com/jeleff1000/league-history-workers/actions/runs/31680569001)
+then passed the in-place apply invariants and saved the same approved cache key,
+but its first readback rule was too broad: it compared all source values,
+including deliberately preserved non-null cache values. The cache is therefore
+**not marked complete**. A read-only verifier now uses the saved apply evidence
+to prove only the authorized NULL fills and direct MFL `win=0 -> 1`
+replacements, while also checking that schema, row count, ops hash, and the
+single cache object remain unchanged.
 The retry is still allowed to mutate only the already-approved
 same-key cache after its test/preflight gate proves the selected artifact list
 exactly matches the complete non-diagnostic shard set. Its fresh restore/readback receipt is
