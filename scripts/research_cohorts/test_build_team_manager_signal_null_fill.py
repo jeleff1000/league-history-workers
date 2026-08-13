@@ -105,6 +105,12 @@ def test_reports_each_artifact_separately_for_ledger_adjudication(tmp_path: Path
             'null_fill_cells_by_field': {
                 'win': 1, 'team_points': 1, 'is_playoffs': 1, 'champion': 1,
             },
+            'comparison_cells_by_field': {
+                'win': {'source_non_null': 2, 'cache_equal': 0, 'cache_conflict': 1, 'cache_null': 1},
+                'team_points': {'source_non_null': 2, 'cache_equal': 0, 'cache_conflict': 1, 'cache_null': 1},
+                'is_playoffs': {'source_non_null': 2, 'cache_equal': 0, 'cache_conflict': 1, 'cache_null': 1},
+                'champion': {'source_non_null': 2, 'cache_equal': 0, 'cache_conflict': 1, 'cache_null': 1},
+            },
         },
         {
             'artifact_id': 12,
@@ -115,6 +121,12 @@ def test_reports_each_artifact_separately_for_ledger_adjudication(tmp_path: Path
             'delta_rows': 1,
             'null_fill_cells_by_field': {
                 'win': 1, 'team_points': 1, 'is_playoffs': 1, 'champion': 1,
+            },
+            'comparison_cells_by_field': {
+                'win': {'source_non_null': 2, 'cache_equal': 0, 'cache_conflict': 1, 'cache_null': 1},
+                'team_points': {'source_non_null': 2, 'cache_equal': 0, 'cache_conflict': 1, 'cache_null': 1},
+                'is_playoffs': {'source_non_null': 2, 'cache_equal': 0, 'cache_conflict': 1, 'cache_null': 1},
+                'champion': {'source_non_null': 2, 'cache_equal': 0, 'cache_conflict': 1, 'cache_null': 1},
             },
         },
     ]

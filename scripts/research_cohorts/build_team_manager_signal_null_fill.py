@@ -142,12 +142,29 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
                 con.execute("SELECT COUNT(*) FROM artifact_matched").fetchone()[0]
             )
             artifact_fill_cells: dict[str, int] = {}
+            artifact_comparison_cells: dict[str, dict[str, int]] = {}
             artifact_fill_filters: list[str] = []
             for field, (target, _) in SUPPORTED.items():
                 predicate = f"{_q('source_' + field)} IS NOT NULL AND {_q('canonical_' + target)} IS NULL"
                 artifact_fill_cells[target] = int(con.execute(
                     f"SELECT COUNT(*) FROM artifact_matched WHERE {predicate}"
                 ).fetchone()[0])
+                artifact_comparison_cells[target] = {
+                    "source_non_null": int(con.execute(
+                        f"SELECT COUNT(*) FROM artifact_matched WHERE {_q('source_' + field)} IS NOT NULL"
+                    ).fetchone()[0]),
+                    "cache_equal": int(con.execute(
+                        f"SELECT COUNT(*) FROM artifact_matched WHERE {_q('source_' + field)} IS NOT NULL "
+                        f"AND {_q('canonical_' + target)} IS NOT NULL "
+                        f"AND {_q('canonical_' + target)} IS NOT DISTINCT FROM {_q('source_' + field)}"
+                    ).fetchone()[0]),
+                    "cache_conflict": int(con.execute(
+                        f"SELECT COUNT(*) FROM artifact_matched WHERE {_q('source_' + field)} IS NOT NULL "
+                        f"AND {_q('canonical_' + target)} IS NOT NULL "
+                        f"AND {_q('canonical_' + target)} IS DISTINCT FROM {_q('source_' + field)}"
+                    ).fetchone()[0]),
+                    "cache_null": artifact_fill_cells[target],
+                }
                 artifact_fill_filters.append(f"({predicate})")
             artifact_delta_rows = int(con.execute(
                 f"SELECT COUNT(*) FROM artifact_matched WHERE {' OR '.join(artifact_fill_filters)}"
@@ -160,6 +177,7 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
                 "matched_player_rows": artifact_matched_player_rows,
                 "delta_rows": artifact_delta_rows,
                 "null_fill_cells_by_field": artifact_fill_cells,
+                "comparison_cells_by_field": artifact_comparison_cells,
             })
 
         fields: list[str] = []
