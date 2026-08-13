@@ -12,6 +12,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from enrich_artifact_cache_ledger_completion_gates import derive_gate_states
+
 
 def _next_action(receipt: dict) -> str:
     missing = int(receipt.get("cache_missing_cells", 0) or 0)
@@ -373,6 +375,11 @@ def refresh(
         updated += 1
     if updated != len(selected_ids):
         raise SystemExit(f"updated {updated} ledger rows for {len(selected_ids)} selected artifacts")
+    # Gate states are derived from the fresh receipt counts.  Keeping a
+    # historical gate after its current count reached zero reopens completed
+    # schema work and makes the ledger drift from the cache evidence.
+    for row in ledger_rows:
+        row.update(derive_gate_states(row))
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(ledger_rows[0]))

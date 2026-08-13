@@ -15,6 +15,7 @@ FIELDS = [
     "league_week_overlap_keys", "league_week_absent_keys", "matched_source_player_rows",
     "identity_bridge_status", "matched_by_mfl_manager_guid", "matched_by_manager_team_name",
     "matched_by_unique_manager", "cache_join_strategy",
+    "loss_tie_gate", "player_team_bridge_gate", "source_precedence_gate", "cache_admission_state",
 ]
 
 
@@ -204,6 +205,46 @@ def test_refresh_records_team_signal_without_promoting_team_champion_markers(tmp
     assert row["final_status"] == "cache_conflict_preserved"
     assert row["next_action"] == "require_championship_start_evidence_not_team_champion_flag"
     assert "Team-level championship flags" in row["final_reason"]
+
+
+def test_refresh_rederives_admission_gates_after_combined_team_readback(tmp_path):
+    """Fresh receipt values, not stale historical gates, control the next action."""
+    ledger = tmp_path / "ledger.csv"
+    with ledger.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIELDS)
+        writer.writeheader()
+        row = _ledger_row()
+        row.update({
+            "loss_tie_gate": "closed_schema_supported",
+            "player_team_bridge_gate": "open_raw_roster_bridge_required",
+            "source_precedence_gate": "not_required",
+            "cache_admission_state": "open_player_team_bridge",
+        })
+        writer.writerow(row)
+    selected = tmp_path / "selected.json"
+    selected.write_text(json.dumps([{"artifact_id": 7}]))
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text(json.dumps({"rows": [{
+        "artifact_id": 7,
+        "source_cells": 12,
+        "cache_match_cells": 9,
+        "cache_missing_cells": 0,
+        "cache_conflict_cells": 0,
+        "unmatched_cache_cells": 3,
+        "blocked_schema_cells": 0,
+        "final_status": "unmatched_cache_key",
+        "final_reason": "Source candidate key has no matching current canonical row.",
+    }]}))
+    out = tmp_path / "out.csv"
+
+    assert refresh(
+        ledger_path=ledger, receipt_path=receipt, selected_path=selected,
+        receipt_run_id="fresh-team-readback", out_path=out,
+    ) == {"ledger_rows": 1, "updated_rows": 1}
+    row = next(csv.DictReader(out.open(newline="", encoding="utf-8")))
+    assert row["loss_tie_gate"] == "not_required"
+    assert row["player_team_bridge_gate"] == "open_raw_roster_bridge_required"
+    assert row["cache_admission_state"] == "open_player_team_bridge"
 
 
 def test_next_action_keeps_identity_closure_visible_with_loss_tie_schema_work():
