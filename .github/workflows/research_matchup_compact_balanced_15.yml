@@ -18,9 +18,9 @@ on:
         required: false
         default: '15'
       career_buckets:
-        description: 'Bounded global career aggregation partitions; use 1 to test the spill-capable single-pass path'
+        description: 'Disjoint parallel career partitions; use 1 only for an isolated career pilot'
         required: false
-        default: '16'
+        default: '15'
 
 permissions:
   contents: read
@@ -31,6 +31,7 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       lane_count: ${{ steps.plan.outputs.lane_count }}
+      career_matrix: ${{ steps.plan.outputs.career_matrix }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5
@@ -53,6 +54,8 @@ jobs:
           echo "matrix=$(tr -d '\n' < matrix.json)" >> "$GITHUB_OUTPUT"
           lane_count="$(python -c 'import json; print(len(json.load(open("matrix.json"))["include"]))')"
           echo "lane_count=$lane_count" >> "$GITHUB_OUTPUT"
+          career_matrix="$(python -c 'import json; n=int("${{ inputs.career_buckets }}"); assert n > 0; print(json.dumps({"include":[{"bucket":i} for i in range(n)]}))')"
+          echo "career_matrix=$career_matrix" >> "$GITHUB_OUTPUT"
 
   build:
     needs: plan
@@ -103,7 +106,7 @@ jobs:
           retention-days: 1
           compression-level: 0
 
-  merge:
+  merge_base:
     needs: [plan, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -125,11 +128,117 @@ jobs:
           pattern: compact-matchup-lane-*-${{ github.run_id }}
           path: lanes
           merge-multiple: false
-      - name: Merge compact lanes and fail fast on golden output
+      - name: Merge weekly and season lanes once
         run: |
           mapfile -t LANES < <(find lanes -name lane.duckdb | sort)
           test "${#LANES[@]}" -eq ${{ needs.plan.outputs.lane_count }}
-          python code/scripts/research_cohorts/merge_compact_matchup_parts.py --parts "${LANES[@]}" --output research_matchup_compact.duckdb --career-buckets '${{ inputs.career_buckets }}'
+          python code/scripts/research_cohorts/merge_compact_matchup_parts.py --parts "${LANES[@]}" --output research_matchup_compact_base.duckdb --no-career
+          python - <<'PY'
+          import duckdb
+          c=duckdb.connect('research_matchup_compact_base.duckdb',read_only=True)
+          tables={x[0] for x in c.execute('SELECT table_name FROM duckdb_tables()').fetchall()}
+          assert tables >= {'research_matchup_compact_weekly','research_matchup_compact_season'},tables
+          dupe=c.execute("SELECT COUNT(*) FROM (SELECT NFL_player_id,year,week,position FROM research_matchup_compact_weekly GROUP BY 1,2,3,4 HAVING COUNT(*)<>1)").fetchone()[0]
+          assert dupe==0,dupe
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compact-matchup-base-${{ github.run_id }}
+          path: research_matchup_compact_base.duckdb
+          retention-days: 1
+          compression-level: 0
+      - name: Make narrow season source for parallel career workers
+        run: |
+          python - <<'PY'
+          import duckdb
+          source='research_matchup_compact_base.duckdb'
+          target='research_matchup_compact_season_source.duckdb'
+          c=duckdb.connect(target)
+          c.execute(f"ATTACH '{source}' AS source (READ_ONLY)")
+          c.execute('CREATE TABLE research_matchup_compact_season AS SELECT * FROM source.research_matchup_compact_season')
+          c.execute('CHECKPOINT')
+          c.close()
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compact-matchup-season-source-${{ github.run_id }}
+          path: research_matchup_compact_season_source.duckdb
+          retention-days: 1
+          compression-level: 0
+
+  career:
+    needs: [plan, merge_base]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      max-parallel: 15
+      matrix: ${{ fromJSON(needs.plan.outputs.career_matrix) }}
+    env:
+      PYTHONPATH: ${{ github.workspace }}/code
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - uses: actions/download-artifact@v5
+        with:
+          name: compact-matchup-season-source-${{ github.run_id }}
+          path: season-source
+      - name: Build one exact disjoint compact career part
+        run: |
+          python code/scripts/research_cohorts/merge_compact_matchup_parts.py \
+            --season-bundle season-source/research_matchup_compact_season_source.duckdb \
+            --output career-part.duckdb \
+            --career-buckets '${{ inputs.career_buckets }}' \
+            --career-bucket '${{ matrix.bucket }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compact-matchup-career-${{ matrix.bucket }}-${{ github.run_id }}
+          path: career-part.duckdb
+          retention-days: 1
+          compression-level: 0
+
+  merge:
+    needs: [plan, merge_base, career]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: ${{ github.workspace }}/code
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - uses: actions/download-artifact@v5
+        with:
+          name: compact-matchup-base-${{ github.run_id }}
+          path: base
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: compact-matchup-career-*-${{ github.run_id }}
+          path: career-parts
+          merge-multiple: false
+      - name: Assemble parallel career parts and fail fast on golden output
+        run: |
+          mapfile -t CAREER_PARTS < <(find career-parts -name career-part.duckdb | sort)
+          test "${#CAREER_PARTS[@]}" -eq '${{ inputs.career_buckets }}'
+          python code/scripts/research_cohorts/merge_compact_matchup_parts.py \
+            --base-bundle base/research_matchup_compact_base.duckdb \
+            --career-parts "${CAREER_PARTS[@]}" \
+            --output research_matchup_compact.duckdb
           python - <<'PY'
           import duckdb,json
           c=duckdb.connect('research_matchup_compact.duckdb',read_only=True)
