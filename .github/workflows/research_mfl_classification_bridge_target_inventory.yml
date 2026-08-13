@@ -1,0 +1,70 @@
+name: Research MFL classification bridge target inventory
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Existing MFL player-outcome classification run.
+        required: true
+        default: '31192594062'
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Download only the 15 existing classification artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p classification
+          gh run download '${{ inputs.source_run_id }}' --repo '${{ github.repository }}' \
+            --pattern 'mfl-player-outcome-classification-*-31192594062' --dir classification
+          test "$(find classification -name 'mfl_outcome_classification_*.parquet' | wc -l)" = '15'
+      - name: Materialize exact source-roster bridge targets without mutating cache
+        run: |
+          set -euo pipefail
+          args=()
+          while IFS= read -r source; do args+=(--source "$source"); done < <(find classification -name 'mfl_outcome_classification_*.parquet' | sort)
+          python scripts/research_cohorts/materialize_mfl_classification_bridge_targets.py \
+            --base research_public_lake/corpus_snapshot.duckdb "${args[@]}" \
+            --out research_mfl_classification_bridge_targets.json \
+            --report research_mfl_classification_bridge_targets_report.json
+      - name: Fail fast on inventory contract
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(Path('research_mfl_classification_bridge_targets_report.json').read_text())
+          assert report['cache_mutated'] is False
+          assert report['new_lineage'] is False
+          assert report['canonical_schema_unchanged'] is True
+          assert report['source_files'] == 15
+          assert report['target_groups'] >= 0
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-mfl-classification-bridge-targets-${{ github.run_id }}
+          path: |
+            research_mfl_classification_bridge_targets.json
+            research_mfl_classification_bridge_targets_report.json
+          retention-days: 90
+          compression-level: 0
