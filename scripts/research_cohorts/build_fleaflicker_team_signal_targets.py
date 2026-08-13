@@ -95,18 +95,26 @@ def build(*, base: Path, out: Path, report: Path) -> dict[str, int]:
         # no manager or display-name fallback is admitted here.
         con.execute(
             """
-            CREATE TEMP TABLE unbridged_player_weeks AS
-            SELECT DISTINCT CAST(db_name AS VARCHAR) AS db_name,
+            CREATE TEMP TABLE unbridged_players AS
+            SELECT CAST(db_name AS VARCHAR) AS db_name,
                    CAST(year AS INTEGER) AS year,
                    CAST(week AS INTEGER) AS week,
                    NULLIF(TRIM(CAST(fleaflicker_player_id AS VARCHAR)), '')
-                     AS fleaflicker_player_id
+                     AS fleaflicker_player_id,
+                   is_playoffs, champion
             FROM public.player_fantasy
             WHERE LOWER(TRIM(CAST(platform AS VARCHAR)))='fleaflicker'
-              AND NULLIF(TRIM(CAST(fleaflicker_player_id AS VARCHAR)), '') IS NOT NULL
               AND NULLIF(TRIM(CAST(manager AS VARCHAR)), '') IS NULL
               AND NULLIF(TRIM(CAST(team_key AS VARCHAR)), '') IS NULL
               AND NULLIF(TRIM(CAST(team_name AS VARCHAR)), '') IS NULL
+            """
+        )
+        con.execute(
+            """
+            CREATE TEMP TABLE unbridged_player_weeks AS
+            SELECT DISTINCT db_name, year, week, fleaflicker_player_id
+            FROM unbridged_players
+            WHERE fleaflicker_player_id IS NOT NULL
             """
         )
         con.execute(
@@ -148,6 +156,34 @@ def build(*, base: Path, out: Path, report: Path) -> dict[str, int]:
             FROM candidates
             """
         ).fetchone()
+        diagnostics = con.execute(
+            """
+            SELECT
+              COUNT(*) AS unbridged_player_rows,
+              COUNT(*) FILTER (WHERE fleaflicker_player_id IS NOT NULL)
+                AS unbridged_rows_with_native_id,
+              COUNT(*) FILTER (WHERE fleaflicker_player_id IS NULL)
+                AS unbridged_rows_without_native_id,
+              COUNT(*) FILTER (WHERE is_playoffs IS NULL OR champion IS NULL)
+                AS unbridged_rows_with_missing_signal
+            FROM unbridged_players
+            """
+        ).fetchone()
+        source_overlap = con.execute(
+            """
+            SELECT
+              COUNT(*) AS source_signal_unbridged_player_rows,
+              COUNT(*) FILTER (WHERE p.fleaflicker_player_id IS NOT NULL)
+                AS source_signal_rows_with_native_id,
+              COUNT(*) FILTER (WHERE p.fleaflicker_player_id IS NULL)
+                AS source_signal_rows_without_native_id
+            FROM source_signals s
+            JOIN unbridged_players p
+              ON p.db_name=s.db_name AND p.year=s.year AND p.week=s.week
+            WHERE (p.is_playoffs IS NULL AND s.source_is_playoffs IS NOT NULL)
+               OR (p.champion IS NULL AND s.source_champion IS NOT NULL)
+            """
+        ).fetchone()
         result = {
             "read_only": True,
             "cache_mutated": False,
@@ -159,6 +195,13 @@ def build(*, base: Path, out: Path, report: Path) -> dict[str, int]:
             "target_unbridged_player_ids": int(counts[3]),
             "playoff_signal_team_weeks": int(counts[4]),
             "championship_winner_team_weeks": int(counts[5]),
+            "unbridged_player_rows": int(diagnostics[0]),
+            "unbridged_rows_with_native_id": int(diagnostics[1]),
+            "unbridged_rows_without_native_id": int(diagnostics[2]),
+            "unbridged_rows_with_missing_signal": int(diagnostics[3]),
+            "source_signal_unbridged_player_rows": int(source_overlap[0]),
+            "source_signal_rows_with_native_id": int(source_overlap[1]),
+            "source_signal_rows_without_native_id": int(source_overlap[2]),
             "join_contract": "db_name|year|week|team_key -> fleaflicker_player_id -> existing cache player",
             "champion_contract": "is_championship=1 AND champion=1 only",
         }

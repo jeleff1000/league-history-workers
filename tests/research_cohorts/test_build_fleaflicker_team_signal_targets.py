@@ -59,6 +59,8 @@ def test_targets_only_unbridged_fleaflicker_team_signals_and_preserves_cache(tmp
     assert result["new_lineage"] is False
     assert result["target_team_weeks"] == 1
     assert result["championship_winner_team_weeks"] == 1
+    assert result["source_signal_rows_with_native_id"] == 1
+    assert result["source_signal_rows_without_native_id"] == 0
     con = duckdb.connect()
     row = con.execute("SELECT * FROM read_parquet(?)", [str(out)]).fetchone()
     columns = [item[0] for item in con.execute("DESCRIBE SELECT * FROM read_parquet(?)", [str(out)]).fetchall()]
