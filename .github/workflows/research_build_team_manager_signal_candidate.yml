@@ -1,0 +1,103 @@
+name: Build read-only team-manager signal candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Capture immutable-cache prestate
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import duckdb,json
+          from pathlib import Path
+          c=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          Path('prestate.json').write_text(json.dumps({'schema':[r[0] for r in c.execute('DESCRIBE public.player_fantasy').fetchall()], 'player_rows':int(c.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])},indent=2)+'\n')
+          c.close()
+          PY
+      - name: Download every retained team-signal artifact under adjudication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p sources
+          gh run download 31275025446 --repo "$GITHUB_REPOSITORY" --name promotable-rescue-delta-31275025446-7 --dir sources/9026771587
+          gh run download 31275025446 --repo "$GITHUB_REPOSITORY" --name promotable-rescue-delta-31275025446-12 --dir sources/9026776710
+          gh run download 31275356687 --repo "$GITHUB_REPOSITORY" --name promotable-rescue-delta-31275356687-7 --dir sources/9026861928
+          gh run download 31275356687 --repo "$GITHUB_REPOSITORY" --name promotable-rescue-delta-31275356687-12 --dir sources/9026866779
+          gh run download 31280337152 --repo "$GITHUB_REPOSITORY" --name promotable-rescue-delta-31280337152-5 --dir sources/9028252551
+          gh run download 31280337152 --repo "$GITHUB_REPOSITORY" --name promotable-rescue-delta-31280337152-7 --dir sources/9028259828
+          gh run download 31280337152 --repo "$GITHUB_REPOSITORY" --name promotable-rescue-delta-31280337152-12 --dir sources/9028253133
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          entries=[]
+          for artifact_id in (9026771587,9026776710,9026861928,9026866779,9028252551,9028259828,9028253133):
+              files=list((Path('sources')/str(artifact_id)).rglob('promotable_delta.parquet'))
+              if len(files)!=1: raise SystemExit(f'{artifact_id}: expected one source file, found {len(files)}')
+              entries.append({'artifact_id':artifact_id,'path':str(files[0].resolve())})
+          Path('source_manifest.json').write_text(json.dumps(entries,indent=2)+'\n')
+          PY
+      - name: Build strict manager fan-out null-fill candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/build_team_manager_signal_null_fill.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --manifest source_manifest.json \
+            --out team_manager_signal_delta.parquet \
+            --report team_manager_signal_report.json
+      - name: Fail fast on any cache mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb,hashlib,json
+          from pathlib import Path
+          before=json.loads(Path('prestate.json').read_text())
+          report=json.loads(Path('team_manager_signal_report.json').read_text())
+          if report.get('cache_mutated') is not False or report.get('new_lineage') is not False or report.get('canonical_schema_unchanged') is not True:
+              raise SystemExit(f'candidate mutation invariant failed: {report}')
+          c=duckdb.connect('research_public_lake/corpus_snapshot.duckdb',read_only=True)
+          if [r[0] for r in c.execute('DESCRIBE public.player_fantasy').fetchall()] != before['schema']: raise SystemExit('player schema changed')
+          if int(c.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]) != before['player_rows']: raise SystemExit('player row count changed')
+          c.close()
+          h=hashlib.sha256()
+          with open('research_public_lake/ops_cache.duckdb','rb') as f:
+              for block in iter(lambda:f.read(1024*1024),b''): h.update(block)
+          if h.hexdigest()!=Path('ops_before.sha256').read_text().split()[0]: raise SystemExit('ops cache changed')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: team-manager-signal-candidate-${{ github.run_id }}
+          path: |
+            prestate.json
+            ops_before.sha256
+            source_manifest.json
+            team_manager_signal_delta.parquet
+            team_manager_signal_report.json
+          retention-days: 90
+          compression-level: 6

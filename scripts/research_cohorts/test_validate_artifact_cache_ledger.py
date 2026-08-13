@@ -48,8 +48,23 @@ def test_summarize_rows_separates_raw_artifacts_from_cache_recovery_receipts():
         "raw_artifact_closed_rows": 1,
         "raw_artifact_open_rows": 1,
         "cache_recovery_receipt_rows": 1,
+        "post_inventory_artifact_rows": 0,
         "unknown_record_type_rows": 0,
     }
+
+
+def test_summarize_rows_counts_post_inventory_artifact_admissions_separately():
+    admission = _row(
+        record_type="artifact_admission",
+        artifact_id="new-artifact",
+        cache_admission_state="closed_cache_verified",
+    )
+
+    summary = summarize_rows([admission])
+
+    assert summary["raw_artifact_rows"] == 0
+    assert summary["post_inventory_artifact_rows"] == 1
+    assert summary["unknown_record_type_rows"] == 0
 
 
 def test_rejects_cache_verified_row_with_remaining_gap():

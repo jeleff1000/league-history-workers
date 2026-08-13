@@ -1,0 +1,105 @@
+name: Verify saved MFL classification roster bridge apply
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_apply_run_id:
+        description: Apply run whose preserved evidence must be read back against the approved cache.
+        required: true
+        default: '31680569001'
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: mfl-classification-roster-bridge-batch-apply-evidence-${{ inputs.source_apply_run_id }}
+          path: evidence
+          run-id: ${{ inputs.source_apply_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pytest==8.3.5
+      - name: Test exact authorized-cell readback verifier
+        run: python -m pytest -q tests/research_cohorts/test_verify_team_signal_delta_readback.py tests/research_cohorts/test_research_verify_mfl_classification_roster_bridge_apply.py
+      - name: Freshly restore and verify only authorized source-backed cell changes
+        run: |
+          python scripts/research_cohorts/verify_team_signal_delta_readback.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --delta evidence/candidate/combined_delta.parquet \
+            --before evidence/cache_before.json \
+            --ops research_public_lake/ops_cache.duckdb \
+            --ops-before evidence/ops_before.sha256 \
+            --apply-report evidence/apply_report.json \
+            --out mfl_classification_roster_bridge_batch_readback.json
+      - name: Produce ledger receipt without mutating the cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          result=json.loads(Path('mfl_classification_roster_bridge_batch_readback.json').read_text())
+          assembly=json.loads(Path('evidence/assembly_report.json').read_text())
+          apply=json.loads(Path('evidence/apply_report.json').read_text())
+          shard_set=json.loads(Path('evidence/shard_set_report.json').read_text())
+          diagnostics=json.loads(Path('evidence/source_diagnostic_artifacts.json').read_text())
+          receipt={
+              **result,
+              'canonical_cache_key':'${{ env.CANONICAL_CACHE_KEY }}',
+              'candidate_run_id':'31663728938',
+              'source_apply_run_id':'${{ inputs.source_apply_run_id }}',
+              'source_artifact_id':'mfl-classification-roster-bridge-batch-220-complete-artifacts',
+              'candidate_artifacts':int(assembly['candidate_artifacts']),
+              'matched_player_rows':int(result['candidate_rows']),
+              'promotion_disposition':'exact_existing_player_null_fill|direct_mfl_win_replacement',
+              'candidate_fields':sorted(set(
+                  key for key,value in apply['improvements_by_field'].items() if int(value)
+              ) | set(
+                  key for key,value in apply['replacements_by_field'].items() if int(value)
+              )),
+              'excluded_shards':shard_set['excluded_shards'],
+              'source_diagnostic_shards':shard_set['source_diagnostic_shards'],
+              'source_diagnostic_artifacts':diagnostics['artifacts'],
+              'selected_shards':shard_set['selected_shards'],
+              'null_fill_rows':int(assembly['normal_delta_rows']),
+              'direct_mfl_win_replacement_rows':int(assembly['direct_mfl_win_replacement_rows']),
+              'improvements_by_field':{key:int(value) for key,value in apply['improvements_by_field'].items() if int(value)},
+              'replacements_by_field':{key:int(value) for key,value in apply['replacements_by_field'].items() if int(value)},
+          }
+          Path('mfl_classification_roster_bridge_batch_ledger_receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
+          PY
+      - name: Prove one approved same-key cache object remains
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          printf '%s\n' "${ids[0]}" > canonical_cache_id.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-classification-roster-bridge-batch-readback-${{ github.run_id }}
+          path: |
+            mfl_classification_roster_bridge_batch_readback.json
+            mfl_classification_roster_bridge_batch_ledger_receipt.json
+            canonical_cache_id.txt
+          retention-days: 90

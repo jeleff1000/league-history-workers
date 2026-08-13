@@ -156,3 +156,74 @@ def test_append_receipt_records_verified_direct_mfl_win_replacements(tmp_path: P
     assert receipt["dispositions"] == "exact_existing_player_null_fill|direct_mfl_win_replacement"
     assert receipt["candidate_fields"] == "team_points|win"
     assert "direct MFL win replacements" in receipt["final_reason"]
+
+
+def test_append_receipt_accepts_exact_team_null_readback_shape(tmp_path: Path) -> None:
+    from scripts.research_cohorts.append_cache_recovery_receipt import append_receipt
+
+    ledger = tmp_path / "ledger.csv"
+    with ledger.open("w", newline="", encoding="utf-8") as handle:
+        csv.DictWriter(handle, fieldnames=FIELDS).writeheader()
+    readback = tmp_path / "readback.json"
+    readback.write_text(json.dumps({
+        "canonical_cache_key": "approved-key",
+        "candidate_run_id": "31668497497",
+        "source_artifact_id": "9016453846|9016485043",
+        "candidate_rows": 600,
+        "candidate_unique_keys": 600,
+        "matched_player_rows": 600,
+        "unmatched_candidate_keys": 0,
+        "loss_remaining_null_source_cells": 0,
+        "tie_remaining_null_source_cells": 0,
+        "schema_unchanged": True,
+        "player_rows_unchanged": True,
+        "ops_unchanged": True,
+        "fresh_restore": True,
+        "new_lineage": False,
+    }), encoding="utf-8")
+
+    out = tmp_path / "out.csv"
+    append_receipt(
+        ledger_path=ledger,
+        readback_path=readback,
+        out_path=out,
+        receipt_run_id="31669704187",
+        artifact_label="exact-team-null-promotion-600-31669704187",
+        source_artifact="research-sparse-playoff-championship-rescue-46|94",
+    )
+
+    receipt = list(csv.DictReader(out.open(newline="", encoding="utf-8")))[0]
+    assert receipt["candidate_file_count"] == "2"
+    assert receipt["candidate_fields"] == "loss|tie"
+    assert receipt["final_status"] == "cache_verified"
+
+
+def test_append_receipt_accepts_labeled_legacy_apply_receipt(tmp_path: Path) -> None:
+    from scripts.research_cohorts.append_cache_recovery_receipt import append_receipt
+
+    ledger = tmp_path / "ledger.csv"
+    with ledger.open("w", newline="", encoding="utf-8") as handle:
+        csv.DictWriter(handle, fieldnames=FIELDS).writeheader()
+    readback = tmp_path / "readback.json"
+    payload = _clean_readback()
+    payload.update({
+        "readback_proof_mode": "legacy_apply_receipt_minimum_match",
+        "authorized_cells_by_field": {"win": 2},
+        "source_value_disagreements": {"win": 7},
+        "source_artifact_id": "mfl-legacy-batch",
+    })
+    payload.pop("remaining_source_backed_nulls")
+    readback.write_text(json.dumps(payload), encoding="utf-8")
+
+    out = tmp_path / "out.csv"
+    append_receipt(
+        ledger_path=ledger,
+        readback_path=readback,
+        out_path=out,
+        receipt_run_id="31682222659",
+        artifact_label="mfl-legacy",
+        source_artifact="mfl saved batch",
+    )
+
+    receipt = list(csv.DictReader(out.open(newline="", encoding="utf-8")))[0]
+    assert "legacy apply receipt" in receipt["final_reason"]

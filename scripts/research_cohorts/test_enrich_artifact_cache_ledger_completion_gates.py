@@ -15,12 +15,12 @@ def _row(**overrides):
     return row
 
 
-def test_marks_all_three_open_gates_from_quantified_evidence():
+def test_marks_historical_loss_tie_schema_count_as_supported_not_open():
     assert derive_gate_states(_row()) == {
-        "loss_tie_gate": "open_schema_required",
+        "loss_tie_gate": "closed_schema_supported",
         "player_team_bridge_gate": "open_raw_roster_bridge_required",
         "source_precedence_gate": "open_field_precedence_required",
-        "cache_admission_state": "open_all_required_gates",
+        "cache_admission_state": "open_player_team_bridge_and_source_precedence",
     }
 
 

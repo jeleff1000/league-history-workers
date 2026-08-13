@@ -11,6 +11,10 @@ on:
         description: Completed read-only residual MFL classification shard run.
         required: true
         default: '31663728938'
+      excluded_shards:
+        description: Comma-separated rescue shard indexes explicitly excluded from this one apply. Empty requires every shard.
+        required: false
+        default: ''
 
 permissions:
   actions: write
@@ -37,7 +41,28 @@ jobs:
           python -m pytest -q
           scripts/research_cohorts/test_apply_team_signal_delta_in_place.py
           tests/research_cohorts/test_audit_team_signal_candidates.py
+          tests/research_cohorts/test_validate_mfl_shard_artifacts.py
+          tests/research_cohorts/test_extract_mfl_artifact_members.py
+          tests/research_cohorts/test_merge_team_signal_deltas.py
           tests/research_cohorts/test_research_apply_mfl_classification_roster_bridge_batch.py
+      - name: Parse MFL artifact-download shell before any cache restore
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          text = Path('.github/workflows/research_apply_mfl_classification_roster_bridge_batch.yml').read_text()
+          start = text.split('      - name: Download every completed shard artifact and reject an incomplete candidate run\n', 1)[1]
+          block = start.split('      - name: Rebuild exact NULL-fill and direct-MFL replacement deltas from retained evidence\n', 1)[0]
+          script = block.split('        run: |\n', 1)[1]
+          rendered = '\n'.join(
+              line[10:] if line.startswith('          ') else line
+              for line in script.splitlines()
+          ) + '\n'
+          Path('/tmp/mfl_batch_download.sh').write_text(rendered)
+          PY
+          bash -n /tmp/mfl_batch_download.sh
 
   apply:
     needs: tests
@@ -74,6 +99,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CANDIDATE_RUN_ID: ${{ inputs.candidate_run_id }}
+          EXCLUDED_SHARDS: ${{ inputs.excluded_shards }}
         shell: bash
         run: |
           set -euo pipefail
@@ -81,18 +107,126 @@ jobs:
           mkdir -p raw candidate_input
           gh run view "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" --json jobs --jq '.jobs[] | select(.name | startswith("rescue (")) | [.name,.conclusion] | @tsv' > rescue_jobs.tsv
           test -s rescue_jobs.tsv
-          if awk -F '\t' '$2=="cancelled" || $2=="skipped" || $2=="" {exit 1}' rescue_jobs.tsv; then :; else
-            echo 'candidate run has incomplete rescue jobs' >&2; exit 1
-          fi
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/artifacts?per_page=100" \
-            --jq '.artifacts[] | select(.expired == false and (.name | startswith("research-mfl-classification-roster-bridge-shard-"))) | .name' \
-            | sort -u > artifact_names.txt
-          test -s artifact_names.txt
-          test "$(wc -l < rescue_jobs.tsv)" -eq "$(wc -l < artifact_names.txt)"
-          gh run download "$CANDIDATE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --pattern 'research-mfl-classification-roster-bridge-shard-*' --dir raw
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/artifacts?per_page=100" \
+            > all_artifacts.json
+          # The excluded shard is not a candidate artifact for promotion.
+          # An explicitly excluded shard may still have an incomplete pre-state bundle,
+          # or it may have failed before it could emit any artifact.  Both are
+          # permitted only as explicit exclusions; duplicate artifacts are not.
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          pages=json.loads(Path('all_artifacts.json').read_text())
+          artifacts=[artifact for page in pages for artifact in page.get('artifacts', [])
+                     if not artifact.get('expired')
+                     and artifact.get('name', '').startswith('research-mfl-classification-roster-bridge-shard-')]
+          by_name={artifact['name']: int(artifact['id']) for artifact in artifacts}
+          if len(by_name) != len(artifacts):
+              raise SystemExit('duplicate retained artifact names in GitHub artifact inventory')
+          names=sorted(by_name)
+          Path('all_artifact_names.txt').write_text('\n'.join(names)+'\n')
+          excluded=[int(item.strip()) for item in os.environ['EXCLUDED_SHARDS'].split(',') if item.strip()]
+          selected=list(names)
+          missing_artifact_exclusions=[]
+          for shard in excluded:
+              prefix=f'research-mfl-classification-roster-bridge-shard-{shard}-'
+              matches=[item for item in names if item.startswith(prefix)]
+              if len(matches) > 1:
+                  raise SystemExit(f'excluded shard artifact count must be zero or one: shard={shard}, matches={matches}')
+              if matches:
+                  selected.remove(matches[0])
+              else:
+                  missing_artifact_exclusions.append(shard)
+          Path('selected_artifacts.tsv').write_text('\n'.join(
+              f'{name}\t{by_name[name]}' for name in selected
+          )+'\n')
+          Path('missing_artifact_exclusions.json').write_text(json.dumps({
+              'excluded_shards': excluded,
+              'missing_artifact_exclusions': missing_artifact_exclusions,
+          }, indent=2)+'\n')
+          PY
+          mkdir -p raw zips
+          download_artifact() {
+            local name="$1"
+            local artifact_id="$2"
+            local zip_path="zips/${artifact_id}.zip"
+            local output_dir="raw/${name}"
+            local attempt
+            for attempt in 1 2 3 4 5; do
+              rm -f "$zip_path"
+              if curl --fail --location --silent --show-error --retry 4 --retry-all-errors \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H 'Accept: application/vnd.github+json' \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" \
+                -o "$zip_path"; then
+                if python scripts/research_cohorts/extract_mfl_artifact_members.py \
+                  --archive "$zip_path" --out "$output_dir"; then
+                  if test -f "$output_dir/team_signals.parquet" \
+                    && test -f "$output_dir/player_bridge.parquet"; then
+                    return 0
+                  fi
+                else
+                  extraction_status=$?
+                  if test "$extraction_status" -eq 2; then
+                    mkdir -p "$output_dir"
+                    printf '{"artifact":"%s","artifact_id":%s,"status":"source_diagnostic_only"}\n' \
+                      "$name" "$artifact_id" > "$output_dir/source_diagnostic.json"
+                    rm -f "$zip_path"
+                    return 0
+                  fi
+                fi
+              fi
+              rm -rf "$output_dir"
+              sleep "$attempt"
+            done
+            echo "artifact transfer or extraction failed: ${name} (${artifact_id})" >&2
+            return 1
+          }
+          export -f download_artifact
+          export GH_TOKEN GITHUB_REPOSITORY
+          cut -f1,2 selected_artifacts.tsv | xargs -r -P 15 -n 2 bash -c 'download_artifact "$@"' _
+          python - <<'PY'
+          import json, re
+          from pathlib import Path
+
+          complete=[]
+          diagnostics=[]
+          for line in Path('selected_artifacts.tsv').read_text().splitlines():
+              name, artifact_id=line.split('\t')
+              root=Path('raw') / name
+              team=root / 'team_signals.parquet'
+              bridge=root / 'player_bridge.parquet'
+              diagnostic=root / 'source_diagnostic.json'
+              if team.is_file() and bridge.is_file() and not diagnostic.exists():
+                  complete.append((name, artifact_id))
+              elif diagnostic.is_file() and not team.exists() and not bridge.exists():
+                  receipt=json.loads(diagnostic.read_text())
+                  if receipt != {'artifact':name, 'artifact_id':int(artifact_id), 'status':'source_diagnostic_only'}:
+                      raise SystemExit(f'invalid source-diagnostic receipt: {receipt}')
+                  match=re.search(r'-shard-(\d+)-',name)
+                  if not match:
+                      raise SystemExit(f'cannot derive shard from source-diagnostic artifact: {name}')
+                  diagnostics.append((int(match.group(1)), name, artifact_id))
+              else:
+                  raise SystemExit(f'incomplete artifact admission state: {name}')
+          if not complete:
+              raise SystemExit('no complete MFL bridge artifacts admitted')
+          Path('artifact_names.txt').write_text('\n'.join(name for name,_ in complete)+'\n')
+          Path('complete_artifacts.tsv').write_text('\n'.join('\t'.join(row) for row in complete)+'\n')
+          Path('source_diagnostic_artifacts.json').write_text(json.dumps({
+              'status':'source_diagnostic_only',
+              'artifacts':[{'shard':shard,'artifact':name,'artifact_id':int(artifact_id)} for shard,name,artifact_id in diagnostics],
+          }, indent=2)+'\n')
+          Path('source_diagnostic_shards.txt').write_text(','.join(str(shard) for shard,_,_ in diagnostics))
+          PY
           test "$(find raw -name team_signals.parquet | wc -l)" -eq "$(wc -l < artifact_names.txt)"
           test "$(find raw -name player_bridge.parquet | wc -l)" -eq "$(wc -l < artifact_names.txt)"
+          DIAGNOSTIC_SHARDS="$(cat source_diagnostic_shards.txt)"
+          python scripts/research_cohorts/validate_mfl_shard_artifacts.py \
+            --jobs rescue_jobs.tsv --artifacts artifact_names.txt \
+            --excluded-shards "$EXCLUDED_SHARDS" \
+            --source-diagnostic-shards "$DIAGNOSTIC_SHARDS" \
+            --report shard_set_report.json
           i=0
           while IFS= read -r path; do cp "$path" "candidate_input/team_signals_${i}.parquet"; i=$((i+1)); done < <(find raw -name team_signals.parquet -print | sort)
           i=0
@@ -105,14 +239,19 @@ jobs:
             --base research_public_lake/corpus_snapshot.duckdb \
             --candidates candidate_input --out candidate \
             --emit-direct-mfl-win-replacements
+          python scripts/research_cohorts/merge_team_signal_deltas.py \
+            --normal candidate/team_promotable_player_delta.parquet \
+            --replacement candidate/team_direct_mfl_win_replacement_delta.parquet \
+            --out candidate/combined_delta.parquet \
+            --report candidate/combined_delta_merge_report.json
           python - <<'PY'
           import duckdb, json
           from pathlib import Path
           normal=Path('candidate/team_promotable_player_delta.parquet')
           replacement=Path('candidate/team_direct_mfl_win_replacement_delta.parquet')
           con=duckdb.connect()
-          con.execute("COPY (SELECT * FROM read_parquet([?,?], union_by_name=true)) TO 'candidate/combined_delta.parquet' (FORMAT PARQUET)",[str(normal),str(replacement)])
           report=json.loads(Path('candidate/team_signal_candidate_report.json').read_text())
+          merge_report=json.loads(Path('candidate/combined_delta_merge_report.json').read_text())
           positive={k:int(v) for k,v in report['positive_mismatches_not_auto_promoted'].items()}
           if any(value for key,value in positive.items() if key!='win'):
               raise SystemExit(f'non-win source precedence conflict remains: {positive}')
@@ -127,6 +266,8 @@ jobs:
               'normal_delta_rows':int(con.execute('SELECT COUNT(*) FROM read_parquet(?)',[str(normal)]).fetchone()[0]),
               'direct_mfl_win_replacement_rows':replacement_rows,
               'combined_delta_rows':int(con.execute('SELECT COUNT(*) FROM read_parquet(?)',[str(Path('candidate/combined_delta.parquet'))]).fetchone()[0]),
+              'combined_delta_duplicate_rows_collapsed':int(merge_report['duplicate_rows_collapsed']),
+              'combined_delta_conflicting_source_keys':int(merge_report['conflicting_source_keys']),
               'positive_mismatches':positive,
               'read_only':report['read_only'], 'cache_mutated':report['cache_mutated'],
               'new_lineage':report['new_lineage'], 'canonical_schema_unchanged':report['canonical_schema_unchanged'],
@@ -177,9 +318,18 @@ jobs:
           path: |
             cache_before.json
             ops_before.sha256
+            all_artifact_names.txt
+            selected_artifacts.tsv
+            complete_artifacts.tsv
+            artifact_names.txt
+            missing_artifact_exclusions.json
+            source_diagnostic_artifacts.json
+            source_diagnostic_shards.txt
+            shard_set_report.json
             assembly_report.json
             apply_report.json
             candidate/team_signal_candidate_report.json
+            candidate/combined_delta_merge_report.json
             candidate/combined_delta.parquet
           retention-days: 90
           compression-level: 0
@@ -245,6 +395,7 @@ jobs:
           digest=hashlib.sha256()
           with Path('research_public_lake/ops_cache.duckdb').open('rb') as handle:
               for block in iter(lambda:handle.read(1024*1024),b''): digest.update(block)
+          shard_set=json.loads(Path('evidence/shard_set_report.json').read_text())
           result={'canonical_cache_key':'${{ env.CANONICAL_CACHE_KEY }}','candidate_run_id':'${{ inputs.candidate_run_id }}',
                   'candidate_rows':total,'unmatched_candidate_keys':unmatched,'source_value_disagreements':disagreements,
                   'schema_unchanged':schema==[tuple(row) for row in before['schema']],
@@ -263,9 +414,15 @@ jobs:
               **result,
               'candidate_artifacts':int(assembly['candidate_artifacts']),
               'matched_player_rows':total,
-              'source_artifact_id':'mfl-classification-roster-bridge-batch',
+              'source_artifact_id':(
+                  'mfl-classification-roster-bridge-batch-full'
+                  if not shard_set['excluded_shards']
+                  else 'mfl-classification-roster-bridge-batch-excluding-' + '-'.join(str(item) for item in shard_set['excluded_shards'])
+              ),
               'promotion_disposition':'exact_existing_player_null_fill|direct_mfl_win_replacement',
               'candidate_fields':fields,
+              'excluded_shards':shard_set['excluded_shards'],
+              'selected_shards':shard_set['selected_shards'],
               'null_fill_rows':int(assembly['normal_delta_rows']),
               'direct_mfl_win_replacement_rows':int(assembly['direct_mfl_win_replacement_rows']),
               'improvements_by_field':improvements,

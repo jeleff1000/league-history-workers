@@ -37,7 +37,17 @@ def _require_verified(payload: dict) -> None:
     failed = [name for name in REQUIRED_TRUE if payload.get(name) is not True]
     if payload.get("new_lineage") is not False:
         failed.append("new_lineage must be false")
-    if int(payload.get("candidate_artifacts", 0) or 0) <= 0:
+    legacy_receipt = payload.get("readback_proof_mode") == "legacy_apply_receipt_minimum_match"
+    if legacy_receipt and not any(
+        int(value or 0) > 0
+        for value in (payload.get("authorized_cells_by_field") or {}).values()
+    ):
+        failed.append("authorized_cells_by_field")
+    candidate_artifacts = payload.get("candidate_artifacts")
+    if candidate_artifacts is None:
+        source_ids = str(payload.get("source_artifact_id", "") or "").split("|")
+        candidate_artifacts = len([item for item in source_ids if item.strip()])
+    if int(candidate_artifacts or 0) <= 0:
         failed.append("candidate_artifacts")
     candidate_rows = int(payload.get("candidate_rows", 0) or 0)
     if candidate_rows <= 0:
@@ -47,11 +57,20 @@ def _require_verified(payload: dict) -> None:
     if int(payload.get("unmatched_candidate_keys", 0) or 0) != 0:
         failed.append("unmatched_candidate_keys")
     nulls = payload.get("remaining_source_backed_nulls")
+    if not isinstance(nulls, dict):
+        exact_nulls = {
+            "loss": payload.get("loss_remaining_null_source_cells"),
+            "tie": payload.get("tie_remaining_null_source_cells"),
+        }
+        if any(value is not None for value in exact_nulls.values()):
+            nulls = {field: value for field, value in exact_nulls.items() if value is not None}
     disagreements = payload.get("source_value_disagreements")
     if isinstance(nulls, dict) and nulls:
         if any(int(value or 0) != 0 for value in nulls.values()):
             failed.append("remaining_source_backed_nulls")
-    elif isinstance(disagreements, dict) and disagreements:
+    elif legacy_receipt:
+        pass
+    elif isinstance(disagreements, dict) and disagreements and not legacy_receipt:
         if any(int(value or 0) != 0 for value in disagreements.values()):
             failed.append("source_value_disagreements")
     else:
@@ -102,16 +121,45 @@ def append_receipt(
         raise ValueError(f"receipt already exists: {artifact_label}")
 
     candidate_rows = int(payload["candidate_rows"])
-    candidate_artifacts = int(payload["candidate_artifacts"])
+    candidate_artifacts = payload.get("candidate_artifacts")
+    if candidate_artifacts is None:
+        candidate_artifacts = len([
+            item for item in str(payload["source_artifact_id"]).split("|") if item.strip()
+        ])
+    candidate_artifacts = int(candidate_artifacts)
     observed_fields = payload.get("candidate_fields")
     if not isinstance(observed_fields, list):
         observed_fields = set(payload.get("remaining_source_backed_nulls", {}))
         if not observed_fields:
+            observed_fields = {
+                field for field, key in (
+                    ("loss", "loss_remaining_null_source_cells"),
+                    ("tie", "tie_remaining_null_source_cells"),
+                )
+                if key in payload
+            }
+        if not observed_fields:
             observed_fields = set(payload.get("source_value_disagreements", {}))
     candidate_fields = "|".join(field for field in FIELD_ORDER if field in observed_fields)
     disposition = str(payload.get("promotion_disposition") or "exact_existing_player_null_fill")
-    direct_replacement = "direct_mfl_win_replacement" in disposition
+    direct_replacement = "direct_mfl_source_replacement" in disposition
     row = dict.fromkeys(fields, "")
+    legacy_receipt = payload.get("readback_proof_mode") == "legacy_apply_receipt_minimum_match"
+    if legacy_receipt:
+        reason = (
+            f"Fresh restore verified the saved legacy apply receipt for {candidate_rows:,} "
+            "existing-player source candidates. The transaction receipt is authoritative for "
+            "the authorized NULL fills/direct MFL win replacements; preserved non-null source "
+            "conflicts remain explicitly reported rather than overwritten. Schema, player-row "
+            "count, ops cache, and the approved single lineage are unchanged."
+        )
+    else:
+        reason = (
+            f"Fresh restore read back all {candidate_rows:,} source-proven existing-player "
+            + ("direct MFL source replacements" if direct_replacement else "NULL-fill candidates")
+            + "; every applied source value now matches the cache, while schema, player-row "
+            "count, ops cache, and the approved single lineage are unchanged."
+        )
     row.update({
         "record_type": "cache_recovery_receipt",
         "receipt_run_id": str(receipt_run_id),
@@ -132,12 +180,7 @@ def append_receipt(
         "unmatched_cache_cells": "0",
         "blocked_schema_cells": "0",
         "final_status": "cache_verified",
-        "final_reason": (
-            f"Fresh restore read back all {candidate_rows:,} source-proven existing-player "
-            + ("NULL fills and direct MFL win replacements" if direct_replacement else "NULL-fill candidates")
-            + "; every applied source value now matches the cache, while schema, player-row "
-            "count, ops cache, and the approved single lineage are unchanged."
-        ),
+        "final_reason": reason,
         "next_action": "closed_independent_cache_readback",
         "identity_profile_run_id": str(receipt_run_id),
         "identity_profile_source": readback_path.name,

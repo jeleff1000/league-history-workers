@@ -48,7 +48,7 @@ def refresh(
     unknown_record_types = [
         row.get("record_type", "") for row in ledger_rows
         if row.get("record_type") not in {
-            "artifact_inventory", "cache_recovery_receipt"
+            "artifact_inventory", "artifact_admission", "cache_recovery_receipt"
         }
     ]
     if unknown_record_types:
@@ -61,12 +61,28 @@ def refresh(
     receipt = json.loads(receipt_path.read_text(encoding="utf-8-sig"))
     promotion_receipt = "artifact_rows" in receipt
     direct_reaudit_receipt = "artifact_current_state" in receipt
+    team_points_bridge_receipt = "artifact_bridge_state" in receipt
+    team_manager_comparison_receipt = "artifact_comparison_state" in receipt
     if promotion_receipt:
         receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_rows"]}
     elif direct_reaudit_receipt:
         receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_current_state"]}
+    elif team_points_bridge_receipt:
+        receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_bridge_state"]}
+    elif team_manager_comparison_receipt:
+        receipt_rows = {int(row["artifact_id"]): row for row in receipt["artifact_comparison_state"]}
     else:
-        receipt_rows = {int(row["artifact_id"]): row for row in receipt["rows"]}
+        # Combined readback receipts include supplemental cache-recovery
+        # entries whose IDs are descriptive strings.  This refresher updates
+        # frozen raw artifact rows only, so those entries are not candidates
+        # for this numeric raw-artifact lookup.
+        receipt_rows = {}
+        for row in receipt["rows"]:
+            try:
+                artifact_id = int(row["artifact_id"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            receipt_rows[artifact_id] = row
     team_profile_rows: dict[int, dict] = {}
     if team_profile_path is not None:
         profile = json.loads(team_profile_path.read_text(encoding="utf-8"))
@@ -84,6 +100,88 @@ def refresh(
         if artifact_id not in selected_ids:
             continue
         evidence = receipt_rows[artifact_id]
+        if team_manager_comparison_receipt:
+            fields = ("win", "team_points", "is_playoffs", "champion")
+            fills = evidence.get("null_fill_cells_by_field", {})
+            comparisons = evidence.get("comparison_cells_by_field", {})
+            if int(evidence.get("delta_rows", 0) or 0) != 0 or any(
+                int(fills.get(field, 0) or 0) != 0 for field in fields
+            ):
+                raise SystemExit(
+                    f"{artifact_id}: manager signal audit has safe NULL fills; "
+                    "build and validate an exact candidate before refreshing the ledger"
+                )
+            for field in fields:
+                comparison = comparisons.get(field)
+                if comparison is None:
+                    raise SystemExit(f"{artifact_id}: missing {field} comparison evidence")
+                source_non_null = int(comparison.get("source_non_null", 0) or 0)
+                equal = int(comparison.get("cache_equal", 0) or 0)
+                conflict = int(comparison.get("cache_conflict", 0) or 0)
+                cache_null = int(comparison.get("cache_null", 0) or 0)
+                if cache_null != 0 or source_non_null != equal + conflict + cache_null:
+                    raise SystemExit(f"{artifact_id}: {field} comparison does not reconcile")
+            total_source = sum(int(comparisons[field].get("source_non_null", 0) or 0) for field in fields)
+            total_equal = sum(int(comparisons[field].get("cache_equal", 0) or 0) for field in fields)
+            conflicts_by_field = {
+                field: int(comparisons[field].get("cache_conflict", 0) or 0)
+                for field in fields
+            }
+            total_conflicts = sum(conflicts_by_field.values())
+            row["source_cells"] = str(total_source)
+            row["cache_match_cells"] = str(total_equal)
+            row["cache_missing_cells"] = "0"
+            row["cache_conflict_cells"] = str(total_conflicts)
+            row["unmatched_cache_cells"] = "0"
+            row["receipt_run_id"] = str(receipt_run_id)
+            row["receipt_json_sha256"] = digest
+            if total_conflicts == 0:
+                row["final_status"] = "cache_verified"
+                row["final_reason"] = (
+                    "Current strict manager-week fan-out audit found no cache-null fills and all "
+                    f"{total_source:,} source-backed supported cells already equal the canonical cache."
+                )
+                row["next_action"] = "closed_independent_cache_readback"
+            elif conflicts_by_field["champion"] == total_conflicts:
+                row["final_status"] = "cache_conflict_preserved"
+                row["final_reason"] = (
+                    "Team-level championship flags cannot be promoted as player championship-start credit. "
+                    f"Current strict manager-week audit found {total_equal:,} equal cells, no cache-null "
+                    f"fills, and {total_conflicts:,} champion-only conflicts; the non-champion fields agree."
+                )
+                row["next_action"] = "require_championship_start_evidence_not_team_champion_flag"
+            else:
+                row["final_status"] = "partial_schema_blocked_conflicts"
+                row["final_reason"] = (
+                    "Current strict manager-week audit found no cache-null fill, but retains conflicting "
+                    "non-championship source values that require source-precedence adjudication."
+                )
+                row["next_action"] = "preserve_conflicts_pending_source_precedence_adjudication"
+            updated += 1
+            continue
+        if team_points_bridge_receipt:
+            unique = int(evidence.get("unique_team_points_bridges", 0) or 0)
+            if unique:
+                raise SystemExit(
+                    f"{artifact_id}: team-points bridge found {unique} safe recipients; "
+                    "build and validate an exact candidate before refreshing the ledger"
+                )
+            source_keys = int(evidence.get("manager_null_source_keys_with_team_points", 0) or 0)
+            unmatched = int(evidence.get("unmatched_team_points_bridges", 0) or 0)
+            ambiguous = int(evidence.get("ambiguous_team_points_bridges", 0) or 0)
+            if source_keys != unmatched + ambiguous:
+                raise SystemExit(f"{artifact_id}: team-points bridge metrics do not reconcile")
+            row["receipt_run_id"] = str(receipt_run_id)
+            row["receipt_json_sha256"] = digest
+            row["final_status"] = "partial_schema_blocked_direct_identity"
+            row["final_reason"] = (
+                f"Current team-points bridge audit tested {source_keys:,} manager-null source player-weeks; "
+                f"{unmatched:,} had no canonical row with the same league/week/player and team total, "
+                f"and {ambiguous:,} had non-unique team-total matches. No safe recipient exists for this bridge."
+            )
+            row["next_action"] = "resolve_direct_identity_or_close_source_only"
+            updated += 1
+            continue
         if direct_reaudit_receipt:
             if int(evidence.get("safe_null_candidates", 0) or 0) != 0:
                 raise SystemExit(
@@ -105,7 +203,9 @@ def refresh(
                 "source-precedence adjudication."
             )
             row["next_action"] = (
-                "add_loss_tie_schema_then_resolve_direct_identity_and_precedence_adjudication"
+                "resolve_direct_identity_and_precedence_adjudication"
+                if int(evidence.get("cache_conflict_cells", 0) or 0)
+                else "resolve_direct_identity_or_close_source_only"
             )
             updated += 1
             continue

@@ -8,10 +8,10 @@ canonical cache:
 
 The authoritative detailed rows are in
 [`research_matchup_artifact_cache_ledger.csv`](research_matchup_artifact_cache_ledger.csv).
-They were generated from the immutable, read-only cache-receipt Action run
-[31500865474](https://github.com/jeleff1000/league-history-workers/actions/runs/31500865474).
-The source receipt SHA-256 is
-`df8a21d802928f3f0215bff49a272ff7168acb0a6412cc181fd94bd51cf8dbbd`.
+It contains the immutable 9,479-artifact inventory from read-only cache-receipt
+Action run [31500865474](https://github.com/jeleff1000/league-history-workers/actions/runs/31500865474),
+plus every later artifact known to this workstream. The frozen-inventory source
+receipt SHA-256 is `df8a21d802928f3f0215bff49a272ff7168acb0a6412cc181fd94bd51cf8dbbd`.
 
 Direct source readbacks append their evidence to the same CSV; they do not
 create a cache or lineage. The latest is the read-only direct MFL player-key
@@ -20,37 +20,131 @@ receipt SHA-256
 `4c7608c16ccd8cfc35390d5d3f1980ad02f955b221522451433caedabf5f5f24`.
 
 The CSV now has an explicit `record_type` on every row. The frozen inventory
-is exactly 9,479 `artifact_inventory` rows; cache-changing work is recorded as
-a separate `cache_recovery_receipt` row in the *same* ledger, not smuggled into
-the 9,479-artifact denominator. There are currently four such recovery
+is exactly 9,479 `artifact_inventory` rows; later artifacts are 231
+`artifact_admission` rows; cache-changing work is recorded as a separate
+`cache_recovery_receipt` row in the *same* ledger. Neither later artifacts nor
+receipts are smuggled into the 9,479-artifact denominator. There are currently eight such recovery
 receipts: the independently restored 74-row MFL repair, the 204-row direct
-MFL player/team bridge, the 26,936-row MFL source-only bridge promotion, and
-the 1,720-row MFL classification roster-identity promotion. The ledger
+MFL player/team bridge, the 26,936-row MFL source-only bridge promotion, the
+1,720-row MFL classification roster-identity promotion, the 600-cell exact
+loss/tie sparse-signal promotion, the 220-artifact residual MFL batch, and the
+28,085-row exact MFL loss/tie sparse-signal promotion.
+The ledger
 validator fails if a row lacks this distinction.
+
+The seventh receipt is the exact MFL loss/tie promotion: candidate run
+[31689836532](https://github.com/jeleff1000/league-history-workers/actions/runs/31689836532),
+same-key apply/readback [31690044486](https://github.com/jeleff1000/league-history-workers/actions/runs/31690044486),
+and independent post-save audit [31690332564](https://github.com/jeleff1000/league-history-workers/actions/runs/31690332564).
+It filled 28,085 `loss` cells and 27,988 `tie` cells on 28,085 exact existing
+player rows; its post-save candidate delta is zero. Cache object `6601873724`
+was saved under the same approved key, with unchanged schema, player-row count,
+and ops-cache SHA-256.
+
+The eighth receipt is the direct-source conflict replacement: read-only
+candidate [31691317379](https://github.com/jeleff1000/league-history-workers/actions/runs/31691317379),
+guarded same-key promotion [31692380121](https://github.com/jeleff1000/league-history-workers/actions/runs/31692380121),
+and post-save audit [31692615938](https://github.com/jeleff1000/league-history-workers/actions/runs/31692615938).
+It replaced 1,025 `win`, 1,267 `loss`, and 270 `team_points` values across
+1,976 exact player rows. The post-save audit found zero direct-source conflicts
+and zero new candidates. Cache object `6602753769` remains the sole object
+under the approved key; schema, player-row count, and ops-cache SHA-256 are
+unchanged.
 
 ## Current residual queue
 
-The latest ledger validation, after the 1,720-row receipt, reports 9,483
-ledger rows: 9,479 frozen raw-artifact rows and 4 supplemental cache-recovery
-receipts. Of the frozen artifact rows, 8,768 are closed and 711 are still open.
+The latest ledger validation, after the exact loss/tie sparse-signal receipt,
+reports 9,717 ledger rows: 9,479 frozen raw-artifact rows, 231 later
+artifact-admission rows, and 8 supplemental cache-recovery receipts. Of the
+frozen artifact rows, 8,768 are closed and 711 are still open.
 Those 711 entries are a work queue, **not** a claim that 711 artifacts still
 contain unapplied values: each must be re-read against the current approved
 cache before it can be closed or kept open with a current, specific reason.
 
-| Current raw-artifact status | Count | Required disposition |
+| Historical raw-artifact status | Count | Required disposition |
 | --- | ---: | --- |
-| `partial_schema_blocked_unmatched` | 472 | Re-run exact player/team bridge and readback; `loss`/`tie` now exist in schema, so stale schema wording alone cannot block closure. |
-| `partial_schema_blocked_conflicts` | 214 | Compare exact source and canonical non-null cells; preserve or replace only under an explicit source-precedence receipt. |
-| `partial_schema_blocked_direct_identity` | 15 | Resolve the exact direct identity or record the source-only/no-recipient reason. |
+| `partial_schema_blocked_unmatched` | 472 | Historical pre-loss/tie label. Current gate is an exact player/team bridge and readback; schema support is already closed. |
+| `partial_schema_blocked_conflicts` | 214 | Historical pre-loss/tie label. Current gates are exact player/team bridge plus explicit source-precedence receipt. |
+| `partial_schema_blocked_direct_identity` | 15 | Historical pre-loss/tie label. Current gate is direct identity; 12 also need source-precedence adjudication. |
 | `cache_conflict_preserved` | 7 | Record an explicit precedence decision and fresh cell-level readback. |
 | `source_only_team_signal_missing_player_team_bridge` | 2 | Build a source-roster-to-existing-player bridge or retain as source-only. |
 | `unmatched_cache_key` | 1 | Separate already-filled recipients from true source-only player/team records and preserve the residual count. |
 
-The raw source artifact `8952555354` is the last row above. Its current
+The machine-derived **current** frozen-inventory admission queue is simpler than those
+historical labels: 490 artifacts require only an exact player/team bridge, and
+221 require that bridge plus explicit source-precedence adjudication. Of the
+711 open rows, 701 carry pre-schema loss/tie evidence, but every one is now
+marked `closed_schema_supported`; no open row may ask for a loss/tie schema
+migration again.
+
+The raw source artifact `8952555354` is the last frozen-inventory row above. Its current
 receipt proves 26,936 existing-player fills from 256 source candidates are in
 the cache. Its older 19,560 source-only cells are deliberately still open until
 the remaining team/player identities are independently resolved or explicitly
 classified as having no canonical recipient.
+
+The latest bridge-negative receipt,
+[31694545464](https://github.com/jeleff1000/league-history-workers/actions/runs/31694545464),
+tested team-points identity for the 15 direct MFL artifacts after their exact
+source replacement. Across 16,613 manager-null source player-weeks with a
+team-point value, zero identified a canonical recipient with the same
+league/week/player and team total. This does not change the cache or close the
+artifacts; it records that team points cannot resolve this particular missing
+manager identity, so the remaining 4,068 null cells require a roster/team
+identity bridge or an explicit source-only disposition.
+
+The current manager-fanout audit,
+[31695967974](https://github.com/jeleff1000/league-history-workers/actions/runs/31695967974),
+then read three distinct retained team-signal artifacts against 230,225 existing
+player rows. It found zero NULL fills: `win`, `team_points`, and `is_playoffs`
+all agree on every source-backed row. The only remaining disagreement is 3,877
+`champion` cells. Those are deliberately preserved rather than overwritten,
+because these team-level source flags do not prove a player started the actual
+championship matchup—the failure mode that previously inflated championship
+rates. The source is therefore fully explained for those fields: no missing
+cells remain, and champion requires championship-start evidence rather than
+this season/team flag.
+
+## Post-inventory MFL execution records
+
+The residual MFL batch ran after the 9,479-artifact inventory was frozen. Its
+231 records are now appended to the **same CSV**, not maintained as a separate
+checklist. Their exact dispositions are also preserved in the source manifest
+[`research_matchup_mfl_batch_31663728938_admission_manifest.csv`](research_matchup_mfl_batch_31663728938_admission_manifest.csv).
+
+| State | Records | Cache consequence |
+| --- | ---: | --- |
+| Candidate-bearing batch member | 219 | Included in the same-key MFL apply/readback receipt `31682677203`. The ledger labels this `batch_member_legacy_cache_readback`: aggregate receipt evidence is retained, while the absence of historical per-cell prestate is explicit. |
+| Valid zero-delta artifact | 1 | Compared against the cache and emitted no eligible change. |
+| Diagnostic-only artifact | 3 | Contains no `team_signals.parquet`/`player_bridge.parquet` pair, so it has no player-table cache candidate. |
+| No GitHub artifact emitted | 8 | The recovery shard stopped before output. The ledger records a deterministic logical receipt ID, not a fabricated GitHub artifact ID, and retains the precise rerun action if its target remains unresolved. |
+
+These eight no-output records do not conceal unapplied data: there is no source
+artifact to join. They are an execution-recovery queue, separate from the
+711 source-identity/source-precedence rows in the frozen inventory.
+
+## Why the remaining team-signal artifacts cannot be directly upserted
+
+This is now source-schema evidence, not an inference from a failed join. Two
+retained artifact reads are representative of the remaining raw team-signal
+families:
+
+| Artifact | Rows read | Present identity | Missing identity required for player upsert |
+| --- | ---: | --- | --- |
+| `9013217044` / `sleeper-missing-outcome-rescue-3-31229249246` | 4,140 | `db_name`, year/week, manager, `manager_guid`, team key/name, outcome and playoff fields | No NFL player ID, Sleeper player ID, roster membership, or player-to-team edge. |
+| `9016426057` / `research-sparse-playoff-championship-rescue-5-31239084738` | 80 | `db_name`, year/week, manager/franchise/team keys, outcome and playoff/championship fields | No NFL player ID, native player ID, roster membership, or player-to-team edge. |
+
+The 711-open partition has the same ledgered shape: 694 artifacts have only a
+safe manager-week fan-out and 15 have a strict player-key profile; the final
+two have no cache-side player/team identity. Therefore a direct upsert from
+these team-week files would be a fabricated player attribution. The next
+eligible cache change must instead prove, for each source team-week:
+
+`source roster membership -> canonical NFL player -> existing player week -> source team`.
+
+Where that chain is unique, outcome/playoff/championship cells can be promoted
+and read back. Where it is absent or ambiguous, the ledger must retain the
+specific source-only/precedence reason rather than invent a recipient.
 
 The new MFL classification roster-identity receipt is Actions
 [31660451544](https://github.com/jeleff1000/league-history-workers/actions/runs/31660451544).
@@ -83,6 +177,147 @@ league-weeks in 231 read-only shards. Every safety-gate failure now uploads
 its diagnostic artifact. No shard is complete as a cache repair until a
 separate in-place promotion and independently restored cache readback produces
 a `cache_recovery_receipt`.
+
+### 2026-08-13 MFL candidate-set checkpoint
+
+Run `31663728938` ended as cancelled only because two long-running shards were
+manually cancelled after their diagnostics had not completed. Its usable source
+set is nevertheless exact. Its final per-artifact admission status is recorded
+in [the durable admission manifest](research_matchup_mfl_batch_31663728938_admission_manifest.csv),
+which covers every one of the 231 residual shards and links the admitted set to
+the independently read-back same-key receipt `31682677203`:
+
+| Final admission state | Artifacts | Meaning |
+| --- | ---: | --- |
+| `included_in_verified_cache_batch` | 219 | The artifact emitted one or more source-backed candidate rows. Those rows are included in the saved apply evidence and in the readback receipt. |
+| `admitted_no_promotable_delta` | 1 | The artifact was structurally valid, but its rows added no candidate after exact comparison with the cache. |
+| `source_diagnostic_only` | 3 | The archive contains diagnostics but neither required `team_signals.parquet` nor `player_bridge.parquet`; it cannot supply a team-to-player promotion. |
+| `explicitly_excluded_no_candidate` | 8 | The recovery shard either stopped before output or failed cache restore before recovery code began; no candidate exists to apply. |
+
+This resolves the former ambiguous "223 retained artifacts" phrasing below.
+Only the 219 candidate-bearing artifacts supplied the source rows in the
+verified cache batch. The one zero-delta artifact was not silently dropped;
+the three diagnostic-only artifacts and eight no-candidate exclusions are
+explicitly preserved for targeted follow-up rather than misrepresented as
+cache improvements.
+
+| Classification | Shards | Evidence | Admission state |
+| --- | --- | --- | --- |
+| Retained named candidate artifacts | 220 | 219 candidate-bearing artifacts plus one structurally valid zero-delta artifact. | Fully accounted for in the durable manifest. |
+| Incomplete cancelled diagnostics | `32, 156` | Each emitted only `cache_before.json` and `ops_before.sha256`, with no extraction, bridge, signal, or candidate-delta file. | Excluded; must be rerun separately. |
+| Cache-restore failures | `190, 191, 192, 193, 194, 195` | Each failed in under 20 seconds at `fail-on-cache-miss`, before recovery code ran, and emitted no artifact. | Excluded; no candidate exists to promote. |
+
+The first guarded promotion,
+[31674545745](https://github.com/jeleff1000/league-history-workers/actions/runs/31674545745),
+failed safely at preflight before candidate construction or cache mutation: its
+artifact filter mistakenly required a retained artifact for every explicit
+exclusion, including the six shards that failed before any artifact existed.
+The corrected guard permits an explicit exclusion to have zero or one artifact
+(never more than one), and emits a receipt listing zero-artifact exclusions.
+The first retry also stopped before candidate construction because GitHub's bulk
+`gh run download` transport stalled while pulling all prior-run artifacts. The
+replacement transport fetches only the selected artifact IDs, at 15 concurrent
+bounded/retrying requests, and verifies both required Parquet files in every
+archive before candidate assembly. Its first execution exposed a temporary-file
+race (`zips/.zip`): Bash expanded `zip_path` before assigning `artifact_id`.
+That attempt also stopped before candidate construction or cache mutation. The
+download function now assigns the artifact ID before deriving its unique ZIP
+path. The following retry proved that Ubuntu's `unzip` rejects the GitHub
+archive layout as an overlap/zip-bomb; Python's standard `zipfile.ZipFile`
+reads the same archive and extracts only the two required Parquet members.
+That attempt likewise stopped before candidate construction or cache mutation.
+The batch test job now renders this exact download block and runs `bash -n`
+before the apply job is even eligible to restore the cache.
+The exported-function implementation then proved that heredocs are unsafe in
+the `xargs` child-shell boundary despite passing `bash -n`. It has been
+replaced with a tested repository script,
+`extract_mfl_artifact_members.py`, which extracts exactly
+`out/team_signals.parquet` and `out/player_bridge.parquet` from each downloaded
+archive. No cache-facing behavior changed in these transport-only revisions.
+Run [31678670544](https://github.com/jeleff1000/league-history-workers/actions/runs/31678670544)
+then established an additional source fact without mutating the cache: shards
+`92`, `111`, and `139` contain roster-membership/player-directory diagnostics
+but neither required bridge member. They are **source-diagnostic-only**, not
+transfer failures and not cache improvements. The next guarded preflight
+records this state per artifact, excludes those artifacts from candidate
+assembly, and still fails closed for any archive that is neither complete nor
+explicitly diagnostic-only.
+The subsequent candidate build in
+[31679763905](https://github.com/jeleff1000/league-history-workers/actions/runs/31679763905)
+passed artifact admission and stopped at the duplicate-key guard before any
+cache replacement: 247 cache keys appeared in both the NULL-fill and direct
+MFL win-replacement classes. This is an expected overlap in candidate classes,
+not conflicting source evidence. The next preflight merges such overlaps by
+the fixed canonical key, rejects any disagreement among actual `source_*`
+values, and preserves deterministic provenance. It still cannot reach the
+cache until the merge report has zero conflicting source keys.
+Run [31680569001](https://github.com/jeleff1000/league-history-workers/actions/runs/31680569001)
+passed the in-place apply invariants and saved the same approved cache key. Its
+first readback rule was too broad because it compared deliberately preserved
+non-null cache values. The corrected independent readback
+[31682677203](https://github.com/jeleff1000/league-history-workers/actions/runs/31682677203)
+has now appended the sixth supplemental cache receipt. It verifies the
+authorized NULL fills and direct MFL `win=0 -> 1` replacements while preserving
+all other non-null disagreements for source-precedence adjudication. Schema,
+player-row count, ops hash, and the single approved cache object were unchanged.
+
+Because the historical saved delta lacks per-cell canonical prestate, this
+receipt is deliberately labeled `legacy_apply_receipt_minimum_match`: the
+transaction apply report is the authoritative count, while fresh readback
+proves matching source-backed cells and reports preserved non-null source
+conflicts. This closes the batch-level cache receipt; it does **not** erase the
+separate 711-open-artifact work queue or silently classify unresolved source
+identity/conflict evidence as fixed.
+
+## Active work: not yet applied
+
+The following Actions runs are deliberately recorded as **in flight**, not as
+cache improvements. Both restore the same approved cache key read-only; neither
+can save a cache, alter the schema, or create a lineage.
+
+| Run | Exact scope | Required next action before any ledger closure |
+| --- | --- | --- |
+| [31663728938](https://github.com/jeleff1000/league-history-workers/actions/runs/31663728938) | The 231 residual deterministic MFL roster-identity shards, covering only the 1,165 league-weeks not already examined by the preserved 25 successful shards from 31661452691. | **Batch cache receipt complete.** The 231 artifacts are fully dispositioned in the admission manifest; 219 candidate-bearing artifacts are included in the independent readback receipt [31682677203](https://github.com/jeleff1000/league-history-workers/actions/runs/31682677203). Diagnostic-only and no-candidate shards remain explicit follow-up records. |
+| [31668247614](https://github.com/jeleff1000/league-history-workers/actions/runs/31668247614) | Two championship-probe artifacts, `8956468822` and `8956471264`, read back with the corrected dynamic ledger guard. | Inspect the retained receipt and strict-null candidate. Apply only if exact existing-player recipients and source-backed null cells are present. |
+| [31668497497](https://github.com/jeleff1000/league-history-workers/actions/runs/31668497497) | The two smallest blocked sparse playoff/championship artifacts, `9016485043` and `9016453846`, totaling 2,816 source cells. It emitted an exact 600-key, loss/tie-only NULL-fill delta with zero source conflicts. | **Complete.** Its dedicated promotion/readback [31669704187](https://github.com/jeleff1000/league-history-workers/actions/runs/31669704187) freshly restored the approved cache and proved 600/600 loss cells and 600/600 tie cells are filled, with zero unmatched keys; schema, player rows, ops seed, and the single approved cache lineage are unchanged. Receipt SHA-256: `746936c0fce4ba25df78513b0787e84223f736d0d733c64c6db22370da4888e0`. |
+
+### Fleaflicker team-to-player identity recovery
+
+The two historical championship-probe artifacts above have expired. That does
+**not** make their target data unrecoverable: the probe workflow built them
+from the approved cache's `player_fantasy` and `matchup` tables. The next
+read-only target builder must therefore regenerate the exact *current* set of
+Fleaflicker player-week rows that lack cache-side team identity, together with
+their matching cache matchup team signals.
+
+For each resulting `(db_name, year, week, team_key)`, the only external call is
+Fleaflicker's `FetchLeagueRosters`. It returns the same `team_key` and stable
+`fleaflicker_player_id` for every roster member. The safe bridge is then:
+
+`cache matchup team signal -> roster team_key/fleaflicker_player_id -> existing cache player row`
+
+The final promotion remains NULL-fill-only and must use
+`(db_name, year, week, fleaflicker_player_id)`, followed by the standard
+fresh-cache readback. No name matching, new columns, new cache, or new lineage
+is permitted.
+
+**Current correction, recorded 2026-08-13.** The read-only target receipt
+[31672174378](https://github.com/jeleff1000/league-history-workers/actions/runs/31672174378)
+proved that this final native-ID join is not currently executable: all
+2,730,186 cache player rows without cache-side team identity also lack a
+populated `fleaflicker_player_id`; the corresponding source-signal overlap is
+4,197,680 rows and likewise has zero populated native IDs. It produced zero
+candidate team-weeks and made no cache mutation. Therefore `FetchLeagueRosters`
+must first be used only to form a strict source roster identity bridge to an
+existing canonical `NFL_player_id` (including the existing DEF franchise map).
+Only exact one-to-one source-player-to-NFL-player results may then populate the
+already-existing `fleaflicker_player_id` cells and fan out team signals. Any
+ambiguous player, missing canonical recipient, or unresolved DEF identity stays
+blocked with a receipt; display-name or manager fallbacks remain prohibited.
+
+An Action completion by itself never changes the frozen-artifact disposition.
+Only a current approved-cache readback may set `cache_verified` or add a
+`cache_recovery_receipt`.
 
 ## Current approved-cache contract
 
@@ -771,3 +1006,29 @@ identities.
 | `research-source-matchup-rescue-*` | 14 | Corrected fan-out receipt: 28,032,962 cells already equal cache; zero supported null fills; remaining cells are conflicts, schema-blocked loss/tie, or unresolved team identity. | Adjudicate non-null conflicts; resolve/close residual identity gaps; do not run a null-cell promotion for this family. |
 | `research-championship-identity-probe-*` | 9 | Fully adjudicated by receipt 31552757341: seven MFL files have a safe manager-week fan-out but zero valid player-row fills; two files remain source-only because no cache-side identity bridge exists. | Do not promote championship or playoff values from this family; retain the two source-only identity gaps as explicitly unresolved. |
 | `research-sparse-playoff-championship-*` | 621 candidate-bearing | Fully receipted; zero supported null-cell fills. | Close source-only/conflict rows under the explicit precedence and loss/tie schema decisions. |
+
+## Fleaflicker historical-roster bridge â€” source behavior gate discovered
+
+Read-only local source probes on 2026-08-13 established that Fleaflicker has
+two different historical `FetchRoster` behaviors.  League `104989`, season
+2019, week 13 returned a roster consistent with that historical season.  A
+ten-target sparse-playoff sample, however, returned source standings for all
+ten targets but a year-valid roster for only four; six returned no
+year-matching roster rows.  One of the four apparent successes (`105788`,
+requested 2011/week 18) was a false historical response: it contained current
+players including Baker Mayfield, Bucky Irving, and Jordan Addison.  The
+endpoint accepted the requested old period but did not serve the old roster.
+The companion `FetchLeagueScoreboard(105788, 2011, 1)` is independently
+genuine (week-one epoch 2011-09-06), which isolates the defect to the roster
+endpoint rather than the league-year resolver.
+
+This is a source contract issue, not a cache defect.  A Fleaflicker roster
+bridge is admissible only when its roster membership independently passes a
+season-plausibility check against the NFL player universe.  `requested period`
+metadata alone is insufficient.  For genuinely historical roster payloads,
+the existing year + normalized-name + broad-position contract resolved 41 of
+46 members in the `104989` sample; the remaining five are known Fleaflicker
+position aliases (`EDR`, `IL`, `EDR/IL`) and require explicit normalization to
+the canonical `DL` family.  DST continues to use the canonical season-franchise
+ID mapper.  No Fleaflicker source result from this probe has been promoted to
+the approved cache.

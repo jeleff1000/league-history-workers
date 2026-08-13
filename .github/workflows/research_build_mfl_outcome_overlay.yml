@@ -9,6 +9,13 @@ on:
       receipt_run_id:
         required: true
         default: '31515802840'
+      candidate_mode:
+        required: true
+        type: choice
+        options:
+          - null-fill
+          - source-replace
+        default: null-fill
 
 permissions:
   actions: read
@@ -83,7 +90,7 @@ jobs:
               raise SystemExit(f'expected 15 MFL source artifacts, got {len(manifest)}')
           Path('mfl_outcome_source_manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
           PY
-      - name: Build read-only null-fill candidate overlay
+      - name: Build read-only exact-player candidate overlay
         shell: bash
         run: |
           set -euo pipefail
@@ -92,7 +99,8 @@ jobs:
             --manifest mfl_outcome_source_manifest.json \
             --out mfl_direct_player_null_fill_delta.parquet \
             --rejected-out mfl_direct_player_residual_evidence.parquet \
-            --report mfl_direct_player_null_fill_report.json
+            --report mfl_direct_player_null_fill_report.json \
+            --mode '${{ inputs.candidate_mode }}'
       - name: Fail fast on cache, schema, row, or ops mutation
         shell: bash
         run: |

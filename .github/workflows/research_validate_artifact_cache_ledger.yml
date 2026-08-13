@@ -14,6 +14,10 @@ on:
       - scripts/research_cohorts/test_refresh_artifact_cache_ledger.py
       - scripts/research_cohorts/apply_loss_tie_readback_to_ledger.py
       - scripts/research_cohorts/test_apply_loss_tie_readback_to_ledger.py
+      - scripts/research_cohorts/append_mfl_batch_artifact_admissions.py
+      - scripts/research_cohorts/test_append_mfl_batch_artifact_admissions.py
+      - scripts/research_cohorts/validate_mfl_batch_admission_manifest.py
+      - tests/research_cohorts/test_validate_mfl_batch_admission_manifest.py
 
 jobs:
   validate:
@@ -31,6 +35,8 @@ jobs:
           scripts/research_cohorts/test_enrich_artifact_cache_ledger_bridge_evidence.py
           scripts/research_cohorts/test_refresh_artifact_cache_ledger.py
           scripts/research_cohorts/test_apply_loss_tie_readback_to_ledger.py
+          scripts/research_cohorts/test_append_mfl_batch_artifact_admissions.py
+          tests/research_cohorts/test_validate_mfl_batch_admission_manifest.py
       - name: Fail fast on invalid ledger evidence
         run: >-
           python scripts/research_cohorts/validate_artifact_cache_ledger.py

@@ -7,7 +7,7 @@ def test_refresh_replaces_only_selected_artifact_receipt_fields(tmp_path: Path) 
     from scripts.research_cohorts.refresh_artifact_cache_ledger import refresh
 
     fields = [
-        "receipt_run_id", "canonical_cache_key", "receipt_json_sha256", "artifact_id",
+        "record_type", "receipt_run_id", "canonical_cache_key", "receipt_json_sha256", "artifact_id",
         "artifact", "workflow_run_id", "dispositions", "candidate_delta_rows",
         "candidate_fields", "candidate_file_count", "candidate_files", "source_cells",
         "cache_match_cells", "cache_missing_cells", "cache_conflict_cells",
@@ -19,8 +19,8 @@ def test_refresh_replaces_only_selected_artifact_receipt_fields(tmp_path: Path) 
         dict.fromkeys(fields, ""),
         dict.fromkeys(fields, ""),
     ]
-    rows[0].update(artifact_id="1", final_status="old", source_cells="0")
-    rows[1].update(artifact_id="2", final_status="untouched", source_cells="9")
+    rows[0].update(record_type="artifact_inventory", artifact_id="1", final_status="old", source_cells="0")
+    rows[1].update(record_type="artifact_inventory", artifact_id="2", final_status="untouched", source_cells="9")
     with ledger.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
@@ -54,7 +54,7 @@ def test_refresh_records_missing_player_team_bridge_from_team_profile(tmp_path: 
     from scripts.research_cohorts.refresh_artifact_cache_ledger import refresh
 
     fields = [
-        "receipt_run_id", "canonical_cache_key", "receipt_json_sha256", "artifact_id",
+        "record_type", "receipt_run_id", "canonical_cache_key", "receipt_json_sha256", "artifact_id",
         "artifact", "workflow_run_id", "dispositions", "candidate_delta_rows",
         "candidate_fields", "candidate_file_count", "candidate_files", "source_cells",
         "cache_match_cells", "cache_missing_cells", "cache_conflict_cells",
@@ -63,7 +63,7 @@ def test_refresh_records_missing_player_team_bridge_from_team_profile(tmp_path: 
     ]
     ledger = tmp_path / "ledger.csv"
     row = dict.fromkeys(fields, "")
-    row.update(artifact_id="4", source_cells="0")
+    row.update(record_type="artifact_inventory", artifact_id="4", source_cells="0")
     with ledger.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
@@ -106,3 +106,58 @@ def test_refresh_keeps_schema_blocked_evidence_open(tmp_path: Path) -> None:
         "unmatched_cache_cells": 0,
         "blocked_schema_cells": 12,
     }) == "add_loss_tie_schema_then_readback"
+
+
+def test_refresh_ignores_supplemental_receipt_ids_when_reauditing_raw_artifact(
+    tmp_path: Path,
+) -> None:
+    """The combined receipt includes nonnumeric recovery receipts and raw rows."""
+    from scripts.research_cohorts.refresh_artifact_cache_ledger import refresh
+
+    fields = [
+        "record_type", "receipt_run_id", "canonical_cache_key", "receipt_json_sha256",
+        "artifact_id", "artifact", "workflow_run_id", "dispositions",
+        "candidate_delta_rows", "candidate_fields", "candidate_file_count",
+        "candidate_files", "source_cells", "cache_match_cells",
+        "cache_missing_cells", "cache_conflict_cells", "unmatched_cache_cells",
+        "blocked_schema_cells", "final_status", "final_reason", "next_action",
+    ]
+    ledger = tmp_path / "ledger.csv"
+    row = dict.fromkeys(fields, "")
+    row.update(record_type="artifact_inventory", artifact_id="42", source_cells="0")
+    with ledger.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        writer.writerow(row)
+
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text(json.dumps({"rows": [
+        {
+            "record_type": "cache_recovery_receipt",
+            "artifact_id": "mfl-source-only-bridge-26936-31655409805",
+        },
+        {
+            "record_type": "artifact_inventory",
+            "artifact_id": 42,
+            "source_cells": 8,
+            "cache_match_cells": 0,
+            "cache_missing_cells": 0,
+            "cache_conflict_cells": 0,
+            "unmatched_cache_cells": 8,
+            "blocked_schema_cells": 0,
+            "final_status": "unmatched_cache_key",
+            "final_reason": "no cache recipient",
+        },
+    ]}))
+    selected = tmp_path / "selected.json"
+    selected.write_text(json.dumps([{ "artifact_id": 42 }]))
+    out = tmp_path / "out.csv"
+
+    assert refresh(
+        ledger_path=ledger, receipt_path=receipt, selected_path=selected,
+        receipt_run_id="101", out_path=out,
+    ) == {"ledger_rows": 1, "updated_rows": 1}
+
+    result = list(csv.DictReader(out.open(newline="", encoding="utf-8")))[0]
+    assert result["final_status"] == "unmatched_cache_key"
+    assert result["receipt_run_id"] == "101"
