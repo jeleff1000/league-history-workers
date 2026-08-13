@@ -243,6 +243,17 @@ The following Actions runs are deliberately recorded as **in flight**, not as
 cache improvements. Both restore the same approved cache key read-only; neither
 can save a cache, alter the schema, or create a lineage.
 
+The currently queued exact-conflict candidate is
+[31691317379](https://github.com/jeleff1000/league-history-workers/actions/runs/31691317379).
+It is read-only and emits a candidate only for direct MFL source cells whose
+existing canonical values conflict; each emitted cell carries both `source_*`
+and the exact `expected_*` canonical value observed at candidate time. It is
+not a recovery receipt and does not count as a cache improvement. If its report
+proves zero unmatched keys, zero contradictory source keys, mode
+`source-replace`, and a positive delta, only then may guarded workflow
+`research_replace_structured_player_source_conflicts.yml` replace those cells
+under the same approved cache key and record an eighth receipt.
+
 | Run | Exact scope | Required next action before any ledger closure |
 | --- | --- | --- |
 | [31663728938](https://github.com/jeleff1000/league-history-workers/actions/runs/31663728938) | The 231 residual deterministic MFL roster-identity shards, covering only the 1,165 league-weeks not already examined by the preserved 25 successful shards from 31661452691. | **Batch cache receipt complete.** The 231 artifacts are fully dispositioned in the admission manifest; 219 candidate-bearing artifacts are included in the independent readback receipt [31682677203](https://github.com/jeleff1000/league-history-workers/actions/runs/31682677203). Diagnostic-only and no-candidate shards remain explicit follow-up records. |
