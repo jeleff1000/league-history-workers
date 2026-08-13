@@ -1,0 +1,61 @@
+{
+  "apply_workflow_run_id": "31730794989",
+  "cache_join_strategy": "validated_existing_player_rowid_snapshot",
+  "cache_object_id": "6617589517",
+  "candidate_artifacts": 4,
+  "candidate_fields": [
+    "manager",
+    "team_key",
+    "team_name",
+    "mfl_player_id",
+    "win",
+    "loss",
+    "tie",
+    "team_points",
+    "is_playoffs",
+    "has_po_signal"
+  ],
+  "candidate_rows": 1271,
+  "candidate_run_id": "31728622914",
+  "canonical_cache_key": "research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613",
+  "fresh_restore": true,
+  "identity_bridge_status": "exact_mfl_roster_membership_to_nfl_player_to_existing_cache_rowid",
+  "matched_player_rows": 1271,
+  "new_lineage": false,
+  "ops_unchanged": true,
+  "player_rows_unchanged": true,
+  "promotion_disposition": "direct_mfl_source_replacement",
+  "remaining_source_backed_nulls": {
+    "has_po_signal": 0,
+    "is_playoffs": 0,
+    "loss": 0,
+    "manager": 0,
+    "mfl_player_id": 0,
+    "team_key": 0,
+    "team_name": 0,
+    "team_points": 0,
+    "tie": 0,
+    "win": 0
+  },
+  "schema_unchanged": true,
+  "source_artifact_id": "9004892405|9006417376|9007393289|9007511852",
+  "source_replacements": {
+    "is_playoffs": 966,
+    "loss": 1154,
+    "team_points": 1271,
+    "tie": 1028,
+    "win": 432
+  },
+  "source_value_disagreements": {
+    "is_playoffs": 0,
+    "loss": 0,
+    "manager": 0,
+    "mfl_player_id": 0,
+    "team_key": 0,
+    "team_name": 0,
+    "team_points": 0,
+    "tie": 0,
+    "win": 0
+  },
+  "unmatched_candidate_keys": 0
+}
