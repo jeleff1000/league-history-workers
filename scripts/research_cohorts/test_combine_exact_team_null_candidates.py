@@ -18,7 +18,7 @@ def _candidate(root, name, source_loss=0):
     con = duckdb.connect()
     con.execute("""
         CREATE TABLE delta AS
-        SELECT 'league'::VARCHAR db_name, 2024::INTEGER year, 1::INTEGER week,
+        SELECT 'league'::VARCHAR db_name, 2024::INTEGER AS "year", 1::INTEGER AS "week",
                'player'::VARCHAR NFL_player_id, 'manager'::VARCHAR manager,
                NULL::VARCHAR team_key, NULL::VARCHAR team_name, 'sleeper'::VARCHAR platform,
                1::INTEGER source_win, ?::INTEGER source_loss, 0::INTEGER source_tie,
