@@ -129,3 +129,40 @@ def test_candidate_audit_accepts_manager_only_source_without_team_key(
         "team_candidate": True,
         "player_bridge": False,
     }]
+
+
+def test_candidate_audit_emits_direct_mfl_win_replacement_separately(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    from scripts.research_cohorts.audit_team_signal_candidates import main
+
+    base = tmp_path / "base.duckdb"
+    _base_cache(base)
+    con = duckdb.connect(str(base))
+    con.execute("UPDATE public.player_fantasy SET win=0")
+    con.close()
+    candidates = tmp_path / "candidates"
+    candidates.mkdir()
+    _write_parquet(candidates / "source.parquet", [{
+        "db_name": "league", "year": 2024, "week": 15,
+        "team_key": "team", "manager": "mgr", "team_name": "Team",
+        "win": 1,
+    }])
+    out = tmp_path / "out"
+    monkeypatch.setattr(sys, "argv", [
+        "audit_team_signal_candidates.py",
+        "--base", str(base), "--candidates", str(candidates), "--out", str(out),
+        "--emit-direct-mfl-win-replacements",
+    ])
+
+    main()
+
+    con = duckdb.connect()
+    emitted = con.execute(
+        "SELECT COUNT(*) FROM read_parquet(?)",
+        [str(out / "team_direct_mfl_win_replacement_delta.parquet")],
+    ).fetchone()[0]
+    con.close()
+    assert emitted == 1
+    report = json.loads((out / "team_signal_candidate_report.json").read_text(encoding="utf-8"))
+    assert report["direct_mfl_win_replacement_rows"] == 1

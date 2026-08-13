@@ -25,6 +25,11 @@ def main() -> None:
     ap.add_argument("--base", type=Path, required=True)
     ap.add_argument("--candidates", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument(
+        "--emit-direct-mfl-win-replacements",
+        action="store_true",
+        help="Emit exact MFL source win=1 versus canonical win=0 rows separately from NULL-fill candidates.",
+    )
     args = ap.parse_args()
 
     con = duckdb.connect(str(args.base), read_only=True)
@@ -358,6 +363,29 @@ def main() -> None:
         WHERE {" OR ".join(delta_filters)}
       ) TO ? (FORMAT PARQUET)
     """, [str(args.out / "team_promotable_player_delta.parquet")])
+    direct_mfl_win_replacement_rows = 0
+    if args.emit_direct_mfl_win_replacements:
+        replacement_path = args.out / "team_direct_mfl_win_replacement_delta.parquet"
+        con.execute(f"""
+          COPY (
+            SELECT p.db_name,p.year,p.week,p.NFL_player_id,p.manager,p.team_key,p.team_name,
+                   p.platform,p.win canonical_win,m.source_win,{canonical_loss} canonical_loss,m.source_loss,
+                   {canonical_tie} canonical_tie,m.source_tie,p.team_points canonical_team_points,
+                   m.source_team_points,p.is_playoffs canonical_is_playoffs,m.source_playoffs,
+                   p.champion canonical_champion,m.source_champion,
+                   p.final_playoff_seed canonical_final_playoff_seed,m.source_final_playoff_seed,
+                   p.made_playoffs canonical_made_playoffs,
+                   CASE WHEN m.source_final_playoff_seed IS NOT NULL THEN 1 ELSE NULL END source_made_playoffs,
+                   m.source_files,m.join_method
+            FROM public.player_fantasy p JOIN player_matches m ON p.rowid=m.player_rowid
+            WHERE LOWER(TRIM(CAST(p.platform AS VARCHAR)))='mfl'
+              AND CAST(p.win AS VARCHAR)='0'
+              AND CAST(m.source_win AS VARCHAR)='1'
+          ) TO ? (FORMAT PARQUET)
+        """, [str(replacement_path)])
+        direct_mfl_win_replacement_rows = int(con.execute(
+            "SELECT COUNT(*) FROM read_parquet(?)", [str(replacement_path)]
+        ).fetchone()[0])
     emitted = con.execute(f"""
       SELECT
         COUNT(*) FILTER (WHERE canonical_win IS NULL AND source_win IS NOT NULL),
@@ -405,6 +433,11 @@ def main() -> None:
         "improvements_by_field": {k: int(v) for k,v in improvements.items()},
         "join_diagnostic": diagnostic,
         "positive_mismatches_not_auto_promoted": {k: int(v) for k,v in positive_mismatches.items()},
+        "direct_mfl_win_replacement_rows": direct_mfl_win_replacement_rows,
+        "direct_mfl_win_replacement_output": (
+            "team_direct_mfl_win_replacement_delta.parquet"
+            if args.emit_direct_mfl_win_replacements else None
+        ),
         "output": "team_promotable_player_delta.parquet",
         "policy": "NULL fills only; positive signal mismatches and source conflicts remain quarantined",
     }
