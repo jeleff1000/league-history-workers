@@ -180,7 +180,8 @@ jobs:
             'candidate_rows':candidate.get('delta_rows', 0),
           }, indent=2)+'\n')
           PY
-      - uses: actions/upload-artifact@v4
+      - if: always()
+        uses: actions/upload-artifact@v4
         with:
           name: research-mfl-classification-roster-bridge-shard-${{ matrix.shard }}-${{ github.run_id }}
           path: |

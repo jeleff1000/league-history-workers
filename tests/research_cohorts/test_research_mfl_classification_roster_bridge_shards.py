@@ -16,3 +16,12 @@ def test_mfl_classification_shards_are_read_only_and_bounded() -> None:
     assert "actions/caches/" not in workflow
     assert "cache_mutated" in workflow
     assert "new_lineage" in workflow
+
+
+def test_mfl_classification_shards_upload_evidence_after_safety_gate_failure() -> None:
+    workflow = (
+        Path(__file__).resolve().parents[2]
+        / ".github" / "workflows" / "research_mfl_classification_roster_bridge_shards.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "- if: always()\n        uses: actions/upload-artifact@v4" in workflow
