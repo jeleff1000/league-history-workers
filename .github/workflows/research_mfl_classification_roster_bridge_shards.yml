@@ -10,6 +10,10 @@ on:
         description: Existing MFL player-outcome classification evidence run.
         required: true
         default: '31192594062'
+      completed_shards:
+        description: Comma-separated shard IDs already represented by retained successful artifacts from the same target run.
+        required: false
+        default: ''
 
 permissions:
   actions: read
@@ -46,7 +50,13 @@ jobs:
           if not groups:
               raise SystemExit('no current MFL classification bridge targets; refusing an empty source run')
           shards=min(MAX_SHARDS, len(groups))
-          matrix={'include':[{'shard':index, 'shards':shards} for index in range(shards)]}
+          completed={int(value) for value in '${{ inputs.completed_shards }}'.split(',') if value.strip()}
+          if any(index < 0 or index >= shards for index in completed):
+              raise SystemExit(f'completed shard outside deterministic range 0..{shards - 1}: {sorted(completed)}')
+          remaining=[index for index in range(shards) if index not in completed]
+          if not remaining:
+              raise SystemExit('all deterministic shards already represented; refusing a duplicate source run')
+          matrix={'include':[{'shard':index, 'shards':shards} for index in remaining]}
           print('matrix='+json.dumps(matrix, separators=(',', ':')))
           print('target_groups='+str(len(groups)))
           PY

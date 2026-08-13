@@ -25,3 +25,14 @@ def test_mfl_classification_shards_upload_evidence_after_safety_gate_failure() -
     ).read_text(encoding="utf-8")
 
     assert "- if: always()\n        uses: actions/upload-artifact@v4" in workflow
+
+
+def test_mfl_classification_shards_can_exclude_previously_completed_shards() -> None:
+    workflow = (
+        Path(__file__).resolve().parents[2]
+        / ".github" / "workflows" / "research_mfl_classification_roster_bridge_shards.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "completed_shards:" in workflow
+    assert "completed={int(value) for value in '${{ inputs.completed_shards }}'.split(',')" in workflow
+    assert "if index not in completed" in workflow
