@@ -212,6 +212,7 @@ def test_append_receipt_accepts_labeled_legacy_apply_receipt(tmp_path: Path) -> 
         "source_value_disagreements": {"win": 7},
         "source_artifact_id": "mfl-legacy-batch",
     })
+    payload.pop("remaining_source_backed_nulls")
     readback.write_text(json.dumps(payload), encoding="utf-8")
 
     out = tmp_path / "out.csv"
