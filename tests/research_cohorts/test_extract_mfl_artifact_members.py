@@ -49,5 +49,5 @@ def test_refuses_archive_missing_required_member(tmp_path: Path) -> None:
         check=False,
     )
 
-    assert result.returncode != 0
+    assert result.returncode == 2
     assert "player_bridge" in result.stderr

@@ -11,7 +11,14 @@ SCRIPT = (
 )
 
 
-def _run(tmp_path: Path, *, jobs: str, artifacts: str, excluded: str = "") -> subprocess.CompletedProcess[str]:
+def _run(
+    tmp_path: Path,
+    *,
+    jobs: str,
+    artifacts: str,
+    excluded: str = "",
+    source_diagnostic: str = "",
+) -> subprocess.CompletedProcess[str]:
     jobs_path = tmp_path / "jobs.tsv"
     artifacts_path = tmp_path / "artifacts.txt"
     report_path = tmp_path / "report.json"
@@ -24,6 +31,7 @@ def _run(tmp_path: Path, *, jobs: str, artifacts: str, excluded: str = "") -> su
             "--jobs", str(jobs_path),
             "--artifacts", str(artifacts_path),
             "--excluded-shards", excluded,
+            "--source-diagnostic-shards", source_diagnostic,
             "--report", str(report_path),
         ],
         text=True,
@@ -63,3 +71,13 @@ def test_rejects_nonterminal_shard_unless_explicitly_excluded(tmp_path: Path) ->
     )
     assert result.returncode != 0
     assert "nonterminal selected rescue shards" in result.stderr
+
+
+def test_accepts_complete_artifacts_when_diagnostic_shard_is_explicitly_proven(tmp_path: Path) -> None:
+    result = _run(
+        tmp_path,
+        jobs="rescue (0, 256)\tsuccess\nrescue (1, 256)\tfailure\n",
+        artifacts="research-mfl-classification-roster-bridge-shard-0-31663728938\n",
+        source_diagnostic="1",
+    )
+    assert result.returncode == 0, result.stderr

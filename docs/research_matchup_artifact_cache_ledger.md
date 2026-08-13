@@ -100,7 +100,7 @@ set is nevertheless exact and recorded here before promotion:
 
 | Classification | Shards | Evidence | Admission state |
 | --- | --- | --- | --- |
-| Retained source-candidate artifacts | 223 | 231 nonempty rescue jobs; 225 emitted artifacts; excluding only the eight rows below leaves 223 complete artifacts. | Pending guarded batch apply/readback. |
+| Retained named candidate artifacts | 223 | 231 nonempty rescue jobs; 225 emitted artifacts; excluding only the eight rows below leaves 223 named artifacts. Member-level admission must still prove each includes both bridge Parquets. | Pending guarded batch apply/readback. |
 | Incomplete cancelled diagnostics | `32, 156` | Each emitted only `cache_before.json` and `ops_before.sha256`, with no extraction, bridge, signal, or candidate-delta file. | Excluded; must be rerun separately. |
 | Cache-restore failures | `190, 191, 192, 193, 194, 195` | Each failed in under 20 seconds at `fail-on-cache-miss`, before recovery code ran, and emitted no artifact. | Excluded; no candidate exists to promote. |
 
@@ -131,9 +131,17 @@ replaced with a tested repository script,
 `extract_mfl_artifact_members.py`, which extracts exactly
 `out/team_signals.parquet` and `out/player_bridge.parquet` from each downloaded
 archive. No cache-facing behavior changed in these transport-only revisions.
+Run [31678670544](https://github.com/jeleff1000/league-history-workers/actions/runs/31678670544)
+then established an additional source fact without mutating the cache: shards
+`92`, `111`, and `139` contain roster-membership/player-directory diagnostics
+but neither required bridge member. They are **source-diagnostic-only**, not
+transfer failures and not cache improvements. The next guarded preflight
+records this state per artifact, excludes those artifacts from candidate
+assembly, and still fails closed for any archive that is neither complete nor
+explicitly diagnostic-only.
 The retry is still allowed to mutate only the already-approved
 same-key cache after its test/preflight gate proves the selected artifact list
-exactly matches the 223 retained shards. Its fresh restore/readback receipt is
+exactly matches the complete non-diagnostic shard set. Its fresh restore/readback receipt is
 required before this checkpoint, any affected artifact, or any player cell is
 marked complete.
 

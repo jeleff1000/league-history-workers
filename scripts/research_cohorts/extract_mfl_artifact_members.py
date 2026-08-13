@@ -14,13 +14,17 @@ REQUIRED_MEMBERS = {
 }
 
 
+class MissingRequiredMembers(ValueError):
+    """The artifact is a source diagnostic, not a promotable bridge artifact."""
+
+
 def extract(*, archive: Path, out: Path) -> None:
     try:
         with zipfile.ZipFile(archive) as source:
             available = set(source.namelist())
             missing = sorted(set(REQUIRED_MEMBERS) - available)
             if missing:
-                raise ValueError(f"required artifact members missing: {missing}")
+                raise MissingRequiredMembers(f"required artifact members missing: {missing}")
             out.mkdir(parents=True, exist_ok=True)
             for member, filename in REQUIRED_MEMBERS.items():
                 with source.open(member) as src, (out / filename).open("wb") as dst:
@@ -29,13 +33,19 @@ def extract(*, archive: Path, out: Path) -> None:
         raise SystemExit(str(exc)) from exc
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--archive", required=True, type=Path)
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args()
-    extract(archive=args.archive, out=args.out)
+    try:
+        extract(archive=args.archive, out=args.out)
+    except SystemExit as exc:
+        message = str(exc)
+        print(message, file=sys.stderr)
+        return 2 if message.startswith("required artifact members missing:") else 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

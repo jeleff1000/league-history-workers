@@ -64,13 +64,31 @@ def _artifacts(path: Path) -> set[int]:
     return rows
 
 
-def validate(*, jobs_path: Path, artifacts_path: Path, excluded_shards: str) -> dict[str, object]:
+def validate(
+    *,
+    jobs_path: Path,
+    artifacts_path: Path,
+    excluded_shards: str,
+    source_diagnostic_shards: str = "",
+) -> dict[str, object]:
     jobs = _jobs(jobs_path)
     excluded = _excluded(excluded_shards)
+    diagnostics = _excluded(source_diagnostic_shards)
     unknown_exclusions = sorted(excluded - set(jobs))
     if unknown_exclusions:
         raise ValueError(f"excluded shards are not rescue jobs: {unknown_exclusions}")
-    selected = set(jobs) - excluded
+    if excluded & diagnostics:
+        raise ValueError(
+            "source-diagnostic shards must not also be excluded: "
+            f"{sorted(excluded & diagnostics)}"
+        )
+    unknown_diagnostics = sorted(diagnostics - set(jobs))
+    if unknown_diagnostics:
+        raise ValueError(
+            "source-diagnostic shards are not rescue jobs: "
+            f"{unknown_diagnostics}"
+        )
+    selected = set(jobs) - excluded - diagnostics
     nonterminal = sorted(index for index in selected if jobs[index] not in TERMINAL)
     if nonterminal:
         raise ValueError(f"nonterminal selected rescue shards: {nonterminal}")
@@ -86,6 +104,7 @@ def validate(*, jobs_path: Path, artifacts_path: Path, excluded_shards: str) -> 
     return {
         "rescue_jobs": len(jobs),
         "excluded_shards": sorted(excluded),
+        "source_diagnostic_shards": sorted(diagnostics),
         "selected_shards": len(selected),
         "artifact_shards": len(artifact_indices),
         "terminal_selected_shards": len(selected),
@@ -97,12 +116,14 @@ def main() -> None:
     parser.add_argument("--jobs", type=Path, required=True)
     parser.add_argument("--artifacts", type=Path, required=True)
     parser.add_argument("--excluded-shards", default="")
+    parser.add_argument("--source-diagnostic-shards", default="")
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
     report = validate(
         jobs_path=args.jobs,
         artifacts_path=args.artifacts,
         excluded_shards=args.excluded_shards,
+        source_diagnostic_shards=args.source_diagnostic_shards,
     )
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

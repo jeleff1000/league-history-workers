@@ -136,7 +136,6 @@ jobs:
                   selected.remove(matches[0])
               else:
                   missing_artifact_exclusions.append(shard)
-          Path('artifact_names.txt').write_text('\n'.join(selected)+'\n')
           Path('selected_artifacts.tsv').write_text('\n'.join(
               f'{name}\t{by_name[name]}' for name in selected
           )+'\n')
@@ -145,10 +144,6 @@ jobs:
               'missing_artifact_exclusions': missing_artifact_exclusions,
           }, indent=2)+'\n')
           PY
-          test -s artifact_names.txt
-          python scripts/research_cohorts/validate_mfl_shard_artifacts.py \
-            --jobs rescue_jobs.tsv --artifacts artifact_names.txt \
-            --excluded-shards "$EXCLUDED_SHARDS" --report shard_set_report.json
           mkdir -p raw zips
           download_artifact() {
             local name="$1"
@@ -169,6 +164,15 @@ jobs:
                     && test -f "$output_dir/player_bridge.parquet"; then
                     return 0
                   fi
+                else
+                  extraction_status=$?
+                  if test "$extraction_status" -eq 2; then
+                    mkdir -p "$output_dir"
+                    printf '{"artifact":"%s","artifact_id":%s,"status":"source_diagnostic_only"}\n' \
+                      "$name" "$artifact_id" > "$output_dir/source_diagnostic.json"
+                    rm -f "$zip_path"
+                    return 0
+                  fi
                 fi
               fi
               rm -rf "$output_dir"
@@ -180,8 +184,48 @@ jobs:
           export -f download_artifact
           export GH_TOKEN GITHUB_REPOSITORY
           cut -f1,2 selected_artifacts.tsv | xargs -r -P 15 -n 2 bash -c 'download_artifact "$@"' _
+          python - <<'PY'
+          import json, re
+          from pathlib import Path
+
+          complete=[]
+          diagnostics=[]
+          for line in Path('selected_artifacts.tsv').read_text().splitlines():
+              name, artifact_id=line.split('\t')
+              root=Path('raw') / name
+              team=root / 'team_signals.parquet'
+              bridge=root / 'player_bridge.parquet'
+              diagnostic=root / 'source_diagnostic.json'
+              if team.is_file() and bridge.is_file() and not diagnostic.exists():
+                  complete.append((name, artifact_id))
+              elif diagnostic.is_file() and not team.exists() and not bridge.exists():
+                  receipt=json.loads(diagnostic.read_text())
+                  if receipt != {'artifact':name, 'artifact_id':int(artifact_id), 'status':'source_diagnostic_only'}:
+                      raise SystemExit(f'invalid source-diagnostic receipt: {receipt}')
+                  match=re.search(r'-shard-(\d+)-',name)
+                  if not match:
+                      raise SystemExit(f'cannot derive shard from source-diagnostic artifact: {name}')
+                  diagnostics.append((int(match.group(1)), name, artifact_id))
+              else:
+                  raise SystemExit(f'incomplete artifact admission state: {name}')
+          if not complete:
+              raise SystemExit('no complete MFL bridge artifacts admitted')
+          Path('artifact_names.txt').write_text('\n'.join(name for name,_ in complete)+'\n')
+          Path('complete_artifacts.tsv').write_text('\n'.join('\t'.join(row) for row in complete)+'\n')
+          Path('source_diagnostic_artifacts.json').write_text(json.dumps({
+              'status':'source_diagnostic_only',
+              'artifacts':[{'shard':shard,'artifact':name,'artifact_id':int(artifact_id)} for shard,name,artifact_id in diagnostics],
+          }, indent=2)+'\n')
+          Path('source_diagnostic_shards.txt').write_text(','.join(str(shard) for shard,_,_ in diagnostics))
+          PY
           test "$(find raw -name team_signals.parquet | wc -l)" -eq "$(wc -l < artifact_names.txt)"
           test "$(find raw -name player_bridge.parquet | wc -l)" -eq "$(wc -l < artifact_names.txt)"
+          DIAGNOSTIC_SHARDS="$(cat source_diagnostic_shards.txt)"
+          python scripts/research_cohorts/validate_mfl_shard_artifacts.py \
+            --jobs rescue_jobs.tsv --artifacts artifact_names.txt \
+            --excluded-shards "$EXCLUDED_SHARDS" \
+            --source-diagnostic-shards "$DIAGNOSTIC_SHARDS" \
+            --report shard_set_report.json
           i=0
           while IFS= read -r path; do cp "$path" "candidate_input/team_signals_${i}.parquet"; i=$((i+1)); done < <(find raw -name team_signals.parquet -print | sort)
           i=0
@@ -268,8 +312,11 @@ jobs:
             ops_before.sha256
             all_artifact_names.txt
             selected_artifacts.tsv
+            complete_artifacts.tsv
             artifact_names.txt
             missing_artifact_exclusions.json
+            source_diagnostic_artifacts.json
+            source_diagnostic_shards.txt
             shard_set_report.json
             assembly_report.json
             apply_report.json
