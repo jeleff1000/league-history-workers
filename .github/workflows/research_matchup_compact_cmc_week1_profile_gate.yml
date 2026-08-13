@@ -551,18 +551,22 @@ jobs:
                              'wall_seconds': round(perf_counter() - full_started, 3)})
                       raise SystemExit(0)
 
+              season_core_started = perf_counter()
               materialize_season_core_cohort_cells(
                   c, source_table=cmc_source, nfl_stats_table=stats,
                   output_table='cmc_2025_season_core', year=2025, player_id='00-0033280',
                   position='RB',
                   split_threshold=50,
               )
+              season_core_seconds = perf_counter() - season_core_started
+              season_grade_started = perf_counter()
               materialize_season_bracket_grade_cells(
                   c, source_table=cmc_source, nfl_stats_table=stats,
                   output_table='cmc_2025_season_grade', year=2025, player_id='00-0033280',
                   position='RB',
                   split_threshold=50,
               )
+              season_grade_seconds = perf_counter() - season_grade_started
               c.execute("""
                 CREATE OR REPLACE TABLE cmc_2025_season AS
                 SELECT core.*, grades.grade_cells
@@ -597,6 +601,8 @@ jobs:
                       'weekly_nested_cells': weekly_cells, 'season_outer_rows': 1,
                       'season_selected': season_selected, 'season_core_cells': season_core_cells,
                       'season_grade_cells': season_grade_cells,
+                      'season_core_seconds': round(season_core_seconds, 3),
+                      'season_grade_seconds': round(season_grade_seconds, 3),
                       'wall_seconds': round(perf_counter() - full_started, 3),
                   }
                   print(season_receipt)
