@@ -42,7 +42,11 @@ def materialize(
     if any(not row.get("artifact_id") for row in rows):
         raise SystemExit("artifact ledger contains a row without artifact_id")
     if any(
-        row.get("record_type") not in {"artifact_inventory", "cache_recovery_receipt"}
+        row.get("record_type") not in {
+            "artifact_inventory",
+            "artifact_admission",
+            "cache_recovery_receipt",
+        }
         for row in rows
     ):
         raise SystemExit("artifact ledger contains an unknown record type")

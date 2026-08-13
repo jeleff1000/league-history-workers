@@ -790,7 +790,10 @@ def build_receipts(
         # cache facts, not raw artifacts. They may use descriptive string IDs
         # and must be carried through unchanged rather than coerced into the
         # numeric raw-artifact namespace.
-        if result.get("record_type") == "cache_recovery_receipt":
+        if result.get("record_type") in {
+            "cache_recovery_receipt",
+            "artifact_admission",
+        }:
             for field in RECEIPT_COUNT_FIELDS:
                 result[field] = int(result.get(field, 0) or 0)
             rows.append(result)

@@ -125,21 +125,51 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
                   GROUP BY {', '.join(_q(column) for column in SOURCE_KEY)}
                 ), candidates AS (
                   SELECT s.{', s.'.join(_q(column) for column in SOURCE_KEY)},
-                         COUNT(p.rowid) AS canonical_rows
+                         s.source_team_points,
+                         COUNT(p.rowid) AS canonical_player_rows,
+                         COUNT(p.rowid) FILTER (
+                           WHERE p.manager IS NOT NULL
+                             AND LOWER(TRIM(p.manager)) NOT IN ('unrostered', 'fa', 'free agent', 'waivers')
+                         ) AS assigned_player_rows,
+                         COUNT(p.rowid) FILTER (
+                           WHERE p.manager IS NOT NULL
+                             AND LOWER(TRIM(p.manager)) NOT IN ('unrostered', 'fa', 'free agent', 'waivers')
+                             AND p.team_points IS NOT DISTINCT FROM s.source_team_points
+                         ) AS canonical_rows,
+                         COUNT(p.rowid) FILTER (
+                           WHERE p.manager IS NOT NULL
+                             AND LOWER(TRIM(p.manager)) NOT IN ('unrostered', 'fa', 'free agent', 'waivers')
+                             AND p.team_points IS NULL
+                         ) AS assigned_null_team_points_rows,
+                         COUNT(p.rowid) FILTER (
+                           WHERE p.manager IS NOT NULL
+                             AND LOWER(TRIM(p.manager)) NOT IN ('unrostered', 'fa', 'free agent', 'waivers')
+                             AND p.team_points IS NOT NULL
+                             AND p.team_points IS DISTINCT FROM s.source_team_points
+                         ) AS assigned_different_team_points_rows
                   FROM source_keys s
                   LEFT JOIN public.player_fantasy p
                     ON p.db_name IS NOT DISTINCT FROM s.db_name
                    AND p.year IS NOT DISTINCT FROM s.year
                    AND p.week IS NOT DISTINCT FROM s.week
                    AND p.NFL_player_id IS NOT DISTINCT FROM s.NFL_player_id
-                   AND p.manager IS NOT NULL
-                   AND p.team_points IS NOT DISTINCT FROM s.source_team_points
-                  GROUP BY {', '.join(f's.{_q(column)}' for column in SOURCE_KEY)}
+                  GROUP BY {', '.join(f's.{_q(column)}' for column in SOURCE_KEY)}, s.source_team_points
                 )
                 SELECT COUNT(*),
                        COUNT(*) FILTER (WHERE canonical_rows = 1),
                        COUNT(*) FILTER (WHERE canonical_rows > 1),
-                       COUNT(*) FILTER (WHERE canonical_rows = 0)
+                       COUNT(*) FILTER (WHERE canonical_rows = 0),
+                       COUNT(*) FILTER (WHERE canonical_player_rows = 0),
+                       COUNT(*) FILTER (WHERE canonical_player_rows > 0 AND assigned_player_rows = 0),
+                       COUNT(*) FILTER (
+                         WHERE canonical_rows = 0 AND assigned_player_rows > 0
+                           AND assigned_different_team_points_rows > 0
+                       ),
+                       COUNT(*) FILTER (
+                         WHERE canonical_rows = 0 AND assigned_player_rows > 0
+                           AND assigned_different_team_points_rows = 0
+                           AND assigned_null_team_points_rows > 0
+                       )
                 FROM candidates
             """).fetchone()
             artifact_bridge_state.append({
@@ -148,6 +178,10 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
                 "unique_team_points_bridges": int(metrics[1]),
                 "ambiguous_team_points_bridges": int(metrics[2]),
                 "unmatched_team_points_bridges": int(metrics[3]),
+                "canonical_player_absent": int(metrics[4]),
+                "canonical_only_unassigned": int(metrics[5]),
+                "canonical_same_player_different_team_points": int(metrics[6]),
+                "canonical_same_player_null_team_points": int(metrics[7]),
             })
 
         candidate_fields: list[str] = []

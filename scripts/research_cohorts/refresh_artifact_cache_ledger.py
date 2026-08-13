@@ -171,15 +171,31 @@ def refresh(
             ambiguous = int(evidence.get("ambiguous_team_points_bridges", 0) or 0)
             if source_keys != unmatched + ambiguous:
                 raise SystemExit(f"{artifact_id}: team-points bridge metrics do not reconcile")
+            player_absent = int(evidence.get("canonical_player_absent", 0) or 0)
+            only_unassigned = int(evidence.get("canonical_only_unassigned", 0) or 0)
+            different_team_points = int(evidence.get("canonical_same_player_different_team_points", 0) or 0)
+            null_team_points = int(evidence.get("canonical_same_player_null_team_points", 0) or 0)
+            if any((player_absent, only_unassigned, different_team_points, null_team_points)) and (
+                player_absent + only_unassigned + different_team_points + null_team_points != unmatched
+            ):
+                raise SystemExit(f"{artifact_id}: direct-identity classification does not reconcile")
             row["receipt_run_id"] = str(receipt_run_id)
             row["receipt_json_sha256"] = digest
             row["final_status"] = "partial_schema_blocked_direct_identity"
-            row["final_reason"] = (
-                f"Current team-points bridge audit tested {source_keys:,} manager-null source player-weeks; "
-                f"{unmatched:,} had no canonical row with the same league/week/player and team total, "
-                f"and {ambiguous:,} had non-unique team-total matches. No safe recipient exists for this bridge."
-            )
-            row["next_action"] = "resolve_direct_identity_or_close_source_only"
+            if only_unassigned == source_keys:
+                row["final_reason"] = (
+                    f"Current team-points bridge audit found all {source_keys:,} exact player-week keys exist only "
+                    "as unassigned/unrostered canonical rows. The source rows also lack a manager/franchise "
+                    "identity, so team totals cannot identify a fantasy-team recipient."
+                )
+                row["next_action"] = "recover_source_franchise_identity_or_close_source_only"
+            else:
+                row["final_reason"] = (
+                    f"Current team-points bridge audit tested {source_keys:,} manager-null source player-weeks; "
+                    f"{unmatched:,} had no canonical row with the same league/week/player and team total, "
+                    f"and {ambiguous:,} had non-unique team-total matches. No safe recipient exists for this bridge."
+                )
+                row["next_action"] = "resolve_direct_identity_or_close_source_only"
             updated += 1
             continue
         if direct_reaudit_receipt:

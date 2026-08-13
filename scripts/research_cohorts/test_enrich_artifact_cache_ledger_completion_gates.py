@@ -96,6 +96,21 @@ def test_enrich_writes_gate_columns_without_losing_existing_columns(tmp_path):
     }]
 
 
+def test_marks_team_champion_marker_conflicts_as_closed_when_no_player_fill_exists():
+    assert derive_gate_states(_row(
+        final_status="cache_conflict_preserved",
+        next_action="require_championship_start_evidence_not_team_champion_flag",
+        blocked_schema_cells="0",
+        unmatched_cache_cells="0",
+        cache_conflict_cells="4",
+    )) == {
+        "loss_tie_gate": "not_required",
+        "player_team_bridge_gate": "not_required",
+        "source_precedence_gate": "not_required",
+        "cache_admission_state": "closed_cache_conflict_preserved",
+    }
+
+
 def test_enrich_adds_explicit_record_types_and_keeps_supplemental_receipts_out_of_artifact_totals(tmp_path):
     ledger = tmp_path / "ledger.csv"
     out = tmp_path / "out.csv"

@@ -39,6 +39,39 @@ def test_receipts_preserve_non_numeric_supplemental_cache_recovery_record(tmp_pa
     assert json.loads(out.read_text(encoding="utf-8"))["rows"][0]["artifact_id"] == "mfl-74-row-recovery-31624673691"
 
 
+def test_receipts_preserve_non_numeric_artifact_admission_record(tmp_path):
+    """A batch-admission receipt is not a numeric raw-artifact key."""
+    base = tmp_path / "base.duckdb"
+    duckdb.connect(str(base)).close()
+    ledger = tmp_path / "ledger.json"
+    out = tmp_path / "receipts.json"
+    ledger.write_text(json.dumps({"rows": [{
+        "record_type": "artifact_admission",
+        "artifact_id": "no-github-artifact:run-31663728938:shard-156",
+        "source_cells": "0",
+        "cache_match_cells": "0",
+        "cache_missing_cells": "0",
+        "cache_conflict_cells": "0",
+        "unmatched_cache_cells": "0",
+        "blocked_schema_cells": "0",
+        "final_status": "not_data_bearing",
+    }]}), encoding="utf-8")
+
+    result = build_receipts(
+        ledger_path=ledger,
+        base_path=base,
+        team_delta=None,
+        exact_delta=None,
+        structured_delta=None,
+        settings_delta=None,
+        out_path=out,
+    )
+
+    assert result["summary"]["ledger_rows"] == 1
+    assert result["summary"]["raw_artifact_rows"] == 0
+    assert json.loads(out.read_text(encoding="utf-8"))["rows"][0]["artifact_id"] == "no-github-artifact:run-31663728938:shard-156"
+
+
 def test_raw_team_receipt_recomputes_closed_gates_after_cache_readback(tmp_path):
     """A fresh raw-team readback must replace stale schema/bridge gate states."""
     base = tmp_path / "base.duckdb"

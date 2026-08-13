@@ -78,3 +78,30 @@ def test_tied_team_points_do_not_emit_a_candidate(tmp_path: Path) -> None:
     assert result["unique_team_points_bridges"] == 0
     assert result["ambiguous_team_points_bridges"] == 1
     assert result["null_fill_rows"] == 0
+
+
+def test_reports_when_same_player_exists_but_team_total_cannot_identify_the_team(tmp_path: Path) -> None:
+    """This catches a bridge silently calling an existing player source-only."""
+    base, source = tmp_path / "base.duckdb", tmp_path / "source.parquet"
+    manifest, out, report = tmp_path / "manifest.json", tmp_path / "delta.parquet", tmp_path / "report.json"
+    _base(base)
+    con = duckdb.connect()
+    con.execute("""
+        CREATE TABLE source AS
+        SELECT 'league'::VARCHAR AS db_name, 2024::INTEGER AS year,
+               1::INTEGER AS week, 'p1'::VARCHAR AS NFL_player_id,
+               NULL::VARCHAR AS manager, 1::INTEGER AS source_win,
+               NULL::INTEGER AS source_loss, NULL::INTEGER AS source_tie,
+               100.0::DOUBLE AS source_team_points,
+               NULL::INTEGER AS source_is_playoffs
+    """)
+    con.execute("COPY source TO ? (FORMAT PARQUET)", [str(source)])
+    con.close()
+    manifest.write_text(json.dumps([{"artifact_id": 1, "path": str(source)}]))
+
+    result = build(base=base, manifest=manifest, out=out, report=report)
+
+    state = result["artifact_bridge_state"][0]
+    assert state["canonical_player_absent"] == 0
+    assert state["canonical_same_player_different_team_points"] == 1
+    assert state["unmatched_team_points_bridges"] == 1

@@ -97,6 +97,10 @@ def test_refresh_records_team_points_bridge_that_has_no_safe_recipient(tmp_path)
             "unique_team_points_bridges": 0,
             "ambiguous_team_points_bridges": 0,
             "unmatched_team_points_bridges": 12,
+            "canonical_player_absent": 0,
+            "canonical_only_unassigned": 12,
+            "canonical_same_player_different_team_points": 0,
+            "canonical_same_player_null_team_points": 0,
         }],
     }))
     out = tmp_path / "out.csv"
@@ -111,8 +115,8 @@ def test_refresh_records_team_points_bridge_that_has_no_safe_recipient(tmp_path)
     row = next(csv.DictReader(out.open(newline="", encoding="utf-8")))
     assert row["receipt_run_id"] == "bridge-receipt"
     assert row["final_status"] == "partial_schema_blocked_direct_identity"
-    assert row["next_action"] == "resolve_direct_identity_or_close_source_only"
-    assert "12 manager-null source player-weeks" in row["final_reason"]
+    assert row["next_action"] == "recover_source_franchise_identity_or_close_source_only"
+    assert "12 exact player-week keys exist only as unassigned" in row["final_reason"]
 
 
 def test_refresh_records_team_signal_without_promoting_team_champion_markers(tmp_path):
