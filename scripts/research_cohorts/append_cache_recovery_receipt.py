@@ -47,10 +47,15 @@ def _require_verified(payload: dict) -> None:
     if int(payload.get("unmatched_candidate_keys", 0) or 0) != 0:
         failed.append("unmatched_candidate_keys")
     nulls = payload.get("remaining_source_backed_nulls")
-    if not isinstance(nulls, dict) or not nulls:
-        failed.append("remaining_source_backed_nulls")
-    elif any(int(value or 0) != 0 for value in nulls.values()):
-        failed.append("remaining_source_backed_nulls")
+    disagreements = payload.get("source_value_disagreements")
+    if isinstance(nulls, dict) and nulls:
+        if any(int(value or 0) != 0 for value in nulls.values()):
+            failed.append("remaining_source_backed_nulls")
+    elif isinstance(disagreements, dict) and disagreements:
+        if any(int(value or 0) != 0 for value in disagreements.values()):
+            failed.append("source_value_disagreements")
+    else:
+        failed.append("remaining_source_backed_nulls or source_value_disagreements")
     if not str(payload.get("source_artifact_id", "") or "").strip():
         failed.append("source_artifact_id")
     if failed:
@@ -98,8 +103,14 @@ def append_receipt(
 
     candidate_rows = int(payload["candidate_rows"])
     candidate_artifacts = int(payload["candidate_artifacts"])
-    observed_fields = set(payload["remaining_source_backed_nulls"])
+    observed_fields = payload.get("candidate_fields")
+    if not isinstance(observed_fields, list):
+        observed_fields = set(payload.get("remaining_source_backed_nulls", {}))
+        if not observed_fields:
+            observed_fields = set(payload.get("source_value_disagreements", {}))
     candidate_fields = "|".join(field for field in FIELD_ORDER if field in observed_fields)
+    disposition = str(payload.get("promotion_disposition") or "exact_existing_player_null_fill")
+    direct_replacement = "direct_mfl_win_replacement" in disposition
     row = dict.fromkeys(fields, "")
     row.update({
         "record_type": "cache_recovery_receipt",
@@ -109,7 +120,7 @@ def append_receipt(
         "artifact_id": artifact_label,
         "artifact": source_artifact,
         "workflow_run_id": str(payload["candidate_run_id"]),
-        "dispositions": "exact_existing_player_null_fill",
+        "dispositions": disposition,
         "candidate_delta_rows": str(candidate_rows),
         "candidate_fields": candidate_fields,
         "candidate_file_count": str(candidate_artifacts),
@@ -123,8 +134,9 @@ def append_receipt(
         "final_status": "cache_verified",
         "final_reason": (
             f"Fresh restore read back all {candidate_rows:,} source-proven existing-player "
-            "NULL-fill candidates with zero remaining source-backed nulls; schema, player-row "
-            "count, ops cache, and approved single lineage are unchanged."
+            + ("NULL fills and direct MFL win replacements" if direct_replacement else "NULL-fill candidates")
+            + "; every applied source value now matches the cache, while schema, player-row "
+            "count, ops cache, and the approved single lineage are unchanged."
         ),
         "next_action": "closed_independent_cache_readback",
         "identity_profile_run_id": str(receipt_run_id),

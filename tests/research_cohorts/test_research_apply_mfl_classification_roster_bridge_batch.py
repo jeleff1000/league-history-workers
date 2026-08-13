@@ -16,3 +16,5 @@ def test_batch_apply_rebuilds_candidates_from_every_completed_shard_without_new_
     assert "new_lineage" in workflow
     assert 'test "${#ids[@]}" -eq 1' in workflow
     assert 'DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${ids[0]}"' in workflow
+    assert "mfl_classification_roster_bridge_batch_ledger_receipt.json" in workflow
+    assert "promotion_disposition" in workflow

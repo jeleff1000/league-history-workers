@@ -256,6 +256,24 @@ jobs:
           if not (total>0 and unmatched==0 and not any(disagreements.values()) and result['schema_unchanged'] and result['player_rows_unchanged'] and result['ops_unchanged']):
               raise SystemExit(json.dumps(result,sort_keys=True))
           Path('mfl_classification_roster_bridge_batch_readback.json').write_text(json.dumps(result,indent=2)+'\n')
+          assembly=json.loads(Path('evidence/assembly_report.json').read_text())
+          apply=json.loads(Path('evidence/apply_report.json').read_text())
+          improvements={key:int(value) for key,value in apply['improvements_by_field'].items() if int(value)}
+          replacements={key:int(value) for key,value in apply['replacements_by_field'].items() if int(value)}
+          fields=sorted(set(improvements) | set(replacements))
+          receipt={
+              **result,
+              'candidate_artifacts':int(assembly['candidate_artifacts']),
+              'matched_player_rows':total,
+              'source_artifact_id':'mfl-classification-roster-bridge-batch',
+              'promotion_disposition':'exact_existing_player_null_fill|direct_mfl_win_replacement',
+              'candidate_fields':fields,
+              'null_fill_rows':int(assembly['normal_delta_rows']),
+              'direct_mfl_win_replacement_rows':int(assembly['direct_mfl_win_replacement_rows']),
+              'improvements_by_field':improvements,
+              'replacements_by_field':replacements,
+          }
+          Path('mfl_classification_roster_bridge_batch_ledger_receipt.json').write_text(json.dumps(receipt,indent=2)+'\n')
           print(json.dumps(result,sort_keys=True))
           PY
       - name: Prove exactly one approved same-key cache object remains
@@ -272,5 +290,6 @@ jobs:
           name: mfl-classification-roster-bridge-batch-readback-${{ github.run_id }}
           path: |
             mfl_classification_roster_bridge_batch_readback.json
+            mfl_classification_roster_bridge_batch_ledger_receipt.json
             canonical_cache_id.txt
           retention-days: 90

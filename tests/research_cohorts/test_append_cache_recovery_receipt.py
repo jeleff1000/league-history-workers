@@ -115,3 +115,44 @@ def test_append_receipt_rejects_readback_with_unresolved_nulls(tmp_path: Path) -
         assert "remaining_source_backed_nulls" in str(exc)
     else:
         raise AssertionError("expected unsafe readback rejection")
+
+
+def test_append_receipt_records_verified_direct_mfl_win_replacements(tmp_path: Path) -> None:
+    from scripts.research_cohorts.append_cache_recovery_receipt import append_receipt
+
+    ledger = tmp_path / "ledger.csv"
+    with ledger.open("w", newline="", encoding="utf-8") as handle:
+        csv.DictWriter(handle, fieldnames=FIELDS).writeheader()
+    readback = tmp_path / "readback.json"
+    readback.write_text(json.dumps({
+        "candidate_artifacts": 231,
+        "candidate_rows": 451,
+        "candidate_run_id": "31663728938",
+        "canonical_cache_key": "approved-key",
+        "fresh_restore": True,
+        "matched_player_rows": 451,
+        "new_lineage": False,
+        "ops_unchanged": True,
+        "player_rows_unchanged": True,
+        "schema_unchanged": True,
+        "source_artifact_id": "mfl-classification-roster-bridge-batch",
+        "unmatched_candidate_keys": 0,
+        "source_value_disagreements": {"win": 0, "team_points": 0},
+        "promotion_disposition": "exact_existing_player_null_fill|direct_mfl_win_replacement",
+        "candidate_fields": ["team_points", "win"],
+    }), encoding="utf-8")
+
+    out = tmp_path / "out.csv"
+    append_receipt(
+        ledger_path=ledger,
+        readback_path=readback,
+        out_path=out,
+        receipt_run_id="31670000000",
+        artifact_label="mfl-classification-roster-bridge-batch-31670000000",
+        source_artifact="mfl classification roster bridge batch",
+    )
+
+    receipt = list(csv.DictReader(out.open(newline="", encoding="utf-8")))[0]
+    assert receipt["dispositions"] == "exact_existing_player_null_fill|direct_mfl_win_replacement"
+    assert receipt["candidate_fields"] == "team_points|win"
+    assert "direct MFL win replacements" in receipt["final_reason"]
