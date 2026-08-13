@@ -19,7 +19,7 @@ def _base(path: Path) -> None:
         CREATE TABLE public.player_fantasy AS
         SELECT 'league'::VARCHAR AS db_name, 2013::INTEGER AS year, 9::INTEGER AS week,
                'nfl-1'::VARCHAR AS NFL_player_id, NULL::VARCHAR AS manager,
-               'mfl'::VARCHAR AS platform, 0::INTEGER AS win, NULL::INTEGER AS loss,
+               'mfl-1'::VARCHAR AS mfl_player_id, 'mfl'::VARCHAR AS platform, 0::INTEGER AS win, NULL::INTEGER AS loss,
                NULL::INTEGER AS tie, NULL::DOUBLE AS team_points, NULL::INTEGER AS is_playoffs
     """)
     con.close()
@@ -120,8 +120,8 @@ def test_emits_each_canonical_recipient_for_an_ambiguous_exact_player_key(tmp_pa
     assert report["ambiguous_recipient_keys"] == 1
     con = duckdb.connect()
     rows = con.execute(
-        "SELECT recipient_count, canonical_win, source_win FROM read_parquet(?) ORDER BY player_rowid",
+        "SELECT recipient_count, canonical_mfl_player_id, canonical_win, source_win FROM read_parquet(?) ORDER BY player_rowid",
         [str(ambiguous)],
     ).fetchall()
     con.close()
-    assert rows == [(2, 0, 1), (2, 0, 1)]
+    assert rows == [(2, "mfl-1", 0, 1), (2, "mfl-1", 0, 1)]

@@ -23,6 +23,10 @@ SOURCE_FIELDS = {
     "source_team_points": "team_points",
     "source_is_playoffs": "is_playoffs",
 }
+DIAGNOSTIC_CANONICAL_FIELDS = (
+    "manager", "team_key", "team_name", "mfl_player_id", "fantasy_position",
+    "is_rostered", "is_started", "fantasy_points",
+)
 
 
 def _literal(path: Path) -> str:
@@ -129,11 +133,16 @@ def build(
                 "CAST(p.NFL_player_id AS VARCHAR)=s.NFL_player_id",
             ]
         )
+        diagnostic_select = [
+            f"p.{_quoted(name)} AS {_quoted('canonical_' + name)}"
+            for name in DIAGNOSTIC_CANONICAL_FIELDS if name in pcols
+        ]
         con.execute(f"""
             CREATE OR REPLACE TEMP TABLE exact_matches AS
             SELECT s.*, p.rowid AS player_rowid,
                    p.platform AS canonical_platform,
                    {', '.join(f'p.{_quoted(target)} AS {_quoted("canonical_" + target)}' for target in SOURCE_FIELDS.values())}
+                   {',' if diagnostic_select else ''} {', '.join(diagnostic_select)}
             FROM source_unique s JOIN public.player_fantasy p ON {key_join}
             WHERE LOWER(TRIM(COALESCE(CAST(p.platform AS VARCHAR), '')))='mfl'
         """)
@@ -167,6 +176,7 @@ def build(
                     SELECT m.db_name, m.year, m.week, m.NFL_player_id,
                            m.player_rowid, c.recipient_count,
                            m.source_manager, m.canonical_platform AS platform,
+                           {', '.join(_quoted('canonical_' + name) for name in DIAGNOSTIC_CANONICAL_FIELDS if name in pcols)},
                            {', '.join(_quoted('canonical_' + target) for target in SOURCE_FIELDS.values())},
                            {', '.join(_quoted(source) for source in SOURCE_FIELDS)}
                     FROM exact_matches m JOIN recipient_cardinality c
