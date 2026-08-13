@@ -201,6 +201,31 @@ def main() -> None:
           WHERE FALSE
         """)
 
+    # A player-grain bridge proves which source team owns a player, but it
+    # cannot tell us which of two anonymous canonical duplicates should receive
+    # that team signal.  Keep those keys out of the candidate set entirely.
+    # Direct canonical team identity matches below remain eligible; this guard
+    # only applies to the identity-reconstruction bridge.
+    con.execute("""
+      CREATE OR REPLACE TEMP TABLE canonical_player_week_multiplicity AS
+      SELECT CAST(db_name AS VARCHAR) db_name,
+             CAST("year" AS INTEGER) AS season_year,
+             CAST("week" AS INTEGER) AS season_week,
+             CAST(NFL_player_id AS VARCHAR) NFL_player_id,
+             COUNT(*) AS cache_player_week_count
+      FROM public.player_fantasy
+      GROUP BY 1,2,3,4
+    """)
+    con.execute("""
+      CREATE OR REPLACE TEMP TABLE bridge_blocked_duplicate_cache_player_weeks AS
+      SELECT DISTINCT b.db_name, b.bridge_year, b.bridge_week, b.NFL_player_id
+      FROM source_player_bridge b
+      JOIN canonical_player_week_multiplicity c
+        ON c.db_name=b.db_name AND c.season_year=b.bridge_year AND c.season_week=b.bridge_week
+       AND c.NFL_player_id=b.NFL_player_id
+      WHERE c.cache_player_week_count > 1
+    """)
+
     # A team-key match is authoritative when it exists in the canonical table.
     # Some source APIs emit a different representation of the same team key
     # (notably MFL's short franchise number).  In that case the scoped
@@ -276,6 +301,9 @@ def main() -> None:
         ON b.db_name=p.db_name AND b.bridge_year=CAST(p.year AS INTEGER)
        AND b.bridge_week=CAST(p.week AS INTEGER)
        AND b.NFL_player_id=CAST(p.NFL_player_id AS VARCHAR)
+      JOIN canonical_player_week_multiplicity c
+        ON c.db_name=b.db_name AND c.season_year=b.bridge_year AND c.season_week=b.bridge_week
+       AND c.NFL_player_id=b.NFL_player_id
       JOIN source_signals s
         ON s.db_name=b.db_name AND s.year=b.bridge_year AND s.week=b.bridge_week
        AND (((s.team_key IS NOT NULL AND b.team_key IS NOT NULL AND s.team_key=b.team_key)
@@ -283,6 +311,7 @@ def main() -> None:
         OR (s.manager_key IS NOT NULL AND s.manager_key=b.manager_key
             AND (s.team_name_key=b.team_name_key OR b.team_name_key IS NULL)))
       WHERE NOT EXISTS (SELECT 1 FROM player_matches direct WHERE direct.player_rowid=p.rowid)
+        AND c.cache_player_week_count=1
       QUALIFY COUNT(*) OVER (PARTITION BY p.rowid)=1
     """)
     con.execute("""
@@ -414,6 +443,9 @@ def main() -> None:
         "candidate_files": len(files),
         "candidate_file_inventory": file_inventory,
         "bridge_files": len(bridge_files),
+        "bridge_blocked_duplicate_cache_player_weeks": int(con.execute(
+            "SELECT COUNT(*) FROM bridge_blocked_duplicate_cache_player_weeks"
+        ).fetchone()[0]),
         "source_rows": int(con.execute("SELECT COUNT(*) FROM source_raw").fetchone()[0]),
         "source_team_keys": int(source_keys),
         "duplicate_source_rows_collapsed": int(source_duplicate_rows),

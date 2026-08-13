@@ -166,3 +166,47 @@ def test_candidate_audit_emits_direct_mfl_win_replacement_separately(
     assert emitted == 1
     report = json.loads((out / "team_signal_candidate_report.json").read_text(encoding="utf-8"))
     assert report["direct_mfl_win_replacement_rows"] == 1
+
+
+def test_candidate_audit_blocks_player_bridge_when_cache_player_week_is_duplicate(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """One source roster team must never be fanned onto anonymous duplicate cache rows."""
+    from scripts.research_cohorts.audit_team_signal_candidates import main
+
+    base = tmp_path / "base.duckdb"
+    _base_cache(base)
+    con = duckdb.connect(str(base))
+    con.execute("""
+        UPDATE public.player_fantasy
+        SET manager=NULL, team_key=NULL, team_name=NULL, is_playoffs=NULL
+    """)
+    con.execute("INSERT INTO public.player_fantasy SELECT * FROM public.player_fantasy")
+    con.close()
+    candidates = tmp_path / "candidates"
+    candidates.mkdir()
+    _write_parquet(candidates / "team_signal.parquet", [{
+        "db_name": "league", "year": 2024, "week": 15,
+        "team_key": "source-team", "manager": "source manager", "team_name": "Source Team",
+        "is_playoffs": 1,
+    }])
+    _write_parquet(candidates / "player_bridge.parquet", [{
+        "db_name": "league", "year": 2024, "week": 15, "NFL_player_id": "p1",
+        "team_key": "source-team", "manager": "source manager", "team_name": "Source Team",
+    }])
+    out = tmp_path / "out"
+    monkeypatch.setattr(sys, "argv", [
+        "audit_team_signal_candidates.py",
+        "--base", str(base), "--candidates", str(candidates), "--out", str(out),
+    ])
+
+    main()
+
+    con = duckdb.connect()
+    emitted = con.execute(
+        "SELECT COUNT(*) FROM read_parquet(?)", [str(out / "team_promotable_player_delta.parquet")]
+    ).fetchone()[0]
+    con.close()
+    assert emitted == 0
+    report = json.loads((out / "team_signal_candidate_report.json").read_text(encoding="utf-8"))
+    assert report["bridge_blocked_duplicate_cache_player_weeks"] == 1
