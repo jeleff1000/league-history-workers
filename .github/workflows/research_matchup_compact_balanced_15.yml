@@ -100,7 +100,7 @@ jobs:
           compression-level: 0
 
   merge:
-    needs: build
+    needs: [plan, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
