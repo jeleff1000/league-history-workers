@@ -47,8 +47,10 @@ def _write_json(path: Path, value: dict) -> None:
 
 def build(
     *, base: Path, manifest: Path, out: Path, report: Path,
-    rejected_out: Path | None = None,
+    rejected_out: Path | None = None, mode: str = "null-fill",
 ) -> dict:
+    if mode not in {"null-fill", "source-replace"}:
+        raise ValueError(f"unsupported candidate mode: {mode}")
     entries = json.loads(manifest.read_text(encoding="utf-8"))
     if not isinstance(entries, list) or not entries:
         raise ValueError("manifest must be a non-empty list")
@@ -163,21 +165,38 @@ def build(
                 f"SELECT COUNT(*) FROM matched WHERE {safe} AND {_q(target)} IS NOT NULL AND {_q(target)} IS DISTINCT FROM {_q(source_field)}"
             ).fetchone()[0]),
         }
-        filters.append(f"({safe} AND {_q(target)} IS NULL)")
+        candidate_cell = (
+            f"{_q(target)} IS NULL"
+            if mode == "null-fill"
+            else f"{_q(target)} IS NOT NULL AND {_q(target)} IS DISTINCT FROM {_q(source_field)}"
+        )
+        filters.append(f"({safe} AND {candidate_cell})")
 
     out.parent.mkdir(parents=True, exist_ok=True)
     delta_fields = []
+    expected_fields = []
     for source_field, (target, type_name) in SUPPORTED.items():
         variants = _q(source_field + "_variants")
+        candidate_cell = (
+            f"{_q(target)} IS NULL"
+            if mode == "null-fill"
+            else f"{_q(target)} IS NOT NULL AND {_q(target)} IS DISTINCT FROM {_q(source_field)}"
+        )
         delta_fields.append(
             f"CASE WHEN {variants} <= 1 AND {_q(source_field)} IS NOT NULL "
-            f"AND canonical_rows = 1 AND {_q(target)} IS NULL "
+            f"AND canonical_rows = 1 AND {candidate_cell} "
             f"THEN {_q(source_field)} ELSE NULL::{type_name} END AS {_q(source_field)}"
         )
+        if mode == "source-replace":
+            expected_fields.append(
+                f"CASE WHEN {variants} <= 1 AND {_q(source_field)} IS NOT NULL "
+                f"AND canonical_rows = 1 AND {candidate_cell} "
+                f"THEN {_q(target)} ELSE NULL::{type_name} END AS {_q('expected_' + target)}"
+            )
     con.execute(f"""
         COPY (
           SELECT player_rowid, {', '.join(_q(column) for column in KEY)}, source_artifact_ids,
-                 {', '.join(delta_fields)}
+                 {', '.join([*delta_fields, *expected_fields])}
           FROM matched
           WHERE {' OR '.join(filters)}
         ) TO {_lit(out)} (FORMAT PARQUET)
@@ -275,6 +294,7 @@ def build(
 
     result = {
         "read_only": True,
+        "mode": mode,
         "cache_mutated": False,
         "new_lineage": False,
         "canonical_schema_unchanged": True,
@@ -301,11 +321,12 @@ def main() -> None:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--rejected-out", type=Path)
+    parser.add_argument("--mode", choices=("null-fill", "source-replace"), default="null-fill")
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
     print(json.dumps(build(
         base=args.base, manifest=args.manifest, out=args.out,
-        rejected_out=args.rejected_out, report=args.report,
+        rejected_out=args.rejected_out, report=args.report, mode=args.mode,
     ), sort_keys=True))
 
 
