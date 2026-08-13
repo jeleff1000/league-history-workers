@@ -86,8 +86,8 @@ scoreboards and rosters for weeks 14–17 but no playoff/championship flags, whi
 the stale Sleeper ID resolves through its `previous_league_id` chain to the
 actual 2017 league and a recoverable bracket. The former remains source-
 unsupported for player playoff/championship credit unless an independent bracket
-source is found; the latter remains open for an exact native-ID candidate. Both
-require a current approved-cache readback before any closure.
+source is found. The latter initially required an identity bridge and was then
+resolved only where the bridge uniquely identified an existing player-week.
 
 **Sleeper candidate result, recorded 2026-08-13.** The exact historical-ID
 candidate [31745899774](https://github.com/jeleff1000/league-history-workers/actions/runs/31745899774)
@@ -101,6 +101,17 @@ player-schema SHA-256
 `3601374cf879a461d3fd5b4b834c4101300cf66084d81bd0b1cc78c0b61c8c39`.
 This is a documented native-identity gap, not a missing sidecar promotion and
 not permission to insert source-only player rows.
+
+**Sleeper cache receipt, recorded 2026-08-13.** The later GSIS-to-unique-
+existing-player-week bridge found 45 unambiguous existing recipients. The
+same-key promotion [31749243203](https://github.com/jeleff1000/league-history-workers/actions/runs/31749243203)
+filled only their previously-null `has_po_signal` cells—no player rows were
+inserted and no non-null playoff or championship values were replaced. A
+separate, read-only restore [31749573653](https://github.com/jeleff1000/league-history-workers/actions/runs/31749573653)
+then found zero remaining candidate updates and read all 45 playoff signals
+from the saved canonical cache. Five source events remain identity-unmatched
+(not fabricated); 9 of the 10 source championship starters already had a
+non-null canonical championship value.
 
 ## Latest loss/tie promotion receipts
 

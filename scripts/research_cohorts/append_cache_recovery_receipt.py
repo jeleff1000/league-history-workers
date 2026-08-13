@@ -17,6 +17,7 @@ REQUIRED_TRUE = (
 FIELD_ORDER = (
     "champion",
     "final_playoff_seed",
+    "has_po_signal",
     "is_playoffs",
     "loss",
     "made_playoffs",
@@ -149,7 +150,7 @@ def append_receipt(
         reason = (
             f"Fresh restore verified the saved legacy apply receipt for {candidate_rows:,} "
             "existing-player source candidates. The transaction receipt is authoritative for "
-            "the authorized NULL fills/direct MFL win replacements; preserved non-null source "
+            "the authorized NULL fills; preserved non-null source "
             "conflicts remain explicitly reported rather than overwritten. Schema, player-row "
             "count, ops cache, and the approved single lineage are unchanged."
         )
