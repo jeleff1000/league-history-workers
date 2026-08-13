@@ -93,6 +93,18 @@ artifacts; it records that team points cannot resolve this particular missing
 manager identity, so the remaining 4,068 null cells require a roster/team
 identity bridge or an explicit source-only disposition.
 
+The current manager-fanout audit,
+[31695967974](https://github.com/jeleff1000/league-history-workers/actions/runs/31695967974),
+then read three distinct retained team-signal artifacts against 230,225 existing
+player rows. It found zero NULL fills: `win`, `team_points`, and `is_playoffs`
+all agree on every source-backed row. The only remaining disagreement is 3,877
+`champion` cells. Those are deliberately preserved rather than overwritten,
+because these team-level source flags do not prove a player started the actual
+championship matchup—the failure mode that previously inflated championship
+rates. The source is therefore fully explained for those fields: no missing
+cells remain, and champion requires championship-start evidence rather than
+this season/team flag.
+
 ## Post-inventory MFL execution records
 
 The residual MFL batch ran after the 9,479-artifact inventory was frozen. Its
