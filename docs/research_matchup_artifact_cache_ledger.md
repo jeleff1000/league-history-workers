@@ -92,6 +92,25 @@ its diagnostic artifact. No shard is complete as a cache repair until a
 separate in-place promotion and independently restored cache readback produces
 a `cache_recovery_receipt`.
 
+### 2026-08-13 MFL candidate-set checkpoint
+
+Run `31663728938` ended as cancelled only because two long-running shards were
+manually cancelled after their diagnostics had not completed. Its usable source
+set is nevertheless exact and recorded here before promotion:
+
+| Classification | Shards | Evidence | Admission state |
+| --- | --- | --- | --- |
+| Retained source-candidate artifacts | 223 | 231 nonempty rescue jobs; 225 emitted artifacts; excluding only the eight rows below leaves 223 complete artifacts. | Pending guarded batch apply/readback. |
+| Incomplete cancelled diagnostics | `32, 156` | Each emitted only `cache_before.json` and `ops_before.sha256`, with no extraction, bridge, signal, or candidate-delta file. | Excluded; must be rerun separately. |
+| Cache-restore failures | `190, 191, 192, 193, 194, 195` | Each failed in under 20 seconds at `fail-on-cache-miss`, before recovery code ran, and emitted no artifact. | Excluded; no candidate exists to promote. |
+
+The guarded promotion is Actions
+[31674545745](https://github.com/jeleff1000/league-history-workers/actions/runs/31674545745).
+It is allowed to mutate only the already-approved same-key cache after its
+test/preflight gate proves the selected artifact list exactly matches the 223
+retained shards. Its fresh restore/readback receipt is required before this
+checkpoint, any affected artifact, or any player cell is marked complete.
+
 ## Active work: not yet applied
 
 The following Actions runs are deliberately recorded as **in flight**, not as
