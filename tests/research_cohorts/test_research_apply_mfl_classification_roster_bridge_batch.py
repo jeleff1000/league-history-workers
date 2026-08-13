@@ -11,6 +11,8 @@ def test_batch_apply_rebuilds_candidates_from_every_completed_shard_without_new_
     assert "excluded_shards" in workflow
     assert "validate_mfl_shard_artifacts.py" in workflow
     assert "--excluded-shards \"$EXCLUDED_SHARDS\"" in workflow
+    assert "all_artifact_names.txt" in workflow
+    assert "excluded shard is not a candidate artifact" in workflow
     assert "team_signals.parquet" in workflow
     assert "player_bridge.parquet" in workflow
     assert "--emit-direct-mfl-win-replacements" in workflow

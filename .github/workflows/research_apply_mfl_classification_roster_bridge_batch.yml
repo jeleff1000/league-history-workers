@@ -89,7 +89,24 @@ jobs:
           test -s rescue_jobs.tsv
           gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN_ID}/artifacts?per_page=100" \
             --jq '.artifacts[] | select(.expired == false and (.name | startswith("research-mfl-classification-roster-bridge-shard-"))) | .name' \
-            | sort -u > artifact_names.txt
+            | sort -u > all_artifact_names.txt
+          # The excluded shard is not a candidate artifact for promotion.
+          # An explicitly excluded shard may still have an incomplete pre-state bundle,
+          # even if GitHub retained its incomplete pre-state bundle.
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          names=[item for item in Path('all_artifact_names.txt').read_text().splitlines() if item]
+          excluded=[int(item.strip()) for item in os.environ['EXCLUDED_SHARDS'].split(',') if item.strip()]
+          selected=list(names)
+          for shard in excluded:
+              prefix=f'research-mfl-classification-roster-bridge-shard-{shard}-'
+              matches=[item for item in names if item.startswith(prefix)]
+              if len(matches) != 1:
+                  raise SystemExit(f'excluded shard artifact count must be exactly one: shard={shard}, matches={matches}')
+              selected.remove(matches[0])
+          Path('artifact_names.txt').write_text('\n'.join(selected)+'\n')
+          PY
           test -s artifact_names.txt
           python scripts/research_cohorts/validate_mfl_shard_artifacts.py \
             --jobs rescue_jobs.tsv --artifacts artifact_names.txt \
@@ -182,6 +199,8 @@ jobs:
           path: |
             cache_before.json
             ops_before.sha256
+            all_artifact_names.txt
+            artifact_names.txt
             shard_set_report.json
             assembly_report.json
             apply_report.json
