@@ -1,0 +1,79 @@
+name: Repair compact matchup selector maps from existing artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Run containing the completed compact artifact to repair'
+        required: true
+      artifact_name:
+        description: 'Exact completed compact artifact name from source_run_id'
+        required: true
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  reindex:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      PYTHONPATH: ${{ github.workspace }}/code
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 requests
+      - uses: actions/download-artifact@v5
+        with:
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          name: ${{ inputs.artifact_name }}
+          path: compact-artifact
+      - name: Rebuild layout-keyed selector access paths and preflight
+        run: |
+          BUNDLE="$(find compact-artifact -name research_matchup_compact.duckdb -type f)"
+          test -n "$BUNDLE"
+          test "$(printf '%s\n' "$BUNDLE" | wc -l)" -eq 1
+          cp "$BUNDLE" research_matchup_compact.duckdb
+          python - <<'PY'
+          import duckdb
+          from scripts.research_cohorts.compact_matchup_cells import (
+              materialize_compact_core_selector_indices,
+              materialize_compact_grade_selector_indices,
+          )
+          from scripts.research_cohorts.publish_compact_matchup_to_fly import preflight_bundle
+
+          con = duckdb.connect('research_matchup_compact.duckdb')
+          try:
+              for table in (
+                  'research_matchup_compact_weekly',
+                  'research_matchup_compact_season',
+                  'research_matchup_compact_career',
+              ):
+                  con.execute(f'ALTER TABLE {table} DROP COLUMN core_selector_indices')
+                  materialize_compact_core_selector_indices(con, output_table=table)
+              for table in (
+                  'research_matchup_compact_season',
+                  'research_matchup_compact_career',
+              ):
+                  con.execute(f'ALTER TABLE {table} DROP COLUMN grade_selector_indices')
+                  materialize_compact_grade_selector_indices(con, output_table=table)
+              preflight_bundle(con, require_full_history=True)
+          finally:
+              con.close()
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compact-matchup-final-reindexed-${{ inputs.source_run_id }}-${{ github.run_id }}
+          path: research_matchup_compact.duckdb
+          retention-days: 1
+          compression-level: 0

@@ -1,0 +1,105 @@
+name: Research matchup compact denominator probe
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+          fail-on-cache-miss: true
+      - run: python -m pip install duckdb==1.5.1
+      - name: Probe CMC 2019 week 17 eligibility facts
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import duckdb
+
+          con = duckdb.connect()
+          con.execute("ATTACH 'research_public_lake/corpus_snapshot.duckdb' AS lake (READ_ONLY)")
+          table = 'lake.public.player_fantasy'
+          described = con.execute(f'DESCRIBE {table}').fetchall()
+          available = {str(name).lower() for name, *_ in described}
+          required = {
+              'db_name', 'year', 'week', 'nfl_player_id', 'position',
+              'cohort_position_eligible', 'is_rostered', 'is_started',
+              'is_playoffs', 'champion', 'manager', 'team_key', 'team_name',
+              'team_points', 'fantasy_points', 'win',
+          }
+          missing = sorted(required - available)
+          assert not missing, {'missing': missing, 'available': sorted(available)}
+
+          target = """
+            CAST(year AS INTEGER)=2019
+            AND CAST(NFL_player_id AS VARCHAR)='00-0033280'
+          """
+          shape = """
+            COALESCE(CAST(is_rostered AS INTEGER), 0)=1
+            AND COALESCE(CAST(is_started AS INTEGER), 0)=0
+            AND COALESCE(TRIM(CAST(manager AS VARCHAR)), '')=''
+            AND COALESCE(TRIM(CAST(team_key AS VARCHAR)), '')=''
+            AND COALESCE(TRIM(CAST(team_name AS VARCHAR)), '')=''
+            AND team_points IS NULL
+            AND COALESCE(CAST(fantasy_points AS DOUBLE), 0.0)=0.0
+          """
+          payload = {
+              'schema': [list(row) for row in described],
+              'cmc_by_week': con.execute(f"""
+                SELECT CAST(week AS INTEGER) AS week,
+                  COUNT(*) AS rows,
+                  COUNT(DISTINCT db_name) AS leagues,
+                  COUNT(DISTINCT db_name) FILTER (WHERE cohort_position_eligible=1) AS position_eligible_leagues,
+                  COUNT(DISTINCT db_name) FILTER (WHERE is_rostered IS NULL OR is_rostered<>0) AS rostered_leagues,
+                  COUNT(DISTINCT db_name) FILTER (WHERE is_started=1) AS started_leagues,
+                  COUNT(DISTINCT db_name) FILTER (WHERE is_playoffs=1) AS playoff_flag_leagues,
+                  COUNT(DISTINCT db_name) FILTER (WHERE {shape}) AS bad_shape_leagues
+                FROM {table} WHERE {target}
+                GROUP BY 1 ORDER BY 1
+              """).fetchall(),
+              'rb_population_by_week': con.execute("""
+                SELECT CAST(week AS INTEGER) AS week,
+                  COUNT(DISTINCT db_name) FILTER (WHERE cohort_position_eligible=1) AS position_eligible_leagues,
+                  COUNT(DISTINCT db_name) FILTER (WHERE is_playoffs=1) AS playoff_flag_leagues
+                FROM lake.public.player_fantasy
+                WHERE CAST(year AS INTEGER)=2019 AND CAST(position AS VARCHAR)='RB'
+                GROUP BY 1 ORDER BY 1
+              """).fetchall(),
+              'cmc_week_17_samples': con.execute(f"""
+                SELECT CAST(db_name AS VARCHAR), CAST(position AS VARCHAR),
+                  CAST(cohort_position_eligible AS INTEGER), CAST(is_rostered AS INTEGER),
+                  CAST(is_started AS INTEGER), CAST(is_playoffs AS INTEGER), CAST(champion AS INTEGER),
+                  CAST(manager AS VARCHAR), CAST(team_key AS VARCHAR), CAST(team_name AS VARCHAR),
+                  CAST(team_points AS DOUBLE), CAST(fantasy_points AS DOUBLE), CAST(win AS DOUBLE)
+                FROM {table}
+                WHERE {target} AND CAST(week AS INTEGER)=17
+                ORDER BY CAST(db_name AS VARCHAR)
+                LIMIT 25
+              """).fetchall(),
+          }
+          text = json.dumps(payload, indent=2, default=str)
+          Path('denominator_probe.json').write_text(text, encoding='utf-8')
+          print(text)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compact-denominator-probe-${{ github.run_id }}
+          path: denominator_probe.json
+          retention-days: 14
