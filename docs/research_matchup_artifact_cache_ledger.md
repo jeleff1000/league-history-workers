@@ -23,7 +23,7 @@ The CSV now has an explicit `record_type` on every row. The frozen inventory
 is exactly 9,479 `artifact_inventory` rows; later artifacts are 231
 `artifact_admission` rows; cache-changing work is recorded as a separate
 `cache_recovery_receipt` row in the *same* ledger. Neither later artifacts nor
-receipts are smuggled into the 9,479-artifact denominator. There are currently seven such recovery
+receipts are smuggled into the 9,479-artifact denominator. There are currently eight such recovery
 receipts: the independently restored 74-row MFL repair, the 204-row direct
 MFL player/team bridge, the 26,936-row MFL source-only bridge promotion, the
 1,720-row MFL classification roster-identity promotion, the 600-cell exact
@@ -41,11 +41,21 @@ player rows; its post-save candidate delta is zero. Cache object `6601873724`
 was saved under the same approved key, with unchanged schema, player-row count,
 and ops-cache SHA-256.
 
+The eighth receipt is the direct-source conflict replacement: read-only
+candidate [31691317379](https://github.com/jeleff1000/league-history-workers/actions/runs/31691317379),
+guarded same-key promotion [31692380121](https://github.com/jeleff1000/league-history-workers/actions/runs/31692380121),
+and post-save audit [31692615938](https://github.com/jeleff1000/league-history-workers/actions/runs/31692615938).
+It replaced 1,025 `win`, 1,267 `loss`, and 270 `team_points` values across
+1,976 exact player rows. The post-save audit found zero direct-source conflicts
+and zero new candidates. Cache object `6602753769` remains the sole object
+under the approved key; schema, player-row count, and ops-cache SHA-256 are
+unchanged.
+
 ## Current residual queue
 
 The latest ledger validation, after the exact loss/tie sparse-signal receipt,
 reports 9,717 ledger rows: 9,479 frozen raw-artifact rows, 231 later
-artifact-admission rows, and 7 supplemental cache-recovery receipts. Of the
+artifact-admission rows, and 8 supplemental cache-recovery receipts. Of the
 frozen artifact rows, 8,768 are closed and 711 are still open.
 Those 711 entries are a work queue, **not** a claim that 711 artifacts still
 contain unapplied values: each must be re-read against the current approved
@@ -242,17 +252,6 @@ identity/conflict evidence as fixed.
 The following Actions runs are deliberately recorded as **in flight**, not as
 cache improvements. Both restore the same approved cache key read-only; neither
 can save a cache, alter the schema, or create a lineage.
-
-The currently queued exact-conflict candidate is
-[31691317379](https://github.com/jeleff1000/league-history-workers/actions/runs/31691317379).
-It is read-only and emits a candidate only for direct MFL source cells whose
-existing canonical values conflict; each emitted cell carries both `source_*`
-and the exact `expected_*` canonical value observed at candidate time. It is
-not a recovery receipt and does not count as a cache improvement. If its report
-proves zero unmatched keys, zero contradictory source keys, mode
-`source-replace`, and a positive delta, only then may guarded workflow
-`research_replace_structured_player_source_conflicts.yml` replace those cells
-under the same approved cache key and record an eighth receipt.
 
 | Run | Exact scope | Required next action before any ledger closure |
 | --- | --- | --- |

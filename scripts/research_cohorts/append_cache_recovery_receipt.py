@@ -142,7 +142,7 @@ def append_receipt(
             observed_fields = set(payload.get("source_value_disagreements", {}))
     candidate_fields = "|".join(field for field in FIELD_ORDER if field in observed_fields)
     disposition = str(payload.get("promotion_disposition") or "exact_existing_player_null_fill")
-    direct_replacement = "direct_mfl_win_replacement" in disposition
+    direct_replacement = "direct_mfl_source_replacement" in disposition
     row = dict.fromkeys(fields, "")
     legacy_receipt = payload.get("readback_proof_mode") == "legacy_apply_receipt_minimum_match"
     if legacy_receipt:
@@ -156,7 +156,7 @@ def append_receipt(
     else:
         reason = (
             f"Fresh restore read back all {candidate_rows:,} source-proven existing-player "
-            + ("NULL fills and direct MFL win replacements" if direct_replacement else "NULL-fill candidates")
+            + ("direct MFL source replacements" if direct_replacement else "NULL-fill candidates")
             + "; every applied source value now matches the cache, while schema, player-row "
             "count, ops cache, and the approved single lineage are unchanged."
         )

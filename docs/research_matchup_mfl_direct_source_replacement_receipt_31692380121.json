@@ -1,0 +1,38 @@
+{
+  "canonical_cache_key": "research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613",
+  "candidate_run_id": 31691317379,
+  "source_artifact_id": "9004815467|9004892405|9005591893|9005685804|9005697100|9005761481|9006118944|9006417376|9006773660|9007017190|9007391861|9007393289|9007476012|9007511852|9007639810",
+  "candidate_artifacts": 15,
+  "candidate_rows": 1976,
+  "candidate_fields": ["win", "loss", "team_points"],
+  "matched_player_rows": 1976,
+  "unmatched_candidate_keys": 0,
+  "fresh_restore": true,
+  "schema_unchanged": true,
+  "player_rows_unchanged": true,
+  "ops_unchanged": true,
+  "new_lineage": false,
+  "remaining_source_backed_nulls": {
+    "win": 0,
+    "loss": 0,
+    "team_points": 0
+  },
+  "source_value_disagreements": {
+    "win": 0,
+    "loss": 0,
+    "team_points": 0
+  },
+  "promotion_disposition": "exact_existing_player_direct_mfl_source_replacement",
+  "promotion_run_id": 31692380121,
+  "postsave_readback_run_id": 31692615938,
+  "evidence": {
+    "apply_report": "structured-player-source-replace-promotion-evidence-31692380121/apply_report.json",
+    "postsave_report": "research-mfl-outcome-null-fill-candidate-31692615938/mfl_direct_player_null_fill_report.json",
+    "verified_win_cells": 1025,
+    "verified_loss_cells": 1267,
+    "verified_team_points_cells": 270,
+    "postsave_direct_source_conflict_cells": 0,
+    "postsave_candidate_delta_rows": 0,
+    "cache_object_id": 6602753769
+  }
+}
