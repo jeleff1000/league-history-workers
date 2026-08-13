@@ -78,10 +78,10 @@ def _source(path):
             ],
         },
         "players": {
-            "sp-3": {"espn_id": "espn-3"},
-            "sp-4": {"espn_id": "espn-4"},
-            "sp-5": {"espn_id": "espn-5"},
-            "sp-6": {"espn_id": "espn-6"},
+            "sp-3": {"espn_id": "espn-3", "gsis_id": "gsis-3"},
+            "sp-4": {"espn_id": "espn-4", "gsis_id": "gsis-4"},
+            "sp-5": {"espn_id": "espn-5", "gsis_id": "gsis-5"},
+            "sp-6": {"espn_id": "espn-6", "gsis_id": "gsis-6"},
         },
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -144,4 +144,24 @@ def test_uses_exact_espn_bridge_when_cache_sleeper_id_is_missing(tmp_path):
 
     assert result["direct_native_recipient_events"] == 0
     assert result["espn_bridge_recipient_events"] == 2
+    assert result["candidate_rows"] == 2
+
+
+def test_uses_exact_gsis_bridge_when_native_and_espn_ids_are_missing(tmp_path):
+    base = tmp_path / "base.duckdb"
+    source = tmp_path / "source.json"
+    out = tmp_path / "delta.parquet"
+    report = tmp_path / "report.json"
+    _base(base, missing_sleeper_native_ids=True)
+    con = duckdb.connect(str(base))
+    con.execute("UPDATE public.player_fantasy SET espn_player_id=NULL, NFL_player_id='gsis-3' WHERE NFL_player_id='nfl-3'")
+    con.execute("UPDATE public.player_fantasy SET espn_player_id=NULL, NFL_player_id='gsis-5' WHERE NFL_player_id='nfl-5'")
+    con.close()
+    _source(source)
+
+    result = build(base=base, source=source, out=out, report=report)
+
+    assert result["direct_native_recipient_events"] == 0
+    assert result["espn_bridge_recipient_events"] == 0
+    assert result["gsis_bridge_recipient_events"] == 2
     assert result["candidate_rows"] == 2
