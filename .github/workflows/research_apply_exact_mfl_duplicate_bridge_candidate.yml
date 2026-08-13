@@ -1,0 +1,261 @@
+name: Apply Exact MFL Duplicate Bridge Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Must equal APPLY_EXACT_MFL_DUPLICATE_BRIDGE
+        required: true
+        default: ""
+      candidate_run_id:
+        description: Read-only candidate run to promote
+        required: true
+        default: "31728622914"
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: canonical-research-cache-replacement
+  cancel-in-progress: false
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pandas==2.2.3 pyarrow==15.0.2 pytest==8.3.5
+      - run: >-
+          python -m pytest -q
+          tests/research_cohorts/test_apply_exact_mfl_duplicate_bridge_candidate.py
+          tests/research_cohorts/test_research_apply_exact_mfl_duplicate_bridge_candidate.py
+
+  apply:
+    needs: tests
+    if: ${{ inputs.confirm == 'APPLY_EXACT_MFL_DUPLICATE_BRIDGE' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Record cache and ops pre-state
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/corpus_snapshot.duckdb > cache_before.sha256
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          data={
+              'player_schema':[r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()],
+              'player_rows':int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]),
+          }
+          con.close()
+          Path('prestate.json').write_text(json.dumps(data, indent=2)+'\n')
+          PY
+      - name: Download exactly the validated read-only candidate
+        uses: actions/download-artifact@v5
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.candidate_run_id }}
+          name: research-mfl-exact-duplicate-candidate-${{ inputs.candidate_run_id }}
+          path: candidate
+      - name: Reject a stale or broadened candidate before mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, hashlib, json
+          from pathlib import Path
+          root=Path('candidate')
+          report=json.loads(next(root.rglob('mfl_exact_duplicate_candidate_report.json')).read_text())
+          required={
+              'read_only':True, 'cache_mutated':False, 'new_lineage':False,
+              'canonical_schema_unchanged':True,
+              'exact_duplicate_player_weeks':831, 'scoped_cache_rows':12284,
+              'candidate_rows':1271, 'source_actual_cards':96, 'safe_source_cards':96,
+          }
+          for key, expected in required.items():
+              if report.get(key) != expected:
+                  raise SystemExit(f'candidate invariant {key}={report.get(key)!r}, expected {expected!r}')
+          base_hash=Path('cache_before.sha256').read_text().split()[0]
+          candidate_before=next(root.rglob('before_cache.sha256')).read_text().split()[0]
+          candidate_after=next(root.rglob('after_cache.sha256')).read_text().split()[0]
+          if not (base_hash == candidate_before == candidate_after):
+              raise SystemExit('candidate/cache base hash mismatch')
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          schema='\n'.join(r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall())
+          con.close()
+          schema_hash=hashlib.sha256(schema.encode()).hexdigest()
+          candidate_schema_before=next(root.rglob('before_schema.sha256')).read_text().strip()
+          candidate_schema_after=next(root.rglob('after_schema.sha256')).read_text().strip()
+          if not (schema_hash == candidate_schema_before == candidate_schema_after):
+              raise SystemExit('candidate/cache schema hash mismatch')
+          delta=next(root.rglob('mfl_exact_duplicate_candidate.parquet'))
+          con=duckdb.connect()
+          con.execute(f"CREATE TEMP VIEW d AS SELECT * FROM read_parquet('{str(delta).replace("'", "''")}')")
+          n=int(con.execute('SELECT COUNT(*) FROM d').fetchone()[0])
+          duplicate=int(con.execute('SELECT COUNT(*) FROM (SELECT player_rowid FROM d GROUP BY player_rowid HAVING COUNT(*)>1)').fetchone()[0])
+          null_source=int(con.execute('''SELECT COUNT(*) FROM d WHERE source_manager IS NULL OR source_team_key IS NULL OR source_team_name IS NULL OR source_mfl_player_id IS NULL OR source_win IS NULL OR source_loss IS NULL OR source_tie IS NULL OR source_team_points IS NULL OR source_is_playoffs IS NULL''').fetchone()[0])
+          groups=int(con.execute('SELECT COUNT(*) FROM (SELECT DISTINCT db_name,year,week FROM d)').fetchone()[0])
+          con.close()
+          if n != 1271 or duplicate or null_source or groups != 5:
+              raise SystemExit(f'candidate recipient gate failed: rows={n}, duplicate={duplicate}, null_source={null_source}, groups={groups}')
+          PY
+      - name: Apply direct MFL facts to only validated existing recipients
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/apply_exact_mfl_duplicate_bridge_candidate.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --candidate "$(find candidate -name mfl_exact_duplicate_candidate.parquet -print -quit)" \
+            --report apply_report.json
+      - name: Fail fast before same-key replacement
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, hashlib, json
+          from pathlib import Path
+          before=json.loads(Path('prestate.json').read_text())
+          report=json.loads(Path('apply_report.json').read_text())
+          if not (report.get('in_place') is True and report.get('cache_mutated') is True
+                  and report.get('new_lineage') is False and report.get('schema_unchanged') is True
+                  and report.get('player_rows_unchanged') is True
+                  and int(report.get('candidate_rows',-1)) == 1271
+                  and int(report.get('recipient_rows',-1)) == 1271
+                  and int(report.get('snapshot_mismatch_rows',-1)) == 0
+                  and all(int(v)==0 for v in report.get('readback_remaining_source_mismatches',{}).values())
+                  and int(report.get('readback_remaining_has_po_signal',-1)) == 0):
+              raise SystemExit(f'apply invariant failed: {report}')
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          schema=[r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()]
+          rows=int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])
+          con.close()
+          if schema != before['player_schema'] or rows != before['player_rows']:
+              raise SystemExit('canonical player schema or row count changed')
+          ops=hashlib.sha256(Path('research_public_lake/ops_cache.duckdb').read_bytes()).hexdigest()
+          if ops != Path('ops_before.sha256').read_text().split()[0]:
+              raise SystemExit('ops cache changed')
+          PY
+      - name: Save promotion evidence before replacing the same cache object
+        uses: actions/upload-artifact@v4
+        with:
+          name: exact-mfl-duplicate-promotion-evidence-${{ github.run_id }}
+          path: |
+            cache_before.sha256
+            ops_before.sha256
+            prestate.json
+            apply_report.json
+            candidate/**
+          retention-days: 90
+          compression-level: 0
+      - name: Replace only the one approved cache object under its same key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${ids[0]}"
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+
+  readback:
+    needs: apply
+    if: ${{ inputs.confirm == 'APPLY_EXACT_MFL_DUPLICATE_BRIDGE' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: exact-mfl-duplicate-promotion-evidence-${{ github.run_id }}
+          path: evidence
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1
+      - name: Independently restore and prove all direct MFL values landed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, hashlib, json
+          from pathlib import Path
+          before=json.loads(Path('evidence/prestate.json').read_text())
+          delta=next(Path('evidence').rglob('mfl_exact_duplicate_candidate.parquet'))
+          con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          con.execute(f"CREATE TEMP VIEW d AS SELECT * FROM read_parquet('{str(delta).replace("'", "''")}')")
+          match=int(con.execute('SELECT COUNT(*) FROM public.player_fantasy p JOIN d ON p.rowid=d.player_rowid').fetchone()[0])
+          mismatches={}
+          for field in ('manager','team_key','team_name','mfl_player_id','win','loss','tie','team_points','is_playoffs'):
+              mismatches[field]=int(con.execute(f'''SELECT COUNT(*) FROM public.player_fantasy p JOIN d ON p.rowid=d.player_rowid WHERE CAST(p.{field} AS VARCHAR) IS DISTINCT FROM CAST(d.source_{field} AS VARCHAR)''').fetchone()[0])
+          po=int(con.execute('SELECT COUNT(*) FROM public.player_fantasy p JOIN d ON p.rowid=d.player_rowid WHERE TRY_CAST(p.has_po_signal AS INTEGER) IS DISTINCT FROM 1').fetchone()[0])
+          schema=[r[0] for r in con.execute('DESCRIBE public.player_fantasy').fetchall()]
+          rows=int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])
+          con.close()
+          ops=hashlib.sha256(Path('research_public_lake/ops_cache.duckdb').read_bytes()).hexdigest()
+          result={
+              'canonical_cache_key':'research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613',
+              'candidate_run_id':'${{ inputs.candidate_run_id }}',
+              'candidate_rows':1271,
+              'matched_rows':match,
+              'source_mismatches':mismatches,
+              'has_po_signal_mismatches':po,
+              'schema_unchanged':schema==before['player_schema'],
+              'player_rows_unchanged':rows==before['player_rows'],
+              'ops_unchanged':ops==Path('evidence/ops_before.sha256').read_text().split()[0],
+              'fresh_restore':True,
+              'new_lineage':False,
+          }
+          if not (match==1271 and not any(mismatches.values()) and po==0
+                  and result['schema_unchanged'] and result['player_rows_unchanged']
+                  and result['ops_unchanged']):
+              raise SystemExit(json.dumps(result, sort_keys=True))
+          Path('exact_mfl_duplicate_readback.json').write_text(json.dumps(result, indent=2)+'\n')
+          print(json.dumps(result, sort_keys=True))
+          PY
+      - name: Verify exactly one approved cache object remains
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          printf '%s\n' "${ids[0]}" > canonical_cache_id.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: exact-mfl-duplicate-promotion-readback-${{ github.run_id }}
+          path: |
+            exact_mfl_duplicate_readback.json
+            canonical_cache_id.txt
+          retention-days: 90
