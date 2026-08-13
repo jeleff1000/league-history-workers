@@ -111,6 +111,44 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
             "ambiguous_team_points_bridges": int(con.execute("SELECT COUNT(*) FROM bridged WHERE canonical_rows > 1").fetchone()[0]),
             "unmatched_team_points_bridges": int(con.execute("SELECT COUNT(*) FROM bridged WHERE canonical_rows = 0").fetchone()[0]),
         }
+        artifact_bridge_state = []
+        for artifact_id in sorted(int(entry["artifact_id"]) for entry in entries):
+            metrics = con.execute(f"""
+                WITH source_keys AS (
+                  SELECT {', '.join(_q(column) for column in SOURCE_KEY)},
+                         MAX(source_team_points) AS source_team_points
+                  FROM raw_source
+                  WHERE artifact_id = {artifact_id}
+                    AND source_manager IS NULL
+                    AND NFL_player_id IS NOT NULL
+                    AND source_team_points IS NOT NULL
+                  GROUP BY {', '.join(_q(column) for column in SOURCE_KEY)}
+                ), candidates AS (
+                  SELECT s.{', s.'.join(_q(column) for column in SOURCE_KEY)},
+                         COUNT(p.rowid) AS canonical_rows
+                  FROM source_keys s
+                  LEFT JOIN public.player_fantasy p
+                    ON p.db_name IS NOT DISTINCT FROM s.db_name
+                   AND p.year IS NOT DISTINCT FROM s.year
+                   AND p.week IS NOT DISTINCT FROM s.week
+                   AND p.NFL_player_id IS NOT DISTINCT FROM s.NFL_player_id
+                   AND p.manager IS NOT NULL
+                   AND p.team_points IS NOT DISTINCT FROM s.source_team_points
+                  GROUP BY {', '.join(f's.{_q(column)}' for column in SOURCE_KEY)}
+                )
+                SELECT COUNT(*),
+                       COUNT(*) FILTER (WHERE canonical_rows = 1),
+                       COUNT(*) FILTER (WHERE canonical_rows > 1),
+                       COUNT(*) FILTER (WHERE canonical_rows = 0)
+                FROM candidates
+            """).fetchone()
+            artifact_bridge_state.append({
+                "artifact_id": artifact_id,
+                "manager_null_source_keys_with_team_points": int(metrics[0]),
+                "unique_team_points_bridges": int(metrics[1]),
+                "ambiguous_team_points_bridges": int(metrics[2]),
+                "unmatched_team_points_bridges": int(metrics[3]),
+            })
 
         candidate_fields: list[str] = []
         output_fields: list[str] = []
@@ -146,6 +184,7 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
             "manager_null_source_keys_with_team_points": source_keys,
             "source_conflicting_player_keys": source_conflicts,
             **bridge_counts,
+            "artifact_bridge_state": artifact_bridge_state,
             "null_fill_rows": null_fill_rows,
             "null_fill_cells_by_field": null_fill_counts,
         }
