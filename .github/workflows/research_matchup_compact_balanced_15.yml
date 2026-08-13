@@ -47,7 +47,8 @@ jobs:
         run: |
           python code/scripts/research_cohorts/plan_balanced_matchup_tasks.py --snapshot research_public_lake/corpus_snapshot.duckdb --ops-cache research_public_lake/ops_cache.duckdb --year-start '${{ inputs.year_start }}' --year-end '${{ inputs.year_end }}' --positions '${{ inputs.positions }}' --runners '${{ inputs.runners }}' --output matrix.json
           echo "matrix=$(tr -d '\n' < matrix.json)" >> "$GITHUB_OUTPUT"
-          echo "lane_count=$(python -c \"import json; print(len(json.load(open('matrix.json'))['include']))\")" >> "$GITHUB_OUTPUT"
+          lane_count="$(python -c 'import json; print(len(json.load(open("matrix.json"))["include"]))')"
+          echo "lane_count=$lane_count" >> "$GITHUB_OUTPUT"
 
   build:
     needs: plan
