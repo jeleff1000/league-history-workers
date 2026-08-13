@@ -44,7 +44,14 @@ def _base(
     con.close()
 
 
-def _delta(path, *, conflicting_loss: bool = False, null_player_id: bool = False, null_platform: bool = False):
+def _delta(
+    path,
+    *,
+    conflicting_loss: bool = False,
+    null_player_id: bool = False,
+    null_platform: bool = False,
+    source_win: str | None = None,
+):
     con = duckdb.connect()
     con.execute("""
         CREATE TABLE d AS
@@ -60,6 +67,8 @@ def _delta(path, *, conflicting_loss: bool = False, null_player_id: bool = False
         con.execute("UPDATE d SET NFL_player_id=NULL")
     if null_platform:
         con.execute("UPDATE d SET platform=NULL")
+    if source_win is not None:
+        con.execute("UPDATE d SET source_win=?", [source_win])
     con.execute("INSERT INTO d SELECT * FROM d")
     if conflicting_loss:
         con.execute("UPDATE d SET source_loss='0' WHERE rowid=1")
@@ -205,4 +214,29 @@ def test_apply_updates_each_exact_duplicate_canonical_recipient(tmp_path):
     assert payload["matched_rows"] == 2
     con = duckdb.connect(str(base), read_only=True)
     assert con.execute("SELECT COUNT(*) FROM public.player_fantasy WHERE loss='1' AND tie='0'").fetchone() == (2,)
+    con.close()
+
+
+def test_apply_replaces_direct_mfl_win_zero_with_source_one_when_explicitly_enabled(tmp_path):
+    base = tmp_path / "base.duckdb"
+    delta = tmp_path / "delta.parquet"
+    report = tmp_path / "report.json"
+    _base(base)
+    con = duckdb.connect(str(base))
+    con.execute("UPDATE public.player_fantasy SET win='0'")
+    con.close()
+    _delta(delta, source_win="1")
+
+    result = subprocess.run([
+        sys.executable,
+        "scripts/research_cohorts/apply_team_signal_delta_in_place.py",
+        "--base", str(base), "--delta", str(delta), "--report", str(report),
+        "--replace-direct-mfl-win",
+    ], capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    payload = json.loads(report.read_text())
+    assert payload["replacements_by_field"]["win"] == 1
+    con = duckdb.connect(str(base), read_only=True)
+    assert con.execute("SELECT win FROM public.player_fantasy").fetchone() == ("1",)
     con.close()

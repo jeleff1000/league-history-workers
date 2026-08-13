@@ -26,6 +26,11 @@ def main() -> None:
     ap.add_argument("--delta", type=Path, required=True)
     ap.add_argument("--new-rows", type=Path, default=None)
     ap.add_argument("--report", type=Path, required=True)
+    ap.add_argument(
+        "--replace-direct-mfl-win",
+        action="store_true",
+        help="Replace only exact bridged MFL win=0 cells with direct source win=1 values.",
+    )
     args = ap.parse_args()
 
     con = duckdb.connect(str(args.base))
@@ -41,6 +46,15 @@ def main() -> None:
     required |= {"source_win", "source_team_points", "source_playoffs", "source_champion", "source_final_playoff_seed"}
     if not required <= dcols:
         raise SystemExit(f"delta schema missing: {sorted(required-dcols)}")
+    if args.replace_direct_mfl_win:
+        non_mfl = con.execute("""
+          SELECT COUNT(*) FROM delta_raw
+          WHERE LOWER(TRIM(COALESCE(CAST(platform AS VARCHAR), ''))) <> 'mfl'
+        """).fetchone()[0]
+        if non_mfl:
+            raise SystemExit(
+                f"direct MFL win replacement requires exclusively MFL delta rows: {non_mfl} non-MFL rows"
+            )
     new_count = 0
     if args.new_rows is not None:
         npath = str(args.new_rows.resolve()).replace("'", "''")
@@ -179,8 +193,20 @@ def main() -> None:
             continue
         canonical = f"canonical_{field}"
         improvements[field] = con.execute(f"SELECT COUNT(*) FROM matched WHERE {canonical} IS NULL AND {src} IS NOT NULL").fetchone()[0]
+    replacements = {"win": 0}
+    if args.replace_direct_mfl_win:
+        replacements["win"] = con.execute("""
+          SELECT COUNT(*) FROM matched
+          WHERE CAST(canonical_win AS VARCHAR)='0' AND CAST(source_win AS VARCHAR)='1'
+        """).fetchone()[0]
+    replace_direct_mfl_win = "1" if args.replace_direct_mfl_win else "0"
     update_assignments = [
-        "win=CASE WHEN p.win IS NULL THEN m.source_win ELSE p.win END",
+        f"""win=CASE
+            WHEN p.win IS NULL THEN m.source_win
+            WHEN {replace_direct_mfl_win}=1
+                 AND CAST(p.win AS VARCHAR)='0'
+                 AND CAST(m.source_win AS VARCHAR)='1' THEN m.source_win
+            ELSE p.win END""",
         "team_points=CASE WHEN p.team_points IS NULL THEN m.source_team_points ELSE p.team_points END",
         "is_playoffs=CASE WHEN p.is_playoffs IS NULL THEN m.source_playoffs ELSE p.is_playoffs END",
         "champion=CASE WHEN p.champion IS NULL THEN m.source_champion ELSE p.champion END",
@@ -227,6 +253,7 @@ def main() -> None:
         "matched_rows": int(matched),
         "inserted_rows": int(new_count),
         "improvements_by_field": {k:int(v) for k,v in improvements.items()},
+        "replacements_by_field": {k:int(v) for k,v in replacements.items()},
     }
     if "source_file" in dcols:
         report["source_file_rows"] = {
