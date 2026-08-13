@@ -37,13 +37,17 @@ jobs:
           Path('prestate.json').write_text(json.dumps({'schema':[r[0] for r in c.execute('DESCRIBE public.player_fantasy').fetchall()], 'player_rows':int(c.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0])},indent=2)+'\n')
           c.close()
           PY
-      - name: Download three distinct retained team-signal artifacts
+      - name: Download every retained team-signal artifact under adjudication
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p sources
+          gh run download 31275025446 --repo "$GITHUB_REPOSITORY" --name promotable-rescue-delta-31275025446-7 --dir sources/9026771587
+          gh run download 31275025446 --repo "$GITHUB_REPOSITORY" --name promotable-rescue-delta-31275025446-12 --dir sources/9026776710
+          gh run download 31275356687 --repo "$GITHUB_REPOSITORY" --name promotable-rescue-delta-31275356687-7 --dir sources/9026861928
+          gh run download 31275356687 --repo "$GITHUB_REPOSITORY" --name promotable-rescue-delta-31275356687-12 --dir sources/9026866779
           gh run download 31280337152 --repo "$GITHUB_REPOSITORY" --name promotable-rescue-delta-31280337152-5 --dir sources/9028252551
           gh run download 31280337152 --repo "$GITHUB_REPOSITORY" --name promotable-rescue-delta-31280337152-7 --dir sources/9028259828
           gh run download 31280337152 --repo "$GITHUB_REPOSITORY" --name promotable-rescue-delta-31280337152-12 --dir sources/9028253133
@@ -51,7 +55,7 @@ jobs:
           import json
           from pathlib import Path
           entries=[]
-          for artifact_id in (9028252551,9028259828,9028253133):
+          for artifact_id in (9026771587,9026776710,9026861928,9026866779,9028252551,9028259828,9028253133):
               files=list((Path('sources')/str(artifact_id)).rglob('promotable_delta.parquet'))
               if len(files)!=1: raise SystemExit(f'{artifact_id}: expected one source file, found {len(files)}')
               entries.append({'artifact_id':artifact_id,'path':str(files[0].resolve())})

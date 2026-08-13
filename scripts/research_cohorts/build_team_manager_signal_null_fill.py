@@ -109,6 +109,59 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
         """)
         matched_player_rows = int(con.execute("SELECT COUNT(*) FROM matched").fetchone()[0])
 
+        artifact_comparison_state: list[dict] = []
+        for entry in entries:
+            artifact_id = int(entry["artifact_id"])
+            con.execute(f"""
+                CREATE OR REPLACE TEMP TABLE artifact_source_unique AS
+                SELECT db_name, year, week, source_manager, {', '.join(aggregate)}
+                FROM raw_source
+                WHERE artifact_id = {artifact_id}
+                GROUP BY db_name, year, week, source_manager
+            """)
+            artifact_source_team_weeks = int(
+                con.execute("SELECT COUNT(*) FROM artifact_source_unique").fetchone()[0]
+            )
+            artifact_conflicts = int(con.execute(
+                f"SELECT COUNT(*) FROM artifact_source_unique WHERE {conflict_predicate}"
+            ).fetchone()[0])
+            con.execute(f"""
+                CREATE OR REPLACE TEMP TABLE artifact_matched AS
+                SELECT p.rowid AS player_rowid,
+                       {', '.join(f's.{_q('source_' + field)}' for field in SUPPORTED)},
+                       {', '.join(f'p.{_q(target)} AS {_q('canonical_' + target)}' for target, _ in SUPPORTED.values())}
+                FROM artifact_source_unique s
+                JOIN public.player_fantasy p
+                  ON p.db_name IS NOT DISTINCT FROM s.db_name
+                 AND p.year IS NOT DISTINCT FROM s.year
+                 AND p.week IS NOT DISTINCT FROM s.week
+                 AND LOWER(TRIM(p.manager)) IS NOT DISTINCT FROM s.source_manager
+                WHERE {safe_source}
+            """)
+            artifact_matched_player_rows = int(
+                con.execute("SELECT COUNT(*) FROM artifact_matched").fetchone()[0]
+            )
+            artifact_fill_cells: dict[str, int] = {}
+            artifact_fill_filters: list[str] = []
+            for field, (target, _) in SUPPORTED.items():
+                predicate = f"{_q('source_' + field)} IS NOT NULL AND {_q('canonical_' + target)} IS NULL"
+                artifact_fill_cells[target] = int(con.execute(
+                    f"SELECT COUNT(*) FROM artifact_matched WHERE {predicate}"
+                ).fetchone()[0])
+                artifact_fill_filters.append(f"({predicate})")
+            artifact_delta_rows = int(con.execute(
+                f"SELECT COUNT(*) FROM artifact_matched WHERE {' OR '.join(artifact_fill_filters)}"
+            ).fetchone()[0])
+            artifact_comparison_state.append({
+                "artifact_id": artifact_id,
+                "source_team_weeks": artifact_source_team_weeks,
+                "safe_source_team_weeks": artifact_source_team_weeks - artifact_conflicts,
+                "conflicting_source_team_weeks": artifact_conflicts,
+                "matched_player_rows": artifact_matched_player_rows,
+                "delta_rows": artifact_delta_rows,
+                "null_fill_cells_by_field": artifact_fill_cells,
+            })
+
         fields: list[str] = []
         filters: list[str] = []
         fill_cells: dict[str, int] = {}
@@ -160,6 +213,7 @@ def build(*, base: Path, manifest: Path, out: Path, report: Path) -> dict:
             "delta_rows": delta_rows,
             "null_fill_cells_by_field": fill_cells,
             "comparison_cells_by_field": comparison_cells,
+            "artifact_comparison_state": artifact_comparison_state,
             "join_contract": ["db_name", "year", "week", "normalized_manager"],
         }
         _write_json(report, result)

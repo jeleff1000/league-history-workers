@@ -77,3 +77,44 @@ def test_duplicate_source_manager_week_is_excluded(tmp_path: Path) -> None:
 
     assert result['conflicting_source_team_weeks'] == 1
     assert result['delta_rows'] == 0
+
+
+def test_reports_each_artifact_separately_for_ledger_adjudication(tmp_path: Path) -> None:
+    """A duplicated artifact must not hide the fact that it has no NULL fill."""
+    base = tmp_path / 'base.duckdb'
+    source_one, source_two = tmp_path / 'one.parquet', tmp_path / 'two.parquet'
+    manifest, out, report = tmp_path / 'manifest.json', tmp_path / 'delta.parquet', tmp_path / 'report.json'
+    _base(base)
+    _source(source_one)
+    _source(source_two)
+    manifest.write_text(json.dumps([
+        {'artifact_id': 11, 'path': str(source_one)},
+        {'artifact_id': 12, 'path': str(source_two)},
+    ]))
+
+    result = build(base=base, manifest=manifest, out=out, report=report)
+
+    assert result['artifact_comparison_state'] == [
+        {
+            'artifact_id': 11,
+            'source_team_weeks': 1,
+            'safe_source_team_weeks': 1,
+            'conflicting_source_team_weeks': 0,
+            'matched_player_rows': 2,
+            'delta_rows': 1,
+            'null_fill_cells_by_field': {
+                'win': 1, 'team_points': 1, 'is_playoffs': 1, 'champion': 1,
+            },
+        },
+        {
+            'artifact_id': 12,
+            'source_team_weeks': 1,
+            'safe_source_team_weeks': 1,
+            'conflicting_source_team_weeks': 0,
+            'matched_player_rows': 2,
+            'delta_rows': 1,
+            'null_fill_cells_by_field': {
+                'win': 1, 'team_points': 1, 'is_playoffs': 1, 'champion': 1,
+            },
+        },
+    ]
