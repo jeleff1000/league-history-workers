@@ -1,0 +1,140 @@
+name: Replace exact direct-source player conflicts
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Read-only source-replace candidate run containing the exact player delta
+        required: true
+
+permissions:
+  actions: write
+  contents: read
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+concurrency:
+  group: canonical-research-cache-promotion
+  cancel-in-progress: false
+
+jobs:
+  replace:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Capture exact prestate
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/ops_cache.duckdb > ops_before.sha256
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          c=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          Path('prestate.json').write_text(json.dumps({
+            'schema':[r[0] for r in c.execute('DESCRIBE public.player_fantasy').fetchall()],
+            'player_rows':int(c.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]),
+          }, indent=2)+'\n')
+          c.close()
+          PY
+      - name: Download the exact source-replace candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir candidate
+          gh run download '${{ inputs.candidate_run_id }}' --repo '${{ github.repository }}' \
+            --name 'research-mfl-outcome-null-fill-candidate-${{ inputs.candidate_run_id }}' --dir candidate
+          test "$(find candidate -name mfl_direct_player_null_fill_delta.parquet | wc -l)" -eq 1
+          test "$(find candidate -name mfl_direct_player_null_fill_report.json | wc -l)" -eq 1
+      - name: Reject anything except an exact fresh source-replace candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          report=json.loads(next(Path('candidate').rglob('mfl_direct_player_null_fill_report.json')).read_text())
+          required={
+            'mode':'source-replace', 'read_only':True, 'cache_mutated':False,
+            'new_lineage':False, 'canonical_schema_unchanged':True,
+            'source_conflicting_player_keys':0, 'unmatched_canonical_player_keys':0,
+          }
+          for key, expected in required.items():
+            if report.get(key) != expected:
+              raise SystemExit(f'candidate invariant {key}={report.get(key)!r}, expected {expected!r}')
+          if int(report.get('delta_rows',0)) <= 0:
+            raise SystemExit('candidate has no rows')
+          PY
+      - name: Replace only expected direct-source conflicts and read them back
+        shell: bash
+        run: |
+          set -euo pipefail
+          python code/scripts/research_cohorts/apply_structured_player_signal_replacement_in_place.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --delta "$(find candidate -name mfl_direct_player_null_fill_delta.parquet -print -quit)" \
+            --report apply_report.json
+      - name: Fail fast before same-key cache replacement
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, hashlib, json
+          from pathlib import Path
+          before=json.loads(Path('prestate.json').read_text())
+          report=json.loads(Path('apply_report.json').read_text())
+          if (report.get('schema_unchanged') is not True or report.get('row_count_unchanged') is not True
+              or report.get('new_lineage') is not False or report.get('source_precedence') != 'validated_direct_mfl_source'
+              or any(report.get('readback_remaining',{}).values())):
+            raise SystemExit(f'apply gate failed: {report}')
+          c=duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          if [r[0] for r in c.execute('DESCRIBE public.player_fantasy').fetchall()] != before['schema']:
+            raise SystemExit('player schema changed')
+          if int(c.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]) != before['player_rows']:
+            raise SystemExit('player row count changed')
+          c.close()
+          h=hashlib.sha256()
+          with open('research_public_lake/ops_cache.duckdb','rb') as f:
+            for block in iter(lambda:f.read(1024*1024),b''): h.update(block)
+          if h.hexdigest() != Path('ops_before.sha256').read_text().split()[0]:
+            raise SystemExit('ops cache changed')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: structured-player-source-replace-promotion-evidence-${{ github.run_id }}
+          path: |
+            prestate.json
+            ops_before.sha256
+            apply_report.json
+          retention-days: 90
+          compression-level: 6
+      - name: Replace only the approved cache object under the same key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t ids < <(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?key=${CANONICAL_CACHE_KEY}&ref=refs/heads/main" --jq '.actions_caches[].id')
+          test "${#ids[@]}" -eq 1
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/caches/${ids[0]}"
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
