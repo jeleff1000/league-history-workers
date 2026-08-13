@@ -22,7 +22,7 @@ receipt SHA-256
 The CSV now has an explicit `record_type` on every row. The frozen inventory
 is exactly 9,479 `artifact_inventory` rows; cache-changing work is recorded as
 a separate `cache_recovery_receipt` row in the *same* ledger, not smuggled into
-the 9,479-artifact denominator. There are currently three such recovery
+the 9,479-artifact denominator. There are currently four such recovery
 receipts: the independently restored 74-row MFL repair, the 204-row direct
 MFL player/team bridge, the 26,936-row MFL source-only bridge promotion, and
 the 1,720-row MFL classification roster-identity promotion. The ledger
@@ -63,11 +63,26 @@ This receipt covers the first 15 targeted MFL league-weeks only. A fresh
 post-promotion inventory, [31661107930](https://github.com/jeleff1000/league-history-workers/actions/runs/31661107930),
 found 1,295 target league-weeks / 141,598 candidate cache player rows still
 requiring an exact bridge. Eleven pilot weeks are no longer targets; four of
-the pilot weeks retain other unresolved player rows. Candidate-only recovery
-run [31661452691](https://github.com/jeleff1000/league-history-workers/actions/runs/31661452691)
-partitions those 1,295 weeks into 256 deterministic shards at 15 concurrent
-workers. Every shard remains read-only until an independently validated
-promotion/readback receipt exists.
+the pilot weeks retain other unresolved player rows.
+
+The first candidate-only recovery run,
+[31661452691](https://github.com/jeleff1000/league-history-workers/actions/runs/31661452691),
+was stopped after its workflow design flaw was identified: six safety-gate
+failures did not retain their reports. Its 25 successful shard artifacts were
+preserved and independently read locally. Together they cover 130 exact
+league-weeks, all source-resolved, with 38,495 roster memberships and **zero**
+promotable cache player-row fills. They are source-checked/no-candidate
+evidence, not cache-promotion receipts, and therefore do not change the frozen
+9,479-artifact status counts.
+
+The corrected residual-only candidate run,
+[31663728938](https://github.com/jeleff1000/league-history-workers/actions/runs/31663728938),
+keeps the original 256-way deterministic mapping and excludes exactly those
+25 completed shard IDs. It therefore processes only the remaining 1,165
+league-weeks in 231 read-only shards. Every safety-gate failure now uploads
+its diagnostic artifact. No shard is complete as a cache repair until a
+separate in-place promotion and independently restored cache readback produces
+a `cache_recovery_receipt`.
 
 ## Current approved-cache contract
 
