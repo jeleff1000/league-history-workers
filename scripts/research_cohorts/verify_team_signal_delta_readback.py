@@ -29,6 +29,7 @@ FIELDS = {
     "champion": "source_champion",
     "final_playoff_seed": "source_final_playoff_seed",
     "made_playoffs": "source_made_playoffs",
+    "has_po_signal": "source_has_po_signal",
 }
 
 

@@ -1,0 +1,161 @@
+name: Promote Exact Sleeper 2017 Playoff Signal
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: canonical-research-cache-promotion
+  cancel-in-progress: false
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+  SOURCE_RUN_ID: "31748400761"
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install duckdb==1.5.1 pyarrow==15.0.2
+      - name: Record frozen cache and ops prestate
+        run: |
+          set -euo pipefail
+          test -s research_public_lake/corpus_snapshot.duckdb
+          test -s research_public_lake/ops_cache.duckdb
+          sha256sum research_public_lake/corpus_snapshot.duckdb > cache.before.sha256
+          sha256sum research_public_lake/ops_cache.duckdb > ops.before.sha256
+          python - <<'PY'
+          import duckdb, json
+          from pathlib import Path
+          con = duckdb.connect('research_public_lake/corpus_snapshot.duckdb', read_only=True)
+          Path('cache.before.json').write_text(json.dumps({
+              'schema': con.execute('DESCRIBE public.player_fantasy').fetchall(),
+              'player_rows': int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]),
+          }, indent=2) + '\n')
+          con.close()
+          PY
+      - name: Download the exact read-only candidate receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p candidate
+          gh run download "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "research-exact-sleeper-2017-candidate-$SOURCE_RUN_ID" --dir candidate
+          test -s candidate/sleeper_2017_candidate.parquet
+          test -s candidate/sleeper_2017_candidate_report.json
+      - name: Fail fast on any candidate outside the authorized field
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import duckdb, json
+          con=duckdb.connect()
+          p='candidate/sleeper_2017_candidate.parquet'
+          report=json.load(open('candidate/sleeper_2017_candidate_report.json'))
+          assert report['read_only'] is True and report['cache_mutated'] is False
+          assert report['new_lineage'] is False and report['schema_unchanged'] is True
+          assert report['candidate_rows']==45
+          cols=[row[0] for row in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{p}')").fetchall()]
+          expected={'source_has_po_signal'}
+          sources=[name for name in cols if name.startswith('source_') and name not in {'source_file','source_files'}]
+          non_null={name:int(con.execute(f"SELECT COUNT(*) FROM read_parquet('{p}') WHERE {name} IS NOT NULL").fetchone()[0]) for name in sources}
+          assert non_null['source_has_po_signal']==45, non_null
+          assert all(non_null[name]==0 for name in set(sources)-expected), non_null
+          duplicates=int(con.execute(f"SELECT COUNT(*) FROM (SELECT db_name,year,week,NFL_player_id,manager,team_key,team_name,platform FROM read_parquet('{p}') GROUP BY ALL HAVING COUNT(*)>1)").fetchone()[0])
+          assert duplicates==0, duplicates
+          print(json.dumps({'candidate_rows':45,'non_null_source_fields':non_null,'duplicate_keys':duplicates},sort_keys=True))
+          PY
+      - name: Apply only exact existing-row NULL fills
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/apply_team_signal_delta_in_place.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --delta candidate/sleeper_2017_candidate.parquet \
+            --report apply_report.json
+          python - <<'PY'
+          import json
+          report=json.load(open('apply_report.json'))
+          assert report['cache_mutated'] is True
+          assert report['new_lineage'] is False
+          assert report['schema_unchanged'] is True
+          assert report['inserted_rows']==0
+          assert report['improvements_by_field'].get('has_po_signal')==45
+          assert sum(report['improvements_by_field'].get(k,0) for k in report['improvements_by_field'] if k!='has_po_signal')==0
+          PY
+      - name: Verify the authorized field against the restored cache
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/verify_team_signal_delta_readback.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --delta candidate/sleeper_2017_candidate.parquet \
+            --before cache.before.json \
+            --ops research_public_lake/ops_cache.duckdb \
+            --ops-before ops.before.sha256 \
+            --apply-report apply_report.json \
+            --out readback.json
+          python - <<'PY'
+          import json
+          value=json.load(open('readback.json'))
+          assert value['authorized_cells_by_field']=={'has_po_signal':45}
+          assert value['unmatched_candidate_keys']==0
+          assert value['source_value_disagreements']['has_po_signal']==0
+          assert value['schema_unchanged'] is True
+          assert value['player_rows_unchanged'] is True
+          assert value['ops_unchanged'] is True
+          assert value['new_lineage'] is False
+          value.update({
+            'canonical_cache_key': '${{ env.CANONICAL_CACHE_KEY }}',
+            'candidate_run_id': '${{ env.SOURCE_RUN_ID }}',
+            'source_artifact_id': '8956471264',
+            'candidate_artifacts': 1,
+            'matched_player_rows': 45,
+            'remaining_source_backed_nulls': {'has_po_signal': 0},
+            'promotion_disposition': 'exact_existing_player_null_fill',
+            'identity_bridge_status': 'sleeper_gsis_id_to_unique_existing_player_week',
+            'cache_join_strategy': 'db_name|year|week|NFL_player_id|manager|platform|team_key|team_name',
+          })
+          open('readback.json','w').write(json.dumps(value,indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Prove only the player cache changed
+        run: |
+          set -euo pipefail
+          sha256sum research_public_lake/corpus_snapshot.duckdb > cache.after.sha256
+          sha256sum research_public_lake/ops_cache.duckdb > ops.after.sha256
+          cmp ops.before.sha256 ops.after.sha256
+          test "$(cut -d' ' -f1 cache.before.sha256)" != "$(cut -d' ' -f1 cache.after.sha256)"
+      - name: Replace only the approved cache object under its identical key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/caches?key=$CANONICAL_CACHE_KEY&ref=refs/heads/main"
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-exact-sleeper-2017-promotion-receipt-${{ github.run_id }}
+          path: |
+            candidate/sleeper_2017_candidate.parquet
+            candidate/sleeper_2017_candidate_report.json
+            apply_report.json
+            readback.json
+            cache.before.sha256
+            cache.after.sha256
+            ops.before.sha256
+            ops.after.sha256
+          retention-days: 180
