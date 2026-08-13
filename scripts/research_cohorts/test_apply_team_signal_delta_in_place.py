@@ -157,6 +157,34 @@ def test_apply_allows_exact_null_player_id_without_fanout(tmp_path):
     con.close()
 
 
+def test_apply_fans_verified_null_player_team_week_to_all_existing_recipients(tmp_path):
+    base = tmp_path / "base.duckdb"
+    delta = tmp_path / "delta.parquet"
+    report = tmp_path / "report.json"
+    _base(base, null_player_id=True)
+    con = duckdb.connect(str(base))
+    columns = [row[0] for row in con.execute("DESCRIBE public.player_fantasy").fetchall()]
+    quoted = ", ".join(f'"{column}"' for column in columns)
+    con.execute(f"INSERT INTO public.player_fantasy ({quoted}) SELECT {quoted} FROM public.player_fantasy")
+    con.execute("UPDATE public.player_fantasy SET player='another-null-id-player' WHERE rowid=1")
+    con.close()
+    _delta(delta, null_player_id=True)
+
+    result = subprocess.run([
+        sys.executable,
+        "scripts/research_cohorts/apply_team_signal_delta_in_place.py",
+        "--base", str(base), "--delta", str(delta), "--report", str(report),
+    ], capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr + result.stdout
+    payload = json.loads(report.read_text())
+    assert payload["delta_rows"] == 1
+    assert payload["matched_rows"] == 2
+    con = duckdb.connect(str(base), read_only=True)
+    assert con.execute("SELECT COUNT(*) FROM public.player_fantasy WHERE loss='1' AND tie='0'").fetchone() == (2,)
+    con.close()
+
+
 def test_apply_allows_exact_null_platform_without_fanout(tmp_path):
     base = tmp_path / "base.duckdb"
     delta = tmp_path / "delta.parquet"
