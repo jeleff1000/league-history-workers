@@ -22,6 +22,21 @@ on:
         required: false
         type: string
         default: '10'
+      shards:
+        description: 'JSON array of candidate-pool shard numbers'
+        required: false
+        type: string
+        default: '[0]'
+      shard_count:
+        description: 'Total candidate-pool shards'
+        required: false
+        type: string
+        default: '1'
+      allow_partial:
+        description: 'Upload partial shard results without requiring max_valid'
+        required: false
+        type: string
+        default: 'false'
 
 permissions:
   actions: write
@@ -36,6 +51,7 @@ jobs:
       max-parallel: 10
       matrix:
         year: ${{ fromJSON(inputs.years) }}
+        shard: ${{ fromJSON(inputs.shards) }}
     env:
       CORPUS_MODE: '1'
       MFL_RATE_LIMIT_PER_MIN: '12'
@@ -65,13 +81,19 @@ jobs:
           YEAR: ${{ matrix.year }}
           CANDIDATE_PATH: code/${{ inputs.candidate_path }}
           MAX_VALID: ${{ inputs.max_valid }}
+          SHARD: ${{ matrix.shard }}
+          SHARD_COUNT: ${{ inputs.shard_count }}
+          ALLOW_PARTIAL: ${{ inputs.allow_partial }}
         run: |
           python3 - <<'PY'
           import json, os, time
           from multi_league.data_fetchers.mfl.mfl_api_client import MFLAPIClient, MFLAPIError, MFLAPIConfig
           year = int(os.environ['YEAR'])
           rows = json.load(open(os.environ['CANDIDATE_PATH'], encoding='utf-8'))['leagues']
-          candidates = [r for r in rows if int(r['season']) == year]
+          all_candidates = [r for r in rows if int(r['season']) == year]
+          shard = int(os.environ['SHARD'])
+          shard_count = int(os.environ['SHARD_COUNT'])
+          candidates = [r for i, r in enumerate(all_candidates) if i % shard_count == shard]
           client = MFLAPIClient(MFLAPIConfig(rate_limit_per_min=12))
           valid = []
           for r in candidates:
@@ -153,13 +175,13 @@ jobs:
                       print(f"[INVALID] {year}:{lid} missing schedule/YTD pair/player/playoff signal", flush=True)
               except Exception as exc:
                   print(f"[INVALID] {year}:{lid} {exc}", flush=True)
-          if len(valid) < int(os.environ['MAX_VALID']):
+          if len(valid) < int(os.environ['MAX_VALID']) and os.environ['ALLOW_PARTIAL'].lower() not in {'1','true','yes'}:
               raise SystemExit(f"{year} has only {len(valid)} valid candidates")
-          json.dump({'schema_version':'mfl_candidate_probe_v3_ytd_h2h_playoff','season':year,'valid_leagues':valid}, open(f'valid_{year}.json','w'), indent=2, sort_keys=True)
+          json.dump({'schema_version':'mfl_candidate_probe_v3_ytd_h2h_playoff','season':year,'shard':shard,'valid_leagues':valid}, open(f'valid_{year}_{shard}.json','w'), indent=2, sort_keys=True)
           PY
       - name: Upload valid candidate probe
         uses: actions/upload-artifact@v4
         with:
-          name: mfl-valid-candidates-${{ matrix.year }}
+          name: mfl-valid-candidates-${{ matrix.year }}-${{ matrix.shard }}
           retention-days: 30
-          path: valid_${{ matrix.year }}.json
+          path: valid_${{ matrix.year }}_${{ matrix.shard }}.json
