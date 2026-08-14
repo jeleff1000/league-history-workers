@@ -106,9 +106,11 @@ jobs:
                               week_numbers.append(int(w.get('week')))
                           except (TypeError, ValueError):
                               pass
+                  # Two evidence weeks are enough for admission and keep the
+                  # probe within MFL's old-season throttle: opening week proves
+                  # H2H/player payloads, final scheduled week proves postseason
+                  # payloads when the league exposes a boundary.
                   check_weeks = set(week_numbers[:1] + week_numbers[-1:])
-                  if last_regular_week is not None:
-                      check_weeks.update({last_regular_week, last_regular_week + 1})
                   for week in sorted(check_weeks):
                       if week not in week_numbers:
                           continue
