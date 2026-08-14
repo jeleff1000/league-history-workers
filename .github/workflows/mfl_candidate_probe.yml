@@ -93,7 +93,6 @@ jobs:
                   # contains only flat franchise totals. Require actual matchup
                   # pairs, player payloads, and at least one explicit playoff game
                   # before admitting a candidate to the full-register manifest.
-                  client.prefetch_weekly_results_ytd(lid, year)
                   weekly_blocks = []
                   last_regular_week = None
                   try:
