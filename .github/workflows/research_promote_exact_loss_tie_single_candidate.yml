@@ -208,7 +208,7 @@ jobs:
           con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb',read_only=True)
           dpath=str(Path('evidence/combined_delta.parquet').resolve()).replace("'","''")
           con.execute(f"CREATE TEMP VIEW d AS SELECT * FROM read_parquet('{dpath}')")
-          join='''d.db_name=p.db_name AND CAST(d.year AS INTEGER)=CAST(p.year AS INTEGER) AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER) AND d.NFL_player_id=p.NFL_player_id AND d.platform IS NOT DISTINCT FROM p.platform AND d.manager IS NOT DISTINCT FROM p.manager AND (p.team_key IS NULL OR d.team_key=p.team_key) AND (p.team_name IS NULL OR d.team_name=p.team_name)'''
+          join='''d.db_name=p.db_name AND CAST(d.year AS INTEGER)=CAST(p.year AS INTEGER) AND CAST(d.week AS INTEGER)=CAST(p.week AS INTEGER) AND d.NFL_player_id IS NOT DISTINCT FROM p.NFL_player_id AND d.platform IS NOT DISTINCT FROM p.platform AND d.manager IS NOT DISTINCT FROM p.manager AND (p.team_key IS NULL OR d.team_key=p.team_key) AND (p.team_name IS NULL OR d.team_name=p.team_name)'''
           matched=int(con.execute(f'SELECT COUNT(*) FROM public.player_fantasy p JOIN d ON {join}').fetchone()[0])
           unmatched=int(con.execute(f'SELECT COUNT(*) FROM d WHERE NOT EXISTS (SELECT 1 FROM public.player_fantasy p WHERE {join})').fetchone()[0])
           loss_null=int(con.execute(f'SELECT COUNT(*) FROM public.player_fantasy p JOIN d ON {join} WHERE p.loss IS NULL').fetchone()[0])
