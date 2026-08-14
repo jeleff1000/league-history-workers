@@ -1,0 +1,61 @@
+name: MFL 1998 Candidate Probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      yahoo_oauth_ref:
+        required: false
+        type: string
+        default: codex/mfl-gates
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
+      MFL_RATE_LIMIT_PER_MIN: '5'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref }}
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /corpus_seed/
+            /fantasy_football_data_scripts/
+            /requirements.txt
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: pip install -r code/requirements.txt
+      - name: Probe 1998 candidates
+        run: |
+          python3 - <<'PY'
+          import json
+          from multi_league.data_fetchers.mfl.mfl_api_client import MFLAPIClient, MFLAPIConfig
+          rows = [r for r in json.load(open('code/corpus_seed/mfl_candidate_pool_1993_2025.json'))['leagues'] if int(r['season']) == 1998][:20]
+          c = MFLAPIClient(MFLAPIConfig(rate_limit_per_min=5, http_max_retries=0))
+          valid=[]
+          for r in rows:
+              try:
+                  if c.fetch_league(str(r['league_id']), 1998):
+                      valid.append(r); print('[VALID]',r['seed'],flush=True)
+                  else: print('[INVALID]',r['seed'],flush=True)
+              except Exception as e: print('[INVALID]',r['seed'],e,flush=True)
+          if len(valid)<10: raise SystemExit(f'only {len(valid)} valid 1998 candidates')
+          json.dump({'schema_version':'mfl_candidate_probe_v1','season':1998,'valid_leagues':valid},open('valid_1998.json','w'),indent=2,sort_keys=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-valid-candidates-1998-special
+          retention-days: 30
+          path: valid_1998.json
+
