@@ -102,7 +102,7 @@ jobs:
           mv docs/research_matchup_artifact_cache_ledger.next.csv docs/research_matchup_artifact_cache_ledger.csv
           python scripts/research_cohorts/validate_artifact_cache_ledger.py \
             --ledger docs/research_matchup_artifact_cache_ledger.csv \
-            --out ledger_validation.json
+            > ledger_validation.json
       - name: Commit only validated ledger evidence
         shell: bash
         run: |
