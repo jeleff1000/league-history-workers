@@ -32,14 +32,19 @@ jobs:
 
           queue = json.loads(Path('input/research_matchup_open_artifact_queue.json').read_text())
           def action(batch):
-              if batch['cache_missing_cells'] or batch['candidate_delta_rows']:
-                  return 'read_only_candidate_then_same_key_null_fill'
+              # These counts were recorded when the artifact was first
+              # inspected.  They are not permission to mutate the current
+              # cache: conflicts and recipient gaps always take precedence.
               if batch['cache_conflict_cells']:
                   return 'field_level_source_precedence_adjudication'
-              if batch['unmatched_cache_cells']:
-                  return 'deterministic_recipient_bridge_or_terminal_source_only_reason'
               if batch['blocked_schema_cells']:
                   return 'schema_contract_review_no_implicit_schema_change'
+              if batch['unmatched_cache_cells']:
+                  return 'deterministic_recipient_bridge_or_terminal_source_only_reason'
+              if batch['cache_missing_cells']:
+                  return 'read_only_revalidate_then_same_key_null_fill'
+              if batch['candidate_delta_rows']:
+                  return 'read_only_revalidate_against_current_cache'
               return 'inspect_artifact_receipt_and_refresh_ledger'
 
           batches = []
@@ -48,11 +53,12 @@ jobs:
               item['next_action'] = action(item)
               batches.append(item)
           priority = {
-              'read_only_candidate_then_same_key_null_fill': 0,
-              'field_level_source_precedence_adjudication': 1,
-              'deterministic_recipient_bridge_or_terminal_source_only_reason': 2,
-              'schema_contract_review_no_implicit_schema_change': 3,
-              'inspect_artifact_receipt_and_refresh_ledger': 4,
+              'read_only_revalidate_then_same_key_null_fill': 0,
+              'read_only_revalidate_against_current_cache': 1,
+              'field_level_source_precedence_adjudication': 2,
+              'deterministic_recipient_bridge_or_terminal_source_only_reason': 3,
+              'schema_contract_review_no_implicit_schema_change': 4,
+              'inspect_artifact_receipt_and_refresh_ledger': 5,
           }
           batches.sort(key=lambda b: (priority[b['next_action']], -b['candidate_delta_rows'], -b['cache_missing_cells'], b['workflow_run_id'], b['artifact']))
           report = {
