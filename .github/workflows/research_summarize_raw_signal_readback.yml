@@ -48,6 +48,7 @@ jobs:
           profile = json.loads(profile_files[0].read_text())
           profile_rows = profile.get('rows', []) if isinstance(profile, dict) else profile
           profile_examples = profile.get('identity_examples', []) if isinstance(profile, dict) else []
+          profile_unresolved = profile.get('unresolved_identity_reasons', []) if isinstance(profile, dict) else []
           report = {
               'summary': receipt['summary'],
               'selected_artifacts': selected,
@@ -60,6 +61,9 @@ jobs:
             ],
             'selected_identity_examples': [
                 row for row in profile_examples if str(row.get('artifact_id', '')) in selected_ids
+            ],
+            'selected_unresolved_identity_reasons': [
+                row for row in profile_unresolved if str(row.get('artifact_id', '')) in selected_ids
             ],
           }
           Path('research_raw_signal_readback_summary.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')

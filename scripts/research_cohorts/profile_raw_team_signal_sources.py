@@ -294,6 +294,50 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
              )
             GROUP BY 1,2,3,4,5,6,7,8
         """)
+        con.execute("""
+            CREATE OR REPLACE TEMP TABLE unresolved_identity_reasons AS
+            SELECT
+              s.artifact_id,
+              CASE
+                WHEN NOT EXISTS (
+                  SELECT 1 FROM public.player_fantasy p
+                  WHERE p.db_name IS NOT DISTINCT FROM s.db_name
+                    AND p."year" IS NOT DISTINCT FROM s.year
+                    AND p.week IS NOT DISTINCT FROM s.week
+                ) THEN 'no_canonical_player_rows_in_league_week'
+                WHEN s.manager_key IS NULL THEN 'no_source_manager_identity'
+                WHEN EXISTS (
+                  SELECT 1 FROM source_team_keys other
+                  WHERE other.artifact_id=s.artifact_id
+                    AND other.db_name IS NOT DISTINCT FROM s.db_name
+                    AND other.year IS NOT DISTINCT FROM s.year
+                    AND other.week IS NOT DISTINCT FROM s.week
+                    AND other.manager_key IS NOT DISTINCT FROM s.manager_key
+                    AND other.source_team_key IS DISTINCT FROM s.source_team_key
+                ) THEN 'source_manager_maps_to_multiple_source_teams'
+                WHEN NOT EXISTS (
+                  SELECT 1 FROM public.player_fantasy p
+                  WHERE p.db_name IS NOT DISTINCT FROM s.db_name
+                    AND p."year" IS NOT DISTINCT FROM s.year
+                    AND p.week IS NOT DISTINCT FROM s.week
+                    AND LOWER(TRIM(CAST(p.manager AS VARCHAR))) IS NOT DISTINCT FROM s.manager_key
+                ) THEN 'source_manager_has_no_canonical_player_recipient'
+                ELSE 'unclassified_no_safe_identity_match'
+              END AS reason,
+              COUNT(*) AS source_team_keys,
+              SUM(s.source_rows) AS source_team_rows
+            FROM source_team_keys s
+            WHERE NOT EXISTS (
+              SELECT 1 FROM resolved_team_matches r
+              WHERE r.artifact_id=s.artifact_id
+                AND r.db_name IS NOT DISTINCT FROM s.db_name
+                AND r.year IS NOT DISTINCT FROM s.year
+                AND r.week IS NOT DISTINCT FROM s.week
+                AND r.source_team_key IS NOT DISTINCT FROM s.source_team_key
+            )
+            GROUP BY 1,2
+            ORDER BY 1,2
+        """)
         rows = []
         for row in con.execute("""
             WITH raw_counts AS (
@@ -373,6 +417,14 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
             })
         if len(rows) != len(entries):
             raise SystemExit("profile did not account for every manifest artifact")
+        unresolved_identity_reasons = [
+            dict(zip(("artifact_id", "reason", "source_team_keys", "source_team_rows"), row))
+            for row in con.execute("""
+              SELECT artifact_id, reason, source_team_keys, source_team_rows
+              FROM unresolved_identity_reasons
+              ORDER BY artifact_id, reason
+            """).fetchall()
+        ]
         examples: list[dict[str, Any]] = []
         if {"manager", "team_name"} <= player_columns:
             examples = [
@@ -426,6 +478,7 @@ def profile(*, base: Path, manifest: Path) -> dict[str, Any]:
             "source_artifacts": len(entries),
             "source_rows": int(source_rows),
             "rows": rows,
+            "unresolved_identity_reasons": unresolved_identity_reasons,
             "identity_examples": examples,
         }
     finally:
