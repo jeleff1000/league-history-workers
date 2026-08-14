@@ -102,8 +102,8 @@ jobs:
                   parsed = [int(x.strip()) for x in raw_indices.split(",") if x.strip()]
               parsed = sorted({int(x) for x in parsed})
           else:
-              parsed = list(range(start, end))
-          if not parsed or any(x < 0 or x >= len(out) for x in parsed):
+              parsed = list(range(end - start))
+          if not parsed or any(x < 0 or x >= end - start for x in parsed):
               raise SystemExit(f"invalid matrix indices: {parsed}")
           print("indices=" + json.dumps(parsed, separators=(",", ":")))
           PY
