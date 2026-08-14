@@ -161,13 +161,26 @@ jobs:
           DB_NAME: mfl_${{ steps.row.outputs.season }}_${{ steps.row.outputs.league_id }}
           DATA_DIR: ${{ runner.temp }}/mfl_${{ steps.row.outputs.season }}_${{ steps.row.outputs.league_id }}
         run: |
-          python code/fantasy_football_data_scripts/mfl_initial_import.py \
-            --league-id "${SEASON}:${LEAGUE_ID}" \
-            --start-year "${SEASON}" --end-year "${SEASON}" \
-            --data-dir "${DATA_DIR}" --database-name "${DB_NAME}" \
-            --import-mode full --skip-track-1 --skip-track-2-upload --stop-after 4 \
-            > import.log 2>&1
-          cp "${DATA_DIR}/${DB_NAME}.duckdb" league.duckdb
+          set -o pipefail
+          rc=1
+          for attempt in 1 2 3; do
+            ATTEMPT_DIR="${DATA_DIR}_attempt${attempt}"
+            echo "[campaign] importer attempt ${attempt} for ${SEASON}:${LEAGUE_ID}"
+            python code/fantasy_football_data_scripts/mfl_initial_import.py \
+              --league-id "${SEASON}:${LEAGUE_ID}" \
+              --start-year "${SEASON}" --end-year "${SEASON}" \
+              --data-dir "${ATTEMPT_DIR}" --database-name "${DB_NAME}" \
+              --import-mode full --skip-track-1 --skip-track-2-upload --stop-after 4 \
+              2>&1 | tee import.log
+            rc=${PIPESTATUS[0]}
+            if [ "$rc" -eq 0 ] && [ -f "${ATTEMPT_DIR}/${DB_NAME}.duckdb" ]; then
+              cp "${ATTEMPT_DIR}/${DB_NAME}.duckdb" league.duckdb
+              break
+            fi
+            echo "[campaign] attempt ${attempt} failed (rc=${rc}); retrying"
+            sleep 15
+          done
+          exit "$rc"
       - name: Validate canonical receipt
         env:
           SEASON: ${{ steps.row.outputs.season }}
@@ -206,6 +219,7 @@ jobs:
           open('receipt.json','w',encoding='utf-8').write(json.dumps(receipt,indent=2,sort_keys=True))
           PY
       - name: Upload validated season league
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mfl-register-${{ steps.row.outputs.season }}-${{ steps.row.outputs.league_id }}
