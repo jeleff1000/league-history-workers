@@ -1,0 +1,44 @@
+name: Research summarize raw signal readback
+
+on:
+  workflow_dispatch:
+    inputs:
+      readback_run_id:
+        description: Completed read-only raw-signal cache-readback run.
+        required: true
+        default: "31759193969"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: research-raw-signal-cache-readback-${{ inputs.readback_run_id }}
+          run-id: ${{ inputs.readback_run_id }}
+          path: input
+          github-token: ${{ github.token }}
+      - name: Emit exact current-cache receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          files = list(Path('input').rglob('final_artifact_cache_receipts.json'))
+          if len(files) != 1:
+              raise SystemExit(f'expected exactly one readback receipt, found {len(files)}')
+          receipt = json.loads(files[0].read_text())
+          report = {'summary': receipt['summary'], 'rows': receipt['rows']}
+          Path('research_raw_signal_readback_summary.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
+          print(json.dumps(report, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-raw-signal-readback-summary-${{ github.run_id }}
+          path: research_raw_signal_readback_summary.json
