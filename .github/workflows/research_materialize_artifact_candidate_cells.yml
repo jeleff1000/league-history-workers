@@ -189,39 +189,36 @@ jobs:
           pattern: research-artifact-candidate-cells-${{ github.run_id }}-*
           path: shards
           merge-multiple: false
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-candidate-manifest-${{ github.run_id }}
+          path: manifest
       - name: Build candidate manifest receipt without opening any cache
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           import json
-          from collections import Counter
           from pathlib import Path
-          import duckdb
+          from aggregate_artifact_candidate_cells import aggregate_candidate_cells
 
-          receipts=[json.loads(path.read_text()) for path in sorted(Path('shards').rglob('receipts/*.json'))]
-          ids={str(item['artifact_id']) for item in receipts}
-          if len(ids) != int('${{ needs.manifest.outputs.data_artifacts }}'):
-              raise SystemExit(f'candidate receipt coverage failed: receipts={len(ids)} expected=${{ needs.manifest.outputs.data_artifacts }}')
-          candidates=sorted(Path('shards').rglob('candidates/*.parquet'))
-          con=duckdb.connect()
-          if candidates:
-              con.execute('CREATE TABLE candidate_cells AS SELECT * FROM read_parquet(?)',[[str(path) for path in candidates]])
-          else:
-              con.execute("CREATE TABLE candidate_cells AS SELECT NULL::VARCHAR artifact_id, NULL::VARCHAR artifact_file, NULL::VARCHAR file_instance, NULL::VARCHAR source_grain, NULL::VARCHAR db_name, NULL::VARCHAR year, NULL::VARCHAR week, NULL::VARCHAR NFL_player_id, NULL::VARCHAR team_key, NULL::VARCHAR manager, NULL::VARCHAR source_column, NULL::VARCHAR target_column, NULL::VARCHAR source_value_text WHERE FALSE")
-          con.execute("COPY candidate_cells TO 'artifact_candidate_cells.parquet' (FORMAT PARQUET)")
-          summary={
-              'data_artifact_receipts':len(receipts),
-              'candidate_cells':int(con.execute('SELECT COUNT(*) FROM candidate_cells').fetchone()[0]),
-              'candidate_cells_by_grain':dict(con.execute('SELECT source_grain, COUNT(*) FROM candidate_cells GROUP BY 1 ORDER BY 1').fetchall()),
-              'receipt_statuses':dict(Counter(item.get('materialization_status','candidate_cells_materialized') for item in receipts)),
-              'cache_mutated':False,'new_lineage':False,
-          }
+          manifest=json.loads(Path('manifest/candidate_manifest.json').read_text())
+          summary=aggregate_candidate_cells(
+              shard_root=Path('shards'),
+              expected_artifact_ids=manifest['data_artifact_ids'],
+              out_parquet=Path('artifact_candidate_cells.parquet'),
+          )
           Path('artifact_candidate_cells_receipt.json').write_text(json.dumps(summary,indent=2,sort_keys=True)+'\n')
           print(json.dumps(summary,sort_keys=True))
-          con.close()
+          if not summary['receipt_coverage_complete']:
+              raise SystemExit(
+                  'candidate receipt coverage failed: '
+                  f"missing={summary['missing_artifact_ids'][:20]} "
+                  f"unexpected={summary['unexpected_artifact_ids'][:20]}"
+              )
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: research-artifact-candidate-cells-complete-${{ github.run_id }}
           path: |
