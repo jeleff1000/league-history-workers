@@ -5,7 +5,12 @@ on:
     inputs:
       backfill_run:
         description: Source playoff/clutch backfill workflow run ID
-        required: true
+        required: false
+        default: ''
+      schema_only:
+        description: 'Fan out and validate the existing immutable cache only; do not rebuild raw corpus data'
+        required: false
+        default: 'false'
       base_cache_key:
         description: Existing public lake cache containing ops and auxiliary files
         required: true
@@ -52,6 +57,7 @@ jobs:
           key: ${{ inputs.base_cache_key }}
           fail-on-cache-miss: true
       - name: Download deterministic native identity crosswalk
+        if: inputs.schema_only != 'true'
         env:
           GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
         run: |
@@ -62,6 +68,7 @@ jobs:
             --dir research_public_lake
           echo "RESEARCH_NATIVE_ID_CROSSWALK=${{ github.workspace }}/research_public_lake/native_id_crosswalk.parquet" >> "$GITHUB_ENV"
       - name: Download processed source shards
+        if: inputs.schema_only != 'true'
         uses: actions/download-artifact@v5
         with:
           path: source_results
@@ -71,6 +78,7 @@ jobs:
           pattern: research-source-backfill-result-*
           merge-multiple: true
       - name: Unpack processed source shards
+        if: inputs.schema_only != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -83,22 +91,33 @@ jobs:
       - name: Install bounded dependencies
         run: python -m pip install duckdb==1.5.1 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1
       - name: Rebuild corpus snapshot with outcome columns
+        if: inputs.schema_only != 'true'
         run: python code/scripts/sleeper_corpus/build_corpus_snapshot.py
-      - name: Replace corpus in public lake and validate
+      - name: Normalize literal cohorts and validate public lake
         shell: bash
         run: |
           set -euo pipefail
-          python code/scripts/sleeper_corpus/merge_public_corpus_snapshot.py \
-            --base research_public_lake/corpus_snapshot.duckdb \
-            --overlay "$CORPUS_DIR/corpus_snapshot.duckdb" \
-            --out "$CORPUS_DIR/merged_corpus_snapshot.duckdb" \
-            --crosswalk research_public_lake/native_id_crosswalk.parquet \
-            --espn-map code/ops_data/public/espn_nfl_player_map.parquet \
-            --aliases code/scripts/research_cohorts/research_identity_aliases.csv
+          if [ '${{ inputs.schema_only }}' = 'true' ]; then
+            test -z '${{ inputs.backfill_run }}'
+            base_snapshot='research_public_lake/corpus_snapshot.duckdb'
+            normalized_snapshot="$RUNNER_TEMP/normalized_corpus_snapshot.duckdb"
+          else
+            test -n '${{ inputs.backfill_run }}'
+            python code/scripts/sleeper_corpus/merge_public_corpus_snapshot.py \
+              --base research_public_lake/corpus_snapshot.duckdb \
+              --overlay "$CORPUS_DIR/corpus_snapshot.duckdb" \
+              --out "$CORPUS_DIR/merged_corpus_snapshot.duckdb" \
+              --crosswalk research_public_lake/native_id_crosswalk.parquet \
+              --espn-map code/ops_data/public/espn_nfl_player_map.parquet \
+              --aliases code/scripts/research_cohorts/research_identity_aliases.csv
+            base_snapshot="$CORPUS_DIR/merged_corpus_snapshot.duckdb"
+            normalized_snapshot="$CORPUS_DIR/normalized_corpus_snapshot.duckdb"
+          fi
           python code/scripts/research_cohorts/normalize_canonical_research_schema.py \
-            --base "$CORPUS_DIR/merged_corpus_snapshot.duckdb" \
-            --out "$CORPUS_DIR/normalized_corpus_snapshot.duckdb"
-          mv "$CORPUS_DIR/normalized_corpus_snapshot.duckdb" research_public_lake/corpus_snapshot.duckdb
+            --base "$base_snapshot" \
+            --out "$normalized_snapshot" \
+            --ops-cache research_public_lake/ops_cache.duckdb
+          mv "$normalized_snapshot" research_public_lake/corpus_snapshot.duckdb
           python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
       - name: Archive rebuilt public lake
         run: |
