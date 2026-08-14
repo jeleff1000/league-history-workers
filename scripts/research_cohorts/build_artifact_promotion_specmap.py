@@ -18,7 +18,7 @@ from artifact_promotion_specmap import bind_to_canonical_schema, classify_source
 
 
 OUTPUT_FIELDS = (
-    "artifact_id", "artifact", "file", "source_grain", "source_key", "cache_key",
+    "artifact_id", "artifact", "file", "file_instance", "source_grain", "source_key", "cache_key",
     "writable_target_columns", "blocked_source_columns", "may_insert_missing_player_rows",
     "terminal_reason", "quarantined_source_columns", "source_to_target_columns",
 )
@@ -40,22 +40,21 @@ def build_specmap_rows(
 ) -> list[dict[str, str]]:
     """Return one stable source-to-cache contract row per inspected file."""
     out: list[dict[str, str]] = []
-    seen: set[tuple[str, str]] = set()
+    occurrences: dict[tuple[str, str], int] = {}
     for row in checklist_rows:
         artifact_id = str(row.get("artifact_id", "") or "")
         file_name = str(row.get("file", "") or "")
         if not artifact_id or not file_name:
             raise ValueError("checklist row is missing artifact_id or file")
         identity = (artifact_id, file_name)
-        if identity in seen:
-            raise ValueError(f"duplicate artifact file identity: {identity}")
-        seen.add(identity)
+        occurrences[identity] = occurrences.get(identity, 0) + 1
         contract = classify_source_schema(_columns(str(row.get("columns", "") or "[]")))
         bound = bind_to_canonical_schema(contract, canonical_columns)
         out.append({
             "artifact_id": artifact_id,
             "artifact": str(row.get("artifact", "") or ""),
             "file": file_name,
+            "file_instance": str(occurrences[identity]),
             "source_grain": contract.grain,
             "source_key": _joined(contract.source_key),
             "cache_key": _joined(contract.cache_key),
@@ -69,7 +68,7 @@ def build_specmap_rows(
                 if target in bound.writable_target_columns
             ),
         })
-    return sorted(out, key=lambda item: (int(item["artifact_id"]), item["file"]))
+    return sorted(out, key=lambda item: (int(item["artifact_id"]), item["file"], int(item["file_instance"])))
 
 
 def _canonical_columns(path: Path) -> set[str]:
