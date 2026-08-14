@@ -1,0 +1,86 @@
+name: Aggregate existing artifact candidate cells
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Completed candidate-materialization run whose shard artifacts will be assembled
+        required: true
+        default: '31769208198'
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: research-artifact-candidate-cells-${{ inputs.candidate_run_id }}-*
+          path: shards
+          merge-multiple: false
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-candidate-manifest-${{ inputs.candidate_run_id }}
+          path: manifest
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+      - name: Build read-only candidate receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from aggregate_artifact_candidate_cells import aggregate_candidate_cells
+
+          manifest=json.loads(Path('manifest/candidate_manifest.json').read_text())
+          summary=aggregate_candidate_cells(
+              shard_root=Path('shards'),
+              expected_artifact_ids=manifest['data_artifact_ids'],
+              out_parquet=Path('artifact_candidate_cells.parquet'),
+          )
+          Path('artifact_candidate_cells_receipt.json').write_text(json.dumps(summary,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(summary,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: research-artifact-candidate-cells-complete-${{ github.run_id }}
+          path: |
+            artifact_candidate_cells.parquet
+            artifact_candidate_cells_receipt.json
+            shards/**/receipts/*.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
+      - name: Fail after publishing incomplete coverage evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          receipt=json.loads(Path('artifact_candidate_cells_receipt.json').read_text())
+          if not receipt['receipt_coverage_complete']:
+              raise SystemExit(
+                  'candidate receipt coverage failed: '
+                  f"missing={receipt['missing_artifact_ids'][:20]} "
+                  f"unexpected={receipt['unexpected_artifact_ids'][:20]}"
+              )
+          if receipt['cache_mutated'] or receipt['new_lineage']:
+              raise SystemExit('immutable candidate aggregate violated cache/lineage guard')
+          print('candidate coverage receipt complete; no cache opened or mutated')
+          PY
