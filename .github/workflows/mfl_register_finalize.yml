@@ -37,6 +37,7 @@ jobs:
                 esac
                 dest="waves/$id/$artifact_id"
                 mkdir -p "$dest"
+                printf '%s\n' "$artifact_name" > "$dest/artifact_name.txt"
                 gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > "$dest/artifact.zip"
                 unzip -q "$dest/artifact.zip" -d "$dest"
                 rm -f "$dest/artifact.zip"
@@ -57,6 +58,14 @@ jobs:
           import json, pathlib, duckdb
           root = pathlib.Path('waves')
           receipt_paths = sorted(root.rglob('receipt.json'))
+          missing_receipts = sorted(
+              p.parent.joinpath('artifact_name.txt').read_text(encoding='utf-8').strip()
+              for p in root.rglob('artifact_name.txt')
+              if not p.parent.joinpath('receipt.json').exists()
+          )
+          if missing_receipts:
+              print('artifacts without validated receipts:')
+              print('\n'.join(missing_receipts))
           rows = [json.loads(p.read_text(encoding='utf-8')) for p in receipt_paths]
           keys = {(int(r['season']), str(r['league_id'])) for r in rows}
           if len(rows) != 330 or len(keys) != 330: raise SystemExit(f'expected 330 unique rows, got {len(rows)} rows/{len(keys)} keys')
