@@ -88,16 +88,53 @@ jobs:
                       isinstance(w, dict) and w.get('matchup')
                       for w in weeks
                   )
-                  if payload and isinstance(payload, dict) and has_matchups:
+                  # The schedule endpoint alone is not enough for ancient MFL:
+                  # some archived leagues advertise a schedule but weeklyResults
+                  # contains only flat franchise totals. Require actual matchup
+                  # pairs, player payloads, and at least one explicit playoff game
+                  # before admitting a candidate to the full-register manifest.
+                  client.prefetch_weekly_results_ytd(lid, year)
+                  weekly_blocks = []
+                  for w in weeks:
+                      if not isinstance(w, dict):
+                          continue
+                      try:
+                          week = int(w.get('week'))
+                      except (TypeError, ValueError):
+                          continue
+                      weekly = client.fetch_weekly_results(lid, year, week) or {}
+                      weekly_blocks.append(weekly)
+                  has_pair = False
+                  has_players = False
+                  has_playoff = False
+                  for weekly in weekly_blocks:
+                      matchups = weekly.get('matchup') or []
+                      if isinstance(matchups, dict):
+                          matchups = [matchups]
+                      for matchup in matchups:
+                          if not isinstance(matchup, dict):
+                              continue
+                          sides = matchup.get('franchise') or []
+                          if isinstance(sides, dict):
+                              sides = [sides]
+                          if len(sides) == 2:
+                              has_pair = True
+                              has_players = has_players or any(
+                                  isinstance(side, dict) and side.get('player')
+                                  for side in sides
+                              )
+                          if str(matchup.get('regularSeason')).strip() == '0':
+                              has_playoff = True
+                  if payload and isinstance(payload, dict) and has_matchups and has_pair and has_players and has_playoff:
                       valid.append(r)
-                      print(f"[VALID-SCHEDULED] {year}:{lid}", flush=True)
+                      print(f"[VALID-YTD-H2H-PLAYOFF] {year}:{lid}", flush=True)
                   else:
-                      print(f"[INVALID] {year}:{lid} no defined fantasy schedule", flush=True)
+                      print(f"[INVALID] {year}:{lid} missing schedule/YTD pair/player/playoff signal", flush=True)
               except Exception as exc:
                   print(f"[INVALID] {year}:{lid} {exc}", flush=True)
           if len(valid) < int(os.environ['MAX_VALID']):
               raise SystemExit(f"{year} has only {len(valid)} valid candidates")
-          json.dump({'schema_version':'mfl_candidate_probe_v2_scheduled','season':year,'valid_leagues':valid}, open(f'valid_{year}.json','w'), indent=2, sort_keys=True)
+          json.dump({'schema_version':'mfl_candidate_probe_v3_ytd_h2h_playoff','season':year,'valid_leagues':valid}, open(f'valid_{year}.json','w'), indent=2, sort_keys=True)
           PY
       - name: Upload valid candidate probe
         uses: actions/upload-artifact@v4
