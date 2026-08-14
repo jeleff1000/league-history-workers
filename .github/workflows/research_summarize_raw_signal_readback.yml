@@ -34,7 +34,26 @@ jobs:
           if len(files) != 1:
               raise SystemExit(f'expected exactly one readback receipt, found {len(files)}')
           receipt = json.loads(files[0].read_text())
-          report = {'summary': receipt['summary'], 'rows': receipt['rows']}
+          selected_files = list(Path('input').rglob('selected_artifacts.json'))
+          if len(selected_files) != 1:
+              raise SystemExit(f'expected exactly one selected-artifacts manifest, found {len(selected_files)}')
+          selected = json.loads(selected_files[0].read_text())
+          selected_ids = {int(row['artifact_id']) for row in selected}
+          profile_files = list(Path('input').rglob('raw_signal_join_key_profile.json'))
+          if len(profile_files) != 1:
+              raise SystemExit(f'expected exactly one join-key profile, found {len(profile_files)}')
+          profile = json.loads(profile_files[0].read_text())
+          report = {
+              'summary': receipt['summary'],
+              'selected_artifacts': selected,
+              'selected_receipt_rows': [
+                  row for row in receipt['rows']
+                  if int(row.get('artifact_id', -1)) in selected_ids
+              ],
+              'selected_identity_profile': [
+                  row for row in profile if int(row.get('artifact_id', -1)) in selected_ids
+              ],
+          }
           Path('research_raw_signal_readback_summary.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
           print(json.dumps(report, sort_keys=True))
           PY
