@@ -180,6 +180,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
+      - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -200,7 +201,7 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
-          from aggregate_artifact_candidate_cells import aggregate_candidate_cells
+          from scripts.research_cohorts.aggregate_artifact_candidate_cells import aggregate_candidate_cells
 
           manifest=json.loads(Path('manifest/candidate_manifest.json').read_text())
           summary=aggregate_candidate_cells(
