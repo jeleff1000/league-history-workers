@@ -248,6 +248,20 @@ jobs:
           assert tables >= {
               'research_matchup_compact_weekly','research_matchup_compact_season','research_matchup_compact_career',
           },tables
+          unsupported_positions=c.execute("""
+            SELECT source,position
+            FROM (
+              SELECT 'weekly' AS source,position FROM research_matchup_compact_weekly
+              UNION ALL
+              SELECT 'season' AS source,position FROM research_matchup_compact_season
+              UNION ALL
+              SELECT 'career' AS source,position FROM research_matchup_compact_career
+            )
+            WHERE position NOT IN ('QB','RB','WR','TE','K','DEF','DB','DL','LB')
+            GROUP BY 1,2 ORDER BY 1,2
+          """).fetchall()
+          print('unsupported_serving_positions='+json.dumps(unsupported_positions))
+          assert not unsupported_positions,unsupported_positions
           dupe=c.execute("SELECT COUNT(*) FROM (SELECT NFL_player_id,year,week,position FROM research_matchup_compact_weekly GROUP BY 1,2,3,4 HAVING COUNT(*)<>1)").fetchone()[0]
           cmc=None
           positions={p.strip().upper() for p in '${{ inputs.positions }}'.split(',') if p.strip()}
