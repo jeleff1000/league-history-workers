@@ -272,6 +272,8 @@ jobs:
               clutch_champ_overlap,bad_clutch_champ_rates=ranked
               assert clutch_champ_overlap >= 3,ranked
               assert bad_clutch_champ_rates == 0,ranked
+          bad_visible_core=c.execute("SELECT COUNT(*) FROM research_matchup_compact_season,UNNEST(cohort_cells) u(cell) WHERE cell.eligible_leagues >= 150 AND (ABS(COALESCE(cell.clutch_season_sum,0.0)) > 50 OR ABS((COALESCE(cell.expected_wins,0.0)+COALESCE(cell.expected_losses,0.0))-COALESCE(cell.expected_starts,0.0)) > 0.000001)").fetchone()[0]
+          assert bad_visible_core == 0,bad_visible_core
           assert dupe==0,dupe
           print('compact_rollup='+json.dumps({'weekly':c.execute('SELECT COUNT(*) FROM research_matchup_compact_weekly').fetchone()[0],'season':c.execute('SELECT COUNT(*) FROM research_matchup_compact_season').fetchone()[0],'career':c.execute('SELECT COUNT(*) FROM research_matchup_compact_career').fetchone()[0],'cmc':cmc}))
           PY
