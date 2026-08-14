@@ -1,0 +1,159 @@
+name: Compare fixed artifact candidates to approved cache
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run_id:
+        description: Completed candidate-cell materialization run
+        required: true
+      shard_count:
+        description: Must match candidate materialization shard count
+        required: true
+        default: '256'
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+jobs:
+  manifest:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.matrix.outputs.value }}
+    steps:
+      - id: matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          count='${{ inputs.shard_count }}'
+          [[ "$count" =~ ^[0-9]+$ ]] && (( count >= 1 && count <= 256 ))
+          matrix=$(python - "$count" <<'PY'
+          import json, sys
+          print(json.dumps(list(range(int(sys.argv[1]))), separators=(',', ':')))
+          PY
+          )
+          echo "value=$matrix" >> "$GITHUB_OUTPUT"
+
+  compare:
+    needs: manifest
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        shard_index: ${{ fromJSON(needs.manifest.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-candidate-cells-${{ inputs.candidate_run_id }}-${{ matrix.shard_index }}
+          path: candidate_input
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.candidate_run_id }}
+          github-token: ${{ github.token }}
+      - name: Compare candidate cells read-only
+        env:
+          PYTHONPATH: scripts/research_cohorts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          sha256sum research_public_lake/corpus_snapshot.duckdb > out/cache_before.sha256
+          sha256sum research_public_lake/ops_cache.duckdb > out/ops_before.sha256
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import duckdb
+          from compare_artifact_candidate_cells import compare_candidate_cells
+
+          files=sorted(Path('candidate_input').rglob('candidates/*.parquet'))
+          con=duckdb.connect()
+          if files:
+              con.execute('CREATE TABLE cells AS SELECT * FROM read_parquet(?)', [[str(path) for path in files]])
+          else:
+              con.execute("CREATE TABLE cells AS SELECT NULL::VARCHAR artifact_id, NULL::VARCHAR artifact_file, NULL::VARCHAR file_instance, NULL::VARCHAR source_grain, NULL::VARCHAR db_name, NULL::VARCHAR year, NULL::VARCHAR week, NULL::VARCHAR NFL_player_id, NULL::VARCHAR team_key, NULL::VARCHAR manager, NULL::VARCHAR source_column, NULL::VARCHAR target_column, NULL::VARCHAR source_value_text WHERE FALSE")
+          con.execute("COPY cells TO 'out/candidate_cells.parquet' (FORMAT PARQUET)")
+          con.close()
+          report=compare_candidate_cells(Path('research_public_lake/corpus_snapshot.duckdb'), Path('out/candidate_cells.parquet'))
+          report.update({'candidate_run_id':'${{ inputs.candidate_run_id }}','shard_index':${{ matrix.shard_index }},'cache_mutated':False,'new_lineage':False})
+          Path('out/candidate_comparison.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
+          print(json.dumps({k:report[k] for k in ('candidate_cells','admissible_candidate_cells','unmatched_candidates','cache_mutated','new_lineage')},sort_keys=True))
+          PY
+          test "$(cut -d' ' -f1 out/cache_before.sha256)" = "$(sha256sum research_public_lake/corpus_snapshot.duckdb | cut -d' ' -f1)"
+          test "$(cut -d' ' -f1 out/ops_before.sha256)" = "$(sha256sum research_public_lake/ops_cache.duckdb | cut -d' ' -f1)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-artifact-candidate-comparison-${{ github.run_id }}-${{ matrix.shard_index }}
+          path: out
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
+
+  aggregate:
+    needs: [manifest, compare]
+    if: ${{ always() && needs.manifest.result == 'success' && needs.compare.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: research-artifact-candidate-comparison-${{ github.run_id }}-*
+          path: comparisons
+          merge-multiple: false
+      - name: Consolidate exact per-artifact comparison evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+
+          reports=[json.loads(path.read_text()) for path in sorted(Path('comparisons').rglob('candidate_comparison.json'))]
+          if len(reports) != int('${{ inputs.shard_count }}'):
+              raise SystemExit(f'comparison receipt coverage failed: reports={len(reports)} expected=${{ inputs.shard_count }}')
+          expected_key='research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613'
+          source_artifacts={}
+          totals=Counter()
+          for report in reports:
+              if report.get('cache_mutated') or report.get('new_lineage'):
+                  raise SystemExit('comparison worker changed cache state')
+              if report.get('cache_sha256_before') != report.get('cache_sha256_after'):
+                  raise SystemExit('comparison worker cache hash changed')
+              for artifact_id, detail in report.get('by_artifact',{}).items():
+                  if artifact_id in source_artifacts:
+                      raise SystemExit(f'artifact has multiple comparison receipts: {artifact_id}')
+                  source_artifacts[artifact_id]=detail
+              for field in ('candidate_cells','admissible_candidate_cells','unmatched_candidates','unsupported_grain_candidates'):
+                  totals[field]+=int(report.get(field,0))
+              for field in ('safe_null_fills_by_field','same_value_by_field','conflicts_by_field','blocked_by_reason'):
+                  for key,value in report.get(field,{}).items(): totals[f'{field}.{key}']+=int(value)
+          result={
+              'candidate_run_id':'${{ inputs.candidate_run_id }}',
+              'comparison_shards':len(reports),'canonical_cache_key':expected_key,
+              'totals':dict(sorted(totals.items())), 'by_artifact':source_artifacts,
+              'cache_mutated':False,'new_lineage':False,
+          }
+          Path('artifact_candidate_comparison_complete.json').write_text(json.dumps(result,indent=2,sort_keys=True)+'\n')
+          print(json.dumps({'comparison_shards':len(reports),'artifacts':len(source_artifacts),'totals':dict(totals),'cache_mutated':False,'new_lineage':False},sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-artifact-candidate-comparison-complete-${{ github.run_id }}
+          path: artifact_candidate_comparison_complete.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
