@@ -49,6 +49,10 @@ jobs:
           profile_rows = profile.get('rows', []) if isinstance(profile, dict) else profile
           profile_examples = profile.get('identity_examples', []) if isinstance(profile, dict) else []
           profile_unresolved = profile.get('unresolved_identity_reasons', []) if isinstance(profile, dict) else []
+          schema_files = list(Path('input').rglob('raw_source_schemas.json'))
+          if len(schema_files) != 1:
+              raise SystemExit(f'expected exactly one raw-source schema receipt, found {len(schema_files)}')
+          source_schemas = json.loads(schema_files[0].read_text())
           report = {
               'summary': receipt['summary'],
               'selected_artifacts': selected,
@@ -64,6 +68,9 @@ jobs:
             ],
             'selected_unresolved_identity_reasons': [
                 row for row in profile_unresolved if str(row.get('artifact_id', '')) in selected_ids
+            ],
+            'selected_source_schemas': [
+                row for row in source_schemas if str(row.get('artifact_id', '')) in selected_ids
             ],
           }
           Path('research_raw_signal_readback_summary.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
