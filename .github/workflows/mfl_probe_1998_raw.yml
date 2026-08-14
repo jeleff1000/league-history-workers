@@ -1,0 +1,55 @@
+name: MFL 1998 Bounded Raw Probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      yahoo_oauth_ref:
+        required: false
+        type: string
+        default: codex/mfl-gates
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref }}
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /corpus_seed/
+      - name: Bounded raw MFL probes
+        run: |
+          python3 - <<'PY'
+          import json, time, requests
+          rows=[r for r in json.load(open('code/corpus_seed/mfl_candidate_pool_1993_2025.json'))['leagues'] if int(r['season'])==1998][:20]
+          valid=[]
+          s=requests.Session(); s.headers['User-Agent']='LeagueHistoryImport/1.0'
+          for r in rows:
+              lid=str(r['league_id']); url=f'https://api.myfantasyleague.com/1998/export'
+              try:
+                  resp=s.get(url,params={'TYPE':'league','L':lid,'JSON':'1'},timeout=20)
+                  payload=resp.json()
+                  ok=resp.status_code==200 and isinstance(payload,dict) and isinstance(payload.get('league'),dict) and not payload.get('error')
+                  print(('[VALID] ' if ok else '[INVALID] ')+r['seed']+f' status={resp.status_code}',flush=True)
+                  if ok: valid.append(r)
+              except Exception as e: print('[INVALID]',r['seed'],e,flush=True)
+              time.sleep(10)
+          if len(valid)<10: raise SystemExit(f'only {len(valid)} valid bounded 1998 candidates')
+          json.dump({'schema_version':'mfl_candidate_probe_v1','season':1998,'valid_leagues':valid},open('valid_1998.json','w'),indent=2,sort_keys=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-valid-candidates-1998-raw
+          retention-days: 30
+          path: valid_1998.json
+
