@@ -41,3 +41,36 @@ jobs:
         run: >-
           python scripts/research_cohorts/validate_artifact_cache_ledger.py
           --ledger docs/research_matchup_artifact_cache_ledger.csv
+      - name: Materialize the exact remaining-artifact action queue
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import csv, json
+          from collections import Counter, defaultdict
+          from pathlib import Path
+          from scripts.research_cohorts.validate_artifact_cache_ledger import CLOSED_STATUSES
+
+          with Path('docs/research_matchup_artifact_cache_ledger.csv').open(newline='', encoding='utf-8-sig') as handle:
+              rows=list(csv.DictReader(handle))
+          queue=[row for row in rows if row.get('record_type')=='artifact_inventory' and row.get('final_status') not in CLOSED_STATUSES]
+          groups=defaultdict(lambda:{'artifacts':0,'candidate_delta_rows':0,'cache_missing_cells':0,'cache_conflict_cells':0,'unmatched_cache_cells':0,'blocked_schema_cells':0,'artifact_ids':[]})
+          for row in queue:
+              key=(row.get('final_status',''),row.get('workflow_run_id',''),row.get('artifact',''))
+              group=groups[key]; group['artifacts']+=1; group['artifact_ids'].append(int(row['artifact_id']))
+              for field in ('candidate_delta_rows','cache_missing_cells','cache_conflict_cells','unmatched_cache_cells','blocked_schema_cells'):
+                  group[field]+=int(str(row.get(field,'') or '0'))
+          result={
+              'raw_open_artifacts':len(queue),
+              'by_status':dict(sorted(Counter(row['final_status'] for row in queue).items())),
+              'batches':[{'final_status':key[0],'workflow_run_id':key[1],'artifact':key[2],**value} for key,value in sorted(groups.items())],
+              'artifacts':queue,
+          }
+          Path('research_matchup_open_artifact_queue.json').write_text(json.dumps(result,indent=2,sort_keys=True)+'\n')
+          print(json.dumps({'raw_open_artifacts':result['raw_open_artifacts'],'batches':len(result['batches']),'status':result['by_status']},sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-open-artifact-queue-${{ github.run_id }}
+          path: research_matchup_open_artifact_queue.json
+          retention-days: 90
