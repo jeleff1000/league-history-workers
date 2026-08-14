@@ -43,6 +43,21 @@ on:
         required: false
         type: string
         default: '10'
+      continue_population:
+        description: 'Dispatch the next bounded population wave after a successful combine'
+        required: false
+        type: string
+        default: 'false'
+      population_total:
+        description: 'Exclusive total manifest offset for chained population waves'
+        required: false
+        type: string
+        default: '0'
+      population_shard_size:
+        description: 'Manifest rows per chained population wave'
+        required: false
+        type: string
+        default: '256'
 
 permissions:
   actions: write
@@ -393,3 +408,39 @@ jobs:
           path: |
             mfl_register_all_runs.json
             mfl_register_snapshot.duckdb
+
+      - name: Dispatch next population wave
+        if: ${{ success() && inputs.continue_population == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+          MANIFEST_PATH: ${{ inputs.manifest_path }}
+          YAHOO_OAUTH_REF: ${{ inputs.yahoo_oauth_ref }}
+          MAX_PARALLEL: ${{ inputs.max_parallel }}
+          CURRENT_END: ${{ inputs.index_end }}
+          POPULATION_TOTAL: ${{ inputs.population_total }}
+          SHARD_SIZE: ${{ inputs.population_shard_size }}
+        run: |
+          next_start=$((CURRENT_END))
+          total=$((POPULATION_TOTAL))
+          if [ "$total" -le 0 ] || [ "$next_start" -ge "$total" ]; then
+            echo "population waves complete at offset $next_start"
+            exit 0
+          fi
+          next_end=$((next_start + SHARD_SIZE))
+          if [ "$next_end" -gt "$total" ]; then next_end="$total"; fi
+          echo "dispatching population wave $next_start:$next_end of $total"
+          gh workflow run mfl_register_campaign.yml \
+            --repo "$REPOSITORY" \
+            --ref "$REF_NAME" \
+            -f manifest_path="$MANIFEST_PATH" \
+            -f yahoo_oauth_ref="$YAHOO_OAUTH_REF" \
+            -f max_parallel="$MAX_PARALLEL" \
+            -f index_start="$next_start" \
+            -f index_end="$next_end" \
+            -f expected_count=0 \
+            -f exact_per_year=0 \
+            -f continue_population=true \
+            -f population_total="$total" \
+            -f population_shard_size="$SHARD_SIZE"
