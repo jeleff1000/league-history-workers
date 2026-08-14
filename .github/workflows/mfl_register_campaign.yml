@@ -58,6 +58,11 @@ on:
         required: false
         type: string
         default: '256'
+      cache_namespace:
+        description: 'Immutable Actions-cache namespace for the validated pre-rollup snapshot'
+        required: false
+        type: string
+        default: 'mfl-register-sample-v1'
 
 permissions:
   actions: write
@@ -409,6 +414,14 @@ jobs:
             mfl_register_all_runs.json
             mfl_register_snapshot.duckdb
 
+      - name: Save validated pre-rollup cache shard
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            mfl_register_snapshot.duckdb
+            mfl_register_all_runs.json
+          key: ${{ inputs.cache_namespace }}-${{ inputs.index_start }}-${{ inputs.index_end }}
+
       - name: Dispatch next population wave
         if: ${{ success() && inputs.continue_population == 'true' }}
         env:
@@ -421,6 +434,7 @@ jobs:
           CURRENT_END: ${{ inputs.index_end }}
           POPULATION_TOTAL: ${{ inputs.population_total }}
           SHARD_SIZE: ${{ inputs.population_shard_size }}
+          CACHE_NAMESPACE: ${{ inputs.cache_namespace }}
         run: |
           next_start=$((CURRENT_END))
           total=$((POPULATION_TOTAL))
@@ -443,4 +457,5 @@ jobs:
             -f exact_per_year=0 \
             -f continue_population=true \
             -f population_total="$total" \
-            -f population_shard_size="$SHARD_SIZE"
+            -f population_shard_size="$SHARD_SIZE" \
+            -f cache_namespace="$CACHE_NAMESPACE"
