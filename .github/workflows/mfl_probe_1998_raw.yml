@@ -31,7 +31,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, time, requests
-          rows=[r for r in json.load(open('code/corpus_seed/mfl_candidate_pool_1993_2025.json'))['leagues'] if int(r['season'])==1998][:20]
+          rows=[r for r in json.load(open('code/corpus_seed/mfl_candidate_pool_1993_2025.json'))['leagues'] if int(r['season'])==1998][20:50]
           valid=[]
           s=requests.Session(); s.headers['User-Agent']='LeagueHistoryImport/1.0'
           for r in rows:
@@ -52,4 +52,3 @@ jobs:
           name: mfl-valid-candidates-1998-raw
           retention-days: 30
           path: valid_1998.json
-
