@@ -245,7 +245,13 @@ jobs:
           mu = n(f"select count(*) from public.matchup where year={y}") if 'matchup' in tables else 0
           checks = {}
           for field in sorted(populated_player):
-            checks['player_fantasy.'+field] = n(f"select count(*) from public.player_fantasy where year={y} and {field} is not null") if field in cols('player_fantasy') else 0
+            scope = f"year={y}"
+            if field not in {'db_name', 'clutch_equity'}:
+              scope += " and coalesce(is_rostered, 0) = 1"
+            if field == 'opponent_franchise_id':
+              scope += " and coalesce(is_bye_week, 0) = 0 and opponent is not null"
+            checks['player_fantasy.'+field] = n(f"select count(*) from public.player_fantasy where {scope} and {field} is not null") if field in cols('player_fantasy') else 0
+          checks['player_fantasy.tie_valid'] = n(f"select count(*) from public.player_fantasy where year={y} and coalesce(is_rostered,0)=1 and tie in (0,1)") if 'tie' in cols('player_fantasy') else 0
           for field in ('win','loss','is_playoffs','champion','is_championship','final_playoff_seed'):
               checks['matchup.'+field] = n(f"select count(*) from public.matchup where year={y} and {field} is not null") if field in cols('matchup') else 0
           errors = []
