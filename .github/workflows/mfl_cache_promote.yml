@@ -1,0 +1,47 @@
+name: Promote MFL Pre-Rollup Shard Cache
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Completed MFL register campaign run containing the final shard artifact'
+        required: true
+        type: string
+      index_start:
+        description: 'Shard manifest start offset'
+        required: true
+        type: string
+      index_end:
+        description: 'Shard manifest exclusive end offset'
+        required: true
+        type: string
+      cache_namespace:
+        description: 'Immutable Actions-cache namespace'
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download completed shard artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: mfl-register-final-${{ inputs.source_run_id }}-${{ inputs.index_start }}
+          path: shard
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: Validate shard files
+        run: |
+          test -s shard/mfl_register_snapshot.duckdb
+          test -s shard/mfl_register_all_runs.json
+      - name: Save immutable pre-rollup cache shard
+        uses: actions/cache/save@v5
+        with:
+          path: shard
+          key: ${{ inputs.cache_namespace }}-${{ inputs.index_start }}-${{ inputs.index_end }}
