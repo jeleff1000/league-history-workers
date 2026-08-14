@@ -1,0 +1,57 @@
+name: Stage candidate comparison evidence in research ledger
+
+on:
+  workflow_dispatch:
+    inputs:
+      comparison_run_id:
+        description: Completed read-only candidate comparison run
+        required: true
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+      - uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-candidate-comparison-complete-${{ inputs.comparison_run_id }}
+          path: comparison
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.comparison_run_id }}
+          github-token: ${{ github.token }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - name: Stage only fresh read-only comparison evidence into the sole ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s comparison/artifact_candidate_comparison_complete.json
+          python scripts/research_cohorts/stage_candidate_comparison_ledger.py \
+            --ledger docs/research_matchup_artifact_cache_ledger.csv \
+            --comparison comparison/artifact_candidate_comparison_complete.json \
+            --receipt-run-id '${{ inputs.comparison_run_id }}' \
+            --out staged_ledger.csv
+          python scripts/research_cohorts/validate_artifact_cache_ledger.py --ledger staged_ledger.csv
+          mv staged_ledger.csv docs/research_matchup_artifact_cache_ledger.csv
+      - name: Commit the evidence update only when it changed the existing ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- docs/research_matchup_artifact_cache_ledger.csv; then
+            echo 'No ledger evidence changed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/research_matchup_artifact_cache_ledger.csv
+          git commit -m 'ledger: stage artifact candidate comparison evidence'
+          git push origin HEAD:main
