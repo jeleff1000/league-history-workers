@@ -64,6 +64,8 @@ jobs:
           client = MFLAPIClient(MFLAPIConfig(rate_limit_per_min=12))
           valid = []
           for r in candidates:
+              if len(valid) >= 10:
+                  break
               lid = str(r['league_id'])
               try:
                   payload = client.fetch_league(lid, year)
