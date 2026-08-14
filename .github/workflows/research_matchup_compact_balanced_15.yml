@@ -243,8 +243,14 @@ jobs:
           import duckdb,json
           c=duckdb.connect('research_matchup_compact.duckdb',read_only=True)
           tables={x[0] for x in c.execute('SELECT table_name FROM duckdb_tables()').fetchall()}
-          assert tables >= {'research_matchup_compact_weekly','research_matchup_compact_season','research_matchup_compact_career'},tables
+          assert tables >= {
+              'research_matchup_compact_weekly','research_matchup_compact_season','research_matchup_compact_career',
+              'research_matchup_compact_serving_weekly','research_matchup_compact_serving_season','research_matchup_compact_serving_career',
+          },tables
           dupe=c.execute("SELECT COUNT(*) FROM (SELECT NFL_player_id,year,week,position FROM research_matchup_compact_weekly GROUP BY 1,2,3,4 HAVING COUNT(*)<>1)").fetchone()[0]
+          assert c.execute("SELECT COUNT(*) FROM research_matchup_compact_serving_weekly").fetchone()[0] == c.execute("SELECT COUNT(*) * 144 FROM research_matchup_compact_weekly").fetchone()[0]
+          assert c.execute("SELECT COUNT(*) FROM research_matchup_compact_serving_season").fetchone()[0] == c.execute("SELECT COUNT(*) * 576 FROM research_matchup_compact_season").fetchone()[0]
+          assert c.execute("SELECT COUNT(*) FROM research_matchup_compact_serving_career").fetchone()[0] == c.execute("SELECT COUNT(*) * 576 FROM research_matchup_compact_career").fetchone()[0]
           cmc=None
           positions={p.strip().upper() for p in '${{ inputs.positions }}'.split(',') if p.strip()}
           if 2025 <= int('${{ inputs.year_end }}') and 2025 >= int('${{ inputs.year_start }}') and (not positions or 'RB' in positions):
