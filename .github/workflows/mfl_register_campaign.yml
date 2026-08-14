@@ -238,20 +238,31 @@ jobs:
             'opponent_points','is_playoffs','is_consolation','is_championship',
             'champion','clutch_equity',
           }
+          matchup_scoped = {'win','loss','tie','opponent','opponent_franchise_id','opponent_points'}
           schema = {t: sorted(cols(t)) for t in req}
           missing_cols = {t: sorted(v-cols(t)) for t,v in req.items() if v-cols(t)}
           def n(sql): return int(c.execute(sql).fetchone()[0])
           pf = n(f"select count(*) from public.player_fantasy where year={y} and coalesce(is_rostered,0)=1") if 'player_fantasy' in tables else 0
           mu = n(f"select count(*) from public.matchup where year={y}") if 'matchup' in tables else 0
           checks = {}
+          coverage = {}
           for field in sorted(populated_player):
             scope = f"year={y}"
             if field not in {'db_name', 'clutch_equity'}:
               scope += " and coalesce(is_rostered, 0) = 1"
+            if field in matchup_scoped:
+              scope += " and opponent is not null"
             if field == 'opponent_franchise_id':
               scope += " and coalesce(is_bye_week, 0) = 0 and opponent is not null"
-            checks['player_fantasy.'+field] = n(f"select count(*) from public.player_fantasy where {scope} and {field} is not null") if field in cols('player_fantasy') else 0
-          checks['player_fantasy.tie_valid'] = n(f"select count(*) from public.player_fantasy where year={y} and coalesce(is_rostered,0)=1 and tie in (0,1)") if 'tie' in cols('player_fantasy') else 0
+            base = n(f"select count(*) from public.player_fantasy where {scope}") if field in cols('player_fantasy') else 0
+            value = n(f"select count(*) from public.player_fantasy where {scope} and {field} is not null") if field in cols('player_fantasy') else 0
+            checks['player_fantasy.'+field] = value
+            coverage['player_fantasy.'+field] = {'populated': value, 'applicable': base}
+          tie_scope = f"year={y} and coalesce(is_rostered,0)=1 and opponent is not null"
+          tie_base = n(f"select count(*) from public.player_fantasy where {tie_scope}") if 'tie' in cols('player_fantasy') else 0
+          tie_value = n(f"select count(*) from public.player_fantasy where {tie_scope} and tie in (0,1)") if 'tie' in cols('player_fantasy') else 0
+          checks['player_fantasy.tie_valid'] = tie_value
+          coverage['player_fantasy.tie_valid'] = {'populated': tie_value, 'applicable': tie_base}
           for field in ('win','loss','is_playoffs','champion','is_championship','final_playoff_seed'):
               checks['matchup.'+field] = n(f"select count(*) from public.matchup where year={y} and {field} is not null") if field in cols('matchup') else 0
           errors = []
@@ -259,8 +270,9 @@ jobs:
           if missing_cols: errors.append('missing columns '+repr(missing_cols))
           if pf <= 0 or mu <= 0: errors.append(f'empty core rows player={pf} matchup={mu}')
           errors += [f'{k} has no populated values' for k,v in checks.items() if v <= 0]
+          errors += [f'{k} only {v["populated"]}/{v["applicable"]} applicable rows populated' for k,v in coverage.items() if v['applicable'] > 0 and v['populated'] != v['applicable']]
           if errors: raise SystemExit('; '.join(errors))
-          receipt = {'schema_version':'mfl_register_receipt_v1','season':y,'league_id':lid,'seed':f'{y}:{lid}','db_name':dbn,'row_counts':{'player_fantasy':pf,'matchup':mu},'non_null_counts':checks,'player_fantasy_rows':pf,'matchup_rows':mu,'populated_signals':checks,'schema_columns':schema,'source':'league-history-workers'}
+          receipt = {'schema_version':'mfl_register_receipt_v1','season':y,'league_id':lid,'seed':f'{y}:{lid}','db_name':dbn,'row_counts':{'player_fantasy':pf,'matchup':mu},'non_null_counts':checks,'coverage':coverage,'player_fantasy_rows':pf,'matchup_rows':mu,'populated_signals':checks,'schema_columns':schema,'source':'league-history-workers'}
           open('receipt.json','w',encoding='utf-8').write(json.dumps(receipt,indent=2,sort_keys=True))
           PY
       - name: Upload validated season league
@@ -337,6 +349,9 @@ jobs:
               for t, cols in required.items():
                   if not cols <= set(r.get('schema_columns',{}).get(t,[])): errors.append(f"{r['seed']} incomplete {t} schema")
               if any(int(v or 0) <= 0 for v in r.get('non_null_counts',{}).values()): errors.append(f"{r['seed']} has empty required signal")
+              for key, value in r.get('coverage', {}).items():
+                  if int(value.get('applicable', 0)) > 0 and int(value.get('populated', 0)) != int(value.get('applicable', 0)):
+                      errors.append(f"{r['seed']} incomplete coverage {key}: {value}")
           if errors: raise SystemExit('; '.join(errors[:25]))
           out = duckdb.connect('mfl_register_snapshot.duckdb')
           for db_path, r in dbs:
