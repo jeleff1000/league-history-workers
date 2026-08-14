@@ -1,0 +1,87 @@
+name: MFL Candidate Probe (1993-2025)
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_path:
+        description: 'Candidate pool in the private pipeline checkout'
+        required: false
+        type: string
+        default: corpus_seed/mfl_candidate_pool_1993_2025.json
+      yahoo_oauth_ref:
+        required: false
+        type: string
+        default: codex/mfl-gates
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        year: [1993,1994,1995,1996,1997,1998,1999,2000,2001,2002,2003,2004,2005,2006,2007,2008,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018,2019,2020,2021,2022,2023,2024,2025]
+    env:
+      CORPUS_MODE: '1'
+      MFL_RATE_LIMIT_PER_MIN: '12'
+      PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
+    steps:
+      - name: Checkout private pipeline and candidate pool
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref }}
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /corpus_seed/
+            /fantasy_football_data_scripts/
+            /requirements.txt
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install probe dependencies
+        run: pip install -r code/requirements.txt
+      - name: Probe candidate IDs against MFL
+        env:
+          YEAR: ${{ matrix.year }}
+          CANDIDATE_PATH: code/${{ inputs.candidate_path }}
+        run: |
+          python3 - <<'PY'
+          import json, os, time
+          from multi_league.data_fetchers.mfl.mfl_api_client import MFLAPIClient, MFLAPIError, MFLAPIConfig
+          year = int(os.environ['YEAR'])
+          rows = json.load(open(os.environ['CANDIDATE_PATH'], encoding='utf-8'))['leagues']
+          candidates = [r for r in rows if int(r['season']) == year]
+          client = MFLAPIClient(MFLAPIConfig(rate_limit_per_min=12))
+          valid = []
+          for r in candidates:
+              lid = str(r['league_id'])
+              try:
+                  payload = client.fetch_league(lid, year)
+                  if payload and isinstance(payload, dict) and 'league' in payload:
+                      valid.append(r)
+                      print(f"[VALID] {year}:{lid}", flush=True)
+                  else:
+                      print(f"[INVALID] {year}:{lid} unexpected payload", flush=True)
+              except Exception as exc:
+                  print(f"[INVALID] {year}:{lid} {exc}", flush=True)
+          if len(valid) < 10:
+              raise SystemExit(f"{year} has only {len(valid)} valid candidates")
+          json.dump({'schema_version':'mfl_candidate_probe_v1','season':year,'valid_leagues':valid}, open(f'valid_{year}.json','w'), indent=2, sort_keys=True)
+          PY
+      - name: Upload valid candidate probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-valid-candidates-${{ matrix.year }}
+          retention-days: 30
+          path: valid_${{ matrix.year }}.json
+
