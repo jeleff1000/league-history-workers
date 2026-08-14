@@ -25,7 +25,25 @@ jobs:
           mkdir -p waves
           IFS=',' read -ra IDS <<< "$RUN_IDS"
           for id in "${IDS[@]}"; do
-            gh run download "$id" --repo "$GITHUB_REPOSITORY" --pattern 'mfl-register-*' --dir "waves/$id"
+            page=1
+            while :; do
+              payload=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts?per_page=100&page=$page")
+              count=$(jq '.artifacts | length' <<< "$payload")
+              while IFS=$'\t' read -r artifact_id artifact_name; do
+                [ -n "$artifact_id" ] || continue
+                case "$artifact_name" in
+                  mfl-register-*) ;;
+                  *) continue ;;
+                esac
+                dest="waves/$id/$artifact_id"
+                mkdir -p "$dest"
+                gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > "$dest/artifact.zip"
+                unzip -q "$dest/artifact.zip" -d "$dest"
+                rm -f "$dest/artifact.zip"
+              done < <(jq -r '.artifacts[] | [.id, .name] | @tsv' <<< "$payload")
+              [ "$count" -lt 100 ] && break
+              page=$((page + 1))
+            done
           done
       - name: Setup Python
         uses: actions/setup-python@v6
