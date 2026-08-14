@@ -1,0 +1,61 @@
+name: Research record raw signal readback in ledger
+
+on:
+  workflow_dispatch:
+    inputs:
+      readback_run_id:
+        description: Completed read-only raw-signal cache-readback run.
+        required: true
+        default: "31759193969"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: research-raw-signal-cache-readback-${{ inputs.readback_run_id }}
+          run-id: ${{ inputs.readback_run_id }}
+          path: input
+          github-token: ${{ github.token }}
+      - name: Refresh only selected artifact rows from immutable readback receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/refresh_artifact_cache_ledger.py \
+            --ledger docs/research_matchup_artifact_cache_ledger.csv \
+            --receipt input/final_artifact_cache_receipts.json \
+            --selected input/selected_artifacts.json \
+            --receipt-run-id '${{ inputs.readback_run_id }}' \
+            --team-profile input/raw_signal_join_key_profile.json \
+            --out docs/research_matchup_artifact_cache_ledger.csv
+      - name: Fail fast on invalid ledger evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONPATH=scripts/research_cohorts python scripts/research_cohorts/validate_artifact_cache_ledger.py \
+            --ledger docs/research_matchup_artifact_cache_ledger.csv > ledger_validation.json
+          cat ledger_validation.json
+      - name: Commit validated ledger receipt only
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- docs/research_matchup_artifact_cache_ledger.csv; then
+            echo 'No selected ledger rows changed.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/research_matchup_artifact_cache_ledger.csv
+          git commit -m 'research: record raw signal cache readback ${{ inputs.readback_run_id }}'
+          git push
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: research-raw-signal-ledger-record-${{ github.run_id }}
+          path: ledger_validation.json
