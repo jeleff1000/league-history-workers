@@ -175,7 +175,7 @@ jobs:
           if pf <= 0 or mu <= 0: errors.append(f'empty core rows player={pf} matchup={mu}')
           errors += [f'{k} has no populated values' for k,v in checks.items() if v <= 0]
           if errors: raise SystemExit('; '.join(errors))
-          receipt = {'schema_version':'mfl_register_receipt_v1','season':y,'league_id':lid,'seed':f'{y}:{lid}','db_name':dbn,'player_fantasy_rows':pf,'matchup_rows':mu,'populated_signals':checks,'schema_columns':schema,'source':'league-history-workers'}
+          receipt = {'schema_version':'mfl_register_receipt_v1','season':y,'league_id':lid,'seed':f'{y}:{lid}','db_name':dbn,'row_counts':{'player_fantasy':pf,'matchup':mu},'non_null_counts':checks,'player_fantasy_rows':pf,'matchup_rows':mu,'populated_signals':checks,'schema_columns':schema,'source':'league-history-workers'}
           open('receipt.json','w',encoding='utf-8').write(json.dumps(receipt,indent=2,sort_keys=True))
           PY
       - name: Upload validated season league
@@ -188,3 +188,75 @@ jobs:
             receipt.json
             import.log
 
+  combine:
+    needs: [prepare, ingest]
+    if: always() && needs.prepare.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Download all league artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mfl-register-*
+          path: receipts
+          merge-multiple: false
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install DuckDB
+        run: pip install duckdb
+      - name: Build canonical snapshot and final register
+        env:
+          EXPECTED: ${{ needs.prepare.outputs.records }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, duckdb
+          expected = json.loads(os.environ['EXPECTED'])
+          root = pathlib.Path('receipts')
+          receipts, dbs = [], []
+          for p in sorted(root.glob('mfl-register-*/receipt.json')):
+              receipts.append(json.loads(p.read_text(encoding='utf-8')))
+              dbs.append((p.parent / 'league.duckdb', receipts[-1]))
+          keys = {(int(r['season']), str(r['league_id'])) for r in expected}
+          got = {(int(r['season']), str(r['league_id'])) for r in receipts}
+          if got != keys: raise SystemExit(f'receipt set mismatch: expected {len(keys)}, got {len(got)}')
+          errors = []
+          from collections import Counter
+          counts = Counter(int(r['season']) for r in receipts)
+          for y in range(1993, 2026):
+              if counts[y] != 10: errors.append(f'{y} has {counts[y]} receipts')
+          required = {
+            'player_fantasy': {'db_name','year','week','NFL_player_id','is_started','is_rostered','fantasy_points','manager','win','champion','clutch_equity','final_playoff_seed','is_playoffs'},
+            'matchup': {'db_name','year','week','manager','team_points','win','loss','is_playoffs','final_playoff_seed','champion','is_championship'},
+          }
+          for r in receipts:
+              for t, cols in required.items():
+                  if not cols <= set(r.get('schema_columns',{}).get(t,[])): errors.append(f"{r['seed']} incomplete {t} schema")
+              if any(int(v or 0) <= 0 for v in r.get('non_null_counts',{}).values()): errors.append(f"{r['seed']} has empty required signal")
+          if errors: raise SystemExit('; '.join(errors[:25]))
+          out = duckdb.connect('mfl_register_snapshot.duckdb')
+          for db_path, r in dbs:
+              alias = 'src'
+              out.execute(f"ATTACH '{db_path.as_posix()}' AS {alias} (READ_ONLY)")
+              y = int(r['season'])
+              for table in ('league_settings','matchup','player_fantasy'):
+                  if not out.execute("select count(*) from information_schema.tables where table_catalog='src' and table_schema='public' and table_name=?",[table]).fetchone()[0]:
+                      continue
+                  if not out.execute("select count(*) from information_schema.tables where table_schema='main' and table_name=?",[table]).fetchone()[0]:
+                      out.execute(f'create table "{table}" as select * from src.public."{table}" where year={y}')
+                  else:
+                      out.execute(f'insert into "{table}" select * from src.public."{table}" where year={y}')
+              out.execute('DETACH src')
+          out.close()
+          pathlib.Path('mfl_register_all_runs.json').write_text(json.dumps({'schema_version':'mfl_register_results_v1','start_year':1993,'end_year':2025,'per_year':10,'league_count':len(receipts),'leagues':sorted(receipts,key=lambda x:(int(x['season']),str(x['league_id'])))},indent=2,sort_keys=True),encoding='utf-8')
+          print(f'validated {len(receipts)} leagues; wrote canonical snapshot')
+          PY
+      - name: Upload final register and canonical snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-register-final-${{ github.run_id }}
+          retention-days: 90
+          path: |
+            mfl_register_all_runs.json
+            mfl_register_snapshot.duckdb
