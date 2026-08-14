@@ -47,6 +47,7 @@ jobs:
               raise SystemExit(f'expected exactly one join-key profile, found {len(profile_files)}')
           profile = json.loads(profile_files[0].read_text())
           profile_rows = profile.get('rows', []) if isinstance(profile, dict) else profile
+          profile_examples = profile.get('identity_examples', []) if isinstance(profile, dict) else []
           report = {
               'summary': receipt['summary'],
               'selected_artifacts': selected,
@@ -54,9 +55,12 @@ jobs:
                   row for row in receipt['rows']
                   if str(row.get('artifact_id', '')) in selected_ids
               ],
-              'selected_identity_profile': [
-                  row for row in profile_rows if str(row.get('artifact_id', '')) in selected_ids
-              ],
+            'selected_identity_profile': [
+                row for row in profile_rows if str(row.get('artifact_id', '')) in selected_ids
+            ],
+            'selected_identity_examples': [
+                row for row in profile_examples if str(row.get('artifact_id', '')) in selected_ids
+            ],
           }
           Path('research_raw_signal_readback_summary.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
           print(json.dumps(report, sort_keys=True))
