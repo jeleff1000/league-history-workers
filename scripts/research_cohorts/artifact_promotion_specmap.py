@@ -13,6 +13,7 @@ from typing import Iterable
 
 PLAYER_KEY = ("db_name", "year", "week", "NFL_player_id")
 TEAM_KEY = ("db_name", "year", "week", "team_key")
+MANAGER_TEAM_KEY = ("db_name", "year", "week", "manager")
 LEAGUE_YEAR_KEY = ("db_name", "year")
 
 PLAYER_COLUMNS = (
@@ -89,6 +90,17 @@ def classify_source_schema(columns: Iterable[str]) -> PromotionContract:
             grain="team_week",
             source_key=TEAM_KEY,
             cache_key=TEAM_KEY,
+            allowed_target_columns=_present(present, TEAM_SIGNAL_COLUMNS),
+        )
+
+    # Manager is the valid alternate fantasy-team identity.  It fans a single
+    # team-week signal to the cache's player rows for that manager/week; it is
+    # not a player identity and therefore never authorizes row insertion.
+    if set(MANAGER_TEAM_KEY) <= present:
+        return PromotionContract(
+            grain="team_week_manager",
+            source_key=MANAGER_TEAM_KEY,
+            cache_key=MANAGER_TEAM_KEY,
             allowed_target_columns=_present(present, TEAM_SIGNAL_COLUMNS),
         )
 
