@@ -67,16 +67,24 @@ jobs:
               lid = str(r['league_id'])
               try:
                   payload = client.fetch_league(lid, year)
-                  if payload and isinstance(payload, dict):
+                  schedule = client.fetch_schedule(lid, year)
+                  weeks = (schedule or {}).get('weeklySchedule', [])
+                  if isinstance(weeks, dict):
+                      weeks = [weeks]
+                  has_matchups = any(
+                      isinstance(w, dict) and w.get('matchup')
+                      for w in weeks
+                  )
+                  if payload and isinstance(payload, dict) and has_matchups:
                       valid.append(r)
-                      print(f"[VALID] {year}:{lid}", flush=True)
+                      print(f"[VALID-SCHEDULED] {year}:{lid}", flush=True)
                   else:
-                      print(f"[INVALID] {year}:{lid} unexpected payload", flush=True)
+                      print(f"[INVALID] {year}:{lid} no defined fantasy schedule", flush=True)
               except Exception as exc:
                   print(f"[INVALID] {year}:{lid} {exc}", flush=True)
           if len(valid) < 10:
               raise SystemExit(f"{year} has only {len(valid)} valid candidates")
-          json.dump({'schema_version':'mfl_candidate_probe_v1','season':year,'valid_leagues':valid}, open(f'valid_{year}.json','w'), indent=2, sort_keys=True)
+          json.dump({'schema_version':'mfl_candidate_probe_v2_scheduled','season':year,'valid_leagues':valid}, open(f'valid_{year}.json','w'), indent=2, sort_keys=True)
           PY
       - name: Upload valid candidate probe
         uses: actions/upload-artifact@v4
