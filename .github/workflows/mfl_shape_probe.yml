@@ -52,6 +52,10 @@ jobs:
           y=int(os.environ['SEASON']); lid=os.environ['LEAGUE_ID']; c=MFLAPIClient(MFLAPIConfig(rate_limit_per_min=5,http_max_retries=0))
           league=c.fetch_league(lid,y) or {}
           out={'season':y,'league_id':lid,'league_keys':sorted(league),'league_sample':league}
+          try:
+              schedule=c._get(y,'schedule',{'L':lid},raise_on_error_payload=True) or {}
+              out['schedule_sample']=schedule
+          except Exception as e: out['schedule_error']=str(e)
           for w in range(1,18):
               try:
                   p=c.fetch_weekly_results(lid,y,w) or {}
