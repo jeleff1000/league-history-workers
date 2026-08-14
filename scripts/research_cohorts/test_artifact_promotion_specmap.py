@@ -26,9 +26,19 @@ def test_team_week_schema_fans_signals_out_by_team_key_not_player_identity():
     assert contract.source_key == ("db_name", "year", "week", "team_key")
     assert contract.cache_key == ("db_name", "year", "week", "team_key")
     assert contract.allowed_target_columns == (
-        "win", "loss", "tie", "team_points", "is_playoffs", "champion",
+        "win", "loss", "tie", "team_points", "is_playoffs",
     )
+    assert contract.quarantined_source_columns == ("champion",)
     assert contract.may_insert_missing_player_rows is False
+
+
+def test_team_champion_is_writable_only_with_explicit_championship_week_evidence():
+    contract = classify_source_schema({
+        "db_name", "year", "week", "team_key", "is_championship", "champion",
+    })
+
+    assert contract.allowed_target_columns == ("champion",)
+    assert contract.quarantined_source_columns == ()
 
 
 def test_team_week_schema_uses_manager_when_team_key_is_not_available():

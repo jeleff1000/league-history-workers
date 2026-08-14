@@ -22,7 +22,7 @@ PLAYER_COLUMNS = (
     "final_playoff_seed", "made_playoffs", "has_po_signal",
 )
 TEAM_SIGNAL_COLUMNS = (
-    "win", "loss", "tie", "team_points", "is_playoffs", "champion",
+    "win", "loss", "tie", "team_points", "is_playoffs",
     "final_playoff_seed", "made_playoffs", "has_po_signal",
 )
 # Source setting names deliberately differ from canonical cache columns.  These
@@ -49,6 +49,7 @@ class PromotionContract:
     allowed_target_columns: tuple[str, ...]
     may_insert_missing_player_rows: bool = False
     terminal_reason: str = ""
+    quarantined_source_columns: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,26 @@ class BoundPromotionContract:
 
 def _present(columns: set[str], ordered: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(column for column in ordered if column in columns)
+
+
+def _team_signal_contract(
+    *, grain: str, source_key: tuple[str, ...], columns: set[str],
+) -> PromotionContract:
+    """Admit team signals while protecting player championship-start credit."""
+    allowed = list(_present(columns, TEAM_SIGNAL_COLUMNS))
+    quarantined: tuple[str, ...] = ()
+    if "champion" in columns:
+        if "is_championship" in columns:
+            allowed.append("champion")
+        else:
+            quarantined = ("champion",)
+    return PromotionContract(
+        grain=grain,
+        source_key=source_key,
+        cache_key=source_key,
+        allowed_target_columns=tuple(allowed),
+        quarantined_source_columns=quarantined,
+    )
 
 
 def classify_source_schema(columns: Iterable[str]) -> PromotionContract:
@@ -86,22 +107,16 @@ def classify_source_schema(columns: Iterable[str]) -> PromotionContract:
         )
 
     if set(TEAM_KEY) <= present:
-        return PromotionContract(
-            grain="team_week",
-            source_key=TEAM_KEY,
-            cache_key=TEAM_KEY,
-            allowed_target_columns=_present(present, TEAM_SIGNAL_COLUMNS),
+        return _team_signal_contract(
+            grain="team_week", source_key=TEAM_KEY, columns=present,
         )
 
     # Manager is the valid alternate fantasy-team identity.  It fans a single
     # team-week signal to the cache's player rows for that manager/week; it is
     # not a player identity and therefore never authorizes row insertion.
     if set(MANAGER_TEAM_KEY) <= present:
-        return PromotionContract(
-            grain="team_week_manager",
-            source_key=MANAGER_TEAM_KEY,
-            cache_key=MANAGER_TEAM_KEY,
-            allowed_target_columns=_present(present, TEAM_SIGNAL_COLUMNS),
+        return _team_signal_contract(
+            grain="team_week_manager", source_key=MANAGER_TEAM_KEY, columns=present,
         )
 
     if set(LEAGUE_YEAR_KEY) <= present and any(
