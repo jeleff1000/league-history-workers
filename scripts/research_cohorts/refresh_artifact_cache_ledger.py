@@ -92,11 +92,14 @@ def refresh(
                 continue
             receipt_rows[artifact_id] = row
     team_profile_rows: dict[int, dict] = {}
+    team_profile_reasons: dict[int, list[dict]] = {}
     if team_profile_path is not None:
         profile = json.loads(team_profile_path.read_text(encoding="utf-8"))
         team_profile_rows = {
             int(row["artifact_id"]): row for row in profile.get("rows", [])
         }
+        for reason in profile.get("unresolved_identity_reasons", []):
+            team_profile_reasons.setdefault(int(reason["artifact_id"]), []).append(reason)
     if not selected_ids <= set(receipt_rows):
         raise SystemExit("selected artifact is absent from receipt")
     digest = hashlib.sha256(receipt_path.read_bytes()).hexdigest()
@@ -359,12 +362,29 @@ def refresh(
         row["final_reason"] = str(evidence["final_reason"])
         row["next_action"] = _next_action(evidence)
         profile = team_profile_rows.get(artifact_id)
+        reason_rows = team_profile_reasons.get(artifact_id, [])
+        reason_counts = {
+            str(reason["reason"]): int(reason.get("source_team_keys", 0) or 0)
+            for reason in reason_rows
+        }
+        no_recipient = int(reason_counts.get("source_manager_has_no_canonical_player_recipient", 0))
+        no_player_rows = int(reason_counts.get("no_canonical_player_rows_in_league_week", 0))
+        source_only_keys = no_recipient + no_player_rows
+        if source_only_keys and int(evidence.get("cache_conflict_cells", 0) or 0) == 0:
+            row["final_status"] = "source_only_team_signal_missing_player_team_bridge"
+            row["final_reason"] = (
+                f"{no_recipient:,} source team-weeks have a source manager but no canonical player recipient; "
+                f"{no_player_rows:,} source team-weeks have no canonical player rows at all. "
+                "The team signal is retained, but an exact roster-level player bridge is required before it "
+                "can update player-level values."
+            )
+            row["next_action"] = "locate_player_team_roster_bridge_then_exact_player_upsert"
         if profile is not None:
             overlap = int(profile.get("league_week_overlap_keys", 0) or 0)
             matched = int(profile.get("matched_source_team_keys", 0) or 0)
             source_keys = int(profile.get("source_team_keys", 0) or 0)
             absent = int(profile.get("league_week_absent_keys", 0) or 0)
-            if overlap > 0 and matched == 0:
+            if overlap > 0 and matched == 0 and not source_only_keys:
                 row["final_status"] = "source_only_team_signal_missing_player_team_bridge"
                 row["final_reason"] = (
                     f"Raw team signals cover {source_keys} team-weeks; {overlap} overlapping cache "

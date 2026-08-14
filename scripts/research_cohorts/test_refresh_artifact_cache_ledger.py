@@ -207,6 +207,55 @@ def test_refresh_records_team_signal_without_promoting_team_champion_markers(tmp
     assert "Team-level championship flags" in row["final_reason"]
 
 
+def test_refresh_records_specific_source_only_recipient_gap(tmp_path):
+    """Partial team fanout must preserve the count and cause of missing recipients."""
+    ledger = tmp_path / "ledger.csv"
+    with ledger.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=FIELDS)
+        writer.writeheader()
+        writer.writerow(_ledger_row())
+    selected = tmp_path / "selected.json"
+    selected.write_text(json.dumps([{"artifact_id": 7}]))
+    receipt = tmp_path / "receipt.json"
+    receipt.write_text(json.dumps({"rows": [{
+        "artifact_id": 7,
+        "source_cells": 12,
+        "cache_match_cells": 9,
+        "cache_missing_cells": 0,
+        "cache_conflict_cells": 0,
+        "unmatched_cache_cells": 3,
+        "blocked_schema_cells": 0,
+        "final_status": "unmatched_cache_key",
+        "final_reason": "source candidate has no matching current canonical row",
+    }]}))
+    team_profile = tmp_path / "team_profile.json"
+    team_profile.write_text(json.dumps({
+        "rows": [{
+            "artifact_id": 7,
+            "source_team_keys": 4,
+            "league_week_overlap_keys": 4,
+            "league_week_absent_keys": 0,
+            "matched_source_team_keys": 1,
+        }],
+        "unresolved_identity_reasons": [{
+            "artifact_id": 7,
+            "reason": "source_manager_has_no_canonical_player_recipient",
+            "source_team_keys": 3,
+            "source_team_rows": 3,
+        }],
+    }))
+    out = tmp_path / "out.csv"
+
+    assert refresh(
+        ledger_path=ledger, receipt_path=receipt, selected_path=selected,
+        receipt_run_id="recipient-gap", team_profile_path=team_profile, out_path=out,
+    ) == {"ledger_rows": 1, "updated_rows": 1}
+    row = next(csv.DictReader(out.open(newline="", encoding="utf-8")))
+    assert row["final_status"] == "source_only_team_signal_missing_player_team_bridge"
+    assert "3 source team-weeks have a source manager but no canonical player recipient" in row["final_reason"]
+    assert row["next_action"] == "locate_player_team_roster_bridge_then_exact_player_upsert"
+
+
 def test_refresh_rederives_admission_gates_after_combined_team_readback(tmp_path):
     """Fresh receipt values, not stale historical gates, control the next action."""
     ledger = tmp_path / "ledger.csv"
