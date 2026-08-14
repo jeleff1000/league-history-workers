@@ -28,6 +28,8 @@ on:
       - scripts/research_cohorts/test_artifact_candidate_comparison_contract.py
       - scripts/research_cohorts/compare_artifact_candidate_cells.py
       - scripts/research_cohorts/test_compare_artifact_candidate_cells.py
+      - scripts/research_cohorts/stage_candidate_comparison_ledger.py
+      - scripts/research_cohorts/test_stage_candidate_comparison_ledger.py
       - .github/workflows/research_materialize_artifact_candidate_cells.yml
       - scripts/research_cohorts/validate_mfl_batch_admission_manifest.py
       - tests/research_cohorts/test_validate_mfl_batch_admission_manifest.py
@@ -56,6 +58,7 @@ jobs:
           scripts/research_cohorts/test_materialize_artifact_candidate_cells.py
           scripts/research_cohorts/test_artifact_candidate_comparison_contract.py
           scripts/research_cohorts/test_compare_artifact_candidate_cells.py
+          scripts/research_cohorts/test_stage_candidate_comparison_ledger.py
           tests/research_cohorts/test_validate_mfl_batch_admission_manifest.py
       - name: Fail fast on invalid ledger evidence
         run: >-
