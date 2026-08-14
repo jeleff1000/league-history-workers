@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       wave_run_ids:
-        description: 'Comma-separated completed MFL campaign run IDs (wave 0, wave 165)'
+        description: 'Comma-separated MFL campaign run IDs; raw league artifacts are unioned across original and repair runs'
         required: true
         type: string
 
@@ -25,7 +25,7 @@ jobs:
           mkdir -p waves
           IFS=',' read -ra IDS <<< "$RUN_IDS"
           for id in "${IDS[@]}"; do
-            gh run download "$id" --repo "$GITHUB_REPOSITORY" --pattern 'mfl-register-final-*' --dir "waves/$id"
+            gh run download "$id" --repo "$GITHUB_REPOSITORY" --pattern 'mfl-register-*' --dir "waves/$id"
           done
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -38,9 +38,8 @@ jobs:
           python3 - <<'PY'
           import json, pathlib, duckdb
           root = pathlib.Path('waves')
-          regs = [json.loads(p.read_text(encoding='utf-8')) for p in root.rglob('mfl_register_all_runs.json')]
-          if len(regs) != 2: raise SystemExit(f'expected two wave registers, found {len(regs)}')
-          rows = [r for d in regs for r in d['leagues']]
+          receipt_paths = sorted(root.rglob('receipt.json'))
+          rows = [json.loads(p.read_text(encoding='utf-8')) for p in receipt_paths]
           keys = {(int(r['season']), str(r['league_id'])) for r in rows}
           if len(rows) != 330 or len(keys) != 330: raise SystemExit(f'expected 330 unique rows, got {len(rows)} rows/{len(keys)} keys')
           from collections import Counter
@@ -51,13 +50,25 @@ jobs:
               if r['seed'] != f"{r['season']}:{r['league_id']}": raise SystemExit(f"YEAR:ID mismatch: {r['seed']}")
               if any(int(v or 0) <= 0 for v in r.get('non_null_counts',{}).values()): raise SystemExit(f"empty signal: {r['seed']}")
           out = duckdb.connect('mfl_register_snapshot.duckdb')
-          for src_path in sorted(root.rglob('mfl_register_snapshot.duckdb')):
+          seen_keys = set()
+          for src_path in sorted(root.rglob('league.duckdb')):
+              # A repair run may contain an artifact for a key already present in
+              # an original run. The receipt set is the authority; duplicate raw
+              # artifacts are ignored rather than double-inserting rows.
+              receipt_path = src_path.parent / 'receipt.json'
+              if not receipt_path.exists(): continue
+              receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
+              key = (int(receipt['season']), str(receipt['league_id']))
+              if key not in keys: continue
+              if key in seen_keys: continue
+              seen_keys.add(key)
               out.execute(f"ATTACH '{src_path.as_posix()}' AS src (READ_ONLY)")
               for t in ('league_settings','matchup','player_fantasy'):
                   if not out.execute("select count(*) from information_schema.tables where table_catalog='src' and table_schema='main' and table_name=?",[t]).fetchone()[0]: continue
                   if not out.execute("select count(*) from information_schema.tables where table_schema='main' and table_name=?",[t]).fetchone()[0]: out.execute(f'create table "{t}" as select * from src.main."{t}"')
                   else: out.execute(f'insert into "{t}" select * from src.main."{t}"')
               out.execute('detach src')
+          if len(seen_keys) != 330: raise SystemExit(f'expected 330 source databases, found {len(seen_keys)}')
           out.close()
           pathlib.Path('mfl_register_all_runs.json').write_text(json.dumps({'schema_version':'mfl_register_results_v1','start_year':1993,'end_year':2025,'per_year':10,'league_count':330,'leagues':sorted(rows,key=lambda r:(int(r['season']),str(r['league_id'])))},indent=2,sort_keys=True),encoding='utf-8')
           print('validated and merged 330 MFL season-league results')
