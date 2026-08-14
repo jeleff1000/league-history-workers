@@ -238,7 +238,7 @@ jobs:
             'opponent_points','is_playoffs','is_consolation','is_championship',
             'champion','clutch_equity',
           }
-          matchup_scoped = {'win','loss','tie','opponent','opponent_franchise_id','opponent_points'}
+          matchup_scoped = {'win','loss','tie','opponent','opponent_franchise_id','team_points','opponent_points','is_playoffs','is_consolation','is_championship','champion'}
           schema = {t: sorted(cols(t)) for t in req}
           missing_cols = {t: sorted(v-cols(t)) for t,v in req.items() if v-cols(t)}
           def n(sql): return int(c.execute(sql).fetchone()[0])
