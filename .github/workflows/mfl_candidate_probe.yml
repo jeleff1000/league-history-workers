@@ -67,7 +67,7 @@ jobs:
               lid = str(r['league_id'])
               try:
                   payload = client.fetch_league(lid, year)
-                  if payload and isinstance(payload, dict) and 'league' in payload:
+                  if payload and isinstance(payload, dict):
                       valid.append(r)
                       print(f"[VALID] {year}:{lid}", flush=True)
                   else:
@@ -84,4 +84,3 @@ jobs:
           name: mfl-valid-candidates-${{ matrix.year }}
           retention-days: 30
           path: valid_${{ matrix.year }}.json
-
