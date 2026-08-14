@@ -356,6 +356,7 @@ jobs:
           EXPECTED: ${{ needs.prepare.outputs.records }}
           INDEX_START: ${{ inputs.index_start }}
           INDEX_END: ${{ inputs.index_end }}
+          ALLOW_PARTIAL: ${{ inputs.continue_population }}
           PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
         run: |
           python3 - <<'PY'
@@ -368,11 +369,18 @@ jobs:
               dbs.append((p.parent / 'league.duckdb', receipts[-1]))
           keys = {(int(r['season']), str(r['league_id'])) for r in expected}
           got = {(int(r['season']), str(r['league_id'])) for r in receipts}
-          if got != keys: raise SystemExit(f'receipt set mismatch: expected {len(keys)}, got {len(got)}')
+          allow_partial = os.environ.get('ALLOW_PARTIAL','false').lower() == 'true'
+          if not allow_partial and got != keys:
+              raise SystemExit(f'receipt set mismatch: expected {len(keys)}, got {len(got)}')
+          if allow_partial and not got:
+              raise SystemExit(f'population shard produced no valid receipts out of {len(keys)} candidates')
+          rejected = sorted(keys - got)
+          if rejected:
+              print(f'population shard rejected {len(rejected)} candidates')
           errors = []
           from collections import Counter
           counts = Counter(int(r['season']) for r in receipts)
-          wanted = Counter(int(r['season']) for r in expected)
+          wanted = Counter(int(r['season']) for r in (expected if not allow_partial else receipts))
           for y, n in wanted.items():
               if counts[y] != n: errors.append(f'{y} has {counts[y]} receipts, expected {n}')
           from multi_league.core.canonical_player import PLAYER_FANTASY_COLUMNS
@@ -402,7 +410,7 @@ jobs:
                       out.execute(f'insert into "{table}" select * from src.public."{table}" where year={y}')
               out.execute('DETACH src')
           out.close()
-          pathlib.Path('mfl_register_all_runs.json').write_text(json.dumps({'schema_version':'mfl_register_results_v1','start_year':1993,'end_year':2025,'per_year':10,'league_count':len(receipts),'leagues':sorted(receipts,key=lambda x:(int(x['season']),str(x['league_id'])))},indent=2,sort_keys=True),encoding='utf-8')
+          pathlib.Path('mfl_register_all_runs.json').write_text(json.dumps({'schema_version':'mfl_register_results_v1','start_year':min((int(r['season']) for r in receipts), default=None),'end_year':max((int(r['season']) for r in receipts), default=None),'expected_count':len(expected),'league_count':len(receipts),'rejected_count':len(rejected),'rejected': [{'season': y, 'league_id': lid} for y,lid in rejected],'leagues':sorted(receipts,key=lambda x:(int(x['season']),str(x['league_id'])))},indent=2,sort_keys=True),encoding='utf-8')
           print(f'validated {len(receipts)} leagues; wrote canonical snapshot')
           PY
       - name: Upload final register and canonical snapshot
