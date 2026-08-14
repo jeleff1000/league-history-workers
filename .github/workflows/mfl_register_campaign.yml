@@ -286,6 +286,16 @@ jobs:
           pattern: mfl-register-*
           path: receipts
           merge-multiple: false
+      - name: Checkout canonical schema
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref }}
+          path: code
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /fantasy_football_data_scripts/multi_league/core/canonical_player.py
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
@@ -297,6 +307,7 @@ jobs:
           EXPECTED: ${{ needs.prepare.outputs.records }}
           INDEX_START: ${{ inputs.index_start }}
           INDEX_END: ${{ inputs.index_end }}
+          PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
         run: |
           python3 - <<'PY'
           import json, os, pathlib, duckdb
