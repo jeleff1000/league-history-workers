@@ -1,0 +1,75 @@
+name: Research summarize open artifact queue
+
+on:
+  workflow_dispatch:
+    inputs:
+      queue_run_id:
+        description: Completed ledger-validator run that emitted the queue artifact.
+        required: true
+        default: "31758784712"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  summarize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: research-matchup-open-artifact-queue-${{ inputs.queue_run_id }}
+          run-id: ${{ inputs.queue_run_id }}
+          path: input
+          github-token: ${{ github.token }}
+      - name: Classify exact next actions without touching cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          queue = json.loads(Path('input/research_matchup_open_artifact_queue.json').read_text())
+          def action(batch):
+              if batch['cache_missing_cells'] or batch['candidate_delta_rows']:
+                  return 'read_only_candidate_then_same_key_null_fill'
+              if batch['cache_conflict_cells']:
+                  return 'field_level_source_precedence_adjudication'
+              if batch['unmatched_cache_cells']:
+                  return 'deterministic_recipient_bridge_or_terminal_source_only_reason'
+              if batch['blocked_schema_cells']:
+                  return 'schema_contract_review_no_implicit_schema_change'
+              return 'inspect_artifact_receipt_and_refresh_ledger'
+
+          batches = []
+          for batch in queue['batches']:
+              item = dict(batch)
+              item['next_action'] = action(item)
+              batches.append(item)
+          priority = {
+              'read_only_candidate_then_same_key_null_fill': 0,
+              'field_level_source_precedence_adjudication': 1,
+              'deterministic_recipient_bridge_or_terminal_source_only_reason': 2,
+              'schema_contract_review_no_implicit_schema_change': 3,
+              'inspect_artifact_receipt_and_refresh_ledger': 4,
+          }
+          batches.sort(key=lambda b: (priority[b['next_action']], -b['candidate_delta_rows'], -b['cache_missing_cells'], b['workflow_run_id'], b['artifact']))
+          report = {
+              'queue_run_id': '${{ inputs.queue_run_id }}',
+              'raw_open_artifacts': queue['raw_open_artifacts'],
+              'by_status': queue['by_status'],
+              'batches': batches,
+          }
+          Path('research_matchup_open_artifact_action_plan.json').write_text(json.dumps(report, indent=2, sort_keys=True) + '\n')
+          print(json.dumps({
+              'raw_open_artifacts': report['raw_open_artifacts'],
+              'by_status': report['by_status'],
+              'batch_count': len(batches),
+              'next_batches': batches[:10],
+          }, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-matchup-open-artifact-action-plan-${{ github.run_id }}
+          path: research_matchup_open_artifact_action_plan.json
