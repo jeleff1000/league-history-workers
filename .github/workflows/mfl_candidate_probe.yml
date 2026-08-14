@@ -95,6 +95,11 @@ jobs:
                   # before admitting a candidate to the full-register manifest.
                   client.prefetch_weekly_results_ytd(lid, year)
                   weekly_blocks = []
+                  last_regular_week = None
+                  try:
+                      last_regular_week = int(payload.get('lastRegularSeasonWeek'))
+                  except (TypeError, ValueError):
+                      pass
                   for w in weeks:
                       if not isinstance(w, dict):
                           continue
@@ -123,8 +128,17 @@ jobs:
                                   isinstance(side, dict) and side.get('player')
                                   for side in sides
                               )
-                          if str(matchup.get('regularSeason')).strip() == '0':
+                          if str(matchup.get('regularSeason')).strip() == '0' or (
+                              last_regular_week is not None and week > last_regular_week
+                          ):
                               has_playoff = True
+                      flat = weekly.get('franchise') or []
+                      if isinstance(flat, dict):
+                          flat = [flat]
+                      has_players = has_players or any(
+                          isinstance(franchise, dict) and franchise.get('player')
+                          for franchise in flat
+                      )
                   if payload and isinstance(payload, dict) and has_matchups and has_pair and has_players and has_playoff:
                       valid.append(r)
                       print(f"[VALID-YTD-H2H-PLAYOFF] {year}:{lid}", flush=True)
