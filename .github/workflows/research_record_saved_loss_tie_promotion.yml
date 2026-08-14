@@ -1,0 +1,122 @@
+name: Record verified loss-tie cache promotion in ledger
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: research-artifact-ledger
+  cancel-in-progress: false
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+  VERIFICATION_RUN: '31757046992'
+  PROMOTION_RUN: '31756570462'
+  CANDIDATE_RUN: '31754614343'
+  EXPECTED_MATCHED_ROWS: '13986'
+  EXPECTED_UNIQUE_KEYS: '7955'
+  ARTIFACT_LABEL: cache_recovery_31756570462_sleeper_loss_tie_null_id_team_fanout
+
+jobs:
+  record:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Download independently verified readback receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir evidence
+          gh run download "$VERIFICATION_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "saved-loss-tie-promotion-readback-$VERIFICATION_RUN" --dir evidence
+          test "$(find evidence -name saved_loss_tie_promotion_readback.json | wc -l)" -eq 1
+      - name: Normalize and fail-close the ledger receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+
+          source=json.loads(next(Path('evidence').rglob('saved_loss_tie_promotion_readback.json')).read_text())
+          expected_rows=int(os.environ['EXPECTED_MATCHED_ROWS'])
+          expected_keys=int(os.environ['EXPECTED_UNIQUE_KEYS'])
+          required_true=('fresh_restore','schema_unchanged','player_rows_unchanged','ops_unchanged')
+          failed=[key for key in required_true if source.get(key) is not True]
+          if source.get('new_lineage') is not False:
+              failed.append('new_lineage')
+          expected={
+              'promotion_run':os.environ['PROMOTION_RUN'],
+              'candidate_unique_keys':expected_keys,
+              'matched_player_rows':expected_rows,
+              'unmatched_candidate_keys':0,
+              'loss_remaining_null_source_cells':0,
+              'tie_remaining_null_source_cells':0,
+              'loss_source_value_mismatches':0,
+              'tie_source_value_mismatches':0,
+          }
+          for key, value in expected.items():
+              if source.get(key) != value:
+                  failed.append(f'{key}={source.get(key)!r}')
+          if failed:
+              raise SystemExit(json.dumps({'bad_readback':failed,'source':source},sort_keys=True))
+          receipt={
+              **source,
+              'canonical_cache_key':os.environ['CANONICAL_CACHE_KEY'],
+              'candidate_run_id':os.environ['CANDIDATE_RUN'],
+              'source_artifact_id':'research-raw-signal-cache-readback-'+os.environ['CANDIDATE_RUN'],
+              'candidate_artifacts':51,
+              'candidate_rows':expected_rows,
+              'candidate_fields':['loss','tie'],
+              'remaining_source_backed_nulls':{'loss':0,'tie':0},
+              'source_value_disagreements':{'loss':0,'tie':0},
+              'promotion_disposition':'exact_existing_player_null_fill',
+              'identity_bridge_status':'exact_existing_player_team_week_fanout_with_null_safe_nfl_player_id',
+              'cache_join_strategy':'db_name|year|week|NFL_player_id_is_not_distinct_from|platform|manager|team_key/team_name',
+          }
+          Path('ledger_receipt.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Append one verified receipt and validate the complete ledger
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/research_cohorts/append_cache_recovery_receipt.py \
+            --ledger docs/research_matchup_artifact_cache_ledger.csv \
+            --readback ledger_receipt.json \
+            --out docs/research_matchup_artifact_cache_ledger.next.csv \
+            --receipt-run-id "$VERIFICATION_RUN" \
+            --artifact-label "$ARTIFACT_LABEL" \
+            --source-artifact "research-raw-signal-cache-readback-$CANDIDATE_RUN"
+          mv docs/research_matchup_artifact_cache_ledger.next.csv docs/research_matchup_artifact_cache_ledger.csv
+          python scripts/research_cohorts/validate_artifact_cache_ledger.py \
+            --ledger docs/research_matchup_artifact_cache_ledger.csv \
+            --out ledger_validation.json
+      - name: Commit only validated ledger evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/research_matchup_artifact_cache_ledger.csv
+          git diff --cached --quiet && { echo 'no ledger change'; exit 1; }
+          git commit -m 'research: record verified Sleeper loss tie cache promotion'
+          git push origin HEAD:main
+      - uses: actions/upload-artifact@v4
+        with:
+          name: saved-loss-tie-ledger-receipt-${{ github.run_id }}
+          path: |
+            ledger_receipt.json
+            ledger_validation.json
+          retention-days: 90
