@@ -38,6 +38,36 @@ on:
         required: false
         type: string
         default: mfl-population-batch-v1
+      continue_population:
+        description: 'Dispatch the next batch wave after a successful combine'
+        required: false
+        type: string
+        default: 'false'
+      population_total:
+        description: 'Total candidate rows in the manifest'
+        required: false
+        type: string
+        default: '0'
+      accepted_by_year:
+        description: 'Cumulative accepted receipts from previous waves'
+        required: false
+        type: string
+        default: '{}'
+      target_per_year:
+        description: 'Accepted target per required year'
+        required: false
+        type: string
+        default: '10000'
+      target_years:
+        description: 'Comma-separated required years'
+        required: false
+        type: string
+        default: '2005,2006,2007,2008,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018'
+      mfl_rate_limit:
+        description: 'Per-runner MFL requests/minute; keep aggregate below MFL throttle'
+        required: false
+        type: string
+        default: '6'
 
 permissions:
   actions: write
@@ -95,7 +125,7 @@ jobs:
         batch: ${{ fromJSON(needs.prepare.outputs.batches) }}
     env:
       CORPUS_MODE: '1'
-      MFL_RATE_LIMIT_PER_MIN: '12'
+      MFL_RATE_LIMIT_PER_MIN: ${{ inputs.mfl_rate_limit }}
       PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
       OPS_CACHE_PATH: ${{ github.workspace }}/corpus_dependencies/ops_cache.duckdb
       DRAFT_GLOBAL_SOURCE_PATH: ${{ github.workspace }}/corpus_dependencies/draft_global_source.parquet
@@ -193,6 +223,9 @@ jobs:
       - name: Build canonical batch snapshot
         env:
           EXPECTED: ${{ needs.prepare.outputs.records }}
+          ACCEPTED_BY_YEAR: ${{ inputs.accepted_by_year }}
+          TARGET_PER_YEAR: ${{ inputs.target_per_year }}
+          TARGET_YEARS: ${{ inputs.target_years }}
           PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
         run: |
           python3 - <<'PY'
@@ -206,6 +239,12 @@ jobs:
           got={(int(r['season']),str(r['league_id'])) for r in receipts}
           if not got: raise SystemExit('batch wave produced no valid receipts')
           print(f'validated {len(got)}/{len(keys)} candidates; rejected {len(keys-got)}')
+          prior={str(k):int(v) for k,v in json.loads(os.environ.get('ACCEPTED_BY_YEAR','{}') or '{}').items()}
+          for year,count in __import__('collections').Counter(int(r['season']) for r in receipts).items():
+              prior[str(year)]=prior.get(str(year),0)+count
+          target=int(os.environ.get('TARGET_PER_YEAR','10000'))
+          target_years=[y.strip() for y in os.environ.get('TARGET_YEARS','').split(',') if y.strip()]
+          complete_targets=bool(target_years) and all(prior.get(y,0)>=target for y in target_years)
           out=duckdb.connect('mfl_register_snapshot.duckdb')
           for db,r in pairs:
               out.execute(f"ATTACH '{db.as_posix()}' AS src (READ_ONLY)")
@@ -216,7 +255,7 @@ jobs:
                   else: out.execute(f'insert into "{table}" select * from src.public."{table}" where year={int(r["season"])}')
               out.execute('DETACH src')
           out.close()
-          pathlib.Path('mfl_register_all_runs.json').write_text(json.dumps({'schema_version':'mfl_register_results_v1','expected_count':len(keys),'league_count':len(receipts),'rejected_count':len(keys-got),'rejected':[{'season':y,'league_id':lid} for y,lid in sorted(keys-got)],'leagues':sorted(receipts,key=lambda r:(int(r['season']),str(r['league_id'])))},indent=2,sort_keys=True),encoding='utf-8')
+          pathlib.Path('mfl_register_all_runs.json').write_text(json.dumps({'schema_version':'mfl_register_results_v1','expected_count':len(keys),'league_count':len(receipts),'rejected_count':len(keys-got),'rejected':[{'season':y,'league_id':lid} for y,lid in sorted(keys-got)],'accepted_by_year':prior,'target_per_year':target,'target_years':target_years,'complete_targets':complete_targets,'leagues':sorted(receipts,key=lambda r:(int(r['season']),str(r['league_id'])))},indent=2,sort_keys=True),encoding='utf-8')
           PY
       - name: Save validated batch cache
         uses: actions/cache/save@v5
@@ -233,3 +272,32 @@ jobs:
           path: |
             mfl_register_snapshot.duckdb
             mfl_register_all_runs.json
+      - name: Dispatch next batch wave
+        if: ${{ success() && inputs.continue_population == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+          MANIFEST_PATH: ${{ inputs.manifest_path }}
+          YAHOO_OAUTH_REF: ${{ inputs.yahoo_oauth_ref }}
+          BATCH_START: ${{ inputs.batch_start }}
+          BATCH_COUNT: ${{ inputs.batch_count }}
+          BATCH_SIZE: ${{ inputs.batch_size }}
+          POPULATION_TOTAL: ${{ inputs.population_total }}
+          CACHE_NAMESPACE: ${{ inputs.cache_namespace }}
+          TARGET_PER_YEAR: ${{ inputs.target_per_year }}
+          TARGET_YEARS: ${{ inputs.target_years }}
+          MAX_PARALLEL: ${{ inputs.max_parallel }}
+          MFL_RATE: ${{ inputs.mfl_rate_limit }}
+        run: |
+          state=$(python3 -c 'import json; print(json.dumps(json.load(open("mfl_register_all_runs.json",encoding="utf-8")).get("accepted_by_year",{}),separators=(",",":")))')
+          complete=$(python3 -c 'import json; d=json.load(open("mfl_register_all_runs.json",encoding="utf-8")); print("true" if d.get("complete_targets") else "false")')
+          total=${POPULATION_TOTAL:-0}; next=$((BATCH_START+BATCH_COUNT))
+          if [ "$complete" = true ] || [ "$total" -le 0 ] || [ "$((next*BATCH_SIZE))" -ge "$total" ]; then exit 0; fi
+          gh workflow run mfl_register_batch_campaign.yml --repo "$REPOSITORY" --ref "$REF_NAME" \
+            --raw-field manifest_path="$MANIFEST_PATH" --raw-field yahoo_oauth_ref="$YAHOO_OAUTH_REF" \
+            --raw-field batch_start="$next" --raw-field batch_count="$BATCH_COUNT" --raw-field batch_size="$BATCH_SIZE" \
+            --raw-field max_parallel="$MAX_PARALLEL" --raw-field cache_namespace="$CACHE_NAMESPACE" \
+            --raw-field continue_population=true --raw-field population_total="$total" \
+            --raw-field accepted_by_year="$state" --raw-field target_per_year="$TARGET_PER_YEAR" \
+            --raw-field target_years="$TARGET_YEARS" --raw-field mfl_rate_limit="$MFL_RATE"
