@@ -1,0 +1,2318 @@
+{
+  "end_year": 2025,
+  "leagues": [
+    {
+      "league_id": "51104",
+      "link_type": "history",
+      "name": "NBFL",
+      "season": 1993,
+      "seed": "1993:51104"
+    },
+    {
+      "league_id": "52711",
+      "link_type": "history",
+      "name": "Georgetown Football League",
+      "season": 1993,
+      "seed": "1993:52711"
+    },
+    {
+      "league_id": "54498",
+      "link_type": "history",
+      "name": "\"THE\" FFL 2018",
+      "season": 1993,
+      "seed": "1993:54498"
+    },
+    {
+      "league_id": "64636",
+      "link_type": "history",
+      "name": "IONFFL",
+      "season": 1993,
+      "seed": "1993:64636"
+    },
+    {
+      "league_id": "65396",
+      "link_type": "history",
+      "name": "Global Football League",
+      "season": 1993,
+      "seed": "1993:65396"
+    },
+    {
+      "league_id": "67929",
+      "link_type": "history",
+      "name": "East End Fantasy League ",
+      "season": 1993,
+      "seed": "1993:67929"
+    },
+    {
+      "league_id": "68066",
+      "link_type": "history",
+      "name": "DIGIgraphics Fantasy Football League",
+      "season": 1993,
+      "seed": "1993:68066"
+    },
+    {
+      "league_id": "68094",
+      "link_type": "history",
+      "name": "Times Herald Fantasy Football League",
+      "season": 1993,
+      "seed": "1993:68094"
+    },
+    {
+      "league_id": "74318",
+      "link_type": "history",
+      "name": "Red Basement Players Association",
+      "season": 1993,
+      "seed": "1993:74318"
+    },
+    {
+      "league_id": "78596",
+      "link_type": "history",
+      "name": "Tri State II Fantasy Football",
+      "season": 1993,
+      "seed": "1993:78596"
+    },
+    {
+      "league_id": "58779",
+      "link_type": "history",
+      "name": "Tri State II Fantasy Football",
+      "season": 1994,
+      "seed": "1994:58779"
+    },
+    {
+      "league_id": "60987",
+      "link_type": "history",
+      "name": "IONFFL",
+      "season": 1994,
+      "seed": "1994:60987"
+    },
+    {
+      "league_id": "61992",
+      "link_type": "history",
+      "name": "Corium Porci FFL 2018",
+      "season": 1994,
+      "seed": "1994:61992"
+    },
+    {
+      "league_id": "62631",
+      "link_type": "history",
+      "name": "\"THE\" FFL 2018",
+      "season": 1994,
+      "seed": "1994:62631"
+    },
+    {
+      "league_id": "63137",
+      "link_type": "history",
+      "name": "KPFFL",
+      "season": 1994,
+      "seed": "1994:63137"
+    },
+    {
+      "league_id": "63820",
+      "link_type": "history",
+      "name": "Georgetown Football League",
+      "season": 1994,
+      "seed": "1994:63820"
+    },
+    {
+      "league_id": "67177",
+      "link_type": "history",
+      "name": "East End Fantasy League ",
+      "season": 1994,
+      "seed": "1994:67177"
+    },
+    {
+      "league_id": "68142",
+      "link_type": "history",
+      "name": "Weekend Warriors FFL",
+      "season": 1994,
+      "seed": "1994:68142"
+    },
+    {
+      "league_id": "68614",
+      "link_type": "history",
+      "name": "2018 Royal Crest Fantasy Football",
+      "season": 1994,
+      "seed": "1994:68614"
+    },
+    {
+      "league_id": "69051",
+      "link_type": "history",
+      "name": "NBFL",
+      "season": 1994,
+      "seed": "1994:69051"
+    },
+    {
+      "league_id": "50842",
+      "link_type": "history",
+      "name": "Tri State II Fantasy Football",
+      "season": 1995,
+      "seed": "1995:50842"
+    },
+    {
+      "league_id": "50991",
+      "link_type": "history",
+      "name": "IONFFL",
+      "season": 1995,
+      "seed": "1995:50991"
+    },
+    {
+      "league_id": "51563",
+      "link_type": "history",
+      "name": "2017 COMMISSIONER'S TROPHY CHAMPIONSHIP SERIES",
+      "season": 1995,
+      "seed": "1995:51563"
+    },
+    {
+      "league_id": "54409",
+      "link_type": "history",
+      "name": "Weekend Warriors FFL",
+      "season": 1995,
+      "seed": "1995:54409"
+    },
+    {
+      "league_id": "57350",
+      "link_type": "history",
+      "name": "THE GREATEST SHOW ON TURF",
+      "season": 1995,
+      "seed": "1995:57350"
+    },
+    {
+      "league_id": "59588",
+      "link_type": "history",
+      "name": "Dingo 25: Silver",
+      "season": 1995,
+      "seed": "1995:59588"
+    },
+    {
+      "league_id": "65153",
+      "link_type": "history",
+      "name": "Red Basement Players Association",
+      "season": 1995,
+      "seed": "1995:65153"
+    },
+    {
+      "league_id": "65254",
+      "link_type": "history",
+      "name": "East End Fantasy League ",
+      "season": 1995,
+      "seed": "1995:65254"
+    },
+    {
+      "league_id": "65443",
+      "link_type": "history",
+      "name": "2018 North Carolina Football League",
+      "season": 1995,
+      "seed": "1995:65443"
+    },
+    {
+      "league_id": "66873",
+      "link_type": "history",
+      "name": "Times Herald Fantasy Football League",
+      "season": 1995,
+      "seed": "1995:66873"
+    },
+    {
+      "league_id": "50306",
+      "link_type": "history",
+      "name": "DAFL",
+      "season": 1996,
+      "seed": "1996:50306"
+    },
+    {
+      "league_id": "50559",
+      "link_type": "history",
+      "name": "Weekend Warriors FFL",
+      "season": 1996,
+      "seed": "1996:50559"
+    },
+    {
+      "league_id": "52610",
+      "link_type": "history",
+      "name": "\"THE\" FFL 2018",
+      "season": 1996,
+      "seed": "1996:52610"
+    },
+    {
+      "league_id": "53870",
+      "link_type": "history",
+      "name": "WAFFLE",
+      "season": 1996,
+      "seed": "1996:53870"
+    },
+    {
+      "league_id": "55961",
+      "link_type": "history",
+      "name": "RTFFL",
+      "season": 1996,
+      "seed": "1996:55961"
+    },
+    {
+      "league_id": "56698",
+      "link_type": "history",
+      "name": "THE GREATEST SHOW ON TURF",
+      "season": 1996,
+      "seed": "1996:56698"
+    },
+    {
+      "league_id": "59590",
+      "link_type": "history",
+      "name": "2017 COMMISSIONER'S TROPHY CHAMPIONSHIP SERIES",
+      "season": 1996,
+      "seed": "1996:59590"
+    },
+    {
+      "league_id": "62250",
+      "link_type": "history",
+      "name": "NBFL",
+      "season": 1996,
+      "seed": "1996:62250"
+    },
+    {
+      "league_id": "62768",
+      "link_type": "history",
+      "name": "MFL - Casmer Michalski Memorial League",
+      "season": 1996,
+      "seed": "1996:62768"
+    },
+    {
+      "league_id": "64546",
+      "link_type": "history",
+      "name": "Georgetown Football League",
+      "season": 1996,
+      "seed": "1996:64546"
+    },
+    {
+      "league_id": "50550",
+      "link_type": "history",
+      "name": "KPFFL",
+      "season": 1997,
+      "seed": "1997:50550"
+    },
+    {
+      "league_id": "50614",
+      "link_type": "history",
+      "name": "\"THE\" FFL 2018",
+      "season": 1997,
+      "seed": "1997:50614"
+    },
+    {
+      "league_id": "50863",
+      "link_type": "history",
+      "name": "IONFFL",
+      "season": 1997,
+      "seed": "1997:50863"
+    },
+    {
+      "league_id": "51996",
+      "link_type": "history",
+      "name": "NBFL",
+      "season": 1997,
+      "seed": "1997:51996"
+    },
+    {
+      "league_id": "53043",
+      "link_type": "history",
+      "name": "Serious Armchair Quarterbacks",
+      "season": 1997,
+      "seed": "1997:53043"
+    },
+    {
+      "league_id": "53949",
+      "link_type": "history",
+      "name": "Cypresswood Fantasy Football League",
+      "season": 1997,
+      "seed": "1997:53949"
+    },
+    {
+      "league_id": "54187",
+      "link_type": "history",
+      "name": "DJFFL",
+      "season": 1997,
+      "seed": "1997:54187"
+    },
+    {
+      "league_id": "57654",
+      "link_type": "history",
+      "name": "NFFL since 1985 - 2018",
+      "season": 1997,
+      "seed": "1997:57654"
+    },
+    {
+      "league_id": "58531",
+      "link_type": "history",
+      "name": "RFL NINE",
+      "season": 1997,
+      "seed": "1997:58531"
+    },
+    {
+      "league_id": "59086",
+      "link_type": "history",
+      "name": "DIGIgraphics Fantasy Football League",
+      "season": 1997,
+      "seed": "1997:59086"
+    },
+    {
+      "league_id": "14832",
+      "link_type": "probe_log",
+      "name": "",
+      "season": 1998,
+      "seed": "1998:14832"
+    },
+    {
+      "league_id": "54945",
+      "link_type": "probe_log",
+      "name": "",
+      "season": 1998,
+      "seed": "1998:54945"
+    },
+    {
+      "league_id": "55498",
+      "link_type": "probe_log",
+      "name": "",
+      "season": 1998,
+      "seed": "1998:55498"
+    },
+    {
+      "league_id": "61692",
+      "link_type": "probe_log",
+      "name": "",
+      "season": 1998,
+      "seed": "1998:61692"
+    },
+    {
+      "league_id": "62562",
+      "link_type": "probe_log",
+      "name": "",
+      "season": 1998,
+      "seed": "1998:62562"
+    },
+    {
+      "league_id": "63506",
+      "link_type": "probe_log",
+      "name": "",
+      "season": 1998,
+      "seed": "1998:63506"
+    },
+    {
+      "league_id": "66375",
+      "link_type": "probe_log",
+      "name": "",
+      "season": 1998,
+      "seed": "1998:66375"
+    },
+    {
+      "league_id": "68314",
+      "link_type": "probe_log",
+      "name": "",
+      "season": 1998,
+      "seed": "1998:68314"
+    },
+    {
+      "league_id": "68973",
+      "link_type": "probe_log",
+      "name": "",
+      "season": 1998,
+      "seed": "1998:68973"
+    },
+    {
+      "league_id": "69109",
+      "link_type": "probe_log",
+      "name": "",
+      "season": 1998,
+      "seed": "1998:69109"
+    },
+    {
+      "league_id": "1325",
+      "link_type": "seed",
+      "name": "XTREME FFL",
+      "season": 1999,
+      "seed": "1999:1325"
+    },
+    {
+      "league_id": "1403",
+      "link_type": "seed",
+      "name": "Last Man Standing",
+      "season": 1999,
+      "seed": "1999:1403"
+    },
+    {
+      "league_id": "1478",
+      "link_type": "seed",
+      "name": "MUFFDL Lambeau Expansion",
+      "season": 1999,
+      "seed": "1999:1478"
+    },
+    {
+      "league_id": "1806",
+      "link_type": "seed",
+      "name": "Fantasy Advantage Black League",
+      "season": 1999,
+      "seed": "1999:1806"
+    },
+    {
+      "league_id": "1962",
+      "link_type": "seed",
+      "name": "Repeat Offenders",
+      "season": 1999,
+      "seed": "1999:1962"
+    },
+    {
+      "league_id": "1976",
+      "link_type": "seed",
+      "name": "Chop Block Football League",
+      "season": 1999,
+      "seed": "1999:1976"
+    },
+    {
+      "league_id": "2083",
+      "link_type": "seed",
+      "name": "Ponchos",
+      "season": 1999,
+      "seed": "1999:2083"
+    },
+    {
+      "league_id": "2547",
+      "link_type": "seed",
+      "name": "Huddled Mass 2K",
+      "season": 1999,
+      "seed": "1999:2547"
+    },
+    {
+      "league_id": "2679",
+      "link_type": "seed",
+      "name": "M-CARE FFL",
+      "season": 1999,
+      "seed": "1999:2679"
+    },
+    {
+      "league_id": "2709",
+      "link_type": "seed",
+      "name": "New Millennium Dynasty FFL",
+      "season": 1999,
+      "seed": "1999:2709"
+    },
+    {
+      "league_id": "1000",
+      "link_type": "seed",
+      "name": "XFFL (The Draft)",
+      "season": 2000,
+      "seed": "2000:1000"
+    },
+    {
+      "league_id": "1020",
+      "link_type": "seed",
+      "name": "YFL Titans",
+      "season": 2000,
+      "seed": "2000:1020"
+    },
+    {
+      "league_id": "1038",
+      "link_type": "seed",
+      "name": "CFFL",
+      "season": 2000,
+      "seed": "2000:1038"
+    },
+    {
+      "league_id": "1055",
+      "link_type": "seed",
+      "name": "PHARMACY PHANTASY PHOOTBALL LEAGUE",
+      "season": 2000,
+      "seed": "2000:1055"
+    },
+    {
+      "league_id": "1059",
+      "link_type": "seed",
+      "name": "UW-STOUT FANTASY FOOTBALL LEAGUE",
+      "season": 2000,
+      "seed": "2000:1059"
+    },
+    {
+      "league_id": "1085",
+      "link_type": "seed",
+      "name": "Skill vs Luck IV",
+      "season": 2000,
+      "seed": "2000:1085"
+    },
+    {
+      "league_id": "1125",
+      "link_type": "seed",
+      "name": "League of Marion",
+      "season": 2000,
+      "seed": "2000:1125"
+    },
+    {
+      "league_id": "1137",
+      "link_type": "seed",
+      "name": "Bob Football League",
+      "season": 2000,
+      "seed": "2000:1137"
+    },
+    {
+      "league_id": "1138",
+      "link_type": "seed",
+      "name": "Bothell Brawlers Football League",
+      "season": 2000,
+      "seed": "2000:1138"
+    },
+    {
+      "league_id": "1142",
+      "link_type": "seed",
+      "name": "815 Mega Hurts",
+      "season": 2000,
+      "seed": "2000:1142"
+    },
+    {
+      "league_id": "1046",
+      "link_type": "seed",
+      "name": "PHILS PHANTASY PHOOTBALL LEAGUE",
+      "season": 2001,
+      "seed": "2001:1046"
+    },
+    {
+      "league_id": "1048",
+      "link_type": "seed",
+      "name": "PEMCO SUCKS 2001",
+      "season": 2001,
+      "seed": "2001:1048"
+    },
+    {
+      "league_id": "1055",
+      "link_type": "seed",
+      "name": "Motown League",
+      "season": 2001,
+      "seed": "2001:1055"
+    },
+    {
+      "league_id": "1080",
+      "link_type": "seed",
+      "name": "4th & Goal",
+      "season": 2001,
+      "seed": "2001:1080"
+    },
+    {
+      "league_id": "1082",
+      "link_type": "seed",
+      "name": "Dirty Dozen Fantasy League",
+      "season": 2001,
+      "seed": "2001:1082"
+    },
+    {
+      "league_id": "1115",
+      "link_type": "seed",
+      "name": "Gold Club Cup",
+      "season": 2001,
+      "seed": "2001:1115"
+    },
+    {
+      "league_id": "1119",
+      "link_type": "seed",
+      "name": "Big South Fantasy Football League",
+      "season": 2001,
+      "seed": "2001:1119"
+    },
+    {
+      "league_id": "1123",
+      "link_type": "seed",
+      "name": "Smash-Mouth",
+      "season": 2001,
+      "seed": "2001:1123"
+    },
+    {
+      "league_id": "1126",
+      "link_type": "seed",
+      "name": "West Coast Dynasty 2001",
+      "season": 2001,
+      "seed": "2001:1126"
+    },
+    {
+      "league_id": "1128",
+      "link_type": "seed",
+      "name": "E!SFL E!ntertainment Sports Football",
+      "season": 2001,
+      "seed": "2001:1128"
+    },
+    {
+      "league_id": "00086",
+      "link_type": "history",
+      "name": "NERFL 2005",
+      "season": 2002,
+      "seed": "2002:00086"
+    },
+    {
+      "league_id": "00165",
+      "link_type": "history",
+      "name": "F-OFF",
+      "season": 2002,
+      "seed": "2002:00165"
+    },
+    {
+      "league_id": "00580",
+      "link_type": "history",
+      "name": "American Football League",
+      "season": 2002,
+      "seed": "2002:00580"
+    },
+    {
+      "league_id": "00736",
+      "link_type": "history",
+      "name": "George Peppard Memorial FFL",
+      "season": 2002,
+      "seed": "2002:00736"
+    },
+    {
+      "league_id": "00817",
+      "link_type": "history",
+      "name": "North Coast Fantasy Football League",
+      "season": 2002,
+      "seed": "2002:00817"
+    },
+    {
+      "league_id": "00962",
+      "link_type": "history",
+      "name": "ABCO SUPPLY",
+      "season": 2002,
+      "seed": "2002:00962"
+    },
+    {
+      "league_id": "00986",
+      "link_type": "history",
+      "name": "Load Fantasy Football League",
+      "season": 2002,
+      "seed": "2002:00986"
+    },
+    {
+      "league_id": "01001",
+      "link_type": "history",
+      "name": "Rex's Rugrats",
+      "season": 2002,
+      "seed": "2002:01001"
+    },
+    {
+      "league_id": "01017",
+      "link_type": "history",
+      "name": "Global Internet Fantasy Football League",
+      "season": 2002,
+      "seed": "2002:01017"
+    },
+    {
+      "league_id": "01164",
+      "link_type": "history",
+      "name": "Halas League",
+      "season": 2002,
+      "seed": "2002:01164"
+    },
+    {
+      "league_id": "10114",
+      "link_type": "history",
+      "name": "The John Elway Memorial League",
+      "season": 2003,
+      "seed": "2003:10114"
+    },
+    {
+      "league_id": "10138",
+      "link_type": "history",
+      "name": "NUNYA FB",
+      "season": 2003,
+      "seed": "2003:10138"
+    },
+    {
+      "league_id": "10199",
+      "link_type": "history",
+      "name": "Glory Days 2005 Season is here! Get it on!!",
+      "season": 2003,
+      "seed": "2003:10199"
+    },
+    {
+      "league_id": "10205",
+      "link_type": "history",
+      "name": "Paychex Fantasy Football League",
+      "season": 2003,
+      "seed": "2003:10205"
+    },
+    {
+      "league_id": "10278",
+      "link_type": "history",
+      "name": "REAL Football 2018",
+      "season": 2003,
+      "seed": "2003:10278"
+    },
+    {
+      "league_id": "10298",
+      "link_type": "history",
+      "name": "Fantasy Freeks",
+      "season": 2003,
+      "seed": "2003:10298"
+    },
+    {
+      "league_id": "10312",
+      "link_type": "history",
+      "name": "T.A.G. Fantasy Football League",
+      "season": 2003,
+      "seed": "2003:10312"
+    },
+    {
+      "league_id": "10383",
+      "link_type": "history",
+      "name": "Schiedemeyer",
+      "season": 2003,
+      "seed": "2003:10383"
+    },
+    {
+      "league_id": "10422",
+      "link_type": "history",
+      "name": "Spense's Fantasy Football League",
+      "season": 2003,
+      "seed": "2003:10422"
+    },
+    {
+      "league_id": "10491",
+      "link_type": "history",
+      "name": "Mills Football League",
+      "season": 2003,
+      "seed": "2003:10491"
+    },
+    {
+      "league_id": "10013",
+      "link_type": "history",
+      "name": "Thurman Thomas FFL 2005",
+      "season": 2004,
+      "seed": "2004:10013"
+    },
+    {
+      "league_id": "10034",
+      "link_type": "history",
+      "name": "Knoxville Buds FFL",
+      "season": 2004,
+      "seed": "2004:10034"
+    },
+    {
+      "league_id": "10049",
+      "link_type": "history",
+      "name": "Kroger Fantasy Football League",
+      "season": 2004,
+      "seed": "2004:10049"
+    },
+    {
+      "league_id": "10051",
+      "link_type": "history",
+      "name": "NOTEL - No Tight End League",
+      "season": 2004,
+      "seed": "2004:10051"
+    },
+    {
+      "league_id": "10057",
+      "link_type": "history",
+      "name": "ITI League",
+      "season": 2004,
+      "seed": "2004:10057"
+    },
+    {
+      "league_id": "10069",
+      "link_type": "history",
+      "name": "Wright-Butler League Playoffs",
+      "season": 2004,
+      "seed": "2004:10069"
+    },
+    {
+      "league_id": "10106",
+      "link_type": "history",
+      "name": "Brain Trust Fantasy Football League",
+      "season": 2004,
+      "seed": "2004:10106"
+    },
+    {
+      "league_id": "10117",
+      "link_type": "history",
+      "name": "2006 FantasyGuru.com Playoff League",
+      "season": 2004,
+      "seed": "2004:10117"
+    },
+    {
+      "league_id": "10127",
+      "link_type": "history",
+      "name": "Armchair World Football League",
+      "season": 2004,
+      "seed": "2004:10127"
+    },
+    {
+      "league_id": "10139",
+      "link_type": "history",
+      "name": "NETex Miners",
+      "season": 2004,
+      "seed": "2004:10139"
+    },
+    {
+      "league_id": "10037",
+      "link_type": "seed",
+      "name": "PAQL Playoffs",
+      "season": 2005,
+      "seed": "2005:10037"
+    },
+    {
+      "league_id": "10079",
+      "link_type": "seed",
+      "name": "League of Champions",
+      "season": 2005,
+      "seed": "2005:10079"
+    },
+    {
+      "league_id": "10087",
+      "link_type": "seed",
+      "name": "Duke Cup XI !!",
+      "season": 2005,
+      "seed": "2005:10087"
+    },
+    {
+      "league_id": "10089",
+      "link_type": "seed",
+      "name": "MyFantasyLeague.com Demo",
+      "season": 2005,
+      "seed": "2005:10089"
+    },
+    {
+      "league_id": "10092",
+      "link_type": "seed",
+      "name": "Ultimate Fantasy Football League",
+      "season": 2005,
+      "seed": "2005:10092"
+    },
+    {
+      "league_id": "10117",
+      "link_type": "seed",
+      "name": "2005 TPS FFL",
+      "season": 2005,
+      "seed": "2005:10117"
+    },
+    {
+      "league_id": "10122",
+      "link_type": "seed",
+      "name": "HHAG Fantasy Football",
+      "season": 2005,
+      "seed": "2005:10122"
+    },
+    {
+      "league_id": "10127",
+      "link_type": "seed",
+      "name": "DC SLUGGS",
+      "season": 2005,
+      "seed": "2005:10127"
+    },
+    {
+      "league_id": "10128",
+      "link_type": "seed",
+      "name": "Gale Sayers League",
+      "season": 2005,
+      "seed": "2005:10128"
+    },
+    {
+      "league_id": "10131",
+      "link_type": "seed",
+      "name": "CSFL",
+      "season": 2005,
+      "seed": "2005:10131"
+    },
+    {
+      "league_id": "10001",
+      "link_type": "seed",
+      "name": "Allison Fantasy Football League",
+      "season": 2006,
+      "seed": "2006:10001"
+    },
+    {
+      "league_id": "10006",
+      "link_type": "seed",
+      "name": "Rocky Mountain Fantasy Football League 2006 ",
+      "season": 2006,
+      "seed": "2006:10006"
+    },
+    {
+      "league_id": "10008",
+      "link_type": "seed",
+      "name": "TUSCO DYNASTY LEAGUE",
+      "season": 2006,
+      "seed": "2006:10008"
+    },
+    {
+      "league_id": "10009",
+      "link_type": "seed",
+      "name": "The Faultline",
+      "season": 2006,
+      "seed": "2006:10009"
+    },
+    {
+      "league_id": "10028",
+      "link_type": "seed",
+      "name": "Crazy Eight Fantasy Football League",
+      "season": 2006,
+      "seed": "2006:10028"
+    },
+    {
+      "league_id": "10040",
+      "link_type": "seed",
+      "name": "Misfits and Outlaws Xtreme FFL-VII",
+      "season": 2006,
+      "seed": "2006:10040"
+    },
+    {
+      "league_id": "10041",
+      "link_type": "seed",
+      "name": "World League of Fantasy Football",
+      "season": 2006,
+      "seed": "2006:10041"
+    },
+    {
+      "league_id": "10042",
+      "link_type": "seed",
+      "name": "TALK-N-TRASH",
+      "season": 2006,
+      "seed": "2006:10042"
+    },
+    {
+      "league_id": "10044",
+      "link_type": "seed",
+      "name": "Empire Fantasy Sports 56",
+      "season": 2006,
+      "seed": "2006:10044"
+    },
+    {
+      "league_id": "10045",
+      "link_type": "seed",
+      "name": "The Good, The Bad, The Ugly",
+      "season": 2006,
+      "seed": "2006:10045"
+    },
+    {
+      "league_id": "10002",
+      "link_type": "seed",
+      "name": "The Ultimate Fantasy Football League",
+      "season": 2007,
+      "seed": "2007:10002"
+    },
+    {
+      "league_id": "10038",
+      "link_type": "seed",
+      "name": "The Big Show",
+      "season": 2007,
+      "seed": "2007:10038"
+    },
+    {
+      "league_id": "10063",
+      "link_type": "seed",
+      "name": "2007 Fantasy Football League",
+      "season": 2007,
+      "seed": "2007:10063"
+    },
+    {
+      "league_id": "10077",
+      "link_type": "seed",
+      "name": "Family Reunion Fantasy Football",
+      "season": 2007,
+      "seed": "2007:10077"
+    },
+    {
+      "league_id": "10096",
+      "link_type": "seed",
+      "name": "Tri-Coast Fantasy Football League",
+      "season": 2007,
+      "seed": "2007:10096"
+    },
+    {
+      "league_id": "10105",
+      "link_type": "seed",
+      "name": "SW MN Fantasy Football League",
+      "season": 2007,
+      "seed": "2007:10105"
+    },
+    {
+      "league_id": "10139",
+      "link_type": "seed",
+      "name": "Peak Performance Fantasy Football League",
+      "season": 2007,
+      "seed": "2007:10139"
+    },
+    {
+      "league_id": "10145",
+      "link_type": "seed",
+      "name": "WAG'S ALMIGHTY FANTASY FOOTBALL LEAGUE",
+      "season": 2007,
+      "seed": "2007:10145"
+    },
+    {
+      "league_id": "10167",
+      "link_type": "seed",
+      "name": "Merrittstown Fantasy Football League",
+      "season": 2007,
+      "seed": "2007:10167"
+    },
+    {
+      "league_id": "10200",
+      "link_type": "seed",
+      "name": "All-Out Blitz League",
+      "season": 2007,
+      "seed": "2007:10200"
+    },
+    {
+      "league_id": "10012",
+      "link_type": "history",
+      "name": "Lynch's 22nd Annual Fantasy Football League",
+      "season": 2008,
+      "seed": "2008:10012"
+    },
+    {
+      "league_id": "10016",
+      "link_type": "history",
+      "name": "Sigma Fantasy Football League",
+      "season": 2008,
+      "seed": "2008:10016"
+    },
+    {
+      "league_id": "10028",
+      "link_type": "history",
+      "name": "Redwood's Fantasy Football League",
+      "season": 2008,
+      "seed": "2008:10028"
+    },
+    {
+      "league_id": "10029",
+      "link_type": "history",
+      "name": "LFFFL",
+      "season": 2008,
+      "seed": "2008:10029"
+    },
+    {
+      "league_id": "10035",
+      "link_type": "history",
+      "name": "Zealots Field Classic 5",
+      "season": 2008,
+      "seed": "2008:10035"
+    },
+    {
+      "league_id": "10037",
+      "link_type": "history",
+      "name": "CEFL2018",
+      "season": 2008,
+      "seed": "2008:10037"
+    },
+    {
+      "league_id": "10050",
+      "link_type": "history",
+      "name": "FIDO",
+      "season": 2008,
+      "seed": "2008:10050"
+    },
+    {
+      "league_id": "10057",
+      "link_type": "history",
+      "name": "ARFL",
+      "season": 2008,
+      "seed": "2008:10057"
+    },
+    {
+      "league_id": "10061",
+      "link_type": "history",
+      "name": "Extravaganza Football League",
+      "season": 2008,
+      "seed": "2008:10061"
+    },
+    {
+      "league_id": "10068",
+      "link_type": "history",
+      "name": "SOFA Rotisserie Playoff League (SRPL) Playoffs",
+      "season": 2008,
+      "seed": "2008:10068"
+    },
+    {
+      "league_id": "10002",
+      "link_type": "history",
+      "name": "Durand Area Fantasy Football League",
+      "season": 2009,
+      "seed": "2009:10002"
+    },
+    {
+      "league_id": "10023",
+      "link_type": "history",
+      "name": "WENFL",
+      "season": 2009,
+      "seed": "2009:10023"
+    },
+    {
+      "league_id": "10028",
+      "link_type": "history",
+      "name": "Quest Bronze15",
+      "season": 2009,
+      "seed": "2009:10028"
+    },
+    {
+      "league_id": "10030",
+      "link_type": "history",
+      "name": "Gettin to be Old Fellas",
+      "season": 2009,
+      "seed": "2009:10030"
+    },
+    {
+      "league_id": "10036",
+      "link_type": "history",
+      "name": "Brew City Keeper League",
+      "season": 2009,
+      "seed": "2009:10036"
+    },
+    {
+      "league_id": "10039",
+      "link_type": "history",
+      "name": "Scandahoovian Football League",
+      "season": 2009,
+      "seed": "2009:10039"
+    },
+    {
+      "league_id": "10046",
+      "link_type": "history",
+      "name": "MHFFL - 2018 Steve Largent League",
+      "season": 2009,
+      "seed": "2009:10046"
+    },
+    {
+      "league_id": "10048",
+      "link_type": "history",
+      "name": "Monday Morning Quarterbacks",
+      "season": 2009,
+      "seed": "2009:10048"
+    },
+    {
+      "league_id": "10049",
+      "link_type": "history",
+      "name": "Jackson Center Fantasy Football League",
+      "season": 2009,
+      "seed": "2009:10049"
+    },
+    {
+      "league_id": "10067",
+      "link_type": "history",
+      "name": "SLFFL",
+      "season": 2009,
+      "seed": "2009:10067"
+    },
+    {
+      "league_id": "10011",
+      "link_type": "history",
+      "name": "GOoF FFL 2018",
+      "season": 2010,
+      "seed": "2010:10011"
+    },
+    {
+      "league_id": "10016",
+      "link_type": "history",
+      "name": "Death League",
+      "season": 2010,
+      "seed": "2010:10016"
+    },
+    {
+      "league_id": "10021",
+      "link_type": "history",
+      "name": "Supa's Party League",
+      "season": 2010,
+      "seed": "2010:10021"
+    },
+    {
+      "league_id": "10035",
+      "link_type": "history",
+      "name": "West Coast League",
+      "season": 2010,
+      "seed": "2010:10035"
+    },
+    {
+      "league_id": "10038",
+      "link_type": "history",
+      "name": "Leetown Fantasy Football League",
+      "season": 2010,
+      "seed": "2010:10038"
+    },
+    {
+      "league_id": "10044",
+      "link_type": "history",
+      "name": "THE GREATEST SHOW ON TURF",
+      "season": 2010,
+      "seed": "2010:10044"
+    },
+    {
+      "league_id": "10045",
+      "link_type": "history",
+      "name": "Boozers League",
+      "season": 2010,
+      "seed": "2010:10045"
+    },
+    {
+      "league_id": "10047",
+      "link_type": "history",
+      "name": "Southeast Iowa FFL",
+      "season": 2010,
+      "seed": "2010:10047"
+    },
+    {
+      "league_id": "10062",
+      "link_type": "history",
+      "name": "Sports Wings 3.0 - Ode to the Yahoos",
+      "season": 2010,
+      "seed": "2010:10062"
+    },
+    {
+      "league_id": "10063",
+      "link_type": "history",
+      "name": "YAC ",
+      "season": 2010,
+      "seed": "2010:10063"
+    },
+    {
+      "league_id": "10009",
+      "link_type": "history",
+      "name": "GSP Survivor ",
+      "season": 2011,
+      "seed": "2011:10009"
+    },
+    {
+      "league_id": "10010",
+      "link_type": "history",
+      "name": "The Dynasty Football Championship",
+      "season": 2011,
+      "seed": "2011:10010"
+    },
+    {
+      "league_id": "10014",
+      "link_type": "history",
+      "name": "North American IDP League",
+      "season": 2011,
+      "seed": "2011:10014"
+    },
+    {
+      "league_id": "10032",
+      "link_type": "history",
+      "name": "Geriatric Die-nasty League of North America",
+      "season": 2011,
+      "seed": "2011:10032"
+    },
+    {
+      "league_id": "10033",
+      "link_type": "history",
+      "name": "FS&P FFL",
+      "season": 2011,
+      "seed": "2011:10033"
+    },
+    {
+      "league_id": "10042",
+      "link_type": "history",
+      "name": "NEPA DESTROYERZ Playoffs",
+      "season": 2011,
+      "seed": "2011:10042"
+    },
+    {
+      "league_id": "10049",
+      "link_type": "history",
+      "name": "Gridiron Gang",
+      "season": 2011,
+      "seed": "2011:10049"
+    },
+    {
+      "league_id": "10054",
+      "link_type": "history",
+      "name": "Milton Fantasy Football League",
+      "season": 2011,
+      "seed": "2011:10054"
+    },
+    {
+      "league_id": "10056",
+      "link_type": "history",
+      "name": "Paul Crewe FFL",
+      "season": 2011,
+      "seed": "2011:10056"
+    },
+    {
+      "league_id": "10059",
+      "link_type": "history",
+      "name": "Big Black Momma",
+      "season": 2011,
+      "seed": "2011:10059"
+    },
+    {
+      "league_id": "10006",
+      "link_type": "history",
+      "name": "Bad MoFo Fantasy Football",
+      "season": 2012,
+      "seed": "2012:10006"
+    },
+    {
+      "league_id": "10016",
+      "link_type": "history",
+      "name": "Southern Maryland Fantasy Football - 2018",
+      "season": 2012,
+      "seed": "2012:10016"
+    },
+    {
+      "league_id": "10017",
+      "link_type": "history",
+      "name": "Cohen's FFL Playoff 2018-2018 Playoffs",
+      "season": 2012,
+      "seed": "2012:10017"
+    },
+    {
+      "league_id": "10032",
+      "link_type": "history",
+      "name": "The PigBall Parliament",
+      "season": 2012,
+      "seed": "2012:10032"
+    },
+    {
+      "league_id": "10033",
+      "link_type": "history",
+      "name": "The 2018 Petesy & Leaping Loyd LaMois Pro Football Draft Playoffs",
+      "season": 2012,
+      "seed": "2012:10033"
+    },
+    {
+      "league_id": "10036",
+      "link_type": "history",
+      "name": "Appfoo 18",
+      "season": 2012,
+      "seed": "2012:10036"
+    },
+    {
+      "league_id": "10038",
+      "link_type": "history",
+      "name": "Mixed Bag of Nuts Playoffs",
+      "season": 2012,
+      "seed": "2012:10038"
+    },
+    {
+      "league_id": "10049",
+      "link_type": "history",
+      "name": "Last Place Pays FFL",
+      "season": 2012,
+      "seed": "2012:10049"
+    },
+    {
+      "league_id": "10050",
+      "link_type": "history",
+      "name": "Norwood Fantasy Football League",
+      "season": 2012,
+      "seed": "2012:10050"
+    },
+    {
+      "league_id": "10053",
+      "link_type": "history",
+      "name": "FFB2018",
+      "season": 2012,
+      "seed": "2012:10053"
+    },
+    {
+      "league_id": "10000",
+      "link_type": "history",
+      "name": "Stenny's Rebel Fantasy Football",
+      "season": 2013,
+      "seed": "2013:10000"
+    },
+    {
+      "league_id": "10002",
+      "link_type": "history",
+      "name": "ZFL",
+      "season": 2013,
+      "seed": "2013:10002"
+    },
+    {
+      "league_id": "10014",
+      "link_type": "history",
+      "name": "ICFL",
+      "season": 2013,
+      "seed": "2013:10014"
+    },
+    {
+      "league_id": "10015",
+      "link_type": "history",
+      "name": "Chicago-Suburban Fantasy Football League",
+      "season": 2013,
+      "seed": "2013:10015"
+    },
+    {
+      "league_id": "10018",
+      "link_type": "history",
+      "name": "Fantasy Football League of Legends 2018",
+      "season": 2013,
+      "seed": "2013:10018"
+    },
+    {
+      "league_id": "10028",
+      "link_type": "history",
+      "name": "Wardogs League",
+      "season": 2013,
+      "seed": "2013:10028"
+    },
+    {
+      "league_id": "10031",
+      "link_type": "history",
+      "name": "HAFA",
+      "season": 2013,
+      "seed": "2013:10031"
+    },
+    {
+      "league_id": "10033",
+      "link_type": "history",
+      "name": "Seattle Police Department Fantasy Football League",
+      "season": 2013,
+      "seed": "2013:10033"
+    },
+    {
+      "league_id": "10034",
+      "link_type": "history",
+      "name": "Carroll County Fantasy Football League",
+      "season": 2013,
+      "seed": "2013:10034"
+    },
+    {
+      "league_id": "10048",
+      "link_type": "history",
+      "name": "GFL",
+      "season": 2013,
+      "seed": "2013:10048"
+    },
+    {
+      "league_id": "10003",
+      "link_type": "history",
+      "name": "Dynasty Sports Empire - D3 Football",
+      "season": 2014,
+      "seed": "2014:10003"
+    },
+    {
+      "league_id": "10004",
+      "link_type": "history",
+      "name": "Go Deep Football League",
+      "season": 2014,
+      "seed": "2014:10004"
+    },
+    {
+      "league_id": "10009",
+      "link_type": "history",
+      "name": "Oceaneering FFL",
+      "season": 2014,
+      "seed": "2014:10009"
+    },
+    {
+      "league_id": "10015",
+      "link_type": "history",
+      "name": "FFDL2018",
+      "season": 2014,
+      "seed": "2014:10015"
+    },
+    {
+      "league_id": "10024",
+      "link_type": "history",
+      "name": "Ryz League Playoffs",
+      "season": 2014,
+      "seed": "2014:10024"
+    },
+    {
+      "league_id": "10037",
+      "link_type": "history",
+      "name": "FCML",
+      "season": 2014,
+      "seed": "2014:10037"
+    },
+    {
+      "league_id": "10038",
+      "link_type": "history",
+      "name": "The Commissioner's Office",
+      "season": 2014,
+      "seed": "2014:10038"
+    },
+    {
+      "league_id": "10041",
+      "link_type": "history",
+      "name": "Prince Rupert Liquid Sunshine 2018",
+      "season": 2014,
+      "seed": "2014:10041"
+    },
+    {
+      "league_id": "10043",
+      "link_type": "history",
+      "name": "2018 GNFL",
+      "season": 2014,
+      "seed": "2014:10043"
+    },
+    {
+      "league_id": "10045",
+      "link_type": "history",
+      "name": "FFL of Breckenridge",
+      "season": 2014,
+      "seed": "2014:10045"
+    },
+    {
+      "league_id": "10062",
+      "link_type": "seed",
+      "name": "Quest Bronze Dynasty 42",
+      "season": 2015,
+      "seed": "2015:10062"
+    },
+    {
+      "league_id": "10212",
+      "link_type": "seed",
+      "name": "Kansas State Dynasty",
+      "season": 2015,
+      "seed": "2015:10212"
+    },
+    {
+      "league_id": "10363",
+      "link_type": "seed",
+      "name": "Dynasty in the Making",
+      "season": 2015,
+      "seed": "2015:10363"
+    },
+    {
+      "league_id": "10412",
+      "link_type": "seed",
+      "name": "FFLS Silver Dynasty 29",
+      "season": 2015,
+      "seed": "2015:10412"
+    },
+    {
+      "league_id": "10507",
+      "link_type": "seed",
+      "name": "BOSTON DYNASTY",
+      "season": 2015,
+      "seed": "2015:10507"
+    },
+    {
+      "league_id": "10619",
+      "link_type": "seed",
+      "name": "dyNASTY -- Where Fantasy Football Champions Come to Play",
+      "season": 2015,
+      "seed": "2015:10619"
+    },
+    {
+      "league_id": "10622",
+      "link_type": "seed",
+      "name": "Grand Forks Dynasty League",
+      "season": 2015,
+      "seed": "2015:10622"
+    },
+    {
+      "league_id": "10674",
+      "link_type": "seed",
+      "name": "FDSB Dynasty League",
+      "season": 2015,
+      "seed": "2015:10674"
+    },
+    {
+      "league_id": "10684",
+      "link_type": "seed",
+      "name": "Regulators Dynasty Football",
+      "season": 2015,
+      "seed": "2015:10684"
+    },
+    {
+      "league_id": "10696",
+      "link_type": "seed",
+      "name": "Masters Copper Dynasty 800069",
+      "season": 2015,
+      "seed": "2015:10696"
+    },
+    {
+      "league_id": "10055",
+      "link_type": "seed",
+      "name": "MFL 10s Draft-Only League 10055",
+      "season": 2016,
+      "seed": "2016:10055"
+    },
+    {
+      "league_id": "10056",
+      "link_type": "seed",
+      "name": "Masters Copper Dynasty 900269 - Ghost of 36",
+      "season": 2016,
+      "seed": "2016:10056"
+    },
+    {
+      "league_id": "10061",
+      "link_type": "seed",
+      "name": "Rapcon Keeper",
+      "season": 2016,
+      "seed": "2016:10061"
+    },
+    {
+      "league_id": "10069",
+      "link_type": "seed",
+      "name": "MFL 10s Draft-Only League 10069",
+      "season": 2016,
+      "seed": "2016:10069"
+    },
+    {
+      "league_id": "10071",
+      "link_type": "seed",
+      "name": "Calgary Fantasy Football League (CFFL)",
+      "season": 2016,
+      "seed": "2016:10071"
+    },
+    {
+      "league_id": "10073",
+      "link_type": "seed",
+      "name": "MFL 10s Draft-Only League 10073",
+      "season": 2016,
+      "seed": "2016:10073"
+    },
+    {
+      "league_id": "10074",
+      "link_type": "seed",
+      "name": "League Of Champions",
+      "season": 2016,
+      "seed": "2016:10074"
+    },
+    {
+      "league_id": "10075",
+      "link_type": "seed",
+      "name": "Forever 2004",
+      "season": 2016,
+      "seed": "2016:10075"
+    },
+    {
+      "league_id": "10077",
+      "link_type": "seed",
+      "name": "10-73 Hall of Doom",
+      "season": 2016,
+      "seed": "2016:10077"
+    },
+    {
+      "league_id": "10079",
+      "link_type": "seed",
+      "name": "MFL 10s Draft-Only League 10079",
+      "season": 2016,
+      "seed": "2016:10079"
+    },
+    {
+      "league_id": "45019",
+      "link_type": "seed",
+      "name": "Masters Bronze Live Draft 100631",
+      "season": 2017,
+      "seed": "2017:45019"
+    },
+    {
+      "league_id": "45025",
+      "link_type": "seed",
+      "name": "Masters Silver Live Draft 100695",
+      "season": 2017,
+      "seed": "2017:45025"
+    },
+    {
+      "league_id": "45033",
+      "link_type": "seed",
+      "name": "2017 World Fantasy Football League ",
+      "season": 2017,
+      "seed": "2017:45033"
+    },
+    {
+      "league_id": "45075",
+      "link_type": "seed",
+      "name": "Medwest",
+      "season": 2017,
+      "seed": "2017:45075"
+    },
+    {
+      "league_id": "45078",
+      "link_type": "seed",
+      "name": "72 Family League",
+      "season": 2017,
+      "seed": "2017:45078"
+    },
+    {
+      "league_id": "45106",
+      "link_type": "seed",
+      "name": "Manure Of Teams ~ MOT FFL",
+      "season": 2017,
+      "seed": "2017:45106"
+    },
+    {
+      "league_id": "45109",
+      "link_type": "seed",
+      "name": "12 Angry Men",
+      "season": 2017,
+      "seed": "2017:45109"
+    },
+    {
+      "league_id": "45116",
+      "link_type": "seed",
+      "name": "Masters Tin Email Draft #27 - 101040",
+      "season": 2017,
+      "seed": "2017:45116"
+    },
+    {
+      "league_id": "45260",
+      "link_type": "seed",
+      "name": "Wisconsin Football League",
+      "season": 2017,
+      "seed": "2017:45260"
+    },
+    {
+      "league_id": "45319",
+      "link_type": "seed",
+      "name": "Beantown Eliminator",
+      "season": 2017,
+      "seed": "2017:45319"
+    },
+    {
+      "league_id": "10002",
+      "link_type": "seed",
+      "name": "WFL - WORLD FANTASY LEAGUE",
+      "season": 2018,
+      "seed": "2018:10002"
+    },
+    {
+      "league_id": "10003",
+      "link_type": "seed",
+      "name": "Remember The Llama",
+      "season": 2018,
+      "seed": "2018:10003"
+    },
+    {
+      "league_id": "10004",
+      "link_type": "seed",
+      "name": "Quest Bronze Dynasty 72",
+      "season": 2018,
+      "seed": "2018:10004"
+    },
+    {
+      "league_id": "10005",
+      "link_type": "seed",
+      "name": "Masters Copper Dynasty 110279 - Classic 4",
+      "season": 2018,
+      "seed": "2018:10005"
+    },
+    {
+      "league_id": "10008",
+      "link_type": "seed",
+      "name": "All World FFL",
+      "season": 2018,
+      "seed": "2018:10008"
+    },
+    {
+      "league_id": "10009",
+      "link_type": "seed",
+      "name": "Masters Silver Live Draft 110785",
+      "season": 2018,
+      "seed": "2018:10009"
+    },
+    {
+      "league_id": "10013",
+      "link_type": "seed",
+      "name": "keeper",
+      "season": 2018,
+      "seed": "2018:10013"
+    },
+    {
+      "league_id": "10016",
+      "link_type": "seed",
+      "name": "2018",
+      "season": 2018,
+      "seed": "2018:10016"
+    },
+    {
+      "league_id": "10017",
+      "link_type": "seed",
+      "name": "The Great American Armchair Football League",
+      "season": 2018,
+      "seed": "2018:10017"
+    },
+    {
+      "league_id": "10018",
+      "link_type": "seed",
+      "name": "Rolling Thunder Football League",
+      "season": 2018,
+      "seed": "2018:10018"
+    },
+    {
+      "league_id": "10002",
+      "link_type": "history",
+      "name": "WFL - WORLD FANTASY LEAGUE",
+      "season": 2019,
+      "seed": "2019:10002"
+    },
+    {
+      "league_id": "10003",
+      "link_type": "history",
+      "name": "Remember The Llama",
+      "season": 2019,
+      "seed": "2019:10003"
+    },
+    {
+      "league_id": "10005",
+      "link_type": "history",
+      "name": "Masters Copper Dynasty 110279 - Classic 4",
+      "season": 2019,
+      "seed": "2019:10005"
+    },
+    {
+      "league_id": "10008",
+      "link_type": "history",
+      "name": "All World FFL",
+      "season": 2019,
+      "seed": "2019:10008"
+    },
+    {
+      "league_id": "10013",
+      "link_type": "history",
+      "name": "keeper",
+      "season": 2019,
+      "seed": "2019:10013"
+    },
+    {
+      "league_id": "10016",
+      "link_type": "history",
+      "name": "2018",
+      "season": 2019,
+      "seed": "2019:10016"
+    },
+    {
+      "league_id": "10017",
+      "link_type": "history",
+      "name": "The Great American Armchair Football League",
+      "season": 2019,
+      "seed": "2019:10017"
+    },
+    {
+      "league_id": "10018",
+      "link_type": "history",
+      "name": "Rolling Thunder Football League",
+      "season": 2019,
+      "seed": "2019:10018"
+    },
+    {
+      "league_id": "10019",
+      "link_type": "history",
+      "name": "The Mans League",
+      "season": 2019,
+      "seed": "2019:10019"
+    },
+    {
+      "league_id": "10034",
+      "link_type": "history",
+      "name": "MFL 2K18",
+      "season": 2019,
+      "seed": "2019:10034"
+    },
+    {
+      "league_id": "12551",
+      "link_type": "history",
+      "name": "Great American Collegians Dynasty League",
+      "season": 2020,
+      "seed": "2020:12551"
+    },
+    {
+      "league_id": "22537",
+      "link_type": "history",
+      "name": "WGM Fantasy League",
+      "season": 2020,
+      "seed": "2020:22537"
+    },
+    {
+      "league_id": "32387",
+      "link_type": "history",
+      "name": "LeagueHub",
+      "season": 2020,
+      "seed": "2020:32387"
+    },
+    {
+      "league_id": "34916",
+      "link_type": "history",
+      "name": "Blizzard Fantasy League (BFL)",
+      "season": 2020,
+      "seed": "2020:34916"
+    },
+    {
+      "league_id": "35900",
+      "link_type": "history",
+      "name": "Burien Football Conference",
+      "season": 2020,
+      "seed": "2020:35900"
+    },
+    {
+      "league_id": "39912",
+      "link_type": "history",
+      "name": "FBG MBSL 1",
+      "season": 2020,
+      "seed": "2020:39912"
+    },
+    {
+      "league_id": "40295",
+      "link_type": "history",
+      "name": "Kingfisher",
+      "season": 2020,
+      "seed": "2020:40295"
+    },
+    {
+      "league_id": "45396",
+      "link_type": "history",
+      "name": "Vanderbilt Gentlemen's League (VGL 2018)",
+      "season": 2020,
+      "seed": "2020:45396"
+    },
+    {
+      "league_id": "45715",
+      "link_type": "history",
+      "name": "Swan Family League",
+      "season": 2020,
+      "seed": "2020:45715"
+    },
+    {
+      "league_id": "47617",
+      "link_type": "history",
+      "name": "Fingers Fantasy Keeper League",
+      "season": 2020,
+      "seed": "2020:47617"
+    },
+    {
+      "league_id": "10001",
+      "link_type": "gap_discovery",
+      "name": "2021 Fantasy Playoffs League",
+      "season": 2021,
+      "seed": "2021:10001"
+    },
+    {
+      "league_id": "10005",
+      "link_type": "gap_discovery",
+      "name": "Masters Copper Dynasty 140379 - Classic 4",
+      "season": 2021,
+      "seed": "2021:10005"
+    },
+    {
+      "league_id": "10006",
+      "link_type": "gap_discovery",
+      "name": "The FFL 2021",
+      "season": 2021,
+      "seed": "2021:10006"
+    },
+    {
+      "league_id": "10007",
+      "link_type": "gap_discovery",
+      "name": "Masters Tin Dynasty 140616 - Bravo 1902",
+      "season": 2021,
+      "seed": "2021:10007"
+    },
+    {
+      "league_id": "10010",
+      "link_type": "gap_discovery",
+      "name": "Apex Amateur Dynasty 203",
+      "season": 2021,
+      "seed": "2021:10010"
+    },
+    {
+      "league_id": "10011",
+      "link_type": "gap_discovery",
+      "name": "Dunbar Fantasy Football",
+      "season": 2021,
+      "seed": "2021:10011"
+    },
+    {
+      "league_id": "10013",
+      "link_type": "gap_discovery",
+      "name": "keeper",
+      "season": 2021,
+      "seed": "2021:10013"
+    },
+    {
+      "league_id": "10015",
+      "link_type": "gap_discovery",
+      "name": "Dynasty Pioneer",
+      "season": 2021,
+      "seed": "2021:10015"
+    },
+    {
+      "league_id": "10017",
+      "link_type": "gap_discovery",
+      "name": "The Great American Armchair Football League",
+      "season": 2021,
+      "seed": "2021:10017"
+    },
+    {
+      "league_id": "10018",
+      "link_type": "gap_discovery",
+      "name": "Rolling Thunder Football League",
+      "season": 2021,
+      "seed": "2021:10018"
+    },
+    {
+      "league_id": "10001",
+      "link_type": "gap_discovery",
+      "name": "2022 Fantasy Playoff Challenge",
+      "season": 2022,
+      "seed": "2022:10001"
+    },
+    {
+      "league_id": "10005",
+      "link_type": "gap_discovery",
+      "name": "Masters Copper Dynasty 150432 - Classic 4",
+      "season": 2022,
+      "seed": "2022:10005"
+    },
+    {
+      "league_id": "10006",
+      "link_type": "gap_discovery",
+      "name": "The FFL 2022",
+      "season": 2022,
+      "seed": "2022:10006"
+    },
+    {
+      "league_id": "10007",
+      "link_type": "gap_discovery",
+      "name": "Masters Tin Dynasty 150234 - Bravo 1902",
+      "season": 2022,
+      "seed": "2022:10007"
+    },
+    {
+      "league_id": "10009",
+      "link_type": "gap_discovery",
+      "name": "Masters Bronze Live Draft 151008",
+      "season": 2022,
+      "seed": "2022:10009"
+    },
+    {
+      "league_id": "10010",
+      "link_type": "gap_discovery",
+      "name": "Apex Amateur Dynasty 203",
+      "season": 2022,
+      "seed": "2022:10010"
+    },
+    {
+      "league_id": "10011",
+      "link_type": "gap_discovery",
+      "name": "Dunbar Fantasy Football",
+      "season": 2022,
+      "seed": "2022:10011"
+    },
+    {
+      "league_id": "10013",
+      "link_type": "gap_discovery",
+      "name": "keeper",
+      "season": 2022,
+      "seed": "2022:10013"
+    },
+    {
+      "league_id": "10015",
+      "link_type": "gap_discovery",
+      "name": "Dynasty Pioneer",
+      "season": 2022,
+      "seed": "2022:10015"
+    },
+    {
+      "league_id": "10017",
+      "link_type": "gap_discovery",
+      "name": "The Great American Armchair Football League",
+      "season": 2022,
+      "seed": "2022:10017"
+    },
+    {
+      "league_id": "10005",
+      "link_type": "gap_discovery",
+      "name": "Masters Copper Dynasty 160462 - Classic 4",
+      "season": 2023,
+      "seed": "2023:10005"
+    },
+    {
+      "league_id": "10006",
+      "link_type": "gap_discovery",
+      "name": "The FFL 2023",
+      "season": 2023,
+      "seed": "2023:10006"
+    },
+    {
+      "league_id": "10007",
+      "link_type": "gap_discovery",
+      "name": "Masters Tin Dynasty 160255 - Bravo 1902",
+      "season": 2023,
+      "seed": "2023:10007"
+    },
+    {
+      "league_id": "10010",
+      "link_type": "gap_discovery",
+      "name": "Apex Amateur Dynasty 203",
+      "season": 2023,
+      "seed": "2023:10010"
+    },
+    {
+      "league_id": "10011",
+      "link_type": "gap_discovery",
+      "name": "Dunbar Fantasy Football",
+      "season": 2023,
+      "seed": "2023:10011"
+    },
+    {
+      "league_id": "10013",
+      "link_type": "gap_discovery",
+      "name": "keeper",
+      "season": 2023,
+      "seed": "2023:10013"
+    },
+    {
+      "league_id": "10015",
+      "link_type": "gap_discovery",
+      "name": "Dynasty Pioneer",
+      "season": 2023,
+      "seed": "2023:10015"
+    },
+    {
+      "league_id": "10017",
+      "link_type": "gap_discovery",
+      "name": "The Great American Armchair Football League",
+      "season": 2023,
+      "seed": "2023:10017"
+    },
+    {
+      "league_id": "10019",
+      "link_type": "gap_discovery",
+      "name": "The Mans League",
+      "season": 2023,
+      "seed": "2023:10019"
+    },
+    {
+      "league_id": "10023",
+      "link_type": "gap_discovery",
+      "name": "Old Mission Mush",
+      "season": 2023,
+      "seed": "2023:10023"
+    },
+    {
+      "league_id": "10267",
+      "link_type": "seed",
+      "name": "Pliability and Hydration League",
+      "season": 2024,
+      "seed": "2024:10267"
+    },
+    {
+      "league_id": "10301",
+      "link_type": "seed",
+      "name": "National Fantasy League",
+      "season": 2024,
+      "seed": "2024:10301"
+    },
+    {
+      "league_id": "10336",
+      "link_type": "seed",
+      "name": "2K Fantasy Playoffs",
+      "season": 2024,
+      "seed": "2024:10336"
+    },
+    {
+      "league_id": "10499",
+      "link_type": "seed",
+      "name": "Starkey Dynasty",
+      "season": 2024,
+      "seed": "2024:10499"
+    },
+    {
+      "league_id": "10802",
+      "link_type": "seed",
+      "name": "FOOTBALL GODS",
+      "season": 2024,
+      "seed": "2024:10802"
+    },
+    {
+      "league_id": "10964",
+      "link_type": "seed",
+      "name": "Apex Amateur Dynamic Superflex Best Ball Dynasty 423",
+      "season": 2024,
+      "seed": "2024:10964"
+    },
+    {
+      "league_id": "11176",
+      "link_type": "seed",
+      "name": "Canal Bar League",
+      "season": 2024,
+      "seed": "2024:11176"
+    },
+    {
+      "league_id": "11232",
+      "link_type": "seed",
+      "name": "Jim's Burgers Fantasy Football League",
+      "season": 2024,
+      "seed": "2024:11232"
+    },
+    {
+      "league_id": "11521",
+      "link_type": "seed",
+      "name": "Auction Extravaganza Dynasty Football League",
+      "season": 2024,
+      "seed": "2024:11521"
+    },
+    {
+      "league_id": "11690",
+      "link_type": "seed",
+      "name": "DDFL League #2",
+      "season": 2024,
+      "seed": "2024:11690"
+    },
+    {
+      "league_id": "10005",
+      "link_type": "gap_discovery",
+      "name": "Masters Copper Dynasty 182198 - Classic 4",
+      "season": 2025,
+      "seed": "2025:10005"
+    },
+    {
+      "league_id": "10006",
+      "link_type": "gap_discovery",
+      "name": "The FFL 2025",
+      "season": 2025,
+      "seed": "2025:10006"
+    },
+    {
+      "league_id": "10007",
+      "link_type": "gap_discovery",
+      "name": "Masters Tin Dynasty 181281 - Bravo 1902",
+      "season": 2025,
+      "seed": "2025:10007"
+    },
+    {
+      "league_id": "10009",
+      "link_type": "gap_discovery",
+      "name": "2025 Five Keeper FFL Playoffs",
+      "season": 2025,
+      "seed": "2025:10009"
+    },
+    {
+      "league_id": "10010",
+      "link_type": "gap_discovery",
+      "name": "Apex Amateur Dynasty 203",
+      "season": 2025,
+      "seed": "2025:10010"
+    },
+    {
+      "league_id": "10011",
+      "link_type": "gap_discovery",
+      "name": "Dunbar Fantasy Football",
+      "season": 2025,
+      "seed": "2025:10011"
+    },
+    {
+      "league_id": "10013",
+      "link_type": "gap_discovery",
+      "name": "keeper",
+      "season": 2025,
+      "seed": "2025:10013"
+    },
+    {
+      "league_id": "10015",
+      "link_type": "gap_discovery",
+      "name": "Dynasty Pioneer",
+      "season": 2025,
+      "seed": "2025:10015"
+    },
+    {
+      "league_id": "10017",
+      "link_type": "gap_discovery",
+      "name": "The Great American Armchair Football League",
+      "season": 2025,
+      "seed": "2025:10017"
+    },
+    {
+      "league_id": "10019",
+      "link_type": "gap_discovery",
+      "name": "The Mans League",
+      "season": 2025,
+      "seed": "2025:10019"
+    }
+  ],
+  "per_year": 10,
+  "schema_version": "mfl_execution_manifest_v2_probe_backed",
+  "start_year": 1993
+}
