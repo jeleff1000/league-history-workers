@@ -1,0 +1,72 @@
+name: Finalize MFL Register Waves
+
+on:
+  workflow_dispatch:
+    inputs:
+      wave_run_ids:
+        description: 'Comma-separated completed MFL campaign run IDs (wave 0, wave 165)'
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Download validated wave artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_IDS: ${{ inputs.wave_run_ids }}
+        run: |
+          mkdir -p waves
+          IFS=',' read -ra IDS <<< "$RUN_IDS"
+          for id in "${IDS[@]}"; do
+            gh run download "$id" --repo "$GITHUB_REPOSITORY" --pattern 'mfl-register-final-*' --dir "waves/$id"
+          done
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install DuckDB
+        run: pip install duckdb
+      - name: Validate and merge both waves
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, duckdb
+          root = pathlib.Path('waves')
+          regs = [json.loads(p.read_text(encoding='utf-8')) for p in root.rglob('mfl_register_all_runs.json')]
+          if len(regs) != 2: raise SystemExit(f'expected two wave registers, found {len(regs)}')
+          rows = [r for d in regs for r in d['leagues']]
+          keys = {(int(r['season']), str(r['league_id'])) for r in rows}
+          if len(rows) != 330 or len(keys) != 330: raise SystemExit(f'expected 330 unique rows, got {len(rows)} rows/{len(keys)} keys')
+          from collections import Counter
+          counts = Counter(int(r['season']) for r in rows)
+          bad = {y: n for y, n in counts.items() if n != 10}
+          if bad or set(counts) != set(range(1993, 2026)): raise SystemExit(f'per-year counts invalid: {bad}')
+          for r in rows:
+              if r['seed'] != f"{r['season']}:{r['league_id']}": raise SystemExit(f"YEAR:ID mismatch: {r['seed']}")
+              if any(int(v or 0) <= 0 for v in r.get('non_null_counts',{}).values()): raise SystemExit(f"empty signal: {r['seed']}")
+          out = duckdb.connect('mfl_register_snapshot.duckdb')
+          for src_path in sorted(root.rglob('mfl_register_snapshot.duckdb')):
+              out.execute(f"ATTACH '{src_path.as_posix()}' AS src (READ_ONLY)")
+              for t in ('league_settings','matchup','player_fantasy'):
+                  if not out.execute("select count(*) from information_schema.tables where table_catalog='src' and table_schema='main' and table_name=?",[t]).fetchone()[0]: continue
+                  if not out.execute("select count(*) from information_schema.tables where table_schema='main' and table_name=?",[t]).fetchone()[0]: out.execute(f'create table "{t}" as select * from src.main."{t}"')
+                  else: out.execute(f'insert into "{t}" select * from src.main."{t}"')
+              out.execute('detach src')
+          out.close()
+          pathlib.Path('mfl_register_all_runs.json').write_text(json.dumps({'schema_version':'mfl_register_results_v1','start_year':1993,'end_year':2025,'per_year':10,'league_count':330,'leagues':sorted(rows,key=lambda r:(int(r['season']),str(r['league_id'])))},indent=2,sort_keys=True),encoding='utf-8')
+          print('validated and merged 330 MFL season-league results')
+          PY
+      - name: Upload final 330-league register
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-register-all-runs-${{ github.run_id }}
+          retention-days: 90
+          path: |
+            mfl_register_all_runs.json
+            mfl_register_snapshot.duckdb
