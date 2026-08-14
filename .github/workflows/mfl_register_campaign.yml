@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       manifest_path:
-        description: 'Path in the private yahoo_oauth checkout to the 330-row execution manifest'
+        description: 'Path in the private yahoo_oauth checkout to a season-scoped MFL manifest'
         required: false
         type: string
         default: corpus_seed/mfl_execution_manifest_1993_2025.json
@@ -33,6 +33,16 @@ on:
         required: false
         type: string
         default: ''
+      expected_count:
+        description: 'Exact manifest row count; 0 disables the sample-count assertion for population manifests'
+        required: false
+        type: string
+        default: '330'
+      exact_per_year:
+        description: 'Exact rows required per year; 0 disables the per-year assertion for population manifests'
+        required: false
+        type: string
+        default: '10'
 
 permissions:
   actions: write
@@ -69,6 +79,8 @@ jobs:
           INDICES: ${{ inputs.indices }}
           INDEX_START: ${{ inputs.index_start }}
           INDEX_END: ${{ inputs.index_end }}
+          EXPECTED_COUNT: ${{ inputs.expected_count }}
+          EXACT_PER_YEAR: ${{ inputs.exact_per_year }}
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os
@@ -78,23 +90,26 @@ jobs:
           rows = d.get("leagues", d.get("rows", d if isinstance(d, list) else None))
           if not isinstance(rows, list): raise SystemExit("manifest has no leagues/rows list")
           keys = {(int(r["season"]), str(r["league_id"])) for r in rows}
-          years = list(range(1993, 2026))
+          expected_count = int(os.environ["EXPECTED_COUNT"])
+          exact_per_year = int(os.environ["EXACT_PER_YEAR"])
           counts = Counter(y for y, _ in keys)
-          if len(keys) != 330 or len(rows) != 330: raise SystemExit(f"expected 330 unique rows, got rows={len(rows)} keys={len(keys)}")
-          bad = {y: counts[y] for y in years if counts[y] != 10}
-          if bad: raise SystemExit(f"per-year counts invalid: {bad}")
+          if expected_count and (len(keys) != expected_count or len(rows) != expected_count):
+              raise SystemExit(f"expected {expected_count} unique rows, got rows={len(rows)} keys={len(keys)}")
+          if exact_per_year:
+              bad = {y: n for y, n in counts.items() if n != exact_per_year}
+              if bad: raise SystemExit(f"per-year counts invalid: {bad}")
           out = []
           for r in sorted(rows, key=lambda x: (int(x["season"]), str(x["league_id"]))):
               y, lid = int(r["season"]), str(r["league_id"])
               if str(r.get("seed", f"{y}:{lid}")) != f"{y}:{lid}": raise SystemExit(f"seed/year mismatch: {r}")
               out.append({"season": y, "league_id": lid, "seed": f"{y}:{lid}", "name": r.get("name", "")})
-          print("records=" + json.dumps(out, separators=(",", ":")))
           print("max_parallel=" + str(min(max(1, int(os.environ["MAX_PARALLEL"])), 20)))
-          raw_indices = os.environ.get("INDICES", "").strip()
           start = int(os.environ["INDEX_START"])
           end = int(os.environ["INDEX_END"])
           if start < 0 or end < start or end > len(out):
               raise SystemExit(f"invalid index range: {start}:{end} for {len(out)} records")
+          selected = out[start:end]
+          raw_indices = os.environ.get("INDICES", "").strip()
           if raw_indices:
               try:
                   parsed = json.loads(raw_indices)
@@ -102,9 +117,10 @@ jobs:
                   parsed = [int(x.strip()) for x in raw_indices.split(",") if x.strip()]
               parsed = sorted({int(x) for x in parsed})
           else:
-              parsed = list(range(end - start))
-          if not parsed or any(x < 0 or x >= end - start for x in parsed):
+              parsed = list(range(len(selected)))
+          if not parsed or any(x < 0 or x >= len(selected) for x in parsed):
               raise SystemExit(f"invalid matrix indices: {parsed}")
+          print("records=" + json.dumps(selected, separators=(",", ":")))
           print("indices=" + json.dumps(parsed, separators=(",", ":")))
           PY
 
@@ -323,9 +339,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, pathlib, duckdb
-          all_expected = json.loads(os.environ['EXPECTED'])
-          start, end = int(os.environ['INDEX_START']), int(os.environ['INDEX_END'])
-          expected = all_expected[start:end]
+          expected = json.loads(os.environ['EXPECTED'])
           root = pathlib.Path('receipts')
           receipts, dbs = [], []
           for p in sorted(root.glob('mfl-register-*/receipt.json')):
