@@ -47,6 +47,7 @@ class PromotionContract:
     source_key: tuple[str, ...]
     cache_key: tuple[str, ...]
     allowed_target_columns: tuple[str, ...]
+    source_to_target_columns: tuple[tuple[str, str], ...] = ()
     may_insert_missing_player_rows: bool = False
     terminal_reason: str = ""
     quarantined_source_columns: tuple[str, ...] = ()
@@ -82,6 +83,7 @@ def _team_signal_contract(
         source_key=source_key,
         cache_key=source_key,
         allowed_target_columns=tuple(allowed),
+        source_to_target_columns=tuple((column, column) for column in allowed),
         quarantined_source_columns=quarantined,
     )
 
@@ -103,6 +105,7 @@ def classify_source_schema(columns: Iterable[str]) -> PromotionContract:
             source_key=PLAYER_KEY,
             cache_key=PLAYER_KEY,
             allowed_target_columns=allowed,
+            source_to_target_columns=tuple((column, column) for column in allowed),
             may_insert_missing_player_rows=has_roster_payload,
         )
 
@@ -126,8 +129,9 @@ def classify_source_schema(columns: Iterable[str]) -> PromotionContract:
             grain="league_year_settings",
             source_key=LEAGUE_YEAR_KEY,
             cache_key=LEAGUE_YEAR_KEY,
-            allowed_target_columns=tuple(
-                target for source, target in SETTING_SOURCE_TO_TARGET if source in present
+            allowed_target_columns=tuple(target for source, target in SETTING_SOURCE_TO_TARGET if source in present),
+            source_to_target_columns=tuple(
+                (source, target) for source, target in SETTING_SOURCE_TO_TARGET if source in present
             ),
         )
 

@@ -26,6 +26,7 @@ def test_builds_one_reproducible_contract_row_per_artifact_file():
             "cache_key": "db_name|year|week|NFL_player_id", "writable_target_columns": "is_started|win",
             "blocked_source_columns": "", "may_insert_missing_player_rows": "true",
             "terminal_reason": "", "quarantined_source_columns": "",
+            "source_to_target_columns": "is_started:is_started|win:win",
         },
         {
             "artifact_id": "102", "artifact": "team-source", "file": "teams.parquet",
@@ -33,6 +34,7 @@ def test_builds_one_reproducible_contract_row_per_artifact_file():
             "cache_key": "db_name|year|week|team_key", "writable_target_columns": "win|team_points",
             "blocked_source_columns": "", "may_insert_missing_player_rows": "false",
             "terminal_reason": "", "quarantined_source_columns": "",
+            "source_to_target_columns": "win:win|team_points:team_points",
         },
         {
             "artifact_id": "103", "artifact": "audit", "file": "summary.json",
@@ -40,5 +42,6 @@ def test_builds_one_reproducible_contract_row_per_artifact_file():
             "writable_target_columns": "", "blocked_source_columns": "",
             "may_insert_missing_player_rows": "false",
             "terminal_reason": "no_supported_row_level_contract", "quarantined_source_columns": "",
+            "source_to_target_columns": "",
         },
     ]

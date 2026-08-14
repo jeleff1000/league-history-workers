@@ -20,7 +20,7 @@ from artifact_promotion_specmap import bind_to_canonical_schema, classify_source
 OUTPUT_FIELDS = (
     "artifact_id", "artifact", "file", "source_grain", "source_key", "cache_key",
     "writable_target_columns", "blocked_source_columns", "may_insert_missing_player_rows",
-    "terminal_reason", "quarantined_source_columns",
+    "terminal_reason", "quarantined_source_columns", "source_to_target_columns",
 )
 
 
@@ -64,6 +64,10 @@ def build_specmap_rows(
             "may_insert_missing_player_rows": str(contract.may_insert_missing_player_rows).lower(),
             "terminal_reason": contract.terminal_reason,
             "quarantined_source_columns": _joined(contract.quarantined_source_columns),
+            "source_to_target_columns": "|".join(
+                f"{source}:{target}" for source, target in contract.source_to_target_columns
+                if target in bound.writable_target_columns
+            ),
         })
     return sorted(out, key=lambda item: (int(item["artifact_id"]), item["file"]))
 

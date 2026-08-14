@@ -13,6 +13,11 @@ def test_player_week_schema_requires_exact_player_identity_and_can_fill_player_c
     assert contract.allowed_target_columns == (
         "is_rostered", "is_started", "win", "team_points", "is_playoffs", "champion",
     )
+    assert contract.source_to_target_columns == (
+        ("is_rostered", "is_rostered"), ("is_started", "is_started"),
+        ("win", "win"), ("team_points", "team_points"),
+        ("is_playoffs", "is_playoffs"), ("champion", "champion"),
+    )
     assert contract.may_insert_missing_player_rows is True
 
 
@@ -65,6 +70,12 @@ def test_league_year_settings_schema_only_maps_declared_cohort_dimensions():
     assert contract.allowed_target_columns == (
         "cohort_teams", "cohort_scoring", "cohort_pass_td", "cohort_playoff_teams",
         "cohort_roster", "cohort_best_ball", "cohort_dynasty",
+    )
+    assert contract.source_to_target_columns == (
+        ("team_count", "cohort_teams"), ("ppr", "cohort_scoring"),
+        ("pass_td", "cohort_pass_td"), ("playoff_teams", "cohort_playoff_teams"),
+        ("roster_config", "cohort_roster"), ("format", "cohort_best_ball"),
+        ("draft_style", "cohort_dynasty"),
     )
 
 
