@@ -208,6 +208,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, duckdb
+          from multi_league.core.canonical_player import PLAYER_FANTASY_COLUMNS
           y, lid, dbn = int(os.environ['SEASON']), os.environ['LEAGUE_ID'], os.environ['DB_NAME']
           c = duckdb.connect('league.duckdb', read_only=True)
           tables = {r[0] for r in c.execute("select table_name from information_schema.tables where table_schema='public'").fetchall()}
@@ -215,8 +216,21 @@ jobs:
           missing_tables = sorted(required_tables - tables)
           def cols(t): return {r[0] for r in c.execute(f'describe public.{t}').fetchall()} if t in tables else set()
           req = {
-            'player_fantasy': {'db_name','year','week','NFL_player_id','is_started','is_rostered','fantasy_points','manager','win','champion','clutch_equity','final_playoff_seed','is_playoffs'},
+            'player_fantasy': set(PLAYER_FANTASY_COLUMNS),
             'matchup': {'db_name','year','week','manager','team_points','win','loss','is_playoffs','final_playoff_seed','champion','is_championship'},
+          }
+          # A complete DDL is necessary but not sufficient. These fields must
+          # be populated for the pre-rollup player cache to produce matchup
+          # outcomes and clutch metrics. Feature-specific SQL columns may be
+          # legitimately NULL for leagues that do not use that feature.
+          populated_player = {
+            'db_name','year','week','player_week','NFL_player_id','manager',
+            'manager_guid','franchise_id','manager_week','mfl_player_id',
+            'player','position','fantasy_position','fantasy_points',
+            'is_started','is_rostered','platform','league_id','win','loss',
+            'tie','opponent','opponent_franchise_id','team_points',
+            'opponent_points','is_playoffs','is_consolation','is_championship',
+            'champion','clutch_equity',
           }
           schema = {t: sorted(cols(t)) for t in req}
           missing_cols = {t: sorted(v-cols(t)) for t,v in req.items() if v-cols(t)}
@@ -224,8 +238,8 @@ jobs:
           pf = n(f"select count(*) from public.player_fantasy where year={y} and coalesce(is_rostered,0)=1") if 'player_fantasy' in tables else 0
           mu = n(f"select count(*) from public.matchup where year={y}") if 'matchup' in tables else 0
           checks = {}
-          for field in ('manager','win','champion','clutch_equity'):
-              checks['player_fantasy.'+field] = n(f"select count(*) from public.player_fantasy where year={y} and {field} is not null") if field in cols('player_fantasy') else 0
+          for field in sorted(populated_player):
+            checks['player_fantasy.'+field] = n(f"select count(*) from public.player_fantasy where year={y} and {field} is not null") if field in cols('player_fantasy') else 0
           for field in ('win','loss','is_playoffs','champion','is_championship','final_playoff_seed'):
               checks['matchup.'+field] = n(f"select count(*) from public.matchup where year={y} and {field} is not null") if field in cols('matchup') else 0
           errors = []
@@ -291,8 +305,9 @@ jobs:
           wanted = Counter(int(r['season']) for r in expected)
           for y, n in wanted.items():
               if counts[y] != n: errors.append(f'{y} has {counts[y]} receipts, expected {n}')
+          from multi_league.core.canonical_player import PLAYER_FANTASY_COLUMNS
           required = {
-            'player_fantasy': {'db_name','year','week','NFL_player_id','is_started','is_rostered','fantasy_points','manager','win','champion','clutch_equity','final_playoff_seed','is_playoffs'},
+            'player_fantasy': set(PLAYER_FANTASY_COLUMNS),
             'matchup': {'db_name','year','week','manager','team_points','win','loss','is_playoffs','final_playoff_seed','champion','is_championship'},
           }
           for r in receipts:
