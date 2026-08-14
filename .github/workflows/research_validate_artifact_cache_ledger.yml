@@ -20,6 +20,8 @@ on:
       - scripts/research_cohorts/test_artifact_promotion_specmap.py
       - scripts/research_cohorts/build_artifact_promotion_specmap.py
       - scripts/research_cohorts/test_build_artifact_promotion_specmap.py
+      - scripts/research_cohorts/normalize_artifact_promotion_candidates.py
+      - scripts/research_cohorts/test_normalize_artifact_promotion_candidates.py
       - scripts/research_cohorts/validate_mfl_batch_admission_manifest.py
       - tests/research_cohorts/test_validate_mfl_batch_admission_manifest.py
       - .github/workflows/research_validate_artifact_cache_ledger.yml
@@ -43,6 +45,7 @@ jobs:
           scripts/research_cohorts/test_append_mfl_batch_artifact_admissions.py
           scripts/research_cohorts/test_artifact_promotion_specmap.py
           scripts/research_cohorts/test_build_artifact_promotion_specmap.py
+          scripts/research_cohorts/test_normalize_artifact_promotion_candidates.py
           tests/research_cohorts/test_validate_mfl_batch_admission_manifest.py
       - name: Fail fast on invalid ledger evidence
         run: >-
