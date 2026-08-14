@@ -23,8 +23,8 @@ env:
   REPORT_SHA: 14cf4220ff62a9576de20c17fcc29cfd26c353d5405d5ab0be28381bebd1a6ca
   DELTA_SHA: 70caa5eb05802e7a36c9680f77e26e483d4f79e2b9646a5493455ac5009b0b62
   EXPECTED_RAW_ROWS: '13986'
-  EXPECTED_UNIQUE_ROWS: '13986'
-  EXPECTED_BLOCKED_NULL_NFL_ROWS: '0'
+  EXPECTED_UNIQUE_ROWS: '7955'
+  EXPECTED_MATCHED_ROWS: '13986'
 
 jobs:
   tests:
@@ -83,24 +83,47 @@ jobs:
           test -n "$report" && test -n "$delta"
           test "$(sha256sum "$report" | awk '{print $1}')" = "$REPORT_SHA"
           test "$(sha256sum "$delta" | awk '{print $1}')" = "$DELTA_SHA"
-      - name: Verify and combine exact-ID loss-tie rows only
+      - name: Verify and collapse exact loss-tie rows without discarding null NFL IDs
         shell: bash
         run: |
           set -euo pipefail
           python scripts/research_cohorts/verify_exact_team_null_candidate_contract.py --candidate-root candidate --out candidate_contract.json
-          python scripts/research_cohorts/combine_exact_team_null_candidates.py --candidate-root candidate --out-delta combined_delta.parquet --out-receipt combined_contract.json
           python - <<'PY'
-          import json,os
-          c=json.load(open('combined_contract.json'))
+          import duckdb,json,os
+          from pathlib import Path
+          c=json.load(open('candidate_contract.json'))
           expected={
-            'candidate_bundles':1,
             'raw_rows':int(os.environ['EXPECTED_RAW_ROWS']),
             'unique_rows':int(os.environ['EXPECTED_UNIQUE_ROWS']),
-            'blocked_null_nfl_player_id_rows':int(os.environ['EXPECTED_BLOCKED_NULL_NFL_ROWS']),
             'conflicting_duplicate_keys':0,
           }
           actual={k:c.get(k) for k in expected}
           if actual != expected: raise SystemExit({'actual':actual,'expected':expected})
+          delta=next(Path('candidate').rglob('team_promotable_player_delta.parquet'))
+          con=duckdb.connect()
+          quoted=str(delta.resolve()).replace("'", "''")
+          con.execute(f"""
+            COPY (
+              SELECT db_name,year,week,NFL_player_id,manager,team_key,team_name,platform,
+                     MAX(source_win) source_win, MAX(source_loss) source_loss,
+                     MAX(source_tie) source_tie, MAX(source_team_points) source_team_points,
+                     MAX(source_playoffs) source_playoffs, MAX(source_champion) source_champion,
+                     MAX(source_final_playoff_seed) source_final_playoff_seed,
+                     MAX(source_made_playoffs) source_made_playoffs
+              FROM read_parquet('{quoted}')
+              GROUP BY db_name,year,week,NFL_player_id,manager,team_key,team_name,platform
+            ) TO 'combined_delta.parquet' (FORMAT PARQUET)
+          """)
+          collapsed=int(con.execute("SELECT COUNT(*) FROM read_parquet('combined_delta.parquet')").fetchone()[0])
+          con.close()
+          if collapsed != expected['unique_rows']:
+              raise SystemExit({'collapsed_rows':collapsed,'expected':expected['unique_rows']})
+          Path('combined_contract.json').write_text(json.dumps({
+              'raw_rows':expected['raw_rows'], 'unique_rows':collapsed,
+              'null_nfl_player_id_allowed':True,
+              'duplicate_rows_collapsed':expected['raw_rows']-collapsed,
+              'conflicting_duplicate_keys':0,
+          }, indent=2)+'\n')
           PY
       - name: Apply existing-player loss-tie NULL cells only
         shell: bash
@@ -113,7 +136,7 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           import duckdb,hashlib,json,os
-          before=json.load(open('prestate.json')); report=json.load(open('apply_report.json')); expected=int(os.environ['EXPECTED_UNIQUE_ROWS'])
+          before=json.load(open('prestate.json')); report=json.load(open('apply_report.json')); expected=int(os.environ['EXPECTED_MATCHED_ROWS'])
           allowed=('win','loss','tie','team_points','is_playoffs','champion','final_playoff_seed','made_playoffs')
           fields={k:int(report['improvements_by_field'].get(k,0)) for k in allowed}
           required={k:0 for k in allowed}; required['loss']=expected; required['tie']=expected
@@ -181,7 +204,7 @@ jobs:
           python - <<'PY'
           import duckdb,hashlib,json,os
           from pathlib import Path
-          before=json.load(open('evidence/prestate.json')); expected=int(os.environ['EXPECTED_UNIQUE_ROWS'])
+          before=json.load(open('evidence/prestate.json')); expected=int(os.environ['EXPECTED_MATCHED_ROWS'])
           con=duckdb.connect('research_public_lake/corpus_snapshot.duckdb',read_only=True)
           dpath=str(Path('evidence/combined_delta.parquet').resolve()).replace("'","''")
           con.execute(f"CREATE TEMP VIEW d AS SELECT * FROM read_parquet('{dpath}')")
