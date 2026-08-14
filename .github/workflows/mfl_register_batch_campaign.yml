@@ -1,0 +1,235 @@
+name: MFL Register Batch Campaign
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest_path:
+        description: 'Private checkout manifest containing season-scoped MFL rows'
+        required: false
+        type: string
+        default: corpus_seed/mfl_population_manifest_2004_2018_expanded.json
+      yahoo_oauth_ref:
+        description: 'Private pipeline ref containing importer and batch driver'
+        required: false
+        type: string
+        default: codex/mfl-gates
+      batch_start:
+        description: 'First batch number in this wave'
+        required: false
+        type: string
+        default: '0'
+      batch_count:
+        description: 'Number of batches in this wave'
+        required: false
+        type: string
+        default: '16'
+      batch_size:
+        description: 'Leagues processed sequentially by one runner'
+        required: false
+        type: string
+        default: '16'
+      max_parallel:
+        description: 'Concurrent batch runners; each runner has its own MFL limiter'
+        required: false
+        type: string
+        default: '20'
+      cache_namespace:
+        description: 'Immutable Actions cache namespace'
+        required: false
+        type: string
+        default: mfl-population-batch-v1
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      records: ${{ steps.manifest.outputs.records }}
+      batches: ${{ steps.manifest.outputs.batches }}
+      max_parallel: ${{ steps.manifest.outputs.max_parallel }}
+    steps:
+      - name: Checkout private manifest
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref }}
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /corpus_seed/
+      - name: Select wave batches
+        id: manifest
+        env:
+          MANIFEST: code/${{ inputs.manifest_path }}
+          START: ${{ inputs.batch_start }}
+          COUNT: ${{ inputs.batch_count }}
+          SIZE: ${{ inputs.batch_size }}
+          MAX: ${{ inputs.max_parallel }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          d=json.load(open(os.environ['MANIFEST'], encoding='utf-8'))
+          rows=d.get('rows', d.get('leagues', d))
+          start=int(os.environ['START']); count=int(os.environ['COUNT']); size=int(os.environ['SIZE'])
+          end=min(len(rows), (start+count)*size)
+          selected=rows[start*size:end]
+          batches=list(range(start, start+((len(selected)+size-1)//size)))
+          print('records='+json.dumps(selected,separators=(',',':')))
+          print('batches='+json.dumps(batches,separators=(',',':')))
+          print('max_parallel='+str(min(max(1,int(os.environ['MAX'])),len(batches))))
+          PY
+
+  ingest:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(needs.prepare.outputs.max_parallel) }}
+      matrix:
+        batch: ${{ fromJSON(needs.prepare.outputs.batches) }}
+    env:
+      CORPUS_MODE: '1'
+      MFL_RATE_LIMIT_PER_MIN: '12'
+      PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
+      OPS_CACHE_PATH: ${{ github.workspace }}/corpus_dependencies/ops_cache.duckdb
+      DRAFT_GLOBAL_SOURCE_PATH: ${{ github.workspace }}/corpus_dependencies/draft_global_source.parquet
+      CORPUS_DEPENDENCY_DIR: ${{ github.workspace }}/corpus_dependencies
+      CORPUS_DEPENDENCY_KEY: corpus-dependencies-v1-Linux-20260717
+    steps:
+      - name: Checkout worker
+        uses: actions/checkout@v5
+        with:
+          path: worker
+      - name: Checkout private pipeline
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref }}
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /corpus_seed/
+            /fantasy_football_data_scripts/
+            /scripts/extraplatform_corpus/
+            /requirements.txt
+            /pyproject.toml
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r code/requirements.txt
+      - name: Restore corpus dependencies
+        id: deps
+        uses: actions/cache/restore@v5
+        with:
+          path: corpus_dependencies
+          key: corpus-dependencies-v1-Linux-20260717
+      - name: Require offline dependency cache
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: exit 1
+      - name: Run validated MFL batch
+        env:
+          MANIFEST: code/${{ inputs.manifest_path }}
+          BATCH_START: ${{ inputs.batch_start }}
+          BATCH: ${{ matrix.batch }}
+          BATCH_SIZE: ${{ inputs.batch_size }}
+        run: |
+          mkdir -p batch_output
+          python code/scripts/extraplatform_corpus/mfl_register_batch.py \
+            --manifest "$MANIFEST" \
+            --offset "$(( (BATCH - BATCH_START) * BATCH_SIZE + BATCH_START * BATCH_SIZE ))" \
+            --limit "$BATCH_SIZE" \
+            --output batch_output \
+            --code-root code
+      - name: Upload batch receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-register-batch-${{ matrix.batch }}
+          retention-days: 30
+          path: |
+            batch_output/*/league.duckdb
+            batch_output/*/receipt.json
+            batch_output/*/import.log
+            batch_output/batch_receipt.json
+
+  combine:
+    needs: [prepare, ingest]
+    if: always() && needs.prepare.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Download batch artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mfl-register-batch-*
+          path: receipts
+          merge-multiple: false
+      - name: Checkout canonical schema
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref }}
+          path: code
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /fantasy_football_data_scripts/multi_league/core/canonical_player.py
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install DuckDB
+        run: pip install duckdb
+      - name: Build canonical batch snapshot
+        env:
+          EXPECTED: ${{ needs.prepare.outputs.records }}
+          PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, duckdb, os
+          expected=json.loads(os.environ['EXPECTED']); root=pathlib.Path('receipts')
+          pairs=[]; receipts=[]
+          for receipt_path in sorted(root.rglob('receipt.json')):
+              r=json.loads(receipt_path.read_text(encoding='utf-8')); receipts.append(r)
+              pairs.append((receipt_path.parent/'league.duckdb',r))
+          keys={(int(r['season']),str(r['league_id'])) for r in expected}
+          got={(int(r['season']),str(r['league_id'])) for r in receipts}
+          if not got: raise SystemExit('batch wave produced no valid receipts')
+          print(f'validated {len(got)}/{len(keys)} candidates; rejected {len(keys-got)}')
+          out=duckdb.connect('mfl_register_snapshot.duckdb')
+          for db,r in pairs:
+              out.execute(f"ATTACH '{db.as_posix()}' AS src (READ_ONLY)")
+              for table in ('league_settings','matchup','player_fantasy'):
+                  if not out.execute("select count(*) from information_schema.tables where table_catalog='src' and table_schema='public' and table_name=?",[table]).fetchone()[0]: continue
+                  if not out.execute("select count(*) from information_schema.tables where table_schema='main' and table_name=?",[table]).fetchone()[0]:
+                      out.execute(f'create table "{table}" as select * from src.public."{table}" where year={int(r["season"])}')
+                  else: out.execute(f'insert into "{table}" select * from src.public."{table}" where year={int(r["season"])}')
+              out.execute('DETACH src')
+          out.close()
+          pathlib.Path('mfl_register_all_runs.json').write_text(json.dumps({'schema_version':'mfl_register_results_v1','expected_count':len(keys),'league_count':len(receipts),'rejected_count':len(keys-got),'rejected':[{'season':y,'league_id':lid} for y,lid in sorted(keys-got)],'leagues':sorted(receipts,key=lambda r:(int(r['season']),str(r['league_id'])))},indent=2,sort_keys=True),encoding='utf-8')
+          PY
+      - name: Save validated batch cache
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            mfl_register_snapshot.duckdb
+            mfl_register_all_runs.json
+          key: ${{ inputs.cache_namespace }}-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+      - name: Upload batch snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-register-batch-final-${{ github.run_id }}
+          retention-days: 90
+          path: |
+            mfl_register_snapshot.duckdb
+            mfl_register_all_runs.json
