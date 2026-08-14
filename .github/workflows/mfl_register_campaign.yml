@@ -1,0 +1,190 @@
+name: MFL Register Campaign (1993-2025)
+
+on:
+  workflow_dispatch:
+    inputs:
+      manifest_path:
+        description: 'Path in the private yahoo_oauth checkout to the 330-row execution manifest'
+        required: false
+        type: string
+        default: corpus_seed/mfl_execution_manifest_1993_2025.json
+      yahoo_oauth_ref:
+        description: 'Private pipeline ref containing the manifest and importer'
+        required: false
+        type: string
+        default: codex/mfl-gates
+      max_parallel:
+        description: 'Concurrent MFL runners (one league per runner/IP)'
+        required: false
+        type: string
+        default: '15'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      records: ${{ steps.manifest.outputs.records }}
+      max_parallel: ${{ steps.manifest.outputs.max_parallel }}
+    steps:
+      - name: Checkout private pipeline and manifest
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref }}
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /corpus_seed/
+            /scripts/extraplatform_corpus/
+            /fantasy_football_data_scripts/
+            /requirements.txt
+            /pyproject.toml
+      - name: Validate exact 330-row manifest
+        id: manifest
+        env:
+          MANIFEST_PATH: code/${{ inputs.manifest_path }}
+          MAX_PARALLEL: ${{ inputs.max_parallel }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          from collections import Counter
+          p = os.environ["MANIFEST_PATH"]
+          d = json.load(open(p, encoding="utf-8"))
+          rows = d.get("leagues", d.get("rows", d if isinstance(d, list) else None))
+          if not isinstance(rows, list): raise SystemExit("manifest has no leagues/rows list")
+          keys = {(int(r["season"]), str(r["league_id"])) for r in rows}
+          years = list(range(1993, 2026))
+          counts = Counter(y for y, _ in keys)
+          if len(keys) != 330 or len(rows) != 330: raise SystemExit(f"expected 330 unique rows, got rows={len(rows)} keys={len(keys)}")
+          bad = {y: counts[y] for y in years if counts[y] != 10}
+          if bad: raise SystemExit(f"per-year counts invalid: {bad}")
+          out = []
+          for r in sorted(rows, key=lambda x: (int(x["season"]), str(x["league_id"]))):
+              y, lid = int(r["season"]), str(r["league_id"])
+              if str(r.get("seed", f"{y}:{lid}")) != f"{y}:{lid}": raise SystemExit(f"seed/year mismatch: {r}")
+              out.append({"season": y, "league_id": lid, "seed": f"{y}:{lid}", "name": r.get("name", "")})
+          print("records=" + json.dumps(out, separators=(",", ":")))
+          print("max_parallel=" + str(min(max(1, int(os.environ["MAX_PARALLEL"])), 20)))
+          PY
+
+  ingest:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(needs.prepare.outputs.max_parallel) }}
+      matrix:
+        include: ${{ fromJSON(needs.prepare.outputs.records) }}
+    env:
+      CORPUS_MODE: '1'
+      MFL_RATE_LIMIT_PER_MIN: '12'
+      PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
+      OPS_CACHE_PATH: ${{ github.workspace }}/corpus_dependencies/ops_cache.duckdb
+      DRAFT_GLOBAL_SOURCE_PATH: ${{ github.workspace }}/corpus_dependencies/draft_global_source.parquet
+      CORPUS_DEPENDENCY_DIR: ${{ github.workspace }}/corpus_dependencies
+      CORPUS_DEPENDENCY_KEY: corpus-dependencies-v1-Linux-20260717
+    steps:
+      - name: Checkout worker
+        uses: actions/checkout@v5
+        with:
+          path: worker
+      - name: Checkout private pipeline
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref }}
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /fantasy_football_data_scripts/
+            /scripts/
+            /requirements.txt
+            /pyproject.toml
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: pip install -r code/requirements.txt
+      - name: Restore corpus dependencies
+        id: deps
+        uses: actions/cache/restore@v5
+        with:
+          path: corpus_dependencies
+          key: corpus-dependencies-v1-Linux-20260717
+      - name: Require offline dependency cache
+        if: steps.deps.outputs.cache-hit != 'true'
+        run: exit 1
+      - name: Assert no Fly credentials
+        run: |
+          test -z "${DATABASE_SERVER_URL:-}" && test -z "${DATABASE_READ_TOKEN:-}" && test -z "${DATABASE_WRITE_TOKEN:-}"
+      - name: Import exact league season
+        env:
+          SEASON: ${{ matrix.season }}
+          LEAGUE_ID: ${{ matrix.league_id }}
+          DB_NAME: mfl_${{ matrix.season }}_${{ matrix.league_id }}
+          DATA_DIR: ${{ runner.temp }}/mfl_${{ matrix.season }}_${{ matrix.league_id }}
+        run: |
+          python code/fantasy_football_data_scripts/mfl_initial_import.py \
+            --league-id "${SEASON}:${LEAGUE_ID}" \
+            --start-year "${SEASON}" --end-year "${SEASON}" \
+            --data-dir "${DATA_DIR}" --database-name "${DB_NAME}" \
+            --import-mode full --skip-track-1 --skip-track-2-upload --stop-after 4 \
+            > import.log 2>&1
+          cp "${DATA_DIR}/${DB_NAME}.duckdb" league.duckdb
+      - name: Validate canonical receipt
+        env:
+          SEASON: ${{ matrix.season }}
+          LEAGUE_ID: ${{ matrix.league_id }}
+          DB_NAME: mfl_${{ matrix.season }}_${{ matrix.league_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os, duckdb
+          y, lid, dbn = int(os.environ['SEASON']), os.environ['LEAGUE_ID'], os.environ['DB_NAME']
+          c = duckdb.connect('league.duckdb', read_only=True)
+          tables = {r[0] for r in c.execute("select table_name from information_schema.tables where table_schema='public'").fetchall()}
+          required_tables = {'player_fantasy','matchup','league_settings'}
+          missing_tables = sorted(required_tables - tables)
+          def cols(t): return {r[0] for r in c.execute(f'describe public.{t}').fetchall()} if t in tables else set()
+          req = {
+            'player_fantasy': {'db_name','year','week','NFL_player_id','is_started','is_rostered','fantasy_points','manager','win','champion','clutch_equity','final_playoff_seed','is_playoffs'},
+            'matchup': {'db_name','year','week','manager','team_points','win','loss','is_playoffs','final_playoff_seed','champion','is_championship'},
+          }
+          schema = {t: sorted(cols(t)) for t in req}
+          missing_cols = {t: sorted(v-cols(t)) for t,v in req.items() if v-cols(t)}
+          def n(sql): return int(c.execute(sql).fetchone()[0])
+          pf = n(f"select count(*) from public.player_fantasy where year={y} and coalesce(is_rostered,0)=1") if 'player_fantasy' in tables else 0
+          mu = n(f"select count(*) from public.matchup where year={y}") if 'matchup' in tables else 0
+          checks = {}
+          for field in ('manager','win','champion','clutch_equity'):
+              checks['player_fantasy.'+field] = n(f"select count(*) from public.player_fantasy where year={y} and {field} is not null") if field in cols('player_fantasy') else 0
+          for field in ('win','loss','is_playoffs','champion','is_championship','final_playoff_seed'):
+              checks['matchup.'+field] = n(f"select count(*) from public.matchup where year={y} and {field} is not null") if field in cols('matchup') else 0
+          errors = []
+          if missing_tables: errors.append('missing tables '+repr(missing_tables))
+          if missing_cols: errors.append('missing columns '+repr(missing_cols))
+          if pf <= 0 or mu <= 0: errors.append(f'empty core rows player={pf} matchup={mu}')
+          errors += [f'{k} has no populated values' for k,v in checks.items() if v <= 0]
+          if errors: raise SystemExit('; '.join(errors))
+          receipt = {'schema_version':'mfl_register_receipt_v1','season':y,'league_id':lid,'seed':f'{y}:{lid}','db_name':dbn,'player_fantasy_rows':pf,'matchup_rows':mu,'populated_signals':checks,'schema_columns':schema,'source':'league-history-workers'}
+          open('receipt.json','w',encoding='utf-8').write(json.dumps(receipt,indent=2,sort_keys=True))
+          PY
+      - name: Upload validated season league
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-register-${{ matrix.season }}-${{ matrix.league_id }}
+          retention-days: 30
+          path: |
+            league.duckdb
+            receipt.json
+            import.log
+
