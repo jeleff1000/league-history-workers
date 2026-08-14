@@ -21,6 +21,10 @@ on:
         description: 'Disjoint parallel career partitions; use 1 only for an isolated career pilot'
         required: false
         default: '15'
+      capacity_only:
+        description: 'Run only immutable-cache position-capacity allocation gates; emit no compact artifacts'
+        required: false
+        default: 'false'
 
 permissions:
   contents: read
@@ -31,6 +35,7 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       lane_count: ${{ steps.plan.outputs.lane_count }}
+      task_count: ${{ steps.plan.outputs.task_count }}
       career_matrix: ${{ steps.plan.outputs.career_matrix }}
     steps:
       - uses: actions/checkout@v5
@@ -50,10 +55,16 @@ jobs:
       - run: python -m pip install duckdb==1.5.1
       - id: plan
         run: |
-          python code/scripts/research_cohorts/plan_balanced_matchup_tasks.py --snapshot research_public_lake/corpus_snapshot.duckdb --ops-cache research_public_lake/ops_cache.duckdb --year-start '${{ inputs.year_start }}' --year-end '${{ inputs.year_end }}' --positions '${{ inputs.positions }}' --runners '${{ inputs.runners }}' --output matrix.json
+          capacity_args=()
+          if [ '${{ inputs.capacity_only }}' = 'true' ]; then
+            capacity_args+=(--capacity-only)
+          fi
+          python code/scripts/research_cohorts/plan_balanced_matchup_tasks.py --snapshot research_public_lake/corpus_snapshot.duckdb --ops-cache research_public_lake/ops_cache.duckdb --year-start '${{ inputs.year_start }}' --year-end '${{ inputs.year_end }}' --positions '${{ inputs.positions }}' --runners '${{ inputs.runners }}' "${capacity_args[@]}" --output matrix.json
           echo "matrix=$(tr -d '\n' < matrix.json)" >> "$GITHUB_OUTPUT"
           lane_count="$(python -c 'import json; print(len(json.load(open("matrix.json"))["include"]))')"
           echo "lane_count=$lane_count" >> "$GITHUB_OUTPUT"
+          task_count="$(python -c 'import json; print(sum(len(x["tasks"]) for x in json.load(open("matrix.json"))["include"]))')"
+          echo "task_count=$task_count" >> "$GITHUB_OUTPUT"
           career_matrix="$(python -c 'import json; n=int("${{ inputs.career_buckets }}"); assert n > 0; print(json.dumps({"include":[{"bucket":i} for i in range(n)]}))')"
           echo "career_matrix=$career_matrix" >> "$GITHUB_OUTPUT"
 
@@ -67,6 +78,7 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       TASKS: ${{ toJSON(matrix.tasks) }}
+      CAPACITY_ONLY: ${{ inputs.capacity_only }}
       PYTHONPATH: ${{ github.workspace }}/code
     steps:
       - uses: actions/checkout@v5
@@ -90,26 +102,100 @@ jobs:
           python - <<'PY'
           import json,os,subprocess,sys
           from pathlib import Path
+          capacity_only=os.environ.get('CAPACITY_ONLY','false').lower() == 'true'
+          audit_results=[]
           for task in json.loads(os.environ['TASKS']):
-              name=f"{task['task_id']}.duckdb"
-              cmd=[sys.executable,'code/scripts/research_cohorts/build_compact_matchup_bundle.py','--snapshot','research_public_lake/corpus_snapshot.duckdb','--ops-cache','research_public_lake/ops_cache.duckdb','--output',str(Path('out/tasks')/name),'--year',str(task['year']),'--position',task['position']]
-              if task.get('player_buckets', 1) > 1:
-                  cmd.extend(['--player-bucket-count',str(task['player_buckets']),'--player-bucket',str(task['player_bucket'])])
-              if task.get('player_ids'):
-                  cmd.extend(['--player-ids-json',json.dumps(task['player_ids'])])
+              cmd=[sys.executable,'code/scripts/research_cohorts/build_compact_matchup_bundle.py','--snapshot','research_public_lake/corpus_snapshot.duckdb','--year',str(task['year']),'--position',task['position']]
+              if capacity_only:
+                  cmd.append('--capacity-only')
+              else:
+                  name=f"{task['task_id']}.duckdb"
+                  cmd.extend(['--ops-cache','research_public_lake/ops_cache.duckdb','--output',str(Path('out/tasks')/name)])
+                  if task.get('player_buckets', 1) > 1:
+                      cmd.extend(['--player-bucket-count',str(task['player_buckets']),'--player-bucket',str(task['player_bucket'])])
+                  if task.get('player_ids'):
+                      cmd.extend(['--player-ids-json',json.dumps(task['player_ids'])])
               print(json.dumps(task),flush=True)
-              subprocess.run(cmd,check=True)
+              completed=subprocess.run(cmd,check=True,text=True,capture_output=capacity_only)
+              if capacity_only:
+                  print(completed.stdout, end='', flush=True)
+                  lines=[line for line in completed.stdout.splitlines() if line.startswith('compact_task_capacity_allocation=')]
+                  assert len(lines)==1,(task,completed.stdout)
+                  audit_results.append(json.loads(lines[0].split('=',1)[1]))
+          if capacity_only:
+              Path('out/capacity-allocation.json').write_text(json.dumps(audit_results,sort_keys=True),encoding='utf-8')
           PY
-          python code/scripts/research_cohorts/merge_compact_matchup_parts.py --parts out/tasks/*.duckdb --output out/lane.duckdb --no-career
+          if [ "$CAPACITY_ONLY" != 'true' ]; then
+            python code/scripts/research_cohorts/merge_compact_matchup_parts.py --parts out/tasks/*.duckdb --output out/lane.duckdb --no-career
+          fi
+      - if: inputs.capacity_only == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: compact-matchup-capacity-${{ matrix.bucket }}-${{ github.run_id }}
+          path: out/capacity-allocation.json
+          retention-days: 1
+          compression-level: 0
       - uses: actions/upload-artifact@v4
+        if: inputs.capacity_only != 'true'
         with:
           name: compact-matchup-lane-${{ matrix.bucket }}-${{ github.run_id }}
           path: out/lane.duckdb
           retention-days: 1
           compression-level: 0
 
+  capacity_audit_summary:
+    needs: [plan, build]
+    if: inputs.capacity_only == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: compact-matchup-capacity-*-${{ github.run_id }}
+          path: capacity
+          merge-multiple: false
+      - name: Fail closed on every position-year allocation
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+          files=sorted(Path('capacity').glob('**/capacity-allocation.json'))
+          results=[row for path in files for row in json.loads(path.read_text())]
+          assert len(results)==${{ needs.plan.outputs.task_count }},(len(results),${{ needs.plan.outputs.task_count }})
+          keys=[(row['year'],row['position']) for row in results]
+          duplicates=[key for key,count in Counter(keys).items() if count != 1]
+          assert not duplicates,duplicates
+          bad=[row for row in results if any(row[key] for key in ('invalid_rostered_lanes','invalid_started_lanes','invalid_historical_lanes'))]
+          assert not bad,bad
+          totals={stat:Counter() for stat in ('rostered_tiers','started_tiers')}
+          for row in results:
+              for stat in totals:
+                  totals[stat].update(row[stat])
+          visible=sum(row['visible_eligible_lanes'] for row in results)
+          ten_twelve={
+              stat: totals[stat]['10tm'] + totals[stat]['12tm']
+              for stat in totals
+          }
+          shares={
+              stat: (ten_twelve[stat] / visible if visible else None)
+              for stat in totals
+          }
+          assert all(
+              share is None or share > 0.5
+              for share in shares.values()
+          ), {'visible_lanes': visible, 'ten_twelve_lanes': ten_twelve, 'shares': shares}
+          print(json.dumps({
+              'position_years':len(results),
+              'visible_lanes':visible,
+              'tiers':totals,
+              'ten_twelve_lanes':ten_twelve,
+              'ten_twelve_shares':shares,
+          },sort_keys=True))
+          PY
+
   merge_base:
     needs: [plan, build]
+    if: inputs.capacity_only != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -170,6 +256,7 @@ jobs:
 
   career:
     needs: [plan, merge_base]
+    if: inputs.capacity_only != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -209,6 +296,7 @@ jobs:
 
   merge:
     needs: [plan, merge_base, career]
+    if: inputs.capacity_only != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
