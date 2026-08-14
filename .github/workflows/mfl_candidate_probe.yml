@@ -100,12 +100,18 @@ jobs:
                       last_regular_week = int(payload.get('lastRegularSeasonWeek'))
                   except (TypeError, ValueError):
                       pass
+                  week_numbers = []
                   for w in weeks:
-                      if not isinstance(w, dict):
-                          continue
-                      try:
-                          week = int(w.get('week'))
-                      except (TypeError, ValueError):
+                      if isinstance(w, dict):
+                          try:
+                              week_numbers.append(int(w.get('week')))
+                          except (TypeError, ValueError):
+                              pass
+                  check_weeks = set(week_numbers[:1] + week_numbers[-1:])
+                  if last_regular_week is not None:
+                      check_weeks.update({last_regular_week, last_regular_week + 1})
+                  for week in sorted(check_weeks):
+                      if week not in week_numbers:
                           continue
                       weekly = client.fetch_weekly_results(lid, year, week) or {}
                       weekly_blocks.append(weekly)
