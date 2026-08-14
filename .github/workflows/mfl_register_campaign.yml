@@ -189,7 +189,7 @@ jobs:
               --league-id "${SEASON}:${LEAGUE_ID}" \
               --start-year "${SEASON}" --end-year "${SEASON}" \
               --data-dir "${ATTEMPT_DIR}" --database-name "${DB_NAME}" \
-              --import-mode full --skip-track-1 --skip-track-2-upload --stop-after 4 \
+              --import-mode full --player-cache-minimal --skip-track-1 --skip-track-2-upload --stop-after 4 \
               2>&1 | tee import.log
             rc=${PIPESTATUS[0]}
             if [ "$rc" -eq 0 ] && [ -f "${ATTEMPT_DIR}/${DB_NAME}.duckdb" ]; then
