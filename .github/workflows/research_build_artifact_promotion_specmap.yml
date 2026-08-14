@@ -1,0 +1,116 @@
+name: Build fixed research artifact promotion spec map
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_audit_run_id:
+        description: Completed 9,479-artifact schema audit run
+        required: true
+        default: '31337901490'
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+
+jobs:
+  map:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Restore the approved cache read-only
+        uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ env.CANONICAL_CACHE_KEY }}
+          fail-on-cache-miss: true
+
+      - name: Download the existing complete artifact checklist
+        uses: actions/download-artifact@v5
+        with:
+          name: research-artifact-audit-complete-${{ inputs.source_audit_run_id }}
+          path: source_audit
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_audit_run_id }}
+          github-token: ${{ github.token }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+
+      - name: Capture read-only cache receipt and build the source-to-cache map
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s source_audit/artifact_checklist.csv
+          python - <<'PY'
+          import duckdb, hashlib, json
+          from pathlib import Path
+
+          cache=Path('research_public_lake/corpus_snapshot.duckdb')
+          ops=Path('research_public_lake/ops_cache.duckdb')
+          def sha(path):
+              digest=hashlib.sha256()
+              with path.open('rb') as handle:
+                  for block in iter(lambda: handle.read(1024*1024), b''):
+                      digest.update(block)
+              return digest.hexdigest()
+          con=duckdb.connect(str(cache), read_only=True)
+          receipt={
+              'canonical_cache_key': '${{ env.CANONICAL_CACHE_KEY }}',
+              'player_columns': [row[0] for row in con.execute('DESCRIBE public.player_fantasy').fetchall()],
+              'player_rows': int(con.execute('SELECT COUNT(*) FROM public.player_fantasy').fetchone()[0]),
+              'cache_sha256_before': sha(cache),
+              'ops_sha256_before': sha(ops),
+              'cache_mutated': False,
+              'new_lineage': False,
+          }
+          con.close()
+          Path('cache_before_specmap.json').write_text(json.dumps(receipt, indent=2, sort_keys=True)+'\n')
+          PY
+          python scripts/research_cohorts/build_artifact_promotion_specmap.py \
+            --checklist source_audit/artifact_checklist.csv \
+            --canonical-cache research_public_lake/corpus_snapshot.duckdb \
+            --out-csv artifact_promotion_specmap.csv \
+            --out-json artifact_promotion_specmap_summary.json
+          python - <<'PY'
+          import csv, hashlib, json
+          from pathlib import Path
+
+          before=json.loads(Path('cache_before_specmap.json').read_text())
+          def sha(path):
+              digest=hashlib.sha256()
+              with open(path,'rb') as handle:
+                  for block in iter(lambda: handle.read(1024*1024), b''):
+                      digest.update(block)
+              return digest.hexdigest()
+          with Path('artifact_promotion_specmap.csv').open(newline='', encoding='utf-8') as handle:
+              rows=list(csv.DictReader(handle))
+          ids={row['artifact_id'] for row in rows}
+          summary=json.loads(Path('artifact_promotion_specmap_summary.json').read_text())
+          if summary['artifact_ids'] != 9479 or len(ids) != 9479:
+              raise SystemExit(f'exact manifest map failed: summary={summary["artifact_ids"]} ids={len(ids)}')
+          if sha('research_public_lake/corpus_snapshot.duckdb') != before['cache_sha256_before']:
+              raise SystemExit('spec-map workflow mutated canonical cache')
+          if sha('research_public_lake/ops_cache.duckdb') != before['ops_sha256_before']:
+              raise SystemExit('spec-map workflow mutated ops cache')
+          receipt={**before, **summary, 'cache_sha256_after': sha('research_public_lake/corpus_snapshot.duckdb'), 'ops_sha256_after': sha('research_public_lake/ops_cache.duckdb'), 'cache_mutated': False, 'new_lineage': False}
+          Path('artifact_promotion_specmap_receipt.json').write_text(json.dumps(receipt, indent=2, sort_keys=True)+'\n')
+          print(json.dumps({'artifact_ids':len(ids), 'source_grains':summary['source_grains'], 'cache_mutated':False, 'new_lineage':False}, sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-artifact-promotion-specmap-${{ github.run_id }}
+          path: |
+            artifact_promotion_specmap.csv
+            artifact_promotion_specmap_summary.json
+            artifact_promotion_specmap_receipt.json
+          if-no-files-found: error
+          retention-days: 90
+          compression-level: 6
