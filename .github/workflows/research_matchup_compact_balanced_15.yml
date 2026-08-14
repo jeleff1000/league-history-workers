@@ -3,6 +3,9 @@ name: Research matchup compact 15-runner rollup
 on:
   workflow_dispatch:
     inputs:
+      cache_key:
+        description: 'Validated immutable public-lake cache key to read; must contain literal 08tm/10tm/12tm/14tm fanout'
+        required: true
       year_start:
         required: true
         default: '2025'
@@ -50,7 +53,7 @@ jobs:
       - uses: actions/cache/restore@v5
         with:
           path: research_public_lake
-          key: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+          key: ${{ inputs.cache_key }}
           fail-on-cache-miss: true
       - run: python -m pip install duckdb==1.5.1
       - id: plan
@@ -93,7 +96,7 @@ jobs:
       - uses: actions/cache/restore@v5
         with:
           path: research_public_lake
-          key: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
+          key: ${{ inputs.cache_key }}
           fail-on-cache-miss: true
       - run: python -m pip install duckdb==1.5.1
       - name: Build assigned compact outer-row tasks
