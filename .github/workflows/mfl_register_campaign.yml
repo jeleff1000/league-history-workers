@@ -258,23 +258,24 @@ jobs:
           schema = {t: sorted(cols(t)) for t in req}
           missing_cols = {t: sorted(v-cols(t)) for t,v in req.items() if v-cols(t)}
           def n(sql): return int(c.execute(sql).fetchone()[0])
-          pf = n(f"select count(*) from public.player_fantasy where year={y} and coalesce(is_rostered,0)=1") if 'player_fantasy' in tables else 0
+          roster_scope = f"year={y} and coalesce(is_rostered,0)=1 and player is not null and upper(coalesce(cast(position as varchar),'')) <> 'STUB'"
+          pf = n(f"select count(*) from public.player_fantasy where {roster_scope}") if 'player_fantasy' in tables else 0
           mu = n(f"select count(*) from public.matchup where year={y}") if 'matchup' in tables else 0
           checks = {}
           coverage = {}
           for field in sorted(populated_player):
             scope = f"year={y}"
             if field not in {'db_name', 'clutch_equity'}:
-              scope += " and coalesce(is_rostered, 0) = 1"
+              scope += " and coalesce(is_rostered,0)=1 and player is not null and upper(coalesce(cast(position as varchar),'')) <> 'STUB'"
             if field in matchup_scoped:
               scope += " and opponent is not null"
             if field == 'opponent_franchise_id':
               scope += " and coalesce(is_bye_week, 0) = 0 and opponent is not null"
             base = n(f"select count(*) from public.player_fantasy where {scope}") if field in cols('player_fantasy') else 0
-            value = n(f"select count(*) from public.player_fantasy where {scope} and {field} is not null") if field in cols('player_fantasy') else 0
+            value = n(f"select count(*) from public.player_fantasy where {scope} and nullif(trim(cast({field} as varchar)),'') is not null") if field in cols('player_fantasy') else 0
             checks['player_fantasy.'+field] = value
             coverage['player_fantasy.'+field] = {'populated': value, 'applicable': base}
-          tie_scope = f"year={y} and coalesce(is_rostered,0)=1 and opponent is not null"
+          tie_scope = f"{roster_scope} and opponent is not null"
           tie_base = n(f"select count(*) from public.player_fantasy where {tie_scope}") if 'tie' in cols('player_fantasy') else 0
           tie_value = n(f"select count(*) from public.player_fantasy where {tie_scope} and tie in (0,1)") if 'tie' in cols('player_fantasy') else 0
           checks['player_fantasy.tie_valid'] = tie_value
