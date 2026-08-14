@@ -257,6 +257,8 @@ jobs:
               assert cmc_2019_season == cmc_2019_weekly[:5],(cmc_2019_season,cmc_2019_weekly)
           if 2010 <= int('${{ inputs.year_end }}') and 2010 >= int('${{ inputs.year_start }}') and (not positions or 'RB' in positions):
               marcel=c.execute("SELECT cell.clutch_season_sum FROM research_matchup_compact_season,UNNEST(cohort_cells) u(cell) WHERE NFL_player_id='00-0026393' AND year=2010 AND position='RB' AND cell.q_teams='ALL' AND cell.q_roster='ALL' AND cell.q_scoring='ALL' AND cell.q_pass_td='ALL' AND cell.q_dynasty='ALL' AND cell.q_best_ball='ALL'").fetchone()
+              marcel_weeks=c.execute("SELECT week,cell.eligible_leagues,cell.rostered_leagues,cell.started_leagues,cell.clutch_weekly_average FROM research_matchup_compact_weekly,UNNEST(cohort_cells) u(cell) WHERE NFL_player_id='00-0026393' AND year=2010 AND position='RB' AND cell.q_teams='ALL' AND cell.q_roster='ALL' AND cell.q_scoring='ALL' AND cell.q_pass_td='ALL' AND cell.q_dynasty='ALL' AND cell.q_best_ball='ALL' ORDER BY week").fetchall()
+              print('marcel_clutch_weeks='+json.dumps(marcel_weeks))
               assert marcel is not None and 1.09 < marcel[0] < 1.11,marcel
           if 2017 <= int('${{ inputs.year_end }}') and 2017 >= int('${{ inputs.year_start }}') and (not positions or 'RB' in positions):
               core_ordinal,grade_ordinal=89,353
