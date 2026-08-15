@@ -278,7 +278,9 @@ jobs:
           MFL_PLAYERS_CACHE_DIR: ${{ github.workspace }}/mfl_player_cache
         run: |
           mkdir -p batch_output
-          timeout --signal=TERM --kill-after=30s 1800s python code/scripts/extraplatform_corpus/mfl_register_batch.py \
+            # Keep a slow/broken league from holding an entire bulk chunk hostage.
+            # Its receipt is retained for the targeted retry queue on the next pass.
+            timeout --signal=TERM --kill-after=30s 600s python code/scripts/extraplatform_corpus/mfl_register_batch.py \
             --manifest "$MANIFEST" \
             --offset "$(( (BATCH - BATCH_START) * BATCH_SIZE + BATCH_START * BATCH_SIZE ))" \
             --limit "$BATCH_SIZE" \
