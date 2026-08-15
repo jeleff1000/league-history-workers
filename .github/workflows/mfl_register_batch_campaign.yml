@@ -68,6 +68,11 @@ on:
         required: false
         type: string
         default: '6'
+      start_stagger_seconds:
+        description: 'Delay each matrix batch to avoid synchronized MFL bursts'
+        required: false
+        type: string
+        default: '15'
 
 permissions:
   actions: write
@@ -172,9 +177,14 @@ jobs:
           BATCH_START: ${{ inputs.batch_start }}
           BATCH: ${{ matrix.batch }}
           BATCH_SIZE: ${{ inputs.batch_size }}
+          STAGGER: ${{ inputs.start_stagger_seconds }}
+          MAX_PARALLEL: ${{ inputs.max_parallel }}
         run: |
           mkdir -p batch_output
-          python code/scripts/extraplatform_corpus/mfl_register_batch.py \
+          delay=$(( (BATCH % MAX_PARALLEL) * STAGGER ))
+          echo "[batch] delaying ${delay}s to spread MFL requests"
+          sleep "$delay"
+          timeout --signal=TERM --kill-after=30s 1800s python code/scripts/extraplatform_corpus/mfl_register_batch.py \
             --manifest "$MANIFEST" \
             --offset "$(( (BATCH - BATCH_START) * BATCH_SIZE + BATCH_START * BATCH_SIZE ))" \
             --limit "$BATCH_SIZE" \
@@ -289,6 +299,7 @@ jobs:
           TARGET_YEARS: ${{ inputs.target_years }}
           MAX_PARALLEL: ${{ inputs.max_parallel }}
           MFL_RATE: ${{ inputs.mfl_rate_limit }}
+          STAGGER: ${{ inputs.start_stagger_seconds }}
         run: |
           state=$(python3 -c 'import json; print(json.dumps(json.load(open("mfl_register_all_runs.json",encoding="utf-8")).get("accepted_by_year",{}),separators=(",",":")))')
           complete=$(python3 -c 'import json; d=json.load(open("mfl_register_all_runs.json",encoding="utf-8")); print("true" if d.get("complete_targets") else "false")')
@@ -300,4 +311,5 @@ jobs:
             --raw-field max_parallel="$MAX_PARALLEL" --raw-field cache_namespace="$CACHE_NAMESPACE" \
             --raw-field continue_population=true --raw-field population_total="$total" \
             --raw-field accepted_by_year="$state" --raw-field target_per_year="$TARGET_PER_YEAR" \
-            --raw-field target_years="$TARGET_YEARS" --raw-field mfl_rate_limit="$MFL_RATE"
+            --raw-field target_years="$TARGET_YEARS" --raw-field mfl_rate_limit="$MFL_RATE" \
+            --raw-field start_stagger_seconds="$STAGGER"
