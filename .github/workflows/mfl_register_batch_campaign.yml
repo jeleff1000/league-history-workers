@@ -198,6 +198,9 @@ jobs:
 
   ingest:
     needs: prepare
+    # Individual league failures are recorded in batch receipts; they must not
+    # prevent combine from publishing the successful league databases.
+    continue-on-error: true
     runs-on: ubuntu-latest
     timeout-minutes: 360
     strategy:
