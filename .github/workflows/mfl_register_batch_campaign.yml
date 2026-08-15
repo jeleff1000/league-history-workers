@@ -144,14 +144,14 @@ jobs:
         if: ${{ inputs.storage_mode == 'fetch_only' && inputs.prior_index_key != '' }}
         uses: actions/cache/restore@v5
         with:
-          path: work_index
+          path: index_state
           key: ${{ inputs.prior_index_key }}
           fail-on-cache-miss: true
       - name: Build disjoint pending manifest
         if: ${{ inputs.storage_mode == 'fetch_only' }}
         env:
           SOURCE_MANIFEST: code/${{ inputs.manifest_path }}
-          INDEX_PATH: work_index/mfl_register_all_runs.json
+          INDEX_PATH: index_state/mfl_register_all_runs.json
           TARGET_PER_YEAR: ${{ inputs.target_per_year }}
           TARGET_YEARS: ${{ inputs.target_years }}
           COLLECT_ALL: ${{ inputs.collect_all }}
