@@ -398,14 +398,14 @@ jobs:
           print('bad_visible_core_rows='+json.dumps(bad_visible_rows))
           assert bad_visible_core == 0,bad_visible_core
           low_sample_cells=c.execute("""
-            SELECT source, COUNT(*)
+            SELECT sample_source, COUNT(*)
             FROM (
-              SELECT 'weekly_core' source FROM research_matchup_compact_weekly, UNNEST(cohort_cells) u(cell) WHERE cell.rostered_leagues < 150
-              UNION ALL SELECT 'weekly_roster' FROM research_matchup_compact_weekly, UNNEST(roster_cells) u(cell) WHERE cell.rostered_leagues < 150
-              UNION ALL SELECT 'season_core' FROM research_matchup_compact_season, UNNEST(cohort_cells) u(cell) WHERE cell.rostered_league_weeks < 150
-              UNION ALL SELECT 'season_roster' FROM research_matchup_compact_season, UNNEST(roster_cells) u(cell) WHERE cell.rostered_league_weeks < 150
-              UNION ALL SELECT 'career_core' FROM research_matchup_compact_career, UNNEST(cohort_cells) u(cell) WHERE cell.rostered_league_weeks < 150
-              UNION ALL SELECT 'career_roster' FROM research_matchup_compact_career, UNNEST(roster_cells) u(cell) WHERE cell.rostered_league_weeks < 150
+              SELECT 'weekly_core' AS sample_source FROM research_matchup_compact_weekly, UNNEST(cohort_cells) u(cell) WHERE cell.rostered_leagues < 150
+              UNION ALL SELECT 'weekly_roster' AS sample_source FROM research_matchup_compact_weekly, UNNEST(roster_cells) u(cell) WHERE cell.rostered_leagues < 150
+              UNION ALL SELECT 'season_core' AS sample_source FROM research_matchup_compact_season, UNNEST(cohort_cells) u(cell) WHERE cell.rostered_league_weeks < 150
+              UNION ALL SELECT 'season_roster' AS sample_source FROM research_matchup_compact_season, UNNEST(roster_cells) u(cell) WHERE cell.rostered_league_weeks < 150
+              UNION ALL SELECT 'career_core' AS sample_source FROM research_matchup_compact_career, UNNEST(cohort_cells) u(cell) WHERE cell.rostered_league_weeks < 150
+              UNION ALL SELECT 'career_roster' AS sample_source FROM research_matchup_compact_career, UNNEST(roster_cells) u(cell) WHERE cell.rostered_league_weeks < 150
             ) GROUP BY 1 ORDER BY 1
           """).fetchall()
           print('low_sample_cells='+json.dumps(low_sample_cells))
