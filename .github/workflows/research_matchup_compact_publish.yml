@@ -6,6 +6,10 @@ on:
       compact_run_id:
         description: 'Completed compact merge replay run containing the final artifact'
         required: true
+      artifact_name:
+        description: 'Exact compact artifact name; defaults to compact-matchup-final-{compact_run_id}'
+        required: false
+        default: ''
       apply:
         description: 'Set true only after the preflight run is transfer-safe'
         required: true
@@ -47,7 +51,7 @@ jobs:
           repository: jeleff1000/league-history-workers
           run-id: ${{ inputs.compact_run_id }}
           github-token: ${{ github.token }}
-          pattern: compact-matchup-final-${{ inputs.compact_run_id }}
+          name: ${{ inputs.artifact_name || format('compact-matchup-final-{0}', inputs.compact_run_id) }}
           path: compact-artifact
           merge-multiple: true
       - name: Locate exactly one compact serving artifact
