@@ -125,6 +125,7 @@ jobs:
           COUNT: ${{ inputs.batch_count }}
           SIZE: ${{ inputs.batch_size }}
           MAX: ${{ inputs.max_parallel }}
+          STORAGE_MODE: ${{ inputs.storage_mode }}
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os
@@ -134,7 +135,12 @@ jobs:
           end=min(len(rows), (start+count)*size)
           selected=rows[start*size:end]
           batches=list(range(start, start+((len(selected)+size-1)//size)))
-          print('records='+json.dumps(selected,separators=(',',':')))
+          # Chunked combines read the checked-out manifest directly. Avoid
+          # serializing thousands of records into a GitHub job output.
+          if os.environ['STORAGE_MODE'] == 'chunked':
+              print('records=[]')
+          else:
+              print('records='+json.dumps(selected,separators=(',',':')))
           print('batches='+json.dumps(batches,separators=(',',':')))
           print('max_parallel='+str(min(max(1,int(os.environ['MAX'])),len(batches))))
           PY
