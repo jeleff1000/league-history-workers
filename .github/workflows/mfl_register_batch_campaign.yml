@@ -53,6 +53,11 @@ on:
         required: false
         type: string
         default: 'false'
+      retry_rejected:
+        description: 'Build the fetch queue from recorded rejected keys only'
+        required: false
+        type: string
+        default: 'false'
       prior_state_key:
         description: 'Exact cumulative-state cache key from the preceding wave'
         required: false
@@ -155,12 +160,15 @@ jobs:
           TARGET_PER_YEAR: ${{ inputs.target_per_year }}
           TARGET_YEARS: ${{ inputs.target_years }}
           COLLECT_ALL: ${{ inputs.collect_all }}
+          RETRY_REJECTED: ${{ inputs.retry_rejected }}
         run: |
           test -s "$INDEX_PATH"
           python code/scripts/extraplatform_corpus/build_mfl_pending_manifest.py \
             --manifest "$SOURCE_MANIFEST" --index "$INDEX_PATH" \
             --output pending_manifest.json --target-per-year "$TARGET_PER_YEAR" \
-            --target-years "$TARGET_YEARS" $([ "$COLLECT_ALL" = true ] && echo --collect-all)
+            --target-years "$TARGET_YEARS" \
+            $([ "$COLLECT_ALL" = true ] && echo --collect-all) \
+            $([ "$RETRY_REJECTED" = true ] && echo --retry-rejected)
       - name: Publish pending manifest to ingest runners
         if: ${{ inputs.storage_mode == 'fetch_only' }}
         uses: actions/upload-artifact@v4
