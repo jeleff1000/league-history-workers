@@ -1,0 +1,188 @@
+name: Append MFL register to research public lake
+
+on:
+  workflow_dispatch:
+    inputs:
+      mfl_index_key:
+        description: Immutable MFL register index cache key
+        required: true
+        type: string
+      base_cache_key:
+        description: Existing immutable research public lake cache key
+        required: true
+        type: string
+      output_cache_key:
+        description: New immutable research cache key; never replaces the base
+        required: true
+        type: string
+      private_repo_ref:
+        description: Private code ref containing the MFL research adapter
+        required: true
+        default: codex/mfl-gates
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      chunk_count: ${{ steps.plan.outputs.chunk_count }}
+    steps:
+      - uses: actions/cache/restore@v5
+        with:
+          path: index_state
+          key: ${{ inputs.mfl_index_key }}
+          fail-on-cache-miss: true
+      - id: plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          index=json.loads(Path('index_state/mfl_register_all_runs.json').read_text())
+          chunks=[c['cache_key'] for c in index.get('chunks',[]) if c.get('cache_key')]
+          if not chunks:
+              raise SystemExit('MFL index contains no immutable chunks')
+          matrix={'include':[{'chunk_key':key,'bucket':i} for i,key in enumerate(chunks)]}
+          Path('matrix.json').write_text(json.dumps(matrix,separators=(',',':')))
+          print('matrix='+json.dumps(matrix,separators=(',',':')))
+          print('chunk_count='+str(len(chunks)))
+          PY
+          echo "matrix=$(tr -d '\n' < matrix.json)" >> "$GITHUB_OUTPUT"
+          echo "chunk_count=$(python -c 'import json; print(len(json.load(open("matrix.json"))["include"]))')" >> "$GITHUB_OUTPUT"
+
+  convert:
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      max-parallel: 20
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.private_repo_ref }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: chunk_state
+          key: ${{ matrix.chunk_key }}
+          fail-on-cache-miss: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - run: |
+          mkdir -p out
+          python code/scripts/research_cohorts/build_mfl_research_overlay.py \
+            --chunk chunk_state/mfl_register_chunk.duckdb \
+            --output out/overlay.duckdb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-research-overlay-${{ matrix.bucket }}-${{ github.run_id }}
+          path: out/overlay.duckdb
+          retention-days: 3
+          compression-level: 0
+
+  merge:
+    needs: [plan, convert]
+    if: always() && needs.plan.result == 'success' && needs.convert.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.private_repo_ref }}
+          path: code
+      - uses: actions/cache/restore@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.base_cache_key }}
+          fail-on-cache-miss: true
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: mfl-research-overlay-*-${{ github.run_id }}
+          path: overlays
+          merge-multiple: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1 pandas==2.2.3 numpy==1.26.4 scipy==1.14.1 pyarrow==15.0.2
+      - name: Download identity crosswalk
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_REPO_PAT }}
+        run: |
+          gh release download research-native-id-crosswalk-v4 \
+            --repo jeleff1000/yahoo_oauth --pattern native_id_crosswalk.parquet \
+            --clobber --dir research_public_lake
+      - name: Merge all MFL overlays and normalize the new immutable lake
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp research_public_lake/corpus_snapshot.duckdb base_corpus_snapshot.duckdb
+          parts=(overlays/*/overlay.duckdb)
+          test "${#parts[@]}" -eq '${{ needs.plan.outputs.chunk_count }}'
+          python code/scripts/research_cohorts/merge_mfl_research_overlays.py \
+            --parts "${parts[@]}" --output mfl_research_overlay.duckdb
+          python code/scripts/sleeper_corpus/merge_public_corpus_snapshot.py \
+            --base research_public_lake/corpus_snapshot.duckdb \
+            --overlay mfl_research_overlay.duckdb \
+            --out merged_corpus_snapshot.duckdb \
+            --crosswalk research_public_lake/native_id_crosswalk.parquet \
+            --espn-map code/ops_data/public/espn_nfl_player_map.parquet \
+            --aliases code/scripts/research_cohorts/research_identity_aliases.csv
+          python code/scripts/research_cohorts/normalize_canonical_research_schema.py \
+            --base merged_corpus_snapshot.duckdb \
+            --out normalized_corpus_snapshot.duckdb \
+            --ops-cache research_public_lake/ops_cache.duckdb
+          mv normalized_corpus_snapshot.duckdb research_public_lake/corpus_snapshot.duckdb
+          python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
+      - name: Prove MFL league-years landed without schema drift
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import duckdb
+          before=duckdb.connect('base_corpus_snapshot.duckdb',read_only=True)
+          base=duckdb.connect('research_public_lake/corpus_snapshot.duckdb',read_only=True)
+          overlay=duckdb.connect('mfl_research_overlay.duckdb',read_only=True)
+          keys=overlay.execute('SELECT DISTINCT db_name,year FROM league_settings ORDER BY 1,2').fetchall()
+          if not keys: raise SystemExit('overlay has no MFL league-years')
+          out={'mfl_overlay_league_years':len(keys),'overlay_rows':{},'final_rows':{}}
+          for table in ('league_settings','matchup','player_fantasy'):
+              out['overlay_rows'][table]=overlay.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+              placeholders=','.join(['(?,?)']*len(keys))
+              params=[v for key in keys for v in key]
+              out['final_rows'][table]=base.execute(f'SELECT COUNT(*) FROM public."{table}" WHERE (db_name,year) IN ({placeholders})',params).fetchone()[0]
+              if out['final_rows'][table] <= 0: raise SystemExit(f'{table} has no landed MFL rows')
+          before_schema={t:before.execute(f'DESCRIBE public."{t}"').fetchall() for t in ('league_settings','matchup','player_fantasy')}
+          final_schema={t:base.execute(f'DESCRIBE public."{t}"').fetchall() for t in ('league_settings','matchup','player_fantasy')}
+          out['schema_unchanged']=before_schema == final_schema
+          if not out['schema_unchanged']: raise SystemExit('research schema changed')
+          out['cache_key']='${{ inputs.output_cache_key }}'
+          Path('mfl_research_append_proof.json').write_text(json.dumps(out,indent=2,sort_keys=True))
+          print(json.dumps(out,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-research-append-proof-${{ github.run_id }}
+          path: mfl_research_append_proof.json
+          retention-days: 180
+      - uses: actions/cache/save@v5
+        with:
+          path: research_public_lake
+          key: ${{ inputs.output_cache_key }}
