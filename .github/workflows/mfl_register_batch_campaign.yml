@@ -549,7 +549,7 @@ jobs:
             cache_append_proof.json
   verify_cache:
     needs: [combine]
-    if: ${{ needs.combine.result == 'success' }}
+    if: ${{ always() && needs.combine.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Restore exact saved cumulative cache
