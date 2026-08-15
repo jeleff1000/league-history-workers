@@ -38,6 +38,11 @@ on:
         required: false
         type: string
         default: mfl-population-batch-v1
+      attempt_suffix:
+        description: 'Optional immutable retry suffix for a failed wave'
+        required: false
+        type: string
+        default: ''
       continue_population:
         description: 'Dispatch the next batch wave after a successful combine'
         required: false
@@ -179,7 +184,7 @@ jobs:
       DRAFT_GLOBAL_SOURCE_PATH: ${{ github.workspace }}/corpus_dependencies/draft_global_source.parquet
       CORPUS_DEPENDENCY_DIR: ${{ github.workspace }}/corpus_dependencies
       CORPUS_DEPENDENCY_KEY: corpus-dependencies-v1-Linux-20260717
-      MFL_PLAYER_CACHE_KEY: ${{ inputs.cache_namespace }}-players-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+      MFL_PLAYER_CACHE_KEY: ${{ inputs.cache_namespace }}-players-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
     steps:
       - name: Checkout worker
         uses: actions/checkout@v5
@@ -285,7 +290,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: mfl_player_cache
-          key: ${{ inputs.cache_namespace }}-players-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+          key: ${{ inputs.cache_namespace }}-players-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
           restore-keys: |
             ${{ inputs.cache_namespace }}-players-
       - name: Restore prior cumulative register state
@@ -424,7 +429,7 @@ jobs:
         if: ${{ inputs.storage_mode == 'chunked' }}
         env:
           EXPECTED_PATH: ${{ github.workspace }}/code/${{ inputs.manifest_path }}
-          CHUNK_KEY: ${{ inputs.cache_namespace }}-chunk-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+          CHUNK_KEY: ${{ inputs.cache_namespace }}-chunk-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
           PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
         run: |
           python3 code/scripts/extraplatform_corpus/merge_mfl_chunk.py \
@@ -469,13 +474,13 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: chunk_state
-          key: ${{ inputs.cache_namespace }}-chunk-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+          key: ${{ inputs.cache_namespace }}-chunk-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
       - name: Save immutable chunk index
         if: ${{ inputs.storage_mode == 'chunked' }}
         uses: actions/cache/save@v5
         with:
           path: index_state
-          key: ${{ inputs.cache_namespace }}-index-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+          key: ${{ inputs.cache_namespace }}-index-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
       - name: Upload batch snapshot
         if: ${{ inputs.storage_mode != 'chunked' }}
         uses: actions/upload-artifact@v4
@@ -513,14 +518,14 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: chunk_state
-          key: ${{ inputs.cache_namespace }}-chunk-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+          key: ${{ inputs.cache_namespace }}-chunk-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
           fail-on-cache-miss: true
       - name: Restore exact saved chunk index
         if: ${{ inputs.storage_mode == 'chunked' }}
         uses: actions/cache/restore@v5
         with:
           path: index_state
-          key: ${{ inputs.cache_namespace }}-index-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+          key: ${{ inputs.cache_namespace }}-index-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
           fail-on-cache-miss: true
       - name: Validate live cumulative cache append proof
         if: ${{ inputs.storage_mode != 'chunked' }}
@@ -580,8 +585,9 @@ jobs:
           MAX_PARALLEL: ${{ inputs.max_parallel }}
           MFL_RATE: ${{ inputs.mfl_rate_limit }}
           COLLECT_ALL: ${{ inputs.collect_all }}
-          CURRENT_STATE_KEY: ${{ inputs.cache_namespace }}-state-${{ inputs.batch_start }}-${{ inputs.batch_count }}
-          CURRENT_INDEX_KEY: ${{ inputs.cache_namespace }}-index-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+          CURRENT_STATE_KEY: ${{ inputs.cache_namespace }}-state-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
+          CURRENT_INDEX_KEY: ${{ inputs.cache_namespace }}-index-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
+          ATTEMPT_SUFFIX: ${{ inputs.attempt_suffix }}
           STORAGE_MODE: ${{ inputs.storage_mode }}
         run: |
           if [ "$STORAGE_MODE" = chunked ]; then ROOT=index_state; else ROOT=prior_state; fi
@@ -599,4 +605,4 @@ jobs:
             --raw-field target_years="$TARGET_YEARS" --raw-field mfl_rate_limit="$MFL_RATE" \
             --raw-field collect_all="$COLLECT_ALL" \
             --raw-field storage_mode="$STORAGE_MODE" --raw-field prior_state_key="$CURRENT_STATE_KEY" \
-            --raw-field prior_index_key="$CURRENT_INDEX_KEY"
+            --raw-field prior_index_key="$CURRENT_INDEX_KEY" --raw-field attempt_suffix="$ATTEMPT_SUFFIX"
