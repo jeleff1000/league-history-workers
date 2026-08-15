@@ -46,7 +46,8 @@ jobs:
             --season-bundle season-source/research_matchup_compact_season_source.duckdb \
             --output career-part.duckdb \
             --career-buckets 15 \
-            --career-bucket '${{ matrix.bucket }}'
+            --career-bucket '${{ matrix.bucket }}' \
+            --player-sub-buckets '${{ matrix.bucket == 12 && 4 || 1 }}'
       - uses: actions/upload-artifact@v4
         with:
           name: compact-matchup-career-${{ matrix.bucket }}-${{ github.run_id }}
