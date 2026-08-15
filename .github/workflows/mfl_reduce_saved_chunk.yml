@@ -101,18 +101,18 @@ jobs:
           PY
       - name: Stage successor caches
         run: |
-          mkdir -p output_chunk output_index
-          cp mfl_register_chunk.duckdb cache_append_proof.json output_chunk/
-          cp mfl_register_all_runs.json cache_append_proof.json output_index/
+          mkdir -p chunk_state index_state
+          cp mfl_register_chunk.duckdb cache_append_proof.json chunk_state/
+          cp mfl_register_all_runs.json cache_append_proof.json index_state/
       - name: Save successor chunk
         uses: actions/cache/save@v5
         with:
-          path: output_chunk
+          path: chunk_state
           key: ${{ inputs.cache_namespace }}-chunk-${{ inputs.output_suffix }}
       - name: Save successor index
         uses: actions/cache/save@v5
         with:
-          path: output_index
+          path: index_state
           key: ${{ inputs.cache_namespace }}-index-${{ inputs.output_suffix }}
       - name: Upload reducer proof
         uses: actions/upload-artifact@v4
