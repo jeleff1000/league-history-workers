@@ -275,7 +275,9 @@ jobs:
         if: ${{ inputs.storage_mode == 'chunked' && inputs.batch_start != '0' && inputs.prior_index_key != '' }}
         uses: actions/cache/restore@v5
         with:
-          path: prior_index
+          # The cache version includes the path.  Restore to the same path
+          # that is used by the save step, then let the merger read it there.
+          path: index_state
           key: ${{ inputs.prior_index_key }}
       - name: Merge player catalogs from ingest runners
         shell: bash
@@ -405,7 +407,7 @@ jobs:
           python3 code/scripts/extraplatform_corpus/merge_mfl_chunk.py \
             --receipts receipts \
             --expected "$EXPECTED_PATH" \
-            --prior-index prior_index/mfl_register_all_runs.json \
+            --prior-index index_state/mfl_register_all_runs.json \
             --output-db mfl_register_chunk.duckdb \
             --output-index mfl_register_all_runs.json \
             --proof cache_append_proof.json \
