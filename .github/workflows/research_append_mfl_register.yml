@@ -39,22 +39,36 @@ jobs:
           fail-on-cache-miss: true
       - id: plan
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/caches?per_page=100" \
+            --jq '.actions_caches[].key' | sort -u > available_cache_keys.txt
           python - <<'PY'
           import json
           from pathlib import Path
           index=json.loads(Path('index_state/mfl_register_all_runs.json').read_text())
-          chunks=[c['cache_key'] for c in index.get('chunks',[]) if c.get('cache_key')]
+          available=set(Path('available_cache_keys.txt').read_text().splitlines())
+          indexed=[c['cache_key'] for c in index.get('chunks',[]) if c.get('cache_key')]
+          chunks=[key for key in indexed if key in available]
+          missing=[key for key in indexed if key not in available]
           if not chunks:
-              raise SystemExit('MFL index contains no immutable chunks')
+              raise SystemExit('none of the indexed MFL chunks are currently available')
           matrix={'include':[{'chunk_key':key,'bucket':i} for i,key in enumerate(chunks)]}
           Path('matrix.json').write_text(json.dumps(matrix,separators=(',',':')))
+          Path('missing_chunks.json').write_text(json.dumps(missing,indent=2))
           print('matrix='+json.dumps(matrix,separators=(',',':')))
-          print('chunk_count='+str(len(chunks)))
+          print(f'available_chunks={len(chunks)} missing_chunks={len(missing)}')
           PY
           echo "matrix=$(tr -d '\n' < matrix.json)" >> "$GITHUB_OUTPUT"
           echo "chunk_count=$(python -c 'import json; print(len(json.load(open("matrix.json"))["include"]))')" >> "$GITHUB_OUTPUT"
+          echo "missing_count=$(python -c 'import json; print(len(json.load(open("missing_chunks.json"))))')" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-research-missing-chunks-${{ github.run_id }}
+          path: missing_chunks.json
+          retention-days: 180
 
   convert:
     needs: plan
@@ -162,7 +176,7 @@ jobs:
           overlay=duckdb.connect('mfl_research_overlay.duckdb',read_only=True)
           keys=overlay.execute('SELECT DISTINCT db_name,year FROM league_settings ORDER BY 1,2').fetchall()
           if not keys: raise SystemExit('overlay has no MFL league-years')
-          out={'mfl_overlay_league_years':len(keys),'overlay_rows':{},'final_rows':{}}
+          out={'mfl_overlay_league_years':len(keys),'overlay_rows':{},'final_rows':{},'missing_indexed_chunks':int('${{ needs.plan.outputs.missing_count }}')}
           for table in ('league_settings','matchup','player_fantasy'):
               out['overlay_rows'][table]=overlay.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
               placeholders=','.join(['(?,?)']*len(keys))
