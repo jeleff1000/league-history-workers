@@ -146,6 +146,7 @@ jobs:
         with:
           path: work_index
           key: ${{ inputs.prior_index_key }}
+          fail-on-cache-miss: true
       - name: Build disjoint pending manifest
         if: ${{ inputs.storage_mode == 'fetch_only' }}
         env:
@@ -155,7 +156,7 @@ jobs:
           TARGET_YEARS: ${{ inputs.target_years }}
           COLLECT_ALL: ${{ inputs.collect_all }}
         run: |
-          if [ ! -f "$INDEX_PATH" ]; then printf '{}\n' > "$INDEX_PATH"; fi
+          test -s "$INDEX_PATH"
           python code/scripts/extraplatform_corpus/build_mfl_pending_manifest.py \
             --manifest "$SOURCE_MANIFEST" --index "$INDEX_PATH" \
             --output pending_manifest.json --target-per-year "$TARGET_PER_YEAR" \
