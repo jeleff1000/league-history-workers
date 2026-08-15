@@ -6,6 +6,10 @@ on:
       source_run_id:
         description: 'Completed compact build run whose compact base and season source will be reused'
         required: true
+      career_run_id:
+        description: 'Optional completed recovery run whose career artifacts should be reused'
+        required: false
+        default: ''
 
 permissions:
   actions: read
@@ -13,6 +17,7 @@ permissions:
 
 jobs:
   career:
+    if: ${{ inputs.career_run_id == '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -57,6 +62,7 @@ jobs:
 
   merge:
     needs: career
+    if: ${{ always() && (needs.career.result == 'success' || needs.career.result == 'skipped') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -81,7 +87,10 @@ jobs:
           path: base
       - uses: actions/download-artifact@v5
         with:
-          pattern: compact-matchup-career-*-${{ github.run_id }}
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.career_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+          pattern: compact-matchup-career-*-${{ inputs.career_run_id || github.run_id }}
           path: career-parts
           merge-multiple: false
       - name: Assemble parallel career parts and fail fast on golden output
@@ -100,8 +109,10 @@ jobs:
           unsupported=c.execute("SELECT position FROM (SELECT position FROM research_matchup_compact_weekly UNION SELECT position FROM research_matchup_compact_season UNION SELECT position FROM research_matchup_compact_career) WHERE position NOT IN ('QB','RB','WR','TE','K','DEF','DB','DL','LB')").fetchall()
           assert not unsupported,unsupported
           dupe=c.execute("SELECT COUNT(*) FROM (SELECT NFL_player_id,year,week,position FROM research_matchup_compact_weekly GROUP BY 1,2,3,4 HAVING COUNT(*)<>1)").fetchone()[0]
+          cmc_candidates=c.execute("SELECT cell.q_teams,cell.q_roster,cell.q_scoring,cell.q_pass_td,cell.q_dynasty,cell.q_best_ball,cell.eligible_leagues,cell.rostered_leagues,cell.started_leagues,cell.valid_started_outcomes,cell.win_equivalent FROM research_matchup_compact_weekly,UNNEST(cohort_cells) u(cell) WHERE NFL_player_id='00-0033280' AND year=2025 AND week=1 AND position='RB' ORDER BY 1,2,3,4,5,6").fetchall()
+          print('cmc_candidates='+json.dumps(cmc_candidates))
           cmc=c.execute("SELECT cell.eligible_leagues,cell.rostered_leagues,cell.started_leagues,cell.valid_started_outcomes,cell.win_equivalent FROM research_matchup_compact_weekly,UNNEST(cohort_cells) u(cell) WHERE NFL_player_id='00-0033280' AND year=2025 AND week=1 AND position='RB' AND cell.q_teams='ALL' AND cell.q_roster='ALL' AND cell.q_scoring='ALL' AND cell.q_pass_td='ALL' AND cell.q_dynasty='ALL' AND cell.q_best_ball='ALL'").fetchone()
-          assert cmc==(9837,9766,9600,9579,6019.0),cmc
+          assert cmc==(9837,9766,9600,9579,6019.0),(cmc,cmc_candidates)
           low=c.execute("SELECT COUNT(*) FROM (SELECT 1 FROM research_matchup_compact_weekly,UNNEST(cohort_cells) u(cell) WHERE cell.rostered_leagues<150 UNION ALL SELECT 1 FROM research_matchup_compact_season,UNNEST(cohort_cells) u(cell) WHERE cell.rostered_league_weeks<150 UNION ALL SELECT 1 FROM research_matchup_compact_career,UNNEST(cohort_cells) u(cell) WHERE cell.rostered_league_weeks<150)").fetchone()[0]
           assert dupe==0,dupe
           assert low==0,low
