@@ -284,6 +284,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, pathlib, duckdb, os
+          from multi_league.core.canonical_player import PLAYER_FANTASY_COLUMNS
           expected=json.loads(os.environ['EXPECTED']); root=pathlib.Path('receipts')
           pairs=[]; receipts=[]
           for receipt_path in sorted(root.rglob('receipt.json')):
@@ -300,6 +301,21 @@ jobs:
               prior_json=json.loads(prior_path.read_text(encoding='utf-8'))
           prior_leagues=list(prior_json.get('leagues', []))
           prior_rejected=list(prior_json.get('rejected', []))
+          expected_by_key={(int(r['season']),str(r['league_id'])):r for r in expected}
+          prior_by_key={(int(r['season']),str(r['league_id'])):r for r in prior_leagues}
+          current_by_key={(int(r['season']),str(r['league_id'])):r for r in receipts}
+          if len(current_by_key) != len(receipts):
+              raise SystemExit('duplicate successful receipt keys in batch')
+          for key, old in prior_by_key.items():
+              new=current_by_key.get(key)
+              if new is not None and old.get('lineage_id') and new.get('lineage_id') and old['lineage_id'] != new['lineage_id']:
+                  raise SystemExit(f'lineage changed for {key}: {old["lineage_id"]} -> {new["lineage_id"]}')
+          for key, receipt in current_by_key.items():
+              manifest=expected_by_key.get(key)
+              if manifest is None:
+                  raise SystemExit(f'receipt not present in manifest: {key}')
+              if manifest.get('lineage_id') and receipt.get('lineage_id') != manifest['lineage_id']:
+                  raise SystemExit(f'receipt lineage mismatch for {key}')
           print(f'validated {len(got)}/{len(keys)} candidates; rejected {len(keys-got)}')
           prior={str(k):int(v) for k,v in json.loads(os.environ.get('ACCEPTED_BY_YEAR','{}') or '{}').items()}
           for year,count in __import__('collections').Counter(int(r['season']) for r in receipts).items():
@@ -308,6 +324,16 @@ jobs:
           target_years=[y.strip() for y in os.environ.get('TARGET_YEARS','').split(',') if y.strip()]
           collect_all=os.environ.get('COLLECT_ALL','false').lower() == 'true'
           complete_targets=(not collect_all) and bool(target_years) and all(prior.get(y,0)>=target for y in target_years)
+          schema_by_table={}
+          before_rows={}
+          added_rows={table:0 for table in ('league_settings','matchup','player_fantasy')}
+          if prior_db.is_file():
+              prior_read=duckdb.connect(str(prior_db), read_only=True)
+              for table in ('league_settings','matchup','player_fantasy'):
+                  if prior_read.execute("select count(*) from information_schema.tables where table_schema='main' and table_name=?",[table]).fetchone()[0]:
+                      schema_by_table[table]=tuple(r[0] for r in prior_read.execute(f'describe "{table}"').fetchall())
+                      before_rows[table]=int(prior_read.execute(f'select count(*) from "{table}"').fetchone()[0])
+              prior_read.close()
           out=duckdb.connect('mfl_register_snapshot.duckdb')
           if prior_db.is_file():
               out.execute(f"ATTACH '{prior_db.as_posix()}' AS prior (READ_ONLY)")
@@ -319,6 +345,11 @@ jobs:
               out.execute(f"ATTACH '{db.as_posix()}' AS src (READ_ONLY)")
               for table in ('league_settings','matchup','player_fantasy'):
                   if not out.execute("select count(*) from information_schema.tables where table_catalog='src' and table_schema='public' and table_name=?",[table]).fetchone()[0]: continue
+                  source_schema=tuple(x[0] for x in out.execute(f'describe src.public."{table}"').fetchall())
+                  if table in schema_by_table and schema_by_table[table] != source_schema:
+                      raise SystemExit(f'cache schema changed for {table}')
+                  schema_by_table.setdefault(table, source_schema)
+                  added_rows[table] += int(out.execute(f'select count(*) from src.public."{table}" where year={int(r["season"])}').fetchone()[0])
                   if not out.execute("select count(*) from information_schema.tables where table_schema='main' and table_name=?",[table]).fetchone()[0]:
                       out.execute(f'create table "{table}" as select * from src.public."{table}" where year={int(r["season"])}')
                   else: out.execute(f'insert into "{table}" select * from src.public."{table}" where year={int(r["season"])}')
@@ -327,6 +358,22 @@ jobs:
           current_rejected=[{'season':y,'league_id':lid} for y,lid in sorted(keys-got)]
           all_leagues=prior_leagues + receipts
           all_rejected=prior_rejected + current_rejected
+          all_by_key={(int(r['season']),str(r['league_id'])):r for r in all_leagues}
+          if len(all_by_key) != len(all_leagues):
+              raise SystemExit('duplicate league-year key in cumulative cache')
+          if not set(prior_by_key).issubset(all_by_key):
+              raise SystemExit('prior cache rows were removed')
+          if set(prior_by_key) & set(current_by_key) and not set(prior_by_key).isdisjoint(current_by_key):
+              raise SystemExit('batch attempted to append an existing league-year key')
+          final_read=duckdb.connect('mfl_register_snapshot.duckdb', read_only=True)
+          final_rows={table:int(final_read.execute(f'select count(*) from "{table}"').fetchone()[0]) for table in added_rows if final_read.execute("select count(*) from information_schema.tables where table_schema='main' and table_name=?",[table]).fetchone()[0]}
+          final_read.close()
+          for table, added in added_rows.items():
+              if final_rows.get(table,0) - before_rows.get(table,0) != added:
+                  raise SystemExit(f'cache append row-count mismatch for {table}')
+          if set(schema_by_table.get('player_fantasy',())) != set(PLAYER_FANTASY_COLUMNS):
+              raise SystemExit('player_fantasy cache schema is not canonical')
+          pathlib.Path('cache_append_proof.json').write_text(json.dumps({'schema_unchanged':True,'prior_rows':before_rows,'added_rows':added_rows,'final_rows':final_rows,'prior_league_count':len(prior_leagues),'added_league_count':len(receipts),'final_league_count':len(all_leagues),'prior_rows_preserved':set(prior_by_key).issubset(all_by_key),'new_lineage':False,'duplicate_league_year_keys':False},indent=2,sort_keys=True),encoding='utf-8')
           pathlib.Path('mfl_register_all_runs.json').write_text(json.dumps({'schema_version':'mfl_register_results_v1','expected_count':int(prior_json.get('expected_count',0))+len(keys),'league_count':len(all_leagues),'rejected_count':len(all_rejected),'rejected':all_rejected,'accepted_by_year':prior,'target_per_year':target,'target_years':target_years,'complete_targets':complete_targets,'collect_all':collect_all,'leagues':sorted(all_leagues,key=lambda r:(int(r['season']),str(r['league_id'])))},indent=2,sort_keys=True),encoding='utf-8')
           PY
       - name: Stage cumulative register state
@@ -335,6 +382,7 @@ jobs:
           mkdir -p prior_state
           cp mfl_register_snapshot.duckdb prior_state/
           cp mfl_register_all_runs.json prior_state/
+          cp cache_append_proof.json prior_state/
       - name: Save validated batch cache
         uses: actions/cache/save@v5
         with:
@@ -354,8 +402,37 @@ jobs:
           path: |
             mfl_register_snapshot.duckdb
             mfl_register_all_runs.json
-      - name: Dispatch next batch wave
-        if: ${{ success() && inputs.continue_population == 'true' }}
+            cache_append_proof.json
+  verify_cache:
+    needs: [combine]
+    if: ${{ needs.combine.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restore exact saved cumulative cache
+        uses: actions/cache/restore@v5
+        with:
+          path: live_cache
+          key: ${{ inputs.cache_namespace }}-state-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+          fail-on-cache-miss: true
+      - name: Validate live cache append proof
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          root=pathlib.Path('live_cache')
+          proof=json.loads((root/'cache_append_proof.json').read_text(encoding='utf-8'))
+          required={'schema_unchanged':True,'prior_rows_preserved':True,'new_lineage':False,'duplicate_league_year_keys':False}
+          for key,value in required.items():
+              if proof.get(key) != value:
+                  raise SystemExit(f'live cache proof failed: {key}={proof.get(key)!r}')
+          for table,before in proof['prior_rows'].items():
+              added=proof['added_rows'].get(table,0)
+              final=proof['final_rows'].get(table,0)
+              if final-before != added:
+                  raise SystemExit(f'live cache proof row delta failed: {table}')
+          print(json.dumps({'live_cache_validated':True, **proof}, sort_keys=True))
+          PY
+      - name: Dispatch next batch wave after live validation
+        if: ${{ inputs.continue_population == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
@@ -375,8 +452,8 @@ jobs:
           COLLECT_ALL: ${{ inputs.collect_all }}
           CURRENT_STATE_KEY: ${{ inputs.cache_namespace }}-state-${{ inputs.batch_start }}-${{ inputs.batch_count }}
         run: |
-          state=$(python3 -c 'import json; print(json.dumps(json.load(open("mfl_register_all_runs.json",encoding="utf-8")).get("accepted_by_year",{}),separators=(",",":")))')
-          complete=$(python3 -c 'import json; d=json.load(open("mfl_register_all_runs.json",encoding="utf-8")); print("true" if d.get("complete_targets") else "false")')
+          state=$(python3 -c 'import json; print(json.dumps(json.load(open("live_cache/mfl_register_all_runs.json",encoding="utf-8")).get("accepted_by_year",{}),separators=(",",":")))')
+          complete=$(python3 -c 'import json; d=json.load(open("live_cache/mfl_register_all_runs.json",encoding="utf-8")); print("true" if d.get("complete_targets") else "false")')
           total=${POPULATION_TOTAL:-0}; next=$((BATCH_START+BATCH_COUNT))
           if [ "$complete" = true ] || [ "$total" -le 0 ] || [ "$((next*BATCH_SIZE))" -ge "$total" ]; then exit 0; fi
           gh workflow run mfl_register_batch_campaign.yml --repo "$REPOSITORY" --ref "$REF_NAME" \
