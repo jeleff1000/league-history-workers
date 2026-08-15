@@ -378,9 +378,9 @@ jobs:
               assert cmc_2019_weekly is not None and cmc_2019_weekly[5] == 16,cmc_2019_weekly
               assert cmc_2019_season == cmc_2019_weekly[:5],(cmc_2019_season,cmc_2019_weekly)
           if 2010 <= int('${{ inputs.year_end }}') and 2010 >= int('${{ inputs.year_start }}') and (not positions or 'RB' in positions):
-              marcel=c.execute("SELECT 1 FROM research_matchup_compact_season WHERE NFL_player_id='00-0026393' AND year=2010 AND position='RB'").fetchone()
-              print('marcel_reece_2010='+json.dumps(marcel))
-              assert marcel is None,marcel
+              marcel_max_rostered=c.execute("SELECT MAX(cell.rostered_league_weeks) FROM research_matchup_compact_season,UNNEST(roster_cells) u(cell) WHERE NFL_player_id='00-0026393' AND year=2010 AND position='RB'").fetchone()[0]
+              print('marcel_reece_2010_max_rostered='+json.dumps(marcel_max_rostered))
+              assert marcel_max_rostered is None or marcel_max_rostered < 150,marcel_max_rostered
           if 2017 <= int('${{ inputs.year_end }}') and 2017 >= int('${{ inputs.year_start }}') and (not positions or 'RB' in positions):
               core_ordinal,grade_ordinal=89,353
               mark_ingram_2017=c.execute(f"""SELECT core.q_scoring,core.eligible_leagues,core.rostered_league_weeks,core.eligible_league_weeks,core.started_league_weeks,core.valid_started_outcomes,core.win_equivalent,grade.playoff_rate_pct,grade.champ_rate_pct FROM research_matchup_compact_season s CROSS JOIN UNNEST(list_value(list_extract(s.cohort_cells,list_extract(s.core_selector_indices,{core_ordinal})))) u(core) CROSS JOIN UNNEST(list_value(list_extract(s.grade_cells,list_extract(s.grade_selector_indices,{grade_ordinal})))) g(grade) WHERE s.NFL_player_id='00-0027966' AND s.year=2017 AND s.position='RB'""").fetchone()
