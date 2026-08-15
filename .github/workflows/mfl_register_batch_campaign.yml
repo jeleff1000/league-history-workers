@@ -382,5 +382,5 @@ jobs:
             --raw-field continue_population=true --raw-field population_total="$total" \
             --raw-field accepted_by_year="$state" --raw-field target_per_year="$TARGET_PER_YEAR" \
             --raw-field target_years="$TARGET_YEARS" --raw-field mfl_rate_limit="$MFL_RATE" \
-            --raw-field start_stagger_seconds="$STAGGER" --raw-field collect_all="$COLLECT_ALL"
+            --raw-field start_stagger_seconds="$STAGGER" --raw-field collect_all="$COLLECT_ALL" \
             --raw-field prior_state_key="$CURRENT_STATE_KEY"
