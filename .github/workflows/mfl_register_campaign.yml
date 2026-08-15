@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       manifest_path:
-        description: 'Path in the private yahoo_oauth checkout to the 330-row execution manifest'
+        description: 'Path in the private yahoo_oauth checkout to a season-scoped MFL manifest'
         required: false
         type: string
         default: corpus_seed/mfl_execution_manifest_1993_2025.json
@@ -28,6 +28,56 @@ on:
         required: false
         type: string
         default: '165'
+      indices:
+        description: 'Optional JSON or comma-separated local matrix indices for a targeted repair'
+        required: false
+        type: string
+        default: ''
+      expected_count:
+        description: 'Exact manifest row count; 0 disables the sample-count assertion for population manifests'
+        required: false
+        type: string
+        default: '330'
+      exact_per_year:
+        description: 'Exact rows required per year; 0 disables the per-year assertion for population manifests'
+        required: false
+        type: string
+        default: '10'
+      continue_population:
+        description: 'Dispatch the next bounded population wave after a successful combine'
+        required: false
+        type: string
+        default: 'false'
+      population_total:
+        description: 'Exclusive total manifest offset for chained population waves'
+        required: false
+        type: string
+        default: '0'
+      population_shard_size:
+        description: 'Manifest rows per chained population wave'
+        required: false
+        type: string
+        default: '256'
+      cache_namespace:
+        description: 'Immutable Actions-cache namespace for the validated pre-rollup snapshot'
+        required: false
+        type: string
+        default: 'mfl-register-sample-v1'
+      accepted_by_year:
+        description: 'Cumulative accepted receipt counts carried between population waves'
+        required: false
+        type: string
+        default: '{}'
+      target_per_year:
+        description: 'Accepted-league target for each required population year'
+        required: false
+        type: string
+        default: '10000'
+      target_years:
+        description: 'Comma-separated years required before population chaining stops'
+        required: false
+        type: string
+        default: '2005,2006,2007,2008,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018'
 
 permissions:
   actions: write
@@ -39,6 +89,7 @@ jobs:
     outputs:
       records: ${{ steps.manifest.outputs.records }}
       max_parallel: ${{ steps.manifest.outputs.max_parallel }}
+      indices: ${{ steps.manifest.outputs.indices }}
     steps:
       - name: Checkout private pipeline and manifest
         uses: actions/checkout@v5
@@ -60,6 +111,13 @@ jobs:
         env:
           MANIFEST_PATH: code/${{ inputs.manifest_path }}
           MAX_PARALLEL: ${{ inputs.max_parallel }}
+          INDICES: ${{ inputs.indices }}
+          INDEX_START: ${{ inputs.index_start }}
+          INDEX_END: ${{ inputs.index_end }}
+          EXPECTED_COUNT: ${{ inputs.expected_count }}
+          EXACT_PER_YEAR: ${{ inputs.exact_per_year }}
+          ACCEPTED_BY_YEAR: ${{ inputs.accepted_by_year }}
+          TARGET_PER_YEAR: ${{ inputs.target_per_year }}
         run: |
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json, os
@@ -69,18 +127,46 @@ jobs:
           rows = d.get("leagues", d.get("rows", d if isinstance(d, list) else None))
           if not isinstance(rows, list): raise SystemExit("manifest has no leagues/rows list")
           keys = {(int(r["season"]), str(r["league_id"])) for r in rows}
-          years = list(range(1993, 2026))
+          expected_count = int(os.environ["EXPECTED_COUNT"])
+          exact_per_year = int(os.environ["EXACT_PER_YEAR"])
           counts = Counter(y for y, _ in keys)
-          if len(keys) != 330 or len(rows) != 330: raise SystemExit(f"expected 330 unique rows, got rows={len(rows)} keys={len(keys)}")
-          bad = {y: counts[y] for y in years if counts[y] != 10}
-          if bad: raise SystemExit(f"per-year counts invalid: {bad}")
+          try:
+              accepted = {str(k): int(v) for k, v in json.loads(os.environ.get("ACCEPTED_BY_YEAR", "{}") or "{}").items()}
+          except (TypeError, ValueError, json.JSONDecodeError) as exc:
+              raise SystemExit(f"invalid accepted_by_year: {exc}")
+          target = int(os.environ.get("TARGET_PER_YEAR", "10000"))
+          if expected_count and (len(keys) != expected_count or len(rows) != expected_count):
+              raise SystemExit(f"expected {expected_count} unique rows, got rows={len(rows)} keys={len(keys)}")
+          if exact_per_year:
+              bad = {y: n for y, n in counts.items() if n != exact_per_year}
+              if bad: raise SystemExit(f"per-year counts invalid: {bad}")
           out = []
           for r in sorted(rows, key=lambda x: (int(x["season"]), str(x["league_id"]))):
               y, lid = int(r["season"]), str(r["league_id"])
               if str(r.get("seed", f"{y}:{lid}")) != f"{y}:{lid}": raise SystemExit(f"seed/year mismatch: {r}")
               out.append({"season": y, "league_id": lid, "seed": f"{y}:{lid}", "name": r.get("name", "")})
-          print("records=" + json.dumps(out, separators=(",", ":")))
+          if accepted:
+              print("accepted_by_year=" + json.dumps(accepted, separators=(",", ":")))
+          print("target_per_year=" + str(target))
           print("max_parallel=" + str(min(max(1, int(os.environ["MAX_PARALLEL"])), 20)))
+          start = int(os.environ["INDEX_START"])
+          end = int(os.environ["INDEX_END"])
+          if start < 0 or end < start or end > len(out):
+              raise SystemExit(f"invalid index range: {start}:{end} for {len(out)} records")
+          selected = out[start:end]
+          raw_indices = os.environ.get("INDICES", "").strip()
+          if raw_indices:
+              try:
+                  parsed = json.loads(raw_indices)
+              except json.JSONDecodeError:
+                  parsed = [int(x.strip()) for x in raw_indices.split(",") if x.strip()]
+              parsed = sorted({int(x) for x in parsed})
+          else:
+              parsed = list(range(len(selected)))
+          if not parsed or any(x < 0 or x >= len(selected) for x in parsed):
+              raise SystemExit(f"invalid matrix indices: {parsed}")
+          print("records=" + json.dumps(selected, separators=(",", ":")))
+          print("indices=" + json.dumps(parsed, separators=(",", ":")))
           PY
 
   ingest:
@@ -91,7 +177,7 @@ jobs:
       fail-fast: false
       max-parallel: ${{ fromJSON(needs.prepare.outputs.max_parallel) }}
       matrix:
-        index: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95,96,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164]
+        index: ${{ fromJSON(needs.prepare.outputs.indices) }}
     env:
       CORPUS_MODE: '1'
       MFL_RATE_LIMIT_PER_MIN: '12'
@@ -124,6 +210,8 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
+          cache: pip
+          cache-dependency-path: code/requirements.txt
       - name: Install dependencies
         run: pip install -r code/requirements.txt
       - name: Restore corpus dependencies
@@ -170,7 +258,7 @@ jobs:
               --league-id "${SEASON}:${LEAGUE_ID}" \
               --start-year "${SEASON}" --end-year "${SEASON}" \
               --data-dir "${ATTEMPT_DIR}" --database-name "${DB_NAME}" \
-              --import-mode full --skip-track-1 --skip-track-2-upload --stop-after 4 \
+              --import-mode full --player-cache-minimal --skip-track-1 --skip-track-2-upload --stop-after 4 \
               2>&1 | tee import.log
             rc=${PIPESTATUS[0]}
             if [ "$rc" -eq 0 ] && [ -f "${ATTEMPT_DIR}/${DB_NAME}.duckdb" ]; then
@@ -189,6 +277,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, duckdb
+          from multi_league.core.canonical_player import PLAYER_FANTASY_COLUMNS
           y, lid, dbn = int(os.environ['SEASON']), os.environ['LEAGUE_ID'], os.environ['DB_NAME']
           c = duckdb.connect('league.duckdb', read_only=True)
           tables = {r[0] for r in c.execute("select table_name from information_schema.tables where table_schema='public'").fetchall()}
@@ -196,17 +285,48 @@ jobs:
           missing_tables = sorted(required_tables - tables)
           def cols(t): return {r[0] for r in c.execute(f'describe public.{t}').fetchall()} if t in tables else set()
           req = {
-            'player_fantasy': {'db_name','year','week','NFL_player_id','is_started','is_rostered','fantasy_points','manager','win','champion','clutch_equity','final_playoff_seed','is_playoffs'},
+            'player_fantasy': set(PLAYER_FANTASY_COLUMNS),
             'matchup': {'db_name','year','week','manager','team_points','win','loss','is_playoffs','final_playoff_seed','champion','is_championship'},
           }
+          # A complete DDL is necessary but not sufficient. These fields must
+          # be populated for the pre-rollup player cache to produce matchup
+          # outcomes and clutch metrics. Feature-specific SQL columns may be
+          # legitimately NULL for leagues that do not use that feature.
+          populated_player = {
+            'db_name','year','week','player_week','NFL_player_id','manager',
+            'manager_guid','franchise_id','manager_week','mfl_player_id',
+            'player','position','fantasy_position','fantasy_points',
+            'is_started','is_rostered','platform','league_id','win','loss',
+            'tie','opponent','opponent_franchise_id','team_points',
+            'opponent_points','is_playoffs','is_consolation','is_championship',
+            'champion','clutch_equity',
+          }
+          matchup_scoped = {'win','loss','tie','opponent','opponent_franchise_id','team_points','opponent_points','is_playoffs','is_consolation','is_championship','champion'}
           schema = {t: sorted(cols(t)) for t in req}
           missing_cols = {t: sorted(v-cols(t)) for t,v in req.items() if v-cols(t)}
           def n(sql): return int(c.execute(sql).fetchone()[0])
-          pf = n(f"select count(*) from public.player_fantasy where year={y} and coalesce(is_rostered,0)=1") if 'player_fantasy' in tables else 0
+          roster_scope = f"year={y} and coalesce(is_rostered,0)=1 and player is not null and upper(coalesce(cast(position as varchar),'')) <> 'STUB'"
+          pf = n(f"select count(*) from public.player_fantasy where {roster_scope}") if 'player_fantasy' in tables else 0
           mu = n(f"select count(*) from public.matchup where year={y}") if 'matchup' in tables else 0
           checks = {}
-          for field in ('manager','win','champion','clutch_equity'):
-              checks['player_fantasy.'+field] = n(f"select count(*) from public.player_fantasy where year={y} and {field} is not null") if field in cols('player_fantasy') else 0
+          coverage = {}
+          for field in sorted(populated_player):
+            scope = f"year={y}"
+            if field not in {'db_name', 'clutch_equity'}:
+              scope += " and coalesce(is_rostered,0)=1 and player is not null and upper(coalesce(cast(position as varchar),'')) <> 'STUB'"
+            if field in matchup_scoped:
+              scope += " and opponent is not null"
+            if field == 'opponent_franchise_id':
+              scope += " and coalesce(is_bye_week, 0) = 0 and opponent is not null"
+            base = n(f"select count(*) from public.player_fantasy where {scope}") if field in cols('player_fantasy') else 0
+            value = n(f"select count(*) from public.player_fantasy where {scope} and nullif(trim(cast({field} as varchar)),'') is not null") if field in cols('player_fantasy') else 0
+            checks['player_fantasy.'+field] = value
+            coverage['player_fantasy.'+field] = {'populated': value, 'applicable': base}
+          tie_scope = f"{roster_scope} and opponent is not null"
+          tie_base = n(f"select count(*) from public.player_fantasy where {tie_scope}") if 'tie' in cols('player_fantasy') else 0
+          tie_value = n(f"select count(*) from public.player_fantasy where {tie_scope} and tie in (0,1)") if 'tie' in cols('player_fantasy') else 0
+          checks['player_fantasy.tie_valid'] = tie_value
+          coverage['player_fantasy.tie_valid'] = {'populated': tie_value, 'applicable': tie_base}
           for field in ('win','loss','is_playoffs','champion','is_championship','final_playoff_seed'):
               checks['matchup.'+field] = n(f"select count(*) from public.matchup where year={y} and {field} is not null") if field in cols('matchup') else 0
           errors = []
@@ -214,8 +334,9 @@ jobs:
           if missing_cols: errors.append('missing columns '+repr(missing_cols))
           if pf <= 0 or mu <= 0: errors.append(f'empty core rows player={pf} matchup={mu}')
           errors += [f'{k} has no populated values' for k,v in checks.items() if v <= 0]
+          errors += [f'{k} only {v["populated"]}/{v["applicable"]} applicable rows populated' for k,v in coverage.items() if v['applicable'] > 0 and v['populated'] != v['applicable']]
           if errors: raise SystemExit('; '.join(errors))
-          receipt = {'schema_version':'mfl_register_receipt_v1','season':y,'league_id':lid,'seed':f'{y}:{lid}','db_name':dbn,'row_counts':{'player_fantasy':pf,'matchup':mu},'non_null_counts':checks,'player_fantasy_rows':pf,'matchup_rows':mu,'populated_signals':checks,'schema_columns':schema,'source':'league-history-workers'}
+          receipt = {'schema_version':'mfl_register_receipt_v1','season':y,'league_id':lid,'seed':f'{y}:{lid}','db_name':dbn,'row_counts':{'player_fantasy':pf,'matchup':mu},'non_null_counts':checks,'coverage':coverage,'player_fantasy_rows':pf,'matchup_rows':mu,'populated_signals':checks,'schema_columns':schema,'source':'league-history-workers'}
           open('receipt.json','w',encoding='utf-8').write(json.dumps(receipt,indent=2,sort_keys=True))
           PY
       - name: Upload validated season league
@@ -241,6 +362,16 @@ jobs:
           pattern: mfl-register-*
           path: receipts
           merge-multiple: false
+      - name: Checkout canonical schema
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref }}
+          path: code
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /fantasy_football_data_scripts/multi_league/core/canonical_player.py
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
@@ -252,12 +383,15 @@ jobs:
           EXPECTED: ${{ needs.prepare.outputs.records }}
           INDEX_START: ${{ inputs.index_start }}
           INDEX_END: ${{ inputs.index_end }}
+          ALLOW_PARTIAL: ${{ inputs.continue_population }}
+          ACCEPTED_BY_YEAR: ${{ inputs.accepted_by_year }}
+          TARGET_PER_YEAR: ${{ inputs.target_per_year }}
+          TARGET_YEARS: ${{ inputs.target_years }}
+          PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
         run: |
           python3 - <<'PY'
           import json, os, pathlib, duckdb
-          all_expected = json.loads(os.environ['EXPECTED'])
-          start, end = int(os.environ['INDEX_START']), int(os.environ['INDEX_END'])
-          expected = all_expected[start:end]
+          expected = json.loads(os.environ['EXPECTED'])
           root = pathlib.Path('receipts')
           receipts, dbs = [], []
           for p in sorted(root.glob('mfl-register-*/receipt.json')):
@@ -265,21 +399,44 @@ jobs:
               dbs.append((p.parent / 'league.duckdb', receipts[-1]))
           keys = {(int(r['season']), str(r['league_id'])) for r in expected}
           got = {(int(r['season']), str(r['league_id'])) for r in receipts}
-          if got != keys: raise SystemExit(f'receipt set mismatch: expected {len(keys)}, got {len(got)}')
+          allow_partial = os.environ.get('ALLOW_PARTIAL','false').lower() == 'true'
+          if not allow_partial and got != keys:
+              raise SystemExit(f'receipt set mismatch: expected {len(keys)}, got {len(got)}')
+          if allow_partial and not got:
+              raise SystemExit(f'population shard produced no valid receipts out of {len(keys)} candidates')
+          rejected = sorted(keys - got)
+          if rejected:
+              print(f'population shard rejected {len(rejected)} candidates')
+          try:
+              prior = {str(k): int(v) for k, v in json.loads(os.environ.get('ACCEPTED_BY_YEAR', '{}') or '{}').items()}
+          except (TypeError, ValueError, json.JSONDecodeError) as exc:
+              raise SystemExit(f'invalid accepted_by_year: {exc}')
+          accepted_by_year = dict(prior)
+          for year, count in Counter(int(r['season']) for r in receipts).items():
+              accepted_by_year[str(year)] = accepted_by_year.get(str(year), 0) + count
+          target = int(os.environ.get('TARGET_PER_YEAR', '10000'))
+          target_years = [y.strip() for y in os.environ.get('TARGET_YEARS', '').split(',') if y.strip()]
+          complete_targets = bool(target_years) and all(accepted_by_year.get(y, 0) >= target for y in target_years)
+          print(f'accepted_by_year={json.dumps(accepted_by_year, sort_keys=True)}')
+          print(f'target_per_year={target}; complete_targets={complete_targets}')
           errors = []
           from collections import Counter
           counts = Counter(int(r['season']) for r in receipts)
-          wanted = Counter(int(r['season']) for r in expected)
+          wanted = Counter(int(r['season']) for r in (expected if not allow_partial else receipts))
           for y, n in wanted.items():
               if counts[y] != n: errors.append(f'{y} has {counts[y]} receipts, expected {n}')
+          from multi_league.core.canonical_player import PLAYER_FANTASY_COLUMNS
           required = {
-            'player_fantasy': {'db_name','year','week','NFL_player_id','is_started','is_rostered','fantasy_points','manager','win','champion','clutch_equity','final_playoff_seed','is_playoffs'},
+            'player_fantasy': set(PLAYER_FANTASY_COLUMNS),
             'matchup': {'db_name','year','week','manager','team_points','win','loss','is_playoffs','final_playoff_seed','champion','is_championship'},
           }
           for r in receipts:
               for t, cols in required.items():
                   if not cols <= set(r.get('schema_columns',{}).get(t,[])): errors.append(f"{r['seed']} incomplete {t} schema")
               if any(int(v or 0) <= 0 for v in r.get('non_null_counts',{}).values()): errors.append(f"{r['seed']} has empty required signal")
+              for key, value in r.get('coverage', {}).items():
+                  if int(value.get('applicable', 0)) > 0 and int(value.get('populated', 0)) != int(value.get('applicable', 0)):
+                      errors.append(f"{r['seed']} incomplete coverage {key}: {value}")
           if errors: raise SystemExit('; '.join(errors[:25]))
           out = duckdb.connect('mfl_register_snapshot.duckdb')
           for db_path, r in dbs:
@@ -295,7 +452,7 @@ jobs:
                       out.execute(f'insert into "{table}" select * from src.public."{table}" where year={y}')
               out.execute('DETACH src')
           out.close()
-          pathlib.Path('mfl_register_all_runs.json').write_text(json.dumps({'schema_version':'mfl_register_results_v1','start_year':1993,'end_year':2025,'per_year':10,'league_count':len(receipts),'leagues':sorted(receipts,key=lambda x:(int(x['season']),str(x['league_id'])))},indent=2,sort_keys=True),encoding='utf-8')
+          pathlib.Path('mfl_register_all_runs.json').write_text(json.dumps({'schema_version':'mfl_register_results_v1','start_year':min((int(r['season']) for r in receipts), default=None),'end_year':max((int(r['season']) for r in receipts), default=None),'expected_count':len(expected),'league_count':len(receipts),'rejected_count':len(rejected),'rejected': [{'season': y, 'league_id': lid} for y,lid in rejected],'accepted_by_year':accepted_by_year,'target_per_year':target,'target_years':target_years,'complete_targets':complete_targets,'leagues':sorted(receipts,key=lambda x:(int(x['season']),str(x['league_id'])))},indent=2,sort_keys=True),encoding='utf-8')
           print(f'validated {len(receipts)} leagues; wrote canonical snapshot')
           PY
       - name: Upload final register and canonical snapshot
@@ -306,3 +463,70 @@ jobs:
           path: |
             mfl_register_all_runs.json
             mfl_register_snapshot.duckdb
+
+      - name: Save validated pre-rollup cache shard
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            mfl_register_snapshot.duckdb
+            mfl_register_all_runs.json
+          key: ${{ inputs.cache_namespace }}-${{ inputs.index_start }}-${{ inputs.index_end }}
+
+      - name: Dispatch next population wave
+        if: ${{ success() && inputs.continue_population == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+          MANIFEST_PATH: ${{ inputs.manifest_path }}
+          YAHOO_OAUTH_REF: ${{ inputs.yahoo_oauth_ref }}
+          MAX_PARALLEL: ${{ inputs.max_parallel }}
+          CURRENT_END: ${{ inputs.index_end }}
+          POPULATION_TOTAL: ${{ inputs.population_total }}
+          SHARD_SIZE: ${{ inputs.population_shard_size }}
+          CACHE_NAMESPACE: ${{ inputs.cache_namespace }}
+          ACCEPTED_BY_YEAR: ${{ inputs.accepted_by_year }}
+          TARGET_PER_YEAR: ${{ inputs.target_per_year }}
+          TARGET_YEARS: ${{ inputs.target_years }}
+        run: |
+          export ACCEPTED_BY_YEAR=$(python3 -c 'import json; print(json.dumps(json.load(open("mfl_register_all_runs.json", encoding="utf-8")).get("accepted_by_year", {}), separators=(",", ":")))')
+          next_start=$((CURRENT_END))
+          total=$((POPULATION_TOTAL))
+          if [ "$total" -le 0 ] || [ "$next_start" -ge "$total" ]; then
+            echo "population waves complete at offset $next_start"
+            exit 0
+          fi
+          # The receipt manifest carries the cumulative state. Stop as soon
+          # as every required year has reached the accepted target.
+          complete_targets=$(python3 - <<'PY'
+          import json, os
+          accepted = {str(k): int(v) for k, v in json.loads(os.environ.get('ACCEPTED_BY_YEAR', '{}') or '{}').items()}
+          target = int(os.environ.get('TARGET_PER_YEAR', '10000'))
+          years = [y.strip() for y in os.environ.get('TARGET_YEARS', '').split(',') if y.strip()]
+          print('true' if years and all(accepted.get(y, 0) >= target for y in years) else 'false')
+          PY
+          )
+          if [ "$complete_targets" = "true" ]; then
+            echo "all target years reached; no next population wave"
+            exit 0
+          fi
+          next_end=$((next_start + SHARD_SIZE))
+          if [ "$next_end" -gt "$total" ]; then next_end="$total"; fi
+          echo "dispatching population wave $next_start:$next_end of $total"
+          gh workflow run mfl_register_campaign.yml \
+            --repo "$REPOSITORY" \
+            --ref "$REF_NAME" \
+            -f manifest_path="$MANIFEST_PATH" \
+            -f yahoo_oauth_ref="$YAHOO_OAUTH_REF" \
+            -f max_parallel="$MAX_PARALLEL" \
+            -f index_start="$next_start" \
+            -f index_end="$next_end" \
+            -f expected_count=0 \
+            -f exact_per_year=0 \
+            -f continue_population=true \
+            -f population_total="$total" \
+            -f population_shard_size="$SHARD_SIZE" \
+            -f cache_namespace="$CACHE_NAMESPACE" \
+            -f accepted_by_year="$ACCEPTED_BY_YEAR" \
+            -f target_per_year="$TARGET_PER_YEAR" \
+            -f target_years="$TARGET_YEARS"
