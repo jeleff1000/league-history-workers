@@ -1,0 +1,85 @@
+name: MFL Saved Chunk Validator
+
+on:
+  workflow_dispatch:
+    inputs:
+      chunk_key:
+        description: 'Immutable chunk cache key to validate'
+        required: true
+        type: string
+      index_key:
+        description: 'Immutable index cache key to validate'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Restore immutable chunk
+        uses: actions/cache/restore@v5
+        with:
+          path: chunk_state
+          key: ${{ inputs.chunk_key }}
+          fail-on-cache-miss: true
+      - name: Restore immutable index
+        uses: actions/cache/restore@v5
+        with:
+          path: index_state
+          key: ${{ inputs.index_key }}
+          fail-on-cache-miss: true
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install DuckDB
+        run: pip install duckdb
+      - name: Validate saved proof and rows
+        env:
+          CHUNK_KEY: ${{ inputs.chunk_key }}
+          INDEX_KEY: ${{ inputs.index_key }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          import duckdb
+
+          chunk_key = os.environ['CHUNK_KEY']
+          index_key = os.environ['INDEX_KEY']
+          proof = json.loads(Path('chunk_state/cache_append_proof.json').read_text())
+          index = json.loads(Path('index_state/mfl_register_all_runs.json').read_text())
+
+          required = {
+              'schema_unchanged': True,
+              'prior_rows_preserved': True,
+              'new_lineage': False,
+              'duplicate_league_year_keys': False,
+          }
+          for key, expected in required.items():
+              if proof.get(key) != expected:
+                  raise SystemExit(f'proof gate failed: {key}={proof.get(key)!r}')
+          if proof.get('chunk_cache_key') != chunk_key:
+              raise SystemExit('proof chunk key mismatch')
+          if index.get('league_count') != proof.get('final_league_count'):
+              raise SystemExit('index league count mismatch')
+          if not any(c.get('cache_key') == chunk_key for c in index.get('chunks', [])):
+              raise SystemExit('index does not reference saved chunk')
+
+          db = Path('chunk_state/mfl_register_chunk.duckdb')
+          con = duckdb.connect(str(db), read_only=True)
+          actual = {}
+          for table in ('league_settings', 'matchup', 'player_fantasy'):
+              exists = con.execute(
+                  "select count(*) from information_schema.tables "
+                  "where table_schema='main' and table_name=?", [table]
+              ).fetchone()[0]
+              actual[table] = int(con.execute(f'select count(*) from "{table}"').fetchone()[0]) if exists else 0
+          con.close()
+          if actual != proof.get('added_rows'):
+              raise SystemExit(f'chunk row counts mismatch: actual={actual} proof={proof.get("added_rows")}')
+          print(json.dumps({'live_cache_validated': True, 'index_key': index_key, 'proof': proof, 'chunk_rows': actual}, sort_keys=True))
+          PY
