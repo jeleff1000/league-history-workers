@@ -1,0 +1,124 @@
+name: MFL Reduce Saved Chunk
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_chunk_key:
+        description: Exact cache key containing a standalone chunk DuckDB
+        required: true
+        type: string
+      source_index_key:
+        description: Exact cache key containing the standalone chunk index
+        required: true
+        type: string
+      prior_index_key:
+        description: Exact cache key for the current canonical index
+        required: true
+        type: string
+      cache_namespace:
+        description: Canonical immutable cache namespace
+        required: false
+        type: string
+        default: mfl-registered-2004-2018-v2
+      output_suffix:
+        description: Unique immutable successor suffix
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  reduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Restore source chunk
+        uses: actions/cache/restore@v5
+        with:
+          path: chunk_state
+          key: ${{ inputs.source_chunk_key }}
+          fail-on-cache-miss: true
+      - name: Preserve source chunk
+        run: |
+          mkdir -p source_chunk
+          cp chunk_state/mfl_register_chunk.duckdb source_chunk/
+      - name: Restore source index
+        uses: actions/cache/restore@v5
+        with:
+          path: index_state
+          key: ${{ inputs.source_index_key }}
+          fail-on-cache-miss: true
+      - name: Preserve source index
+        run: |
+          mkdir -p source_index
+          cp index_state/mfl_register_all_runs.json source_index/
+          rm -rf index_state
+      - name: Restore canonical prior index
+        uses: actions/cache/restore@v5
+        with:
+          path: index_state
+          key: ${{ inputs.prior_index_key }}
+          fail-on-cache-miss: true
+      - name: Checkout reducer
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: codex/mfl-gates
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/extraplatform_corpus/merge_mfl_saved_chunk.py
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install DuckDB
+        run: pip install duckdb
+      - name: Reduce and prove append
+        env:
+          OUTPUT_KEY: ${{ inputs.cache_namespace }}-chunk-${{ inputs.output_suffix }}
+        run: |
+          python code/scripts/extraplatform_corpus/merge_mfl_saved_chunk.py \
+            --source-db source_chunk/mfl_register_chunk.duckdb \
+            --source-index source_index/mfl_register_all_runs.json \
+            --prior-index index_state/mfl_register_all_runs.json \
+            --output-db mfl_register_chunk.duckdb \
+            --output-index mfl_register_all_runs.json \
+            --proof cache_append_proof.json \
+            --output-key "$OUTPUT_KEY"
+          python - <<'PY'
+          import json
+          p=json.load(open('cache_append_proof.json', encoding='utf-8'))
+          required={'schema_unchanged':True,'prior_rows_preserved':True,'new_lineage':False,'duplicate_league_year_keys':False}
+          for key,value in required.items():
+              if p.get(key) != value: raise SystemExit(f'{key} proof failed')
+          if p.get('added_league_count', 0) <= 0: raise SystemExit('reducer added no leagues')
+          print(json.dumps(p, sort_keys=True))
+          PY
+      - name: Stage successor caches
+        run: |
+          mkdir -p output_chunk output_index
+          cp mfl_register_chunk.duckdb cache_append_proof.json output_chunk/
+          cp mfl_register_all_runs.json cache_append_proof.json output_index/
+      - name: Save successor chunk
+        uses: actions/cache/save@v5
+        with:
+          path: output_chunk
+          key: ${{ inputs.cache_namespace }}-chunk-${{ inputs.output_suffix }}
+      - name: Save successor index
+        uses: actions/cache/save@v5
+        with:
+          path: output_index
+          key: ${{ inputs.cache_namespace }}-index-${{ inputs.output_suffix }}
+      - name: Upload reducer proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-reducer-proof-${{ github.run_id }}
+          retention-days: 90
+          path: |
+            mfl_register_all_runs.json
+            cache_append_proof.json
