@@ -4,21 +4,22 @@ on:
   workflow_dispatch:
     inputs:
       source_run_id:
-        description: 'Completed compact build run whose fifteen lane artifacts should be merged'
+        description: 'Completed compact build run whose compact base and season source will be reused'
         required: true
-      expected_lanes:
-        description: 'Exact number of lane artifacts expected from the source run'
-        required: false
-        default: '15'
 
 permissions:
   actions: read
   contents: read
 
 jobs:
-  merge:
+  career:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      max-parallel: 15
+      matrix:
+        bucket: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
     env:
       PYTHONPATH: ${{ github.workspace }}/code
     steps:
@@ -37,23 +38,72 @@ jobs:
           repository: jeleff1000/league-history-workers
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ github.token }}
-          pattern: compact-matchup-lane-*-${{ inputs.source_run_id }}
-          path: lanes
-          merge-multiple: false
-      - name: Merge preserved compact lanes and fail fast on golden output
+          name: compact-matchup-season-source-${{ inputs.source_run_id }}
+          path: season-source
+      - name: Build one exact disjoint compact career part
         run: |
-          mapfile -t LANES < <(find lanes -name lane.duckdb | sort)
-          test "${#LANES[@]}" -eq ${{ inputs.expected_lanes }}
-          python code/scripts/research_cohorts/merge_compact_matchup_parts.py --parts "${LANES[@]}" --output research_matchup_compact.duckdb
+          python code/scripts/research_cohorts/merge_compact_matchup_parts.py \
+            --season-bundle season-source/research_matchup_compact_season_source.duckdb \
+            --output career-part.duckdb \
+            --career-buckets 15 \
+            --career-bucket '${{ matrix.bucket }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compact-matchup-career-${{ matrix.bucket }}-${{ github.run_id }}
+          path: career-part.duckdb
+          retention-days: 1
+          compression-level: 0
+
+  merge:
+    needs: career
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: ${{ github.workspace }}/code
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install duckdb==1.5.1
+      - uses: actions/download-artifact@v5
+        with:
+          repository: jeleff1000/league-history-workers
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+          name: compact-matchup-base-${{ inputs.source_run_id }}
+          path: base
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: compact-matchup-career-*-${{ github.run_id }}
+          path: career-parts
+          merge-multiple: false
+      - name: Assemble parallel career parts and fail fast on golden output
+        run: |
+          mapfile -t CAREER_PARTS < <(find career-parts -name career-part.duckdb | sort)
+          test "${#CAREER_PARTS[@]}" -eq 15
+          python code/scripts/research_cohorts/merge_compact_matchup_parts.py \
+            --base-bundle base/research_matchup_compact_base.duckdb \
+            --career-parts "${CAREER_PARTS[@]}" \
+            --output research_matchup_compact.duckdb
           python - <<'PY'
           import duckdb,json
           c=duckdb.connect('research_matchup_compact.duckdb',read_only=True)
           tables={x[0] for x in c.execute('SELECT table_name FROM duckdb_tables()').fetchall()}
           assert tables >= {'research_matchup_compact_weekly','research_matchup_compact_season','research_matchup_compact_career'},tables
+          unsupported=c.execute("SELECT position FROM (SELECT position FROM research_matchup_compact_weekly UNION SELECT position FROM research_matchup_compact_season UNION SELECT position FROM research_matchup_compact_career) WHERE position NOT IN ('QB','RB','WR','TE','K','DEF','DB','DL','LB')").fetchall()
+          assert not unsupported,unsupported
           dupe=c.execute("SELECT COUNT(*) FROM (SELECT NFL_player_id,year,week,position FROM research_matchup_compact_weekly GROUP BY 1,2,3,4 HAVING COUNT(*)<>1)").fetchone()[0]
           cmc=c.execute("SELECT cell.eligible_leagues,cell.rostered_leagues,cell.started_leagues,cell.valid_started_outcomes,cell.win_equivalent FROM research_matchup_compact_weekly,UNNEST(cohort_cells) u(cell) WHERE NFL_player_id='00-0033280' AND year=2025 AND week=1 AND position='RB' AND cell.q_teams='ALL' AND cell.q_roster='ALL' AND cell.q_scoring='ALL' AND cell.q_pass_td='ALL' AND cell.q_dynasty='ALL' AND cell.q_best_ball='ALL'").fetchone()
           assert cmc==(9837,9766,9600,9579,6019.0),cmc
+          low=c.execute("SELECT COUNT(*) FROM (SELECT 1 FROM research_matchup_compact_weekly,UNNEST(cohort_cells) u(cell) WHERE cell.rostered_leagues<150 UNION ALL SELECT 1 FROM research_matchup_compact_season,UNNEST(cohort_cells) u(cell) WHERE cell.rostered_league_weeks<150 UNION ALL SELECT 1 FROM research_matchup_compact_career,UNNEST(cohort_cells) u(cell) WHERE cell.rostered_league_weeks<150)").fetchone()[0]
           assert dupe==0,dupe
+          assert low==0,low
           print('compact_rollup='+json.dumps({'weekly':c.execute('SELECT COUNT(*) FROM research_matchup_compact_weekly').fetchone()[0],'season':c.execute('SELECT COUNT(*) FROM research_matchup_compact_season').fetchone()[0],'career':c.execute('SELECT COUNT(*) FROM research_matchup_compact_career').fetchone()[0],'cmc':cmc}))
           PY
       - uses: actions/upload-artifact@v4
