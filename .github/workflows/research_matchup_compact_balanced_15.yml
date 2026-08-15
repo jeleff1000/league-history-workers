@@ -177,7 +177,7 @@ jobs:
           keys=[(row['year'],row['position']) for row in results]
           duplicates=[key for key,count in Counter(keys).items() if count != 1]
           assert not duplicates,duplicates
-          bad=[row for row in results if any(row[key] for key in ('invalid_rostered_lanes','invalid_started_lanes','invalid_historical_lanes'))]
+          bad=[row for row in results if any(row[key] for key in ('invalid_rostered_lanes','invalid_started_lanes','invalid_pooled_lanes'))]
           assert not bad,bad
           totals={stat:Counter() for stat in ('rostered_tiers','started_tiers')}
           for row in results:
