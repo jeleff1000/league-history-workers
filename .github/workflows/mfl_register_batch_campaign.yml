@@ -53,6 +53,16 @@ on:
         required: false
         type: string
         default: ''
+      prior_index_key:
+        description: 'Exact immutable chunk-index cache key from the preceding wave'
+        required: false
+        type: string
+        default: ''
+      storage_mode:
+        description: 'Cache storage mode'
+        required: false
+        type: string
+        default: 'chunked'
       population_total:
         description: 'Total candidate rows in the manifest'
         required: false
@@ -246,6 +256,8 @@ jobs:
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             /fantasy_football_data_scripts/multi_league/core/canonical_player.py
+            /scripts/extraplatform_corpus/merge_mfl_chunk.py
+            /corpus_seed/
       - name: Restore prior MFL player catalog cache
         uses: actions/cache/restore@v5
         with:
@@ -254,11 +266,17 @@ jobs:
           restore-keys: |
             ${{ inputs.cache_namespace }}-players-
       - name: Restore prior cumulative register state
-        if: ${{ inputs.batch_start != '0' && inputs.prior_state_key != '' }}
+        if: ${{ inputs.storage_mode != 'chunked' && inputs.batch_start != '0' && inputs.prior_state_key != '' }}
         uses: actions/cache/restore@v5
         with:
           path: prior_state
           key: ${{ inputs.prior_state_key }}
+      - name: Restore prior chunk index
+        if: ${{ inputs.storage_mode == 'chunked' && inputs.batch_start != '0' && inputs.prior_index_key != '' }}
+        uses: actions/cache/restore@v5
+        with:
+          path: prior_index
+          key: ${{ inputs.prior_index_key }}
       - name: Merge player catalogs from ingest runners
         shell: bash
         run: |
@@ -274,6 +292,7 @@ jobs:
       - name: Install DuckDB
         run: pip install duckdb
       - name: Build canonical batch snapshot
+        if: ${{ inputs.storage_mode != 'chunked' }}
         env:
           EXPECTED: ${{ needs.prepare.outputs.records }}
           ACCEPTED_BY_YEAR: ${{ inputs.accepted_by_year }}
@@ -376,7 +395,23 @@ jobs:
           pathlib.Path('cache_append_proof.json').write_text(json.dumps({'schema_unchanged':True,'prior_rows':before_rows,'added_rows':added_rows,'final_rows':final_rows,'prior_league_count':len(prior_leagues),'added_league_count':len(receipts),'final_league_count':len(all_leagues),'prior_rows_preserved':set(prior_by_key).issubset(all_by_key),'new_lineage':False,'duplicate_league_year_keys':False},indent=2,sort_keys=True),encoding='utf-8')
           pathlib.Path('mfl_register_all_runs.json').write_text(json.dumps({'schema_version':'mfl_register_results_v1','expected_count':int(prior_json.get('expected_count',0))+len(keys),'league_count':len(all_leagues),'rejected_count':len(all_rejected),'rejected':all_rejected,'accepted_by_year':prior,'target_per_year':target,'target_years':target_years,'complete_targets':complete_targets,'collect_all':collect_all,'leagues':sorted(all_leagues,key=lambda r:(int(r['season']),str(r['league_id'])))},indent=2,sort_keys=True),encoding='utf-8')
           PY
+      - name: Build immutable canonical cache chunk
+        if: ${{ inputs.storage_mode == 'chunked' }}
+        env:
+          EXPECTED_PATH: ${{ github.workspace }}/code/${{ inputs.manifest_path }}
+          CHUNK_KEY: ${{ inputs.cache_namespace }}-chunk-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+          PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
+        run: |
+          python3 code/scripts/extraplatform_corpus/merge_mfl_chunk.py \
+            --receipts receipts \
+            --expected "$EXPECTED_PATH" \
+            --prior-index prior_index/mfl_register_all_runs.json \
+            --output-db mfl_register_chunk.duckdb \
+            --output-index mfl_register_all_runs.json \
+            --proof cache_append_proof.json \
+            --chunk-key "$CHUNK_KEY"
       - name: Stage cumulative register state
+        if: ${{ inputs.storage_mode != 'chunked' }}
         shell: bash
         run: |
           mkdir -p prior_state
@@ -384,6 +419,7 @@ jobs:
           cp mfl_register_all_runs.json prior_state/
           cp cache_append_proof.json prior_state/
       - name: Save validated batch cache
+        if: ${{ inputs.storage_mode != 'chunked' }}
         uses: actions/cache/save@v5
         with:
           path: |
@@ -394,7 +430,29 @@ jobs:
         with:
           path: mfl_player_cache
           key: ${{ inputs.cache_namespace }}-players-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+      - name: Stage immutable chunk cache
+        if: ${{ inputs.storage_mode == 'chunked' }}
+        shell: bash
+        run: |
+          mkdir -p chunk_state index_state
+          cp mfl_register_chunk.duckdb chunk_state/
+          cp cache_append_proof.json chunk_state/
+          cp mfl_register_all_runs.json index_state/
+          cp cache_append_proof.json index_state/
+      - name: Save immutable chunk cache
+        if: ${{ inputs.storage_mode == 'chunked' }}
+        uses: actions/cache/save@v5
+        with:
+          path: chunk_state
+          key: ${{ inputs.cache_namespace }}-chunk-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+      - name: Save immutable chunk index
+        if: ${{ inputs.storage_mode == 'chunked' }}
+        uses: actions/cache/save@v5
+        with:
+          path: index_state
+          key: ${{ inputs.cache_namespace }}-index-${{ inputs.batch_start }}-${{ inputs.batch_count }}
       - name: Upload batch snapshot
+        if: ${{ inputs.storage_mode != 'chunked' }}
         uses: actions/upload-artifact@v4
         with:
           name: mfl-register-batch-final-${{ github.run_id }}
@@ -403,18 +461,44 @@ jobs:
             mfl_register_snapshot.duckdb
             mfl_register_all_runs.json
             cache_append_proof.json
+      - name: Upload immutable chunk snapshot
+        if: ${{ inputs.storage_mode == 'chunked' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-register-chunk-${{ github.run_id }}
+          retention-days: 90
+          path: |
+            mfl_register_chunk.duckdb
+            mfl_register_all_runs.json
+            cache_append_proof.json
   verify_cache:
     needs: [combine]
     if: ${{ needs.combine.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Restore exact saved cumulative cache
+        if: ${{ inputs.storage_mode != 'chunked' }}
         uses: actions/cache/restore@v5
         with:
           path: prior_state
           key: ${{ inputs.cache_namespace }}-state-${{ inputs.batch_start }}-${{ inputs.batch_count }}
           fail-on-cache-miss: true
-      - name: Validate live cache append proof
+      - name: Restore exact saved chunk
+        if: ${{ inputs.storage_mode == 'chunked' }}
+        uses: actions/cache/restore@v5
+        with:
+          path: chunk_state
+          key: ${{ inputs.cache_namespace }}-chunk-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+          fail-on-cache-miss: true
+      - name: Restore exact saved chunk index
+        if: ${{ inputs.storage_mode == 'chunked' }}
+        uses: actions/cache/restore@v5
+        with:
+          path: index_state
+          key: ${{ inputs.cache_namespace }}-index-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+          fail-on-cache-miss: true
+      - name: Validate live cumulative cache append proof
+        if: ${{ inputs.storage_mode != 'chunked' }}
         run: |
           python3 - <<'PY'
           import json, pathlib
@@ -429,6 +513,28 @@ jobs:
               final=proof['final_rows'].get(table,0)
               if final-before != added:
                   raise SystemExit(f'live cache proof row delta failed: {table}')
+           print(json.dumps({'live_cache_validated':True, **proof}, sort_keys=True))
+           PY
+      - name: Validate live chunk append proof
+        if: ${{ inputs.storage_mode == 'chunked' }}
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          chunk=pathlib.Path('chunk_state')
+          index=pathlib.Path('index_state')
+          proof=json.loads((chunk/'cache_append_proof.json').read_text(encoding='utf-8'))
+          register=json.loads((index/'mfl_register_all_runs.json').read_text(encoding='utf-8'))
+          required={'schema_unchanged':True,'prior_rows_preserved':True,'new_lineage':False,'duplicate_league_year_keys':False}
+          for key,value in required.items():
+              if proof.get(key) != value:
+                  raise SystemExit(f'live chunk proof failed: {key}={proof.get(key)!r}')
+          if register.get('league_count') != proof.get('final_league_count'):
+              raise SystemExit('live chunk index league count mismatch')
+          if not any(c.get('cache_key') == proof.get('chunk_cache_key') for c in register.get('chunks', [])):
+              raise SystemExit('live chunk index does not reference the saved chunk')
+          for table,before in proof['prior_rows'].items():
+              if proof['final_rows'].get(table,0)-before != proof['added_rows'].get(table,0):
+                  raise SystemExit(f'live chunk row delta failed: {table}')
           print(json.dumps({'live_cache_validated':True, **proof}, sort_keys=True))
           PY
       - name: Dispatch next batch wave after live validation
@@ -451,9 +557,13 @@ jobs:
           STAGGER: ${{ inputs.start_stagger_seconds }}
           COLLECT_ALL: ${{ inputs.collect_all }}
           CURRENT_STATE_KEY: ${{ inputs.cache_namespace }}-state-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+          CURRENT_INDEX_KEY: ${{ inputs.cache_namespace }}-index-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+          STORAGE_MODE: ${{ inputs.storage_mode }}
         run: |
-          state=$(python3 -c 'import json; print(json.dumps(json.load(open("prior_state/mfl_register_all_runs.json",encoding="utf-8")).get("accepted_by_year",{}),separators=(",",":")))')
-          complete=$(python3 -c 'import json; d=json.load(open("prior_state/mfl_register_all_runs.json",encoding="utf-8")); print("true" if d.get("complete_targets") else "false")')
+          if [ "$STORAGE_MODE" = chunked ]; then ROOT=index_state; else ROOT=prior_state; fi
+          export ROOT
+          state=$(python3 -c 'import json,os; print(json.dumps(json.load(open(os.path.join(os.environ["ROOT"],"mfl_register_all_runs.json"),encoding="utf-8")).get("accepted_by_year",{}),separators=(",",":")))')
+          complete=$(python3 -c 'import json,os; d=json.load(open(os.path.join(os.environ["ROOT"],"mfl_register_all_runs.json"),encoding="utf-8")); print("true" if d.get("complete_targets") else "false")')
           total=${POPULATION_TOTAL:-0}; next=$((BATCH_START+BATCH_COUNT))
           if [ "$complete" = true ] || [ "$total" -le 0 ] || [ "$((next*BATCH_SIZE))" -ge "$total" ]; then exit 0; fi
           gh workflow run mfl_register_batch_campaign.yml --repo "$REPOSITORY" --ref "$REF_NAME" \
@@ -464,4 +574,5 @@ jobs:
             --raw-field accepted_by_year="$state" --raw-field target_per_year="$TARGET_PER_YEAR" \
             --raw-field target_years="$TARGET_YEARS" --raw-field mfl_rate_limit="$MFL_RATE" \
             --raw-field start_stagger_seconds="$STAGGER" --raw-field collect_all="$COLLECT_ALL" \
-            --raw-field prior_state_key="$CURRENT_STATE_KEY"
+            --raw-field storage_mode="$STORAGE_MODE" --raw-field prior_state_key="$CURRENT_STATE_KEY" \
+            --raw-field prior_index_key="$CURRENT_INDEX_KEY"
