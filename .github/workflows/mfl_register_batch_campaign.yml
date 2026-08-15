@@ -64,7 +64,7 @@ on:
         type: string
         default: ''
       storage_mode:
-        description: 'Cache storage mode'
+        description: 'Cache storage mode: snapshot, chunked, or fetch_only'
         required: false
         type: string
         default: 'chunked'
@@ -87,7 +87,7 @@ on:
         description: 'Comma-separated required years'
         required: false
         type: string
-        default: '2005,2006,2007,2008,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018'
+        default: '2004,2005,2006,2007,2008,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018'
       mfl_rate_limit:
         description: 'Per-runner MFL requests/minute; keep aggregate below MFL throttle'
         required: false
@@ -117,6 +117,7 @@ jobs:
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             /corpus_seed/
+            /scripts/extraplatform_corpus/build_mfl_pending_manifest.py
             /requirements.txt
       - name: Setup Python for shared worker environment
         uses: actions/setup-python@v6
@@ -139,10 +140,37 @@ jobs:
         with:
           path: .venv
           key: mfl-python-venv-v1-${{ runner.os }}-py311-${{ hashFiles('code/requirements.txt') }}
+      - name: Restore canonical index for pending queue
+        if: ${{ inputs.storage_mode == 'fetch_only' && inputs.prior_index_key != '' }}
+        uses: actions/cache/restore@v5
+        with:
+          path: work_index
+          key: ${{ inputs.prior_index_key }}
+      - name: Build disjoint pending manifest
+        if: ${{ inputs.storage_mode == 'fetch_only' }}
+        env:
+          SOURCE_MANIFEST: code/${{ inputs.manifest_path }}
+          INDEX_PATH: work_index/mfl_register_all_runs.json
+          TARGET_PER_YEAR: ${{ inputs.target_per_year }}
+          TARGET_YEARS: ${{ inputs.target_years }}
+          COLLECT_ALL: ${{ inputs.collect_all }}
+        run: |
+          if [ ! -f "$INDEX_PATH" ]; then printf '{}\n' > "$INDEX_PATH"; fi
+          python code/scripts/extraplatform_corpus/build_mfl_pending_manifest.py \
+            --manifest "$SOURCE_MANIFEST" --index "$INDEX_PATH" \
+            --output pending_manifest.json --target-per-year "$TARGET_PER_YEAR" \
+            --target-years "$TARGET_YEARS" $([ "$COLLECT_ALL" = true ] && echo --collect-all)
+      - name: Publish pending manifest to ingest runners
+        if: ${{ inputs.storage_mode == 'fetch_only' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-pending-manifest-${{ github.run_id }}
+          retention-days: 30
+          path: pending_manifest.json
       - name: Select wave batches
         id: manifest
         env:
-          MANIFEST: code/${{ inputs.manifest_path }}
+          MANIFEST: ${{ inputs.storage_mode == 'fetch_only' && 'pending_manifest.json' || format('code/{0}', inputs.manifest_path) }}
           START: ${{ inputs.batch_start }}
           COUNT: ${{ inputs.batch_count }}
           SIZE: ${{ inputs.batch_size }}
@@ -159,7 +187,7 @@ jobs:
           batches=list(range(start, start+((len(selected)+size-1)//size)))
           # Chunked combines read the checked-out manifest directly. Avoid
           # serializing thousands of records into a GitHub job output.
-          if os.environ['STORAGE_MODE'] == 'chunked':
+          if os.environ['STORAGE_MODE'] in {'chunked', 'fetch_only'}:
               print('records=[]')
           else:
               print('records='+json.dumps(selected,separators=(',',':')))
@@ -233,9 +261,15 @@ jobs:
           key: ${{ env.MFL_PLAYER_CACHE_KEY }}
           restore-keys: |
             ${{ inputs.cache_namespace }}-players-
+      - name: Download pending work manifest
+        if: ${{ inputs.storage_mode == 'fetch_only' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: mfl-pending-manifest-${{ github.run_id }}
+          path: pending_work
       - name: Run validated MFL batch
         env:
-          MANIFEST: code/${{ inputs.manifest_path }}
+          MANIFEST: ${{ inputs.storage_mode == 'fetch_only' && 'pending_work/pending_manifest.json' || format('code/{0}', inputs.manifest_path) }}
           BATCH_START: ${{ inputs.batch_start }}
           BATCH: ${{ matrix.batch }}
           BATCH_SIZE: ${{ inputs.batch_size }}
@@ -294,7 +328,7 @@ jobs:
           restore-keys: |
             ${{ inputs.cache_namespace }}-players-
       - name: Restore prior cumulative register state
-        if: ${{ inputs.storage_mode != 'chunked' && inputs.batch_start != '0' && inputs.prior_state_key != '' }}
+        if: ${{ inputs.storage_mode == 'snapshot' && inputs.batch_start != '0' && inputs.prior_state_key != '' }}
         uses: actions/cache/restore@v5
         with:
           path: prior_state
@@ -307,6 +341,12 @@ jobs:
           # that is used by the save step, then let the merger read it there.
           path: index_state
           key: ${{ inputs.prior_index_key }}
+      - name: Download pending work manifest for combine
+        if: ${{ inputs.storage_mode == 'fetch_only' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: mfl-pending-manifest-${{ github.run_id }}
+          path: pending_work
       - name: Merge player catalogs from ingest runners
         shell: bash
         run: |
@@ -322,7 +362,7 @@ jobs:
       - name: Install DuckDB
         run: pip install duckdb
       - name: Build canonical batch snapshot
-        if: ${{ inputs.storage_mode != 'chunked' }}
+        if: ${{ inputs.storage_mode == 'snapshot' }}
         env:
           EXPECTED: ${{ needs.prepare.outputs.records }}
           ACCEPTED_BY_YEAR: ${{ inputs.accepted_by_year }}
@@ -426,9 +466,9 @@ jobs:
           pathlib.Path('mfl_register_all_runs.json').write_text(json.dumps({'schema_version':'mfl_register_results_v1','expected_count':int(prior_json.get('expected_count',0))+len(keys),'league_count':len(all_leagues),'rejected_count':len(all_rejected),'rejected':all_rejected,'accepted_by_year':prior,'target_per_year':target,'target_years':target_years,'complete_targets':complete_targets,'collect_all':collect_all,'leagues':sorted(all_leagues,key=lambda r:(int(r['season']),str(r['league_id'])))},indent=2,sort_keys=True),encoding='utf-8')
           PY
       - name: Build immutable canonical cache chunk
-        if: ${{ inputs.storage_mode == 'chunked' }}
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
         env:
-          EXPECTED_PATH: ${{ github.workspace }}/code/${{ inputs.manifest_path }}
+          EXPECTED_PATH: ${{ github.workspace }}/${{ inputs.storage_mode == 'fetch_only' && 'pending_work/pending_manifest.json' || format('code/{0}', inputs.manifest_path) }}
           CHUNK_KEY: ${{ inputs.cache_namespace }}-chunk-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
           PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
         run: |
@@ -441,7 +481,7 @@ jobs:
             --proof cache_append_proof.json \
             --chunk-key "$CHUNK_KEY"
       - name: Stage cumulative register state
-        if: ${{ inputs.storage_mode != 'chunked' }}
+        if: ${{ inputs.storage_mode == 'snapshot' }}
         shell: bash
         run: |
           mkdir -p prior_state
@@ -449,7 +489,7 @@ jobs:
           cp mfl_register_all_runs.json prior_state/
           cp cache_append_proof.json prior_state/
       - name: Save validated batch cache
-        if: ${{ inputs.storage_mode != 'chunked' }}
+        if: ${{ inputs.storage_mode == 'snapshot' }}
         uses: actions/cache/save@v5
         with:
           path: |
@@ -461,7 +501,7 @@ jobs:
           path: mfl_player_cache
           key: ${{ inputs.cache_namespace }}-players-${{ inputs.batch_start }}-${{ inputs.batch_count }}
       - name: Stage immutable chunk cache
-        if: ${{ inputs.storage_mode == 'chunked' }}
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
         shell: bash
         run: |
           mkdir -p chunk_state index_state
@@ -470,19 +510,19 @@ jobs:
           cp mfl_register_all_runs.json index_state/
           cp cache_append_proof.json index_state/
       - name: Save immutable chunk cache
-        if: ${{ inputs.storage_mode == 'chunked' }}
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
         uses: actions/cache/save@v5
         with:
           path: chunk_state
           key: ${{ inputs.cache_namespace }}-chunk-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
       - name: Save immutable chunk index
-        if: ${{ inputs.storage_mode == 'chunked' }}
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
         uses: actions/cache/save@v5
         with:
           path: index_state
           key: ${{ inputs.cache_namespace }}-index-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
       - name: Upload batch snapshot
-        if: ${{ inputs.storage_mode != 'chunked' }}
+        if: ${{ inputs.storage_mode == 'snapshot' }}
         uses: actions/upload-artifact@v4
         with:
           name: mfl-register-batch-final-${{ github.run_id }}
@@ -492,7 +532,7 @@ jobs:
             mfl_register_all_runs.json
             cache_append_proof.json
       - name: Upload immutable chunk snapshot
-        if: ${{ inputs.storage_mode == 'chunked' }}
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
         uses: actions/upload-artifact@v4
         with:
           name: mfl-register-chunk-${{ github.run_id }}
@@ -507,28 +547,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Restore exact saved cumulative cache
-        if: ${{ inputs.storage_mode != 'chunked' }}
+        if: ${{ inputs.storage_mode == 'snapshot' }}
         uses: actions/cache/restore@v5
         with:
           path: prior_state
           key: ${{ inputs.cache_namespace }}-state-${{ inputs.batch_start }}-${{ inputs.batch_count }}
           fail-on-cache-miss: true
       - name: Restore exact saved chunk
-        if: ${{ inputs.storage_mode == 'chunked' }}
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
         uses: actions/cache/restore@v5
         with:
           path: chunk_state
           key: ${{ inputs.cache_namespace }}-chunk-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
           fail-on-cache-miss: true
       - name: Restore exact saved chunk index
-        if: ${{ inputs.storage_mode == 'chunked' }}
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
         uses: actions/cache/restore@v5
         with:
           path: index_state
           key: ${{ inputs.cache_namespace }}-index-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
           fail-on-cache-miss: true
       - name: Validate live cumulative cache append proof
-        if: ${{ inputs.storage_mode != 'chunked' }}
+        if: ${{ inputs.storage_mode == 'snapshot' }}
         run: |
           python3 - <<'PY'
           import json, pathlib
@@ -546,7 +586,7 @@ jobs:
            print(json.dumps({'live_cache_validated':True, **proof}, sort_keys=True))
            PY
       - name: Validate live chunk append proof
-        if: ${{ inputs.storage_mode == 'chunked' }}
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
         run: |
           python3 - <<'PY'
           import json, pathlib
