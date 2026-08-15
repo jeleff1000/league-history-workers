@@ -329,13 +329,17 @@ jobs:
           all_rejected=prior_rejected + current_rejected
           pathlib.Path('mfl_register_all_runs.json').write_text(json.dumps({'schema_version':'mfl_register_results_v1','expected_count':int(prior_json.get('expected_count',0))+len(keys),'league_count':len(all_leagues),'rejected_count':len(all_rejected),'rejected':all_rejected,'accepted_by_year':prior,'target_per_year':target,'target_years':target_years,'complete_targets':complete_targets,'collect_all':collect_all,'leagues':sorted(all_leagues,key=lambda r:(int(r['season']),str(r['league_id'])))},indent=2,sort_keys=True),encoding='utf-8')
           PY
+      - name: Stage cumulative register state
+        shell: bash
+        run: |
+          mkdir -p prior_state
+          cp mfl_register_snapshot.duckdb prior_state/
+          cp mfl_register_all_runs.json prior_state/
       - name: Save validated batch cache
         uses: actions/cache/save@v5
         with:
           path: |
-            mfl_register_snapshot.duckdb
-            mfl_register_all_runs.json
-            mfl_player_cache
+            prior_state
           key: ${{ inputs.cache_namespace }}-state-${{ inputs.batch_start }}-${{ inputs.batch_count }}
       - name: Save MFL player catalog cache
         uses: actions/cache/save@v5
