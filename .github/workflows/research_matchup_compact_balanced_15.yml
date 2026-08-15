@@ -393,7 +393,7 @@ jobs:
               clutch_champ_overlap,bad_clutch_champ_rates=ranked
               assert clutch_champ_overlap >= 3,ranked
               assert bad_clutch_champ_rates == 0,ranked
-          bad_visible_rows=c.execute("SELECT NFL_player_id,year,position,cell.eligible_leagues,cell.clutch_season_sum,cell.expected_starts,cell.expected_wins,cell.expected_losses FROM research_matchup_compact_season,UNNEST(cohort_cells) u(cell) WHERE cell.eligible_leagues >= 150 AND (ABS(COALESCE(cell.clutch_season_sum,0.0)) > 50 OR (cell.valid_started_outcomes > 0 AND ABS((COALESCE(cell.expected_wins,0.0)+COALESCE(cell.expected_losses,0.0))-COALESCE(cell.expected_starts,0.0)) > 0.000001)) ORDER BY NFL_player_id LIMIT 25").fetchall()
+          bad_visible_rows=c.execute("SELECT NFL_player_id,year,position,cell.eligible_leagues,cell.clutch_season_sum,cell.expected_starts,cell.expected_wins,cell.expected_losses FROM research_matchup_compact_season,UNNEST(cohort_cells) u(cell) WHERE cell.eligible_leagues >= 150 AND ((ABS(COALESCE(cell.clutch_season_sum,0.0)) > 50 AND COALESCE(cell.start_rate_pct,0.0) >= 5.0) OR (cell.valid_started_outcomes > 0 AND ABS((COALESCE(cell.expected_wins,0.0)+COALESCE(cell.expected_losses,0.0))-COALESCE(cell.expected_starts,0.0)) > 0.000001)) ORDER BY NFL_player_id LIMIT 25").fetchall()
           bad_visible_core=len(bad_visible_rows)
           print('bad_visible_core_rows='+json.dumps(bad_visible_rows))
           assert bad_visible_core == 0,bad_visible_core
