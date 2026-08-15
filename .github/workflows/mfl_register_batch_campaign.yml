@@ -48,6 +48,11 @@ on:
         required: false
         type: string
         default: 'false'
+      prior_state_key:
+        description: 'Exact cumulative-state cache key from the preceding wave'
+        required: false
+        type: string
+        default: ''
       population_total:
         description: 'Total candidate rows in the manifest'
         required: false
@@ -249,13 +254,11 @@ jobs:
           restore-keys: |
             ${{ inputs.cache_namespace }}-players-
       - name: Restore prior cumulative register state
-        if: ${{ inputs.batch_start != '0' }}
+        if: ${{ inputs.batch_start != '0' && inputs.prior_state_key != '' }}
         uses: actions/cache/restore@v5
         with:
           path: prior_state
-          key: ${{ inputs.cache_namespace }}-state-${{ inputs.batch_start }}-${{ inputs.batch_count }}
-          restore-keys: |
-            ${{ inputs.cache_namespace }}-state-
+          key: ${{ inputs.prior_state_key }}
       - name: Merge player catalogs from ingest runners
         shell: bash
         run: |
@@ -366,6 +369,7 @@ jobs:
           MFL_RATE: ${{ inputs.mfl_rate_limit }}
           STAGGER: ${{ inputs.start_stagger_seconds }}
           COLLECT_ALL: ${{ inputs.collect_all }}
+          CURRENT_STATE_KEY: ${{ inputs.cache_namespace }}-state-${{ inputs.batch_start }}-${{ inputs.batch_count }}
         run: |
           state=$(python3 -c 'import json; print(json.dumps(json.load(open("mfl_register_all_runs.json",encoding="utf-8")).get("accepted_by_year",{}),separators=(",",":")))')
           complete=$(python3 -c 'import json; d=json.load(open("mfl_register_all_runs.json",encoding="utf-8")); print("true" if d.get("complete_targets") else "false")')
@@ -379,3 +383,4 @@ jobs:
             --raw-field accepted_by_year="$state" --raw-field target_per_year="$TARGET_PER_YEAR" \
             --raw-field target_years="$TARGET_YEARS" --raw-field mfl_rate_limit="$MFL_RATE" \
             --raw-field start_stagger_seconds="$STAGGER" --raw-field collect_all="$COLLECT_ALL"
+            --raw-field prior_state_key="$CURRENT_STATE_KEY"
