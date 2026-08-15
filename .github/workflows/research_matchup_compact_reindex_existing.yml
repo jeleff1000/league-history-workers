@@ -54,13 +54,34 @@ jobs:
 
           con = duckdb.connect('research_matchup_compact.duckdb')
           try:
-              for table in (
-                  'research_matchup_compact_weekly',
-                  'research_matchup_compact_season',
-                  'research_matchup_compact_career',
-              ):
+              selector_tables = (
+                  ('research_matchup_compact_weekly', ('NFL_player_id', 'year', 'week', 'position')),
+                  ('research_matchup_compact_season', ('NFL_player_id', 'year', 'position')),
+                  ('research_matchup_compact_career', ('NFL_player_id', 'position')),
+              )
+              for table, keys in selector_tables:
                   con.execute(f'ALTER TABLE {table} DROP COLUMN core_selector_indices')
                   materialize_compact_core_selector_indices(con, output_table=table)
+
+                  # Roster ownership uses its own nested cells and must have the
+                  # same 288-request lookup as starts/other core stats.
+                  con.execute(f'ALTER TABLE {table} DROP COLUMN roster_selector_indices')
+                  roster_map = f'_{table}_roster_map'
+                  con.execute(
+                      f'CREATE TABLE {roster_map} AS '
+                      f'SELECT {", ".join(keys)}, roster_cells AS cohort_cells FROM {table}'
+                  )
+                  materialize_compact_core_selector_indices(con, output_table=roster_map)
+                  con.execute(f'ALTER TABLE {table} ADD COLUMN roster_selector_indices USMALLINT[]')
+                  predicate = ' AND '.join(
+                      f'target.{key} = source.{key}' for key in keys
+                  )
+                  con.execute(
+                      f'UPDATE {table} AS target '
+                      f'SET roster_selector_indices = source.core_selector_indices '
+                      f'FROM {roster_map} AS source WHERE {predicate}'
+                  )
+                  con.execute(f'DROP TABLE {roster_map}')
               for table in (
                   'research_matchup_compact_season',
                   'research_matchup_compact_career',
