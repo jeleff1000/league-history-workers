@@ -411,14 +411,14 @@ jobs:
       - name: Restore exact saved cumulative cache
         uses: actions/cache/restore@v5
         with:
-          path: live_cache
+          path: prior_state
           key: ${{ inputs.cache_namespace }}-state-${{ inputs.batch_start }}-${{ inputs.batch_count }}
           fail-on-cache-miss: true
       - name: Validate live cache append proof
         run: |
           python3 - <<'PY'
           import json, pathlib
-          root=pathlib.Path('live_cache')
+          root=pathlib.Path('prior_state')
           proof=json.loads((root/'cache_append_proof.json').read_text(encoding='utf-8'))
           required={'schema_unchanged':True,'prior_rows_preserved':True,'new_lineage':False,'duplicate_league_year_keys':False}
           for key,value in required.items():
@@ -452,8 +452,8 @@ jobs:
           COLLECT_ALL: ${{ inputs.collect_all }}
           CURRENT_STATE_KEY: ${{ inputs.cache_namespace }}-state-${{ inputs.batch_start }}-${{ inputs.batch_count }}
         run: |
-          state=$(python3 -c 'import json; print(json.dumps(json.load(open("live_cache/mfl_register_all_runs.json",encoding="utf-8")).get("accepted_by_year",{}),separators=(",",":")))')
-          complete=$(python3 -c 'import json; d=json.load(open("live_cache/mfl_register_all_runs.json",encoding="utf-8")); print("true" if d.get("complete_targets") else "false")')
+          state=$(python3 -c 'import json; print(json.dumps(json.load(open("prior_state/mfl_register_all_runs.json",encoding="utf-8")).get("accepted_by_year",{}),separators=(",",":")))')
+          complete=$(python3 -c 'import json; d=json.load(open("prior_state/mfl_register_all_runs.json",encoding="utf-8")); print("true" if d.get("complete_targets") else "false")')
           total=${POPULATION_TOTAL:-0}; next=$((BATCH_START+BATCH_COUNT))
           if [ "$complete" = true ] || [ "$total" -le 0 ] || [ "$((next*BATCH_SIZE))" -ge "$total" ]; then exit 0; fi
           gh workflow run mfl_register_batch_campaign.yml --repo "$REPOSITORY" --ref "$REF_NAME" \
