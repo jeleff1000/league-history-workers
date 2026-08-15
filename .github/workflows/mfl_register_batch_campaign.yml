@@ -27,7 +27,7 @@ on:
         description: 'Leagues processed sequentially by one runner'
         required: false
         type: string
-        default: '16'
+        default: '2'
       max_parallel:
         description: 'Concurrent batch runners; each runner has its own MFL limiter'
         required: false
