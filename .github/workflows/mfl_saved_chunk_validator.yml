@@ -66,6 +66,15 @@ jobs:
               raise SystemExit('proof chunk key mismatch')
           if index.get('league_count') != proof.get('final_league_count'):
               raise SystemExit('index league count mismatch')
+          rejected = index.get('rejected', [])
+          if index.get('rejected_count', len(rejected)) != len(rejected):
+              raise SystemExit('index rejected count mismatch')
+          if index.get('attempted_count', index.get('league_count', 0) + len(rejected)) != index.get('league_count', 0) + len(rejected):
+              raise SystemExit('index attempted count mismatch')
+          if index.get('manifest_count') is not None:
+              expected_pending = index['manifest_count'] - index['league_count'] - len(rejected)
+              if index.get('pending_count') != max(0, expected_pending):
+                  raise SystemExit('index pending count mismatch')
           if not any(c.get('cache_key') == chunk_key for c in index.get('chunks', [])):
               raise SystemExit('index does not reference saved chunk')
 
