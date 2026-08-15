@@ -136,6 +136,7 @@ jobs:
       DRAFT_GLOBAL_SOURCE_PATH: ${{ github.workspace }}/corpus_dependencies/draft_global_source.parquet
       CORPUS_DEPENDENCY_DIR: ${{ github.workspace }}/corpus_dependencies
       CORPUS_DEPENDENCY_KEY: corpus-dependencies-v1-Linux-20260717
+      MFL_PLAYER_CACHE_KEY: ${{ inputs.cache_namespace }}-players-${{ inputs.batch_start }}-${{ inputs.batch_count }}
     steps:
       - name: Checkout worker
         uses: actions/checkout@v5
@@ -173,6 +174,13 @@ jobs:
       - name: Require offline dependency cache
         if: steps.deps.outputs.cache-hit != 'true'
         run: exit 1
+      - name: Restore MFL player catalog cache
+        uses: actions/cache/restore@v5
+        with:
+          path: mfl_player_cache
+          key: ${{ env.MFL_PLAYER_CACHE_KEY }}
+          restore-keys: |
+            ${{ inputs.cache_namespace }}-players-
       - name: Run validated MFL batch
         env:
           MANIFEST: code/${{ inputs.manifest_path }}
@@ -181,6 +189,7 @@ jobs:
           BATCH_SIZE: ${{ inputs.batch_size }}
           STAGGER: ${{ inputs.start_stagger_seconds }}
           MAX_PARALLEL: ${{ inputs.max_parallel }}
+          MFL_PLAYERS_CACHE_DIR: ${{ github.workspace }}/mfl_player_cache
         run: |
           mkdir -p batch_output
           delay=$(( (BATCH % MAX_PARALLEL) * STAGGER ))
@@ -203,6 +212,7 @@ jobs:
             batch_output/*/receipt.json
             batch_output/*/import.log
             batch_output/batch_receipt.json
+            mfl_player_cache
 
   combine:
     needs: [prepare, ingest]
@@ -226,6 +236,21 @@ jobs:
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             /fantasy_football_data_scripts/multi_league/core/canonical_player.py
+      - name: Restore prior MFL player catalog cache
+        uses: actions/cache/restore@v5
+        with:
+          path: mfl_player_cache
+          key: ${{ inputs.cache_namespace }}-players-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+          restore-keys: |
+            ${{ inputs.cache_namespace }}-players-
+      - name: Merge player catalogs from ingest runners
+        shell: bash
+        run: |
+          mkdir -p mfl_player_cache
+          find receipts -type f -name 'mfl_players_*.json' -print0 | while IFS= read -r -d '' src; do
+            name="$(basename "$src")"
+            test -s "mfl_player_cache/$name" || cp "$src" "mfl_player_cache/$name"
+          done
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
@@ -275,7 +300,13 @@ jobs:
           path: |
             mfl_register_snapshot.duckdb
             mfl_register_all_runs.json
+            mfl_player_cache
           key: ${{ inputs.cache_namespace }}-${{ inputs.batch_start }}-${{ inputs.batch_count }}
+      - name: Save MFL player catalog cache
+        uses: actions/cache/save@v5
+        with:
+          path: mfl_player_cache
+          key: ${{ inputs.cache_namespace }}-players-${{ inputs.batch_start }}-${{ inputs.batch_count }}
       - name: Upload batch snapshot
         uses: actions/upload-artifact@v4
         with:
