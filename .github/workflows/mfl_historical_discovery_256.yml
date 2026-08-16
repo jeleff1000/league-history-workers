@@ -9,9 +9,9 @@ on:
         default: "256"
         type: string
       max_parallel:
-        description: "Concurrent runners; kept at 15 for MFL API safety"
+        description: "Concurrent runners; Enterprise ceiling is 500"
         required: false
-        default: "15"
+        default: "500"
         type: string
       start_year:
         description: "Oldest season to probe"
@@ -106,7 +106,7 @@ on:
         type: string
       max_parallel:
         required: false
-        default: "15"
+        default: "500"
         type: string
       start_year:
         required: false
@@ -201,7 +201,7 @@ jobs:
           python3 - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           n = min(max(int("${{ inputs.shard_count || '256' }}"), 1), 256)
-          mp = min(max(int("${{ inputs.max_parallel || '15' }}"), 1), 15, n)
+          mp = min(max(int("${{ inputs.max_parallel || '500' }}"), 1), 500, n)
           directory_only = "${{ inputs.directory_only || 'false' }}".strip().lower() == "true"
           raw = "${{ inputs.shard_indices || '' }}".strip()
           if directory_only:
@@ -295,7 +295,7 @@ jobs:
   # directory search as a separate, single runner so named dynasty/keeper/IDP
   # leagues are included without turning every matrix shard into a duplicate
   # keyword crawl.  It starts only after the matrix, keeping total concurrency
-  # at the requested maximum of 15 runners.
+  # at the requested maximum of 500 runners.
   directory:
     # Named-directory discovery is supplemental.  Keep it out of the numeric
     # sweep's critical path; invoke this workflow with directory_only=true when
@@ -531,7 +531,7 @@ jobs:
           MFL_START_YEAR: ${{ inputs.start_year || '1997' }}
           MFL_END_YEAR: ${{ inputs.end_year || '1998' }}
           MFL_SHARD_COUNT: ${{ inputs.shard_count || '256' }}
-          MFL_MAX_PARALLEL: ${{ inputs.max_parallel || '15' }}
+          MFL_MAX_PARALLEL: ${{ inputs.max_parallel || '500' }}
           MFL_ID_BANDS: ${{ inputs.id_bands || '1-9999,10000-29999,30000-59999,60000-80000' }}
           MFL_REQUEST_SLEEP: ${{ inputs.request_sleep || '5.0' }}
           MFL_ID_START: ${{ inputs.id_start || '0' }}
