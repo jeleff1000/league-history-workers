@@ -38,6 +38,11 @@ on:
         required: false
         type: string
         default: mfl-population-batch-v1
+      canonical_namespace:
+        description: 'Immutable canonical cache namespace for campaign finalization'
+        required: false
+        type: string
+        default: mfl-registered-2004-2018-v2
       attempt_suffix:
         description: 'Optional immutable retry suffix for a failed wave'
         required: false
@@ -332,6 +337,7 @@ jobs:
             /corpus_seed/
             /fantasy_football_data_scripts/
             /scripts/extraplatform_corpus/
+            /scripts/extraplatform_corpus/merge_mfl_saved_chunk.py
             /scripts/research_cohorts/build_mfl_research_overlay.py
             /requirements.txt
             /pyproject.toml
@@ -439,13 +445,20 @@ jobs:
           path: prior_state
           key: ${{ inputs.prior_state_key }}
       - name: Restore prior chunk index
-        if: ${{ inputs.storage_mode == 'chunked' && inputs.batch_start != '0' && inputs.prior_index_key != '' }}
+        if: ${{ (inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only') && inputs.prior_index_key != '' }}
         uses: actions/cache/restore@v5
         with:
           # The cache version includes the path.  Restore to the same path
           # that is used by the save step, then let the merger read it there.
           path: index_state
           key: ${{ inputs.prior_index_key }}
+      - name: Restore prior canonical index for finalizer
+        if: ${{ (inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only') && inputs.prior_index_key != '' }}
+        uses: actions/cache/restore@v5
+        with:
+          path: prior_canonical_index
+          key: ${{ inputs.prior_index_key }}
+          fail-on-cache-miss: true
       - name: Download pending work manifest for combine
         if: ${{ inputs.storage_mode == 'fetch_only' }}
         uses: actions/download-artifact@v4
@@ -607,6 +620,74 @@ jobs:
           json.dump({'schema_unchanged':True,'rows':rows,'columns':schemas,'new_lineage':False},open('mfl_research_overlay_proof.json','w'),indent=2,sort_keys=True)
           print(json.dumps({'rows':rows,'schema_unchanged':True},sort_keys=True)); c.close()
           PY
+      - name: Finalize canonical successor cache
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
+        env:
+          PRIOR_INDEX_KEY: ${{ inputs.prior_index_key }}
+          CANONICAL_CHUNK_KEY: ${{ inputs.canonical_namespace }}-chunk-campaign-${{ github.run_id }}
+        run: |
+          if [ -n "$PRIOR_INDEX_KEY" ]; then
+            python3 code/scripts/extraplatform_corpus/merge_mfl_saved_chunk.py \
+              --source-db mfl_register_chunk.duckdb \
+              --source-index mfl_register_all_runs.json \
+              --prior-index prior_canonical_index/mfl_register_all_runs.json \
+              --output-db canonical_mfl_register_chunk.duckdb \
+              --output-index canonical_mfl_register_all_runs.json \
+              --proof canonical_append_proof.json \
+              --output-key "$CANONICAL_CHUNK_KEY"
+          else
+            cp mfl_register_chunk.duckdb canonical_mfl_register_chunk.duckdb
+            cp mfl_register_all_runs.json canonical_mfl_register_all_runs.json
+            cp cache_append_proof.json canonical_append_proof.json
+            python3 - <<'PY'
+            import json, os
+            key=os.environ['CANONICAL_CHUNK_KEY']
+            proof=json.load(open('canonical_append_proof.json', encoding='utf-8'))
+            source_key=proof.get('chunk_cache_key')
+            proof['chunk_cache_key']=key
+            register=json.load(open('canonical_mfl_register_all_runs.json', encoding='utf-8'))
+            for chunk in register.get('chunks', []):
+                if chunk.get('cache_key') == source_key:
+                    chunk['cache_key']=key
+            json.dump(proof,open('canonical_append_proof.json','w'),indent=2,sort_keys=True)
+            json.dump(register,open('canonical_mfl_register_all_runs.json','w'),indent=2,sort_keys=True)
+            PY
+          fi
+          python3 - <<'PY'
+          import json
+          proof=json.load(open('canonical_append_proof.json', encoding='utf-8'))
+          required={'schema_unchanged':True,'prior_rows_preserved':True,'new_lineage':False,'duplicate_league_year_keys':False}
+          for key,value in required.items():
+              if proof.get(key) != value:
+                  raise SystemExit(f'canonical proof failed: {key}={proof.get(key)!r}')
+          if proof.get('added_league_count', 0) <= 0:
+              raise SystemExit('canonical reducer added no leagues')
+          print(json.dumps(proof, sort_keys=True))
+          PY
+      - name: Build canonical research overlay
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
+        run: |
+          python3 code/scripts/research_cohorts/build_mfl_research_overlay.py \
+            --chunk canonical_mfl_register_chunk.duckdb \
+            --output canonical_mfl_research_overlay.duckdb
+          python3 - <<'PY'
+          import json, duckdb
+          source=duckdb.connect('mfl_research_overlay.duckdb',read_only=True)
+          canonical=duckdb.connect('canonical_mfl_research_overlay.duckdb',read_only=True)
+          tables=['league_settings','player_fantasy','matchup']
+          rows={}
+          for table in tables:
+              source_schema=[r[0] for r in source.execute(f'DESCRIBE "{table}"').fetchall()]
+              canonical_schema=[r[0] for r in canonical.execute(f'DESCRIBE "{table}"').fetchall()]
+              if source_schema != canonical_schema:
+                  raise SystemExit(f'{table} canonical research schema mismatch')
+              rows[table]=canonical.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+              if rows[table] <= 0:
+                  raise SystemExit(f'{table} canonical overlay is empty')
+          json.dump({'schema_unchanged':True,'rows':rows,'new_lineage':False},open('canonical_mfl_research_overlay_proof.json','w'),indent=2,sort_keys=True)
+          print(json.dumps({'rows':rows,'schema_unchanged':True},sort_keys=True))
+          source.close(); canonical.close()
+          PY
       - name: Stage cumulative register state
         if: ${{ inputs.storage_mode == 'snapshot' }}
         shell: bash
@@ -642,6 +723,14 @@ jobs:
         run: |
           mkdir -p research_overlay_state
           cp mfl_research_overlay.duckdb research_overlay_state/
+      - name: Stage canonical successor caches
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
+        shell: bash
+        run: |
+          mkdir -p canonical_chunk_state canonical_index_state canonical_research_overlay_state
+          cp canonical_mfl_register_chunk.duckdb canonical_append_proof.json canonical_chunk_state/
+          cp canonical_mfl_register_all_runs.json canonical_append_proof.json canonical_mfl_research_overlay_proof.json canonical_index_state/
+          cp canonical_mfl_research_overlay.duckdb canonical_mfl_research_overlay_proof.json canonical_research_overlay_state/
       - name: Save immutable chunk cache
         if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
         uses: actions/cache/save@v5
@@ -660,6 +749,24 @@ jobs:
         with:
           path: research_overlay_state
           key: ${{ inputs.cache_namespace }}-research-overlay-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
+      - name: Save canonical successor chunk
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
+        uses: actions/cache/save@v5
+        with:
+          path: canonical_chunk_state
+          key: ${{ inputs.canonical_namespace }}-chunk-campaign-${{ github.run_id }}
+      - name: Save canonical successor index
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
+        uses: actions/cache/save@v5
+        with:
+          path: canonical_index_state
+          key: ${{ inputs.canonical_namespace }}-index-campaign-${{ github.run_id }}
+      - name: Save canonical successor research overlay
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
+        uses: actions/cache/save@v5
+        with:
+          path: canonical_research_overlay_state
+          key: ${{ inputs.canonical_namespace }}-research-overlay-campaign-${{ github.run_id }}
       - name: Upload batch snapshot
         if: ${{ inputs.storage_mode == 'snapshot' }}
         uses: actions/upload-artifact@v4
@@ -708,6 +815,27 @@ jobs:
           path: index_state
           key: ${{ inputs.cache_namespace }}-index-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
           fail-on-cache-miss: true
+      - name: Restore exact canonical successor chunk
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
+        uses: actions/cache/restore@v5
+        with:
+          path: canonical_chunk_state
+          key: ${{ inputs.canonical_namespace }}-chunk-campaign-${{ github.run_id }}
+          fail-on-cache-miss: true
+      - name: Restore exact canonical successor index
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
+        uses: actions/cache/restore@v5
+        with:
+          path: canonical_index_state
+          key: ${{ inputs.canonical_namespace }}-index-campaign-${{ github.run_id }}
+          fail-on-cache-miss: true
+      - name: Restore exact canonical successor overlay
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
+        uses: actions/cache/restore@v5
+        with:
+          path: canonical_research_overlay_state
+          key: ${{ inputs.canonical_namespace }}-research-overlay-campaign-${{ github.run_id }}
+          fail-on-cache-miss: true
       - name: Validate live cumulative cache append proof
         if: ${{ inputs.storage_mode == 'snapshot' }}
         run: |
@@ -748,6 +876,31 @@ jobs:
                   raise SystemExit(f'live chunk row delta failed: {table}')
           print(json.dumps({'live_cache_validated':True, **proof}, sort_keys=True))
           PY
+      - name: Validate canonical successor cache
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          chunk=pathlib.Path('canonical_chunk_state')
+          index=pathlib.Path('canonical_index_state')
+          overlay=pathlib.Path('canonical_research_overlay_state')
+          proof=json.loads((chunk/'canonical_append_proof.json').read_text(encoding='utf-8'))
+          register=json.loads((index/'canonical_mfl_register_all_runs.json').read_text(encoding='utf-8'))
+          required={'schema_unchanged':True,'prior_rows_preserved':True,'new_lineage':False,'duplicate_league_year_keys':False}
+          for key,value in required.items():
+              if proof.get(key) != value:
+                  raise SystemExit(f'canonical proof failed: {key}={proof.get(key)!r}')
+          if proof.get('added_league_count', 0) <= 0:
+              raise SystemExit('canonical successor added no leagues')
+          if register.get('league_count') != proof.get('final_league_count'):
+              raise SystemExit('canonical successor index league count mismatch')
+          if not any(c.get('cache_key') == proof.get('chunk_cache_key') for c in register.get('chunks', [])):
+              raise SystemExit('canonical successor index does not reference its chunk')
+          overlay_proof=json.loads((overlay/'canonical_mfl_research_overlay_proof.json').read_text(encoding='utf-8'))
+          if overlay_proof.get('schema_unchanged') is not True or overlay_proof.get('new_lineage') is not False:
+              raise SystemExit('canonical research overlay proof failed')
+          print(json.dumps({'canonical_cache_validated':True, **proof}, sort_keys=True))
+          PY
       - name: Dispatch next batch wave after live validation
         if: ${{ inputs.continue_population == 'true' }}
         env:
@@ -761,6 +914,7 @@ jobs:
           BATCH_SIZE: ${{ inputs.batch_size }}
           POPULATION_TOTAL: ${{ inputs.population_total }}
           CACHE_NAMESPACE: ${{ inputs.cache_namespace }}
+          CANONICAL_NAMESPACE: ${{ inputs.canonical_namespace }}
           TARGET_PER_YEAR: ${{ inputs.target_per_year }}
           TARGET_YEARS: ${{ inputs.target_years }}
           MAX_PARALLEL: ${{ inputs.max_parallel }}
@@ -768,6 +922,7 @@ jobs:
           COLLECT_ALL: ${{ inputs.collect_all }}
           CURRENT_STATE_KEY: ${{ inputs.cache_namespace }}-state-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
           CURRENT_INDEX_KEY: ${{ inputs.cache_namespace }}-index-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
+          CANONICAL_INDEX_KEY: ${{ inputs.canonical_namespace }}-index-campaign-${{ github.run_id }}
           ATTEMPT_SUFFIX: ${{ inputs.attempt_suffix }}
           STORAGE_MODE: ${{ inputs.storage_mode }}
         run: |
@@ -777,13 +932,19 @@ jobs:
           complete=$(python3 -c 'import json,os; d=json.load(open(os.path.join(os.environ["ROOT"],"mfl_register_all_runs.json"),encoding="utf-8")); print("true" if d.get("complete_targets") else "false")')
           total=${POPULATION_TOTAL:-0}; next=$((BATCH_START+BATCH_COUNT))
           if [ "$complete" = true ] || [ "$total" -le 0 ] || [ "$((next*BATCH_SIZE))" -ge "$total" ]; then exit 0; fi
+          if [ "$STORAGE_MODE" = chunked ] || [ "$STORAGE_MODE" = fetch_only ]; then
+            PRIOR_INDEX_KEY="$CANONICAL_INDEX_KEY"
+          else
+            PRIOR_INDEX_KEY="$CURRENT_INDEX_KEY"
+          fi
           gh workflow run mfl_register_batch_campaign.yml --repo "$REPOSITORY" --ref "$REF_NAME" \
             --raw-field manifest_path="$MANIFEST_PATH" --raw-field yahoo_oauth_ref="$YAHOO_OAUTH_REF" \
             --raw-field batch_start="$next" --raw-field batch_count="$BATCH_COUNT" --raw-field batch_size="$BATCH_SIZE" \
             --raw-field max_parallel="$MAX_PARALLEL" --raw-field cache_namespace="$CACHE_NAMESPACE" \
+            --raw-field canonical_namespace="$CANONICAL_NAMESPACE" \
             --raw-field continue_population=true --raw-field population_total="$total" \
             --raw-field accepted_by_year="$state" --raw-field target_per_year="$TARGET_PER_YEAR" \
             --raw-field target_years="$TARGET_YEARS" --raw-field mfl_rate_limit="$MFL_RATE" \
             --raw-field collect_all="$COLLECT_ALL" \
             --raw-field storage_mode="$STORAGE_MODE" --raw-field prior_state_key="$CURRENT_STATE_KEY" \
-            --raw-field prior_index_key="$CURRENT_INDEX_KEY" --raw-field attempt_suffix="$ATTEMPT_SUFFIX"
+            --raw-field prior_index_key="$PRIOR_INDEX_KEY" --raw-field attempt_suffix="$ATTEMPT_SUFFIX"
