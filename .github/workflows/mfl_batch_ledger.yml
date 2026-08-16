@@ -42,20 +42,24 @@ jobs:
               out.mkdir(parents=True,exist_ok=True)
               subprocess.run(['gh','run','download',run_id,'--name',f'mfl-batch-plan-{run_id}','--dir',str(out)],check=False)
           PY
-      - name: Restore latest canonical index cache
-        id: canonical_cache
+      - name: Locate latest successful reducer proof
+        id: canonical_proof
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          key=$(gh cache list --limit 200 --sort created_at --order desc --json key --jq '[.[] | select(.key | startswith("mfl-registered-2004-2018-v2-index-"))][0].key')
-          test -n "$key" && test "$key" != null
-          echo "key=$key" >> "$GITHUB_OUTPUT"
-      - name: Restore canonical index
-        uses: actions/cache/restore@v5
-        with:
-          path: canonical/index_state
-          key: ${{ steps.canonical_cache.outputs.key }}
-          fail-on-cache-miss: true
+          run_id=$(jq -r '[.[] | select(.conclusion == "success")][0].databaseId' runs/mfl_reduce_saved_chunk.json)
+          test -n "$run_id" && test "$run_id" != null
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+      - name: Download latest canonical reducer proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run_id="${{ steps.canonical_proof.outputs.run_id }}"
+          gh run download "$run_id" \
+            --repo "${{ github.repository }}" \
+            --name "mfl-reducer-proof-$run_id" \
+            --dir canonical/index_state
+          test -s canonical/index_state/mfl_register_all_runs.json
       - name: Collect Actions cache inventory
         env:
           GH_TOKEN: ${{ github.token }}
