@@ -81,6 +81,62 @@ jobs:
           python-version: '3.11'
       - name: Install DuckDB
         run: python -m pip install duckdb
+      - name: Normalize duplicate matrix artifacts
+        run: |
+          python - <<'PY'
+          import json
+          import shutil
+          from pathlib import Path
+
+          root = Path('receipts')
+          normalized = Path('normalized_receipts')
+          normalized.mkdir()
+          accepted = {}
+          rejected = {}
+
+          for receipt_path in sorted(root.rglob('receipt.json')):
+              receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
+              key = (int(receipt['season']), str(receipt['league_id']))
+              old = accepted.get(key)
+              if old is not None:
+                  if old['receipt'].get('lineage_id') and receipt.get('lineage_id') and old['receipt']['lineage_id'] != receipt['lineage_id']:
+                      raise SystemExit(f'conflicting lineage for duplicate receipt {key}')
+                  continue
+              db = receipt_path.parent / 'league.duckdb'
+              if not db.is_file():
+                  raise SystemExit(f'missing league database for {key}')
+              accepted[key] = {'receipt': receipt, 'db': db}
+
+          for batch_path in sorted(root.rglob('batch_receipt.json')):
+              batch = json.loads(batch_path.read_text(encoding='utf-8'))
+              for row in batch.get('failures', []):
+                  key = (int(row['season']), str(row['league_id']))
+                  rejected.setdefault(key, {
+                      'season': key[0],
+                      'league_id': key[1],
+                      'reason': str(row.get('reason', 'rejected')),
+                  })
+
+          # A successful receipt supersedes any duplicate failure record.
+          for key in accepted:
+              rejected.pop(key, None)
+
+          for ordinal, key in enumerate(sorted(accepted)):
+              item = accepted[key]
+              target = normalized / f'{ordinal:06d}'
+              target.mkdir()
+              shutil.copy2(item['db'], target / 'league.duckdb')
+              (target / 'receipt.json').write_text(json.dumps(item['receipt'], indent=2) + '\n', encoding='utf-8')
+
+          synthetic = {
+              'schema_version': 'mfl_batch_receipt_v1',
+              'planned': len(accepted) + len(rejected),
+              'successes': len(accepted),
+              'failures': [rejected[key] for key in sorted(rejected)],
+          }
+          (normalized / 'batch_receipt.json').write_text(json.dumps(synthetic, indent=2) + '\n', encoding='utf-8')
+          print(json.dumps({'accepted': len(accepted), 'rejected': len(rejected), 'source_receipts': len(list(root.rglob('receipt.json')))}, sort_keys=True))
+          PY
       - name: Build canonical chunk from successful artifacts
         env:
           PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
@@ -89,7 +145,7 @@ jobs:
         run: |
           printf '{}' > empty_prior_index.json
           python code/scripts/extraplatform_corpus/merge_mfl_chunk.py \
-            --receipts receipts \
+            --receipts normalized_receipts \
             --expected "$EXPECTED_PATH" \
             --prior-index empty_prior_index.json \
             --output-db mfl_register_chunk.duckdb \
