@@ -120,6 +120,7 @@ jobs:
           schemas = {}
           table_schemas = {}
           added_rows = {table: 0 for table in TABLES}
+          already_present_keys = set()
           try:
               for source_dir in sources:
                   source_index = json.loads((source_dir / 'index_state' / 'mfl_register_all_runs.json').read_text(encoding='utf-8'))
@@ -144,12 +145,17 @@ jobs:
                           if table in schemas and schemas[table] != schema:
                               raise SystemExit(f'source schema differs for {table}')
                           schemas.setdefault(table, schema)
-                          source_ref = f'src."{table_schema}"."{table}"'
+                          source_ref = (
+                              f'src."{table}"'
+                              if table_schema.lower() == 'main'
+                              else f'src."{table_schema}"."{table}"'
+                          )
                           if not out.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='main' AND table_name=?", [table]).fetchone()[0]:
                               out.execute(f'CREATE TABLE "{table}" AS SELECT * FROM {source_ref} WHERE 1=0')
                           table_schemas[table] = table_schema
                       for key, row in sorted(source_by_key.items()):
                           if key in prior_by_key or key in selected:
+                              already_present_keys.add(key)
                               old = prior_by_key.get(key) or selected[key]
                               if old.get('lineage_id') and row.get('lineage_id') and old['lineage_id'] != row['lineage_id']:
                                   raise SystemExit(f'lineage changed for {key}')
@@ -161,7 +167,12 @@ jobs:
                               count = int(src.execute(f'SELECT COUNT(*) FROM "{table}" WHERE db_name=? AND year=?', [db_name, season]).fetchone()[0])
                               if not count:
                                   raise SystemExit(f'source missing {table} rows for {season}:{row["league_id"]}')
-                              source_ref = f'src."{table_schemas[table]}"."{table}"'
+                              source_schema = table_schemas[table]
+                              source_ref = (
+                                  f'src."{table}"'
+                                  if source_schema.lower() == 'main'
+                                  else f'src."{source_schema}"."{table}"'
+                              )
                               out.execute(f'INSERT INTO "{table}" SELECT * FROM {source_ref} WHERE db_name=? AND year=?', [db_name, season])
                               added_rows[table] += count
                       out.execute('DETACH src')
@@ -210,7 +221,7 @@ jobs:
               'prior_league_count': len(prior_leagues),
               'added_league_count': len(selected),
               'final_league_count': len(all_leagues),
-              'already_present_count': sum(1 for source_dir in sources for _ in []),
+              'already_present_count': len(already_present_keys),
               'prior_rows_preserved': True,
               'new_lineage': False,
               'duplicate_league_year_keys': False,
