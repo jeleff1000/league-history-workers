@@ -100,7 +100,25 @@ jobs:
           if len(keys) != len(set(keys)):
               raise SystemExit('duplicate league-year key across the three campaign runs')
           Path('expected.json').write_text(json.dumps({'rows': rows}, indent=2, sort_keys=True))
-          print(json.dumps({'expected_rows': len(rows), 'successful_receipts': sum(1 for p in Path('receipts').rglob('receipt.json'))}))
+          receipt_keys = set()
+          for receipt_path in Path('receipts').rglob('receipt.json'):
+              receipt = json.loads(receipt_path.read_text())
+              receipt_keys.add((int(receipt['season']), str(receipt['league_id'])))
+          expected_keys = set(keys)
+          if not receipt_keys.issubset(expected_keys):
+              raise SystemExit('receipt is not present in the combined manifest')
+          for batch_path in Path('receipts').rglob('batch_receipt.json'):
+              batch_path.unlink()
+          failures = [
+              {'season': season, 'league_id': league_id, 'reason': 'campaign_artifact_not_landed'}
+              for season, league_id in sorted(expected_keys - receipt_keys)
+          ]
+          Path('receipts/batch_receipt.json').write_text(json.dumps({
+              'planned': len(expected_keys),
+              'successes': len(receipt_keys),
+              'failures': failures,
+          }, indent=2, sort_keys=True))
+          print(json.dumps({'expected_rows': len(rows), 'successful_receipts': len(receipt_keys), 'rejected': len(failures)}))
           PY
       - name: Build canonical source chunk from all three runs
         env:
