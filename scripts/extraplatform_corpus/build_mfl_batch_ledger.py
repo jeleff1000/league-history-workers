@@ -49,11 +49,13 @@ def build(*, plans_root: Path, runs_root: Path, caches_path: Path, canonical_ind
     landed = {_key(row) for row in landed_rows}
 
     plans: list[dict[str, Any]] = []
+    planned_run_ids: set[str] = set()
     for path in sorted(plans_root.glob("*/batch_plan.json")):
         plan = dict(_read_json(path, {}))
         if not plan:
             continue
         run_id = str(plan.get("source_run_id", path.parent.name))
+        planned_run_ids.add(run_id)
         run = by_run.get(run_id, {})
         source_keys = dict(plan.get("source_cache_keys", {}))
         present = {name: key in caches for name, key in source_keys.items()}
@@ -103,6 +105,20 @@ def build(*, plans_root: Path, runs_root: Path, caches_path: Path, canonical_ind
             }
 
     accepted_by_year = index.get("accepted_by_year", {}) if isinstance(index, dict) else {}
+    unplanned_campaign_runs = [
+        {
+            "run_id": row["run_id"],
+            "status": row.get("status", "unknown"),
+            "conclusion": row.get("conclusion", ""),
+            "created_at": row.get("createdAt"),
+            "updated_at": row.get("updatedAt"),
+            "note": "Run predates durable batch-plan artifacts; batch status is tracked, but exact planned league-years are not reconstructed.",
+        }
+        for row in runs
+        if row.get("workflow") == "mfl_register_batch_campaign"
+        and row.get("run_id") not in planned_run_ids
+    ]
+
     result = {
         "schema_version": "mfl_batch_ledger_v1",
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -115,6 +131,7 @@ def build(*, plans_root: Path, runs_root: Path, caches_path: Path, canonical_ind
         },
         "runs_observed": len(runs),
         "plans_observed": len(plans),
+        "unplanned_campaign_runs": unplanned_campaign_runs,
         "batches": plans,
         "league_years": sorted(league_status.values(), key=lambda row: (row["season"], row["league_id"])),
         "coverage": {
@@ -124,6 +141,7 @@ def build(*, plans_root: Path, runs_root: Path, caches_path: Path, canonical_ind
             "planned": sum(1 for row in league_status.values() if row["status"] == "planned"),
             "failed": sum(1 for row in league_status.values() if row["status"] == "failed"),
             "cancelled": sum(1 for row in league_status.values() if row["status"] == "cancelled"),
+            "unplanned_campaign_runs": len(unplanned_campaign_runs),
         },
     }
     output.parent.mkdir(parents=True, exist_ok=True)
