@@ -493,7 +493,8 @@ jobs:
       - name: Refresh centralized aggregates after merge
         if: steps.import.outputs.exit_code == '0'
         run: |
-          python scripts/refresh_aggregates.py \
+          cd fantasy_football_data_scripts
+          python ../scripts/refresh_aggregates.py \
             --db "${{ steps.parse.outputs.database_name }}"
 
       # ==================== REVALIDATE + WARM VERCEL CACHE ====================
