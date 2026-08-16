@@ -182,9 +182,9 @@ permissions:
   contents: read
 
 concurrency:
-  # All windows share one lock. The scheduler releases the next individual
-  # workflow only after the current one completes.
-  group: mfl-historical-discovery-global
+  # Independent year/ID windows may run concurrently. Identical windows still
+  # share a lock so recovery dispatches cannot duplicate an active sweep.
+  group: mfl-historical-discovery-${{ inputs.start_year || '1997' }}-${{ inputs.end_year || '1998' }}-${{ inputs.id_start || '0' }}-${{ inputs.id_end || '999' }}
   queue: max
   cancel-in-progress: false
 
