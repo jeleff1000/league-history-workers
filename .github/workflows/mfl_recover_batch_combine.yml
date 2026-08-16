@@ -128,24 +128,25 @@ jobs:
               raise SystemExit('canonical append proof failed')
           PY
       - name: Save recovered canonical chunk
+        run: |
+          mkdir -p chunk_state index_state research_overlay_state
+          cp mfl_register_chunk.duckdb cache_append_proof.json chunk_state/
+          cp mfl_register_all_runs.json index_state/
+          cp mfl_research_overlay.duckdb mfl_research_overlay_proof.json research_overlay_state/
+      - name: Cache recovered canonical chunk
         uses: actions/cache/save@v5
         with:
-          path: |
-            mfl_register_chunk.duckdb
-            cache_append_proof.json
-            mfl_register_all_runs.json
+          path: chunk_state
           key: ${{ inputs.cache_namespace }}-chunk-${{ inputs.batch_start }}-${{ inputs.batch_count }}-${{ inputs.output_suffix }}
       - name: Save recovered chunk index
         uses: actions/cache/save@v5
         with:
-          path: mfl_register_all_runs.json
+          path: index_state
           key: ${{ inputs.cache_namespace }}-index-${{ inputs.batch_start }}-${{ inputs.batch_count }}-${{ inputs.output_suffix }}
       - name: Save exact research overlay
         uses: actions/cache/save@v5
         with:
-          path: |
-            mfl_research_overlay.duckdb
-            mfl_research_overlay_proof.json
+          path: research_overlay_state
           key: ${{ inputs.cache_namespace }}-research-overlay-${{ inputs.batch_start }}-${{ inputs.batch_count }}-${{ inputs.output_suffix }}
       - name: Upload recovery proof
         uses: actions/upload-artifact@v4
