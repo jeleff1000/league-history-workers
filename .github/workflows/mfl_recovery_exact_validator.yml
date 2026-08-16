@@ -155,8 +155,13 @@ jobs:
               extra = sorted(final_records - expected)
               raise SystemExit(f'exact set mismatch: missing={missing[:10]} ({len(missing)}), extra={extra[:10]} ({len(extra)})')
           added = final_records - baseline_records
-          if len(added) != 3539:
-              raise SystemExit(f'expected exactly 3539 recovered records, got {len(added)}')
+          # The submitted pilot records are already in the cache baseline used
+          # by this validator; the ten source indexes below supply the remaining
+          # 3,537 records, for 3,539 total recovered records.
+          if len(baseline_records) != 21777:
+              raise SystemExit(f'expected pilot-complete baseline count 21777, got {len(baseline_records)}')
+          if len(added) != 3537:
+              raise SystemExit(f'expected exactly 3537 post-pilot recovered records, got {len(added)}')
           if len(final_records) != 25314:
               raise SystemExit(f'expected final canonical count 25314, got {len(final_records)}')
           for pilot in ((2018, '47348'), (2018, '47351')):
