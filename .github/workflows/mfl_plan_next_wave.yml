@@ -1,0 +1,187 @@
+name: MFL Plan And Launch Unique Next Wave
+
+on:
+  workflow_dispatch:
+    inputs:
+      batch_count:
+        description: 'Number of new batches to reserve and launch'
+        required: false
+        type: string
+        default: '50'
+      batch_size:
+        description: 'League-years per runner'
+        required: false
+        type: string
+        default: '2'
+      max_parallel:
+        description: 'Maximum concurrent runners in the new wave'
+        required: false
+        type: string
+        default: '50'
+      target_years:
+        description: 'Comma-separated seasons'
+        required: false
+        type: string
+        default: '2004,2005,2006,2007,2008,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018'
+      campaign_cutoff:
+        description: 'Include campaigns created after this UTC timestamp as reservations'
+        required: false
+        type: string
+        default: '2026-08-16T03:00:00Z'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout private population manifest
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: codex/mfl-gates
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /corpus_seed/
+            /scripts/extraplatform_corpus/build_mfl_pending_manifest.py
+
+      - name: Collect run inventory and canonical proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p runs canonical
+          gh run list --workflow mfl_register_batch_campaign.yml --limit 1000 \
+            --json databaseId,status,conclusion,createdAt,updatedAt > runs/campaigns.json
+          gh run list --workflow mfl_reduce_saved_chunk.yml --limit 1000 \
+            --json databaseId,status,conclusion,createdAt,updatedAt > runs/reducers.json
+          reducer=$(jq -r '[.[] | select(.conclusion == "success")][0].databaseId' runs/reducers.json)
+          test -n "$reducer" && test "$reducer" != null
+          gh run download "$reducer" --repo "${{ github.repository }}" \
+            --name "mfl-reducer-proof-$reducer" --dir canonical
+          test -s canonical/mfl_register_all_runs.json
+
+      - name: Build pending queue and reserve active assignments
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_YEARS: ${{ inputs.target_years }}
+          CUTOFF: ${{ inputs.campaign_cutoff }}
+          BATCH_SIZE: ${{ inputs.batch_size }}
+          BATCH_COUNT: ${{ inputs.batch_count }}
+        run: |
+          python3 code/scripts/extraplatform_corpus/build_mfl_pending_manifest.py \
+            --manifest code/corpus_seed/mfl_population_manifest_2004_2018_expanded.json \
+            --index canonical/mfl_register_all_runs.json \
+            --output pending_manifest.json \
+            --target-per-year 10000 --target-years "$TARGET_YEARS"
+          python3 - <<'PY'
+          import json, os, re, subprocess
+          from pathlib import Path
+          from datetime import datetime
+
+          runs=json.loads(Path('runs/campaigns.json').read_text())
+          cutoff=datetime.fromisoformat(os.environ['CUTOFF'].replace('Z','+00:00'))
+          batch_size=int(os.environ['BATCH_SIZE'])
+          pending=json.loads(Path('pending_manifest.json').read_text())['rows']
+          reserved=set()
+          evidence=[]
+          for run in runs:
+              if run.get('conclusion') == 'cancelled' or run.get('createdAt','') < os.environ['CUTOFF']:
+                  continue
+              run_id=str(run['databaseId'])
+              artifact=f'mfl-pending-manifest-{run_id}'
+              out=Path('run_manifests')/run_id
+              out.mkdir(parents=True,exist_ok=True)
+              result=subprocess.run(['gh','run','download',run_id,'--repo',os.environ['GITHUB_REPOSITORY'],
+                                     '--name',artifact,'--dir',str(out)],capture_output=True,text=True)
+              path=out/'pending_manifest.json'
+              if result.returncode != 0 or not path.is_file():
+                  continue
+              payload=json.loads(path.read_text())
+              rows=payload.get('rows',[])
+              # Campaigns in the active v9b wave were launched with 250 batches of 2.
+              # Derive the actual matrix width from the workflow's ingest job count.
+              jobs=json.loads(subprocess.check_output([
+                  'gh','run','view',run_id,'--repo',os.environ['GITHUB_REPOSITORY'],'--json','jobs'
+              ],text=True))['jobs']
+              ingest=sum(1 for job in jobs if str(job.get('name','')).startswith('ingest ('))
+              if ingest <= 0:
+                  continue
+              take=min(len(rows), ingest*batch_size)
+              for row in rows[:take]:
+                  reserved.add((int(row['season']),str(row['league_id'])))
+              evidence.append({'run_id':run_id,'ingest_jobs':ingest,'reserved_count':take,
+                               'target_years':payload.get('target_years',[])})
+
+          # Durable plans from newer campaigns are additional reservations.
+          for run in runs:
+              run_id=str(run['databaseId'])
+              out=Path('plans')/run_id
+              out.mkdir(parents=True,exist_ok=True)
+              result=subprocess.run(['gh','run','download',run_id,'--repo',os.environ['GITHUB_REPOSITORY'],
+                                     '--name',f'mfl-batch-plan-{run_id}','--dir',str(out)],capture_output=True)
+              path=out/'batch_plan.json'
+              if result.returncode != 0 or not path.is_file():
+                  continue
+              plan=json.loads(path.read_text())
+              for row in plan.get('planned_league_years',[]):
+                  reserved.add((int(row['season']),str(row['league_id'])))
+
+          rows=[]
+          seen=set()
+          for row in pending:
+              key=(int(row['season']),str(row['league_id']))
+              if key in reserved or key in seen:
+                  continue
+              seen.add(key)
+              rows.append(row)
+          count=int(os.environ['BATCH_COUNT']) if os.environ.get('BATCH_COUNT') else 50
+          size=int(os.environ['BATCH_SIZE'])
+          selected=rows[:count*size]
+          if len(selected) < count*size:
+              raise SystemExit(f'only {len(selected)} unique rows available; need {count*size}')
+          Path('reserved_keys.json').write_text(json.dumps({'schema_version':'mfl_reservations_v1',
+              'rows':[{'season':s,'league_id':lid} for s,lid in sorted(reserved)]},indent=2)+'\n')
+          Path('next_wave_plan.json').write_text(json.dumps({
+              'schema_version':'mfl_next_wave_plan_v1','source_run_id':os.environ['GITHUB_RUN_ID'],
+              'batch_count':count,'batch_size':size,'planned_league_years':selected,
+              'reserved_by_prior_work':len(reserved)},indent=2)+'\n')
+          Path('reservation_evidence.json').write_text(json.dumps(evidence,indent=2)+'\n')
+          print(json.dumps({'prior_reserved':len(reserved),'selected':len(selected),
+                            'first':selected[0],'last':selected[-1]},sort_keys=True))
+          PY
+      - name: Publish reservation plan before launch
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-reservations-${{ github.run_id }}
+          retention-days: 90
+          path: |
+            reserved_keys.json
+            next_wave_plan.json
+            reservation_evidence.json
+
+      - name: Launch exactly the reserved wave
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          index_key=$(gh cache list --limit 300 --sort created_at --order desc --json key --jq '[.[] | select(.key | startswith("mfl-registered-2004-2018-v2-index-"))][0].key')
+          test -n "$index_key" && test "$index_key" != null
+          gh workflow run mfl_register_batch_campaign.yml \
+            --repo "${{ github.repository }}" --ref main \
+            -f batch_start=0 \
+            -f batch_count="${{ inputs.batch_count }}" \
+            -f batch_size="${{ inputs.batch_size }}" \
+            -f max_parallel="${{ inputs.max_parallel }}" \
+            -f cache_namespace="mfl-fetch-wave-v10-unique-${{ github.run_id }}" \
+            -f storage_mode=fetch_only \
+            -f prior_index_key="$index_key" \
+            -f reservation_artifact_run_id="${{ github.run_id }}" \
+            -f reservation_artifact_name="mfl-reservations-${{ github.run_id }}" \
+            -f target_years="${{ inputs.target_years }}" \
+            -f target_per_year=10000 \
+            -f mfl_rate_limit=1

@@ -68,6 +68,16 @@ on:
         required: false
         type: string
         default: ''
+      reservation_artifact_run_id:
+        description: 'Planner run whose reservation artifact excludes already-assigned league-years'
+        required: false
+        type: string
+        default: ''
+      reservation_artifact_name:
+        description: 'Reservation artifact name from the planner run'
+        required: false
+        type: string
+        default: ''
       storage_mode:
         description: 'Cache storage mode: snapshot, chunked, or fetch_only'
         required: false
@@ -169,6 +179,31 @@ jobs:
             --target-years "$TARGET_YEARS" \
             $([ "$COLLECT_ALL" = true ] && echo --collect-all) \
             $([ "$RETRY_REJECTED" = true ] && echo --retry-rejected)
+      - name: Apply planner reservations
+        if: ${{ inputs.storage_mode == 'fetch_only' && inputs.reservation_artifact_run_id != '' && inputs.reservation_artifact_name != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${{ inputs.reservation_artifact_run_id }}" \
+            --repo "${{ github.repository }}" \
+            --name "${{ inputs.reservation_artifact_name }}" \
+            --dir reservations
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          reserved={
+              (int(row['season']), str(row['league_id']))
+              for row in json.loads(Path('reservations/reserved_keys.json').read_text())['rows']
+          }
+          path=Path('pending_manifest.json')
+          payload=json.loads(path.read_text())
+          payload['rows']=[
+              row for row in payload['rows']
+              if (int(row['season']), str(row['league_id'])) not in reserved
+          ]
+          payload['reserved_excluded']=len(reserved)
+          path.write_text(json.dumps(payload, indent=2)+'\n')
+          print(json.dumps({'reserved_excluded':len(reserved),'remaining':len(payload['rows'])},sort_keys=True))
       - name: Publish pending manifest to ingest runners
         if: ${{ inputs.storage_mode == 'fetch_only' }}
         uses: actions/upload-artifact@v4
