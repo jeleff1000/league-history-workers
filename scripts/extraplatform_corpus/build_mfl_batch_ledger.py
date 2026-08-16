@@ -40,7 +40,7 @@ def _key(row: dict[str, Any]) -> tuple[int, str]:
     return int(row["season"]), str(row["league_id"])
 
 
-def build(*, plans_root: Path, runs_root: Path, caches_path: Path, canonical_index: Path, output: Path) -> dict[str, Any]:
+def build(*, plans_root: Path, wave_plans_root: Path, runs_root: Path, caches_path: Path, canonical_index: Path, output: Path) -> dict[str, Any]:
     runs = _run_rows(runs_root)
     by_run = {str(row["run_id"]): row for row in runs if row.get("run_id")}
     caches = _cache_map(caches_path)
@@ -84,9 +84,49 @@ def build(*, plans_root: Path, runs_root: Path, caches_path: Path, canonical_ind
             "not_landed_count": len(planned_keys - landed),
         })
 
+    future_batches: list[dict[str, Any]] = []
+    for path in sorted(wave_plans_root.glob("*/next_wave_plan.json")):
+        wave = dict(_read_json(path, {}))
+        if not wave:
+            continue
+        planner_id = str(wave.get("source_run_id", path.parent.name))
+        campaign_count = int(wave.get("campaign_count", 0))
+        batches_per_campaign = int(wave.get("batches_per_campaign", 0))
+        batch_size = int(wave.get("batch_size", 0))
+        rows = [{"season": int(row["season"]), "league_id": str(row["league_id"])}
+                for row in wave.get("planned_league_years", [])]
+        span = batches_per_campaign * batch_size
+        for campaign in range(campaign_count):
+            assigned = rows[campaign * span:(campaign + 1) * span]
+            future_batches.append({
+                "source_run_id": f"future:{planner_id}:c{campaign}",
+                "planner_run_id": planner_id,
+                "campaign_slot": campaign,
+                "batch_state": "planned",
+                "planned_count": len(assigned),
+                "landed_count": sum(_key(row) in landed for row in assigned),
+                "not_landed_count": sum(_key(row) not in landed for row in assigned),
+                "planned_league_years": assigned,
+            })
+
     league_status: dict[tuple[int, str], dict[str, Any]] = {
         key: {"season": key[0], "league_id": key[1], "status": "landed"} for key in landed
     }
+    actual_planned_keys = {
+        _key(row)
+        for plan in plans
+        for row in plan.get("planned_league_years", [])
+    }
+    for plan in future_batches:
+        for row in plan["planned_league_years"]:
+            key = _key(row)
+            if key in landed or key in actual_planned_keys:
+                continue
+            league_status[key] = {
+                "season": key[0], "league_id": key[1], "status": "planned",
+                "planner_run_id": plan["planner_run_id"],
+                "campaign_slot": plan["campaign_slot"],
+            }
     for plan in plans:
         for row in plan.get("planned_league_years", []):
             key = _key(row)
@@ -131,8 +171,10 @@ def build(*, plans_root: Path, runs_root: Path, caches_path: Path, canonical_ind
         },
         "runs_observed": len(runs),
         "plans_observed": len(plans),
+        "future_wave_plans_observed": len({row["planner_run_id"] for row in future_batches}),
         "unplanned_campaign_runs": unplanned_campaign_runs,
         "batches": plans,
+        "future_batches": future_batches,
         "league_years": sorted(league_status.values(), key=lambda row: (row["season"], row["league_id"])),
         "coverage": {
             "landed": sum(1 for row in league_status.values() if row["status"] == "landed"),
@@ -152,12 +194,13 @@ def build(*, plans_root: Path, runs_root: Path, caches_path: Path, canonical_ind
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--plans-root", type=Path, required=True)
+    parser.add_argument("--wave-plans-root", type=Path, required=True)
     parser.add_argument("--runs-root", type=Path, required=True)
     parser.add_argument("--caches", type=Path, required=True)
     parser.add_argument("--canonical-index", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    result = build(plans_root=args.plans_root, runs_root=args.runs_root, caches_path=args.caches, canonical_index=args.canonical_index, output=args.output)
+    result = build(plans_root=args.plans_root, wave_plans_root=args.wave_plans_root, runs_root=args.runs_root, caches_path=args.caches, canonical_index=args.canonical_index, output=args.output)
     print(json.dumps({"plans_observed": result["plans_observed"], "coverage": result["coverage"]}, sort_keys=True))
 
 

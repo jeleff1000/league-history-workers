@@ -28,6 +28,7 @@ jobs:
           gh run list --workflow mfl_register_batch_campaign.yml --limit 1000 --json databaseId,status,conclusion,createdAt,updatedAt,headSha > runs/mfl_register_batch_campaign.json
           gh run list --workflow mfl_recover_batch_combine.yml --limit 1000 --json databaseId,status,conclusion,createdAt,updatedAt,headSha > runs/mfl_recover_batch_combine.json
           gh run list --workflow mfl_reduce_saved_chunk.yml --limit 1000 --json databaseId,status,conclusion,createdAt,updatedAt,headSha > runs/mfl_reduce_saved_chunk.json
+          gh run list --workflow mfl_plan_next_wave.yml --limit 1000 --json databaseId,status,conclusion,createdAt,updatedAt,headSha > runs/mfl_plan_next_wave.json
       - name: Download durable plans from campaign runs
         env:
           GH_TOKEN: ${{ github.token }}
@@ -41,6 +42,20 @@ jobs:
               out=Path('plans')/run_id
               out.mkdir(parents=True,exist_ok=True)
               subprocess.run(['gh','run','download',run_id,'--name',f'mfl-batch-plan-{run_id}','--dir',str(out)],check=False)
+          PY
+      - name: Download durable future-wave plans
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          rows=json.loads(Path('runs/mfl_plan_next_wave.json').read_text())
+          for row in rows:
+              run_id=str(row['databaseId'])
+              out=Path('wave_plans')/run_id
+              out.mkdir(parents=True,exist_ok=True)
+              subprocess.run(['gh','run','download',run_id,'--name',f'mfl-reservations-{run_id}','--dir',str(out)],check=False)
           PY
       - name: Locate latest successful reducer proof
         id: canonical_proof
@@ -66,8 +81,9 @@ jobs:
         run: gh cache list --limit 1000 --sort created_at --order desc --json key,sizeInBytes,createdAt,lastAccessedAt > caches.json
       - name: Build ledger snapshot
         run: |
-          python3 scripts/extraplatform_corpus/build_mfl_batch_ledger.py \
+            python3 scripts/extraplatform_corpus/build_mfl_batch_ledger.py \
             --plans-root plans \
+            --wave-plans-root wave_plans \
             --runs-root runs \
             --caches caches.json \
             --canonical-index canonical/index_state/mfl_register_all_runs.json \
