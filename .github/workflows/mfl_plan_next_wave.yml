@@ -3,11 +3,16 @@ name: MFL Plan And Launch Unique Next Wave
 on:
   workflow_dispatch:
     inputs:
-      batch_count:
-        description: 'Number of new batches to reserve and launch'
+      campaign_count:
+        description: 'Number of independent campaigns to queue'
         required: false
         type: string
         default: '50'
+      batches_per_campaign:
+        description: 'Unique batches assigned to each campaign'
+        required: false
+        type: string
+        default: '256'
       batch_size:
         description: 'League-years per runner'
         required: false
@@ -78,7 +83,8 @@ jobs:
           TARGET_YEARS: ${{ inputs.target_years }}
           CUTOFF: ${{ inputs.campaign_cutoff }}
           BATCH_SIZE: ${{ inputs.batch_size }}
-          BATCH_COUNT: ${{ inputs.batch_count }}
+          CAMPAIGN_COUNT: ${{ inputs.campaign_count }}
+          BATCHES_PER_CAMPAIGN: ${{ inputs.batches_per_campaign }}
         run: |
           python3 code/scripts/extraplatform_corpus/build_mfl_pending_manifest.py \
             --manifest code/corpus_seed/mfl_population_manifest_2004_2018_expanded.json \
@@ -146,16 +152,19 @@ jobs:
                   continue
               seen.add(key)
               rows.append(row)
-          count=int(os.environ['BATCH_COUNT']) if os.environ.get('BATCH_COUNT') else 50
+          campaign_count=int(os.environ['CAMPAIGN_COUNT'])
+          batches_per_campaign=int(os.environ['BATCHES_PER_CAMPAIGN'])
           size=int(os.environ['BATCH_SIZE'])
-          selected=rows[:count*size]
-          if len(selected) < count*size:
-              raise SystemExit(f'only {len(selected)} unique rows available; need {count*size}')
+          total_batches=campaign_count*batches_per_campaign
+          selected=rows[:total_batches*size]
+          if len(selected) < total_batches*size:
+              raise SystemExit(f'only {len(selected)} unique rows available; need {total_batches*size}')
           Path('reserved_keys.json').write_text(json.dumps({'schema_version':'mfl_reservations_v1',
               'rows':[{'season':s,'league_id':lid} for s,lid in sorted(reserved)]},indent=2)+'\n')
           Path('next_wave_plan.json').write_text(json.dumps({
               'schema_version':'mfl_next_wave_plan_v1','source_run_id':os.environ['GITHUB_RUN_ID'],
-              'batch_count':count,'batch_size':size,'planned_league_years':selected,
+              'campaign_count':campaign_count,'batches_per_campaign':batches_per_campaign,
+              'batch_size':size,'planned_league_years':selected,
               'reserved_by_prior_work':len(reserved)},indent=2)+'\n')
           Path('reservation_evidence.json').write_text(json.dumps(evidence,indent=2)+'\n')
           print(json.dumps({'prior_reserved':len(reserved),'selected':len(selected),
@@ -177,17 +186,33 @@ jobs:
         run: |
           index_key=$(gh cache list --limit 300 --sort created_at --order desc --json key --jq '[.[] | select(.key | startswith("mfl-registered-2004-2018-v2-index-"))][0].key')
           test -n "$index_key" && test "$index_key" != null
-          gh workflow run mfl_register_batch_campaign.yml \
-            --repo "${{ github.repository }}" --ref main \
-            -f batch_start=0 \
-            -f batch_count="${{ inputs.batch_count }}" \
-            -f batch_size="${{ inputs.batch_size }}" \
-            -f max_parallel="${{ inputs.max_parallel }}" \
-            -f cache_namespace="mfl-fetch-wave-v10-unique-${{ github.run_id }}" \
-            -f storage_mode=fetch_only \
-            -f prior_index_key="$index_key" \
-            -f reservation_artifact_run_id="${{ github.run_id }}" \
-            -f reservation_artifact_name="mfl-reservations-${{ github.run_id }}" \
-            -f target_years="${{ inputs.target_years }}" \
-            -f target_per_year=10000 \
-            -f mfl_rate_limit=1
+          failures=0
+          for ((campaign=0; campaign<${{ inputs.campaign_count }}; campaign++)); do
+            start=$((campaign * ${{ inputs.batches_per_campaign }}))
+            if ! gh workflow run mfl_register_batch_campaign.yml \
+              --repo "${{ github.repository }}" --ref main \
+              -f batch_start="$start" \
+              -f batch_count="${{ inputs.batches_per_campaign }}" \
+              -f batch_size="${{ inputs.batch_size }}" \
+              -f max_parallel="${{ inputs.max_parallel }}" \
+              -f cache_namespace="mfl-fetch-wave-v11-${{ github.run_id }}-c${campaign}" \
+              -f storage_mode=fetch_only \
+              -f prior_index_key="$index_key" \
+              -f reservation_artifact_run_id="${{ github.run_id }}" \
+              -f reservation_artifact_name="mfl-reservations-${{ github.run_id }}" \
+              -f target_years="${{ inputs.target_years }}" \
+              -f target_per_year=10000 \
+              -f mfl_rate_limit=1; then
+              failures=$((failures + 1))
+              echo "dispatch failed for campaign $campaign" >&2
+            fi
+          done
+          printf '{"campaign_count":%s,"batches_per_campaign":%s,"dispatch_failures":%s}\n' \
+            "${{ inputs.campaign_count }}" "${{ inputs.batches_per_campaign }}" "$failures" > campaign_dispatches.json
+          test "$failures" -eq 0
+      - name: Publish dispatch manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-dispatch-manifest-${{ github.run_id }}
+          retention-days: 90
+          path: campaign_dispatches.json
