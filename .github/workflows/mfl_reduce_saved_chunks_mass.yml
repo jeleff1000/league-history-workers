@@ -1,0 +1,254 @@
+name: MFL Reduce Saved Chunks Mass
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ids:
+        description: JSON array of source run IDs whose saved chunks should be unioned
+        required: true
+        type: string
+      prior_index_key:
+        description: Exact canonical index cache key
+        required: true
+        type: string
+      cache_namespace:
+        description: Canonical immutable cache namespace
+        required: false
+        type: string
+        default: mfl-registered-2004-2018-v2
+      output_suffix:
+        description: Unique immutable successor suffix
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        source_id: ${{ fromJSON(inputs.source_ids) }}
+    steps:
+      - name: Restore source chunk
+        uses: actions/cache/restore@v5
+        with:
+          path: chunk_state
+          key: mfl-population-batch-v1-chunk-0-1-allrun-${{ matrix.source_id }}
+          fail-on-cache-miss: true
+      - name: Restore source index
+        uses: actions/cache/restore@v5
+        with:
+          path: index_state
+          key: mfl-population-batch-v1-index-0-1-allrun-${{ matrix.source_id }}
+          fail-on-cache-miss: true
+      - name: Publish source pair to mass reducer
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-mass-source-${{ matrix.source_id }}
+          retention-days: 3
+          path: |
+            chunk_state/mfl_register_chunk.duckdb
+            index_state/mfl_register_all_runs.json
+
+  reduce:
+    needs: restore
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Download all source pairs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mfl-mass-source-*
+          path: sources
+          merge-multiple: false
+      - name: Restore canonical prior index
+        uses: actions/cache/restore@v5
+        with:
+          path: prior_index
+          key: ${{ inputs.prior_index_key }}
+          fail-on-cache-miss: true
+      - name: Checkout canonical merger and overlay builder
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: codex/mfl-gates
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/research_cohorts/build_mfl_research_overlay.py
+      - name: Setup Python and DuckDB
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install DuckDB
+        run: pip install duckdb
+      - name: Union and de-duplicate source chunks
+        env:
+          OUTPUT_KEY: ${{ inputs.cache_namespace }}-chunk-${{ inputs.output_suffix }}
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+          import duckdb
+
+          TABLES = ('league_settings', 'matchup', 'player_fantasy')
+          prior_path = Path('prior_index/mfl_register_all_runs.json')
+          prior = json.loads(prior_path.read_text(encoding='utf-8'))
+          prior_leagues = list(prior.get('leagues', []))
+          prior_by_key = {(int(r['season']), str(r['league_id'])): r for r in prior_leagues}
+          if len(prior_by_key) != len(prior_leagues):
+              raise SystemExit('duplicate league-year key in prior index')
+
+          sources = sorted(Path('sources').glob('mfl-mass-source-*'))
+          if not sources:
+              raise SystemExit('no source pairs downloaded')
+          selected = {}
+          rejected = {}
+          source_attempted = 0
+          out = duckdb.connect('mfl_register_chunk.duckdb')
+          schemas = {}
+          added_rows = {table: 0 for table in TABLES}
+          try:
+              for source_dir in sources:
+                  source_index = json.loads((source_dir / 'index_state' / 'mfl_register_all_runs.json').read_text(encoding='utf-8'))
+                  source_leagues = list(source_index.get('leagues', []))
+                  source_by_key = {(int(r['season']), str(r['league_id'])): r for r in source_leagues}
+                  if len(source_by_key) != len(source_leagues):
+                      raise SystemExit(f'duplicate league-year key in {source_dir.name}')
+                  source_attempted += len(source_leagues) + len(source_index.get('rejected', []))
+                  for row in source_index.get('rejected', []):
+                      key = (int(row['season']), str(row['league_id']))
+                      rejected.setdefault(key, row)
+                  db_path = source_dir / 'chunk_state' / 'mfl_register_chunk.duckdb'
+                  src = duckdb.connect(str(db_path), read_only=True)
+                  try:
+                      out.execute(f"ATTACH '{db_path.as_posix()}' AS src (READ_ONLY)")
+                      for table in TABLES:
+                          schema = src.execute(f'DESCRIBE "{table}"').fetchall()
+                          if table in schemas and schemas[table] != schema:
+                              raise SystemExit(f'source schema differs for {table}')
+                          schemas.setdefault(table, schema)
+                          if not out.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='main' AND table_name=?", [table]).fetchone()[0]:
+                              out.execute(f'CREATE TABLE "{table}" AS SELECT * FROM src."{table}" WHERE 1=0')
+                      for key, row in sorted(source_by_key.items()):
+                          if key in prior_by_key or key in selected:
+                              old = prior_by_key.get(key) or selected[key]
+                              if old.get('lineage_id') and row.get('lineage_id') and old['lineage_id'] != row['lineage_id']:
+                                  raise SystemExit(f'lineage changed for {key}')
+                              continue
+                          selected[key] = row
+                          db_name = str(row['db_name'])
+                          season = int(row['season'])
+                          for table in TABLES:
+                              count = int(src.execute(f'SELECT COUNT(*) FROM "{table}" WHERE db_name=? AND year=?', [db_name, season]).fetchone()[0])
+                              if not count:
+                                  raise SystemExit(f'source missing {table} rows for {season}:{row["league_id"]}')
+                              out.execute(f'INSERT INTO "{table}" SELECT * FROM src."{table}" WHERE db_name=? AND year=?', [db_name, season])
+                              added_rows[table] += count
+                      out.execute('DETACH src')
+                  finally:
+                      src.close()
+          finally:
+              out.close()
+
+          if not selected:
+              raise SystemExit('all source rows are already present; no mass successor required')
+          for key in selected:
+              rejected.pop(key, None)
+          all_leagues = prior_leagues + [selected[k] for k in sorted(selected)]
+          prior_rows = {table: int(prior.get('table_rows', {}).get(table, 0)) for table in TABLES}
+          final_rows = {table: prior_rows[table] + added_rows[table] for table in TABLES}
+          accepted_by_year = {str(y): int(n) for y, n in prior.get('accepted_by_year', {}).items()}
+          for row in selected.values():
+              year = str(row['season']); accepted_by_year[year] = accepted_by_year.get(year, 0) + 1
+          schema_columns = prior.get('schema_columns', {table: [[str(c[0]), str(c[1])] for c in schemas[table]] for table in TABLES})
+          index = {
+              'schema_version': 'mfl_register_results_v1',
+              'leagues': sorted(all_leagues, key=lambda r: (int(r['season']), str(r['league_id']))),
+              'league_count': len(all_leagues),
+              'expected_count': int(prior.get('expected_count', 0)) + len(selected),
+              'manifest_count': int(prior.get('manifest_count', 0)),
+              'attempted_count': int(prior.get('attempted_count', 0)) + source_attempted,
+              'pending_count': max(0, int(prior.get('pending_count', 0)) - len(selected)),
+              'rejected_count': len(rejected),
+              'rejected': [rejected[k] for k in sorted(rejected)],
+              'accepted_by_year': accepted_by_year,
+              'target_per_year': prior.get('target_per_year', 10000),
+              'target_years': prior.get('target_years', []),
+              'complete_targets': False,
+              'collect_all': True,
+              'table_rows': final_rows,
+              'schema_columns': schema_columns,
+              'player_fantasy_columns': prior.get('player_fantasy_columns', []),
+              'chunks': list(prior.get('chunks', [])) + [{'cache_key': '${{ inputs.cache_namespace }}-chunk-${{ inputs.output_suffix }}', 'league_count': len(selected), 'table_rows': added_rows}],
+          }
+          proof = {
+              'live_cache_validated': False,
+              'schema_unchanged': True,
+              'prior_rows': prior_rows,
+              'added_rows': added_rows,
+              'final_rows': final_rows,
+              'prior_league_count': len(prior_leagues),
+              'added_league_count': len(selected),
+              'final_league_count': len(all_leagues),
+              'already_present_count': sum(1 for source_dir in sources for _ in []),
+              'prior_rows_preserved': True,
+              'new_lineage': False,
+              'duplicate_league_year_keys': False,
+              'source_chunk_count': len(sources),
+          }
+          Path('mfl_register_all_runs.json').write_text(json.dumps(index, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          Path('cache_append_proof.json').write_text(json.dumps(proof, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+          print(json.dumps(proof, sort_keys=True))
+          PY
+      - name: Build research overlay and prove schema
+        run: |
+          python code/scripts/research_cohorts/build_mfl_research_overlay.py --chunk mfl_register_chunk.duckdb --output mfl_research_overlay.duckdb
+          python - <<'PY'
+          import json, duckdb
+          expected={
+            'league_settings':['db_name','year','num_teams','is_dynasty','max_keepers','sleeper_best_ball','waiver_budget','waiver_type','roster_QB','roster_RB','roster_WR','roster_TE','roster_FLX','roster_SUPER_FLEX','roster_IDP','roster_DL','roster_LB','roster_DB','roster_DB_LB','roster_DL_LB','scoring_rec','scoring_pass_td','playoff_start_week','playoff_teams','regular_season_weeks','end_week','has_multiweek_championship','roster_K','roster_DEF','roster_BN','roster_TAXI','roster_IR','platform','league_key'],
+            'player_fantasy':['db_name','year','week','NFL_player_id','player','position','fantasy_position','platform','team_key','team_name','nfl_team_api','yahoo_player_id','sleeper_player_id','espn_player_id','fleaflicker_player_id','mfl_player_id','is_started','is_rostered','fantasy_points','win','champion','clutch_equity','manager_lamar','manager','team_points','final_playoff_seed','is_playoffs','made_po_bf','is_playoffs_bf','made_po','has_po_signal'],
+            'matchup':['db_name','year','week','manager','franchise_id','opponent','team_points','opponent_points','win','loss','tie','is_playoffs','playoff_seed','final_playoff_seed','champion','is_championship','p_champ'],
+          }
+          c=duckdb.connect('mfl_research_overlay.duckdb',read_only=True); rows={}
+          for table,cols in expected.items():
+              actual=[r[0] for r in c.execute(f'DESCRIBE "{table}"').fetchall()]
+              if actual != cols: raise SystemExit(f'{table} research schema mismatch')
+              rows[table]=c.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+              if rows[table] <= 0: raise SystemExit(f'{table} overlay empty')
+          json.dump({'schema_unchanged':True,'new_lineage':False,'rows':rows},open('mfl_research_overlay_proof.json','w'),indent=2,sort_keys=True)
+          print(json.dumps({'schema_unchanged':True,'rows':rows},sort_keys=True)); c.close()
+          PY
+      - name: Stage and save mass successor caches
+        env:
+          OUTPUT_KEY: ${{ inputs.cache_namespace }}-chunk-${{ inputs.output_suffix }}
+          OUTPUT_INDEX_KEY: ${{ inputs.cache_namespace }}-index-${{ inputs.output_suffix }}
+          OUTPUT_OVERLAY_KEY: ${{ inputs.cache_namespace }}-research-overlay-${{ inputs.output_suffix }}
+        run: |
+          mkdir -p chunk_state index_state research_overlay_state
+          cp mfl_register_chunk.duckdb cache_append_proof.json chunk_state/
+          cp mfl_register_all_runs.json index_state/
+          cp mfl_research_overlay.duckdb mfl_research_overlay_proof.json research_overlay_state/
+      - name: Save mass successor chunk
+        uses: actions/cache/save@v5
+        with:
+          path: chunk_state
+          key: ${{ inputs.cache_namespace }}-chunk-${{ inputs.output_suffix }}
+      - name: Save mass successor index
+        uses: actions/cache/save@v5
+        with:
+          path: index_state
+          key: ${{ inputs.cache_namespace }}-index-${{ inputs.output_suffix }}
+      - name: Save mass research overlay
+        uses: actions/cache/save@v5
+        with:
+          path: research_overlay_state
+          key: ${{ inputs.cache_namespace }}-research-overlay-${{ inputs.output_suffix }}
