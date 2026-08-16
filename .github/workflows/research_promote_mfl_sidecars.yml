@@ -7,15 +7,9 @@ on:
         description: Completed MFL rescue run whose successful artifacts are promoted
         required: true
         default: "31218764865"
-      replace_canonical_cache:
-        description: Replace the existing canonical cache key after validation
-        required: true
-        default: "true"
-        type: boolean
-
 permissions:
   contents: read
-  actions: write
+  actions: read
 
 env:
   CANONICAL_CACHE_KEY: research-public-lake-v4-Linux-20260806-championship-v2-final-playoff-anchor-outcomes-31147899613
@@ -55,6 +49,18 @@ jobs:
             cat release_parts/research-public-lake.tar.part-* | tar -xf - -C research_public_lake
           fi
           test -s research_public_lake/corpus_snapshot.duckdb
+      - name: Restore immutable ops seed without changing its cache or release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p immutable_ops
+          gh release download ops-cache-v6-2000-plus-player-bio \
+            --repo jeleff1000/league-history-workers \
+            --pattern ops_cache.duckdb --dir immutable_ops
+          test -s immutable_ops/ops_cache.duckdb
+          cp immutable_ops/ops_cache.duckdb research_public_lake/ops_cache.duckdb
+          sha256sum research_public_lake/ops_cache.duckdb > ops_seed_before.sha256
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
@@ -77,25 +83,18 @@ jobs:
             --out promoted_corpus_snapshot.duckdb
           cp promoted_corpus_snapshot.duckdb research_public_lake/corpus_snapshot.duckdb
           python code/scripts/research_cohorts/validate_research_public_lake.py research_public_lake
-      - name: Preserve promotion report
-        uses: actions/upload-artifact@v4
-        with:
-          name: mfl-sidecar-promotion-report-${{ github.run_id }}
-          path: promoted_corpus_snapshot.json
-          retention-days: 180
-      - name: Replace only the approved canonical cache key
-        if: inputs.replace_canonical_cache == true
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Verify the immutable ops seed was not changed
         run: |
           set -euo pipefail
-          if ! gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/caches?key=$CANONICAL_CACHE_KEY&ref=refs/heads/main"; then
-            echo "[cache] canonical key was already absent; continuing to save replacement"
-          fi
-          echo "[cache] deleted old canonical key; saving the validated replacement under the identical key"
-      - name: Save validated canonical cache under identical key
-        if: inputs.replace_canonical_cache == true
-        uses: actions/cache/save@v5
+          sha256sum research_public_lake/ops_cache.duckdb > ops_seed_after.sha256
+          cmp ops_seed_before.sha256 ops_seed_after.sha256
+      - name: Preserve merged corpus candidate and audit manifest
+        uses: actions/upload-artifact@v4
         with:
-          path: research_public_lake
-          key: ${{ env.CANONICAL_CACHE_KEY }}
+          name: mfl-sidecar-merged-corpus-${{ github.run_id }}
+          path: |
+            promoted_corpus_snapshot.duckdb
+            promoted_corpus_snapshot.json
+            ops_seed_before.sha256
+            ops_seed_after.sha256
+          retention-days: 180
