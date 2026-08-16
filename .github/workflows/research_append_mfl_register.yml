@@ -20,6 +20,11 @@ on:
         required: true
         default: codex/mfl-gates
         type: string
+      reuse_overlay_run_id:
+        description: Prior run whose successful overlay artifacts should be reused
+        required: false
+        default: ''
+        type: string
 
 permissions:
   actions: write
@@ -31,6 +36,7 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       chunk_count: ${{ steps.plan.outputs.chunk_count }}
+      missing_count: ${{ steps.plan.outputs.missing_count }}
     steps:
       - uses: actions/cache/restore@v5
         with:
@@ -72,6 +78,7 @@ jobs:
 
   convert:
     needs: plan
+    if: inputs.reuse_overlay_run_id == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
@@ -109,7 +116,7 @@ jobs:
 
   merge:
     needs: [plan, convert]
-    if: always() && needs.plan.result == 'success' && needs.convert.result == 'success'
+    if: always() && needs.plan.result == 'success' && (needs.convert.result == 'success' || inputs.reuse_overlay_run_id != '')
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     steps:
@@ -126,10 +133,22 @@ jobs:
           key: ${{ inputs.base_cache_key }}
           fail-on-cache-miss: true
       - uses: actions/download-artifact@v5
+        if: inputs.reuse_overlay_run_id == ''
         with:
           pattern: mfl-research-overlay-*-${{ github.run_id }}
           path: overlays
           merge-multiple: false
+      - name: Reuse successful overlay artifacts
+        if: inputs.reuse_overlay_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p overlays
+          gh run download '${{ inputs.reuse_overlay_run_id }}' \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'mfl-research-overlay-*' \
+            --dir overlays
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
@@ -147,7 +166,7 @@ jobs:
           set -euo pipefail
           cp research_public_lake/corpus_snapshot.duckdb base_corpus_snapshot.duckdb
           parts=(overlays/*/overlay.duckdb)
-          test "${#parts[@]}" -eq '${{ needs.plan.outputs.chunk_count }}'
+          test "${#parts[@]}" -gt 0
           python code/scripts/research_cohorts/merge_mfl_research_overlays.py \
             --parts "${parts[@]}" --output mfl_research_overlay.duckdb
           python code/scripts/sleeper_corpus/merge_public_corpus_snapshot.py \
