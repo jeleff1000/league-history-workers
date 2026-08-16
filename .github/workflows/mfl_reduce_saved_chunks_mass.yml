@@ -118,6 +118,7 @@ jobs:
           source_attempted = 0
           out = duckdb.connect('mfl_register_chunk.duckdb')
           schemas = {}
+          table_schemas = {}
           added_rows = {table: 0 for table in TABLES}
           try:
               for source_dir in sources:
@@ -135,12 +136,18 @@ jobs:
                   try:
                       out.execute(f"ATTACH '{db_path.as_posix()}' AS src (READ_ONLY)")
                       for table in TABLES:
-                          schema = src.execute(f'DESCRIBE "{table}"').fetchall()
+                          table_schema_rows = src.execute("SELECT table_schema FROM information_schema.tables WHERE table_name=? ORDER BY table_schema", [table]).fetchall()
+                          if not table_schema_rows:
+                              raise SystemExit(f'source table missing: {table}')
+                          table_schema = str(table_schema_rows[0][0])
+                          schema = src.execute(f'DESCRIBE "{table_schema}"."{table}"').fetchall()
                           if table in schemas and schemas[table] != schema:
                               raise SystemExit(f'source schema differs for {table}')
                           schemas.setdefault(table, schema)
+                          source_ref = f'src."{table_schema}"."{table}"'
                           if not out.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='main' AND table_name=?", [table]).fetchone()[0]:
-                              out.execute(f'CREATE TABLE "{table}" AS SELECT * FROM src.public."{table}" WHERE 1=0')
+                              out.execute(f'CREATE TABLE "{table}" AS SELECT * FROM {source_ref} WHERE 1=0')
+                          table_schemas[table] = table_schema
                       for key, row in sorted(source_by_key.items()):
                           if key in prior_by_key or key in selected:
                               old = prior_by_key.get(key) or selected[key]
@@ -154,7 +161,8 @@ jobs:
                               count = int(src.execute(f'SELECT COUNT(*) FROM "{table}" WHERE db_name=? AND year=?', [db_name, season]).fetchone()[0])
                               if not count:
                                   raise SystemExit(f'source missing {table} rows for {season}:{row["league_id"]}')
-                              out.execute(f'INSERT INTO "{table}" SELECT * FROM src.public."{table}" WHERE db_name=? AND year=?', [db_name, season])
+                              source_ref = f'src."{table_schemas[table]}"."{table}"'
+                              out.execute(f'INSERT INTO "{table}" SELECT * FROM {source_ref} WHERE db_name=? AND year=?', [db_name, season])
                               added_rows[table] += count
                       out.execute('DETACH src')
                   finally:
