@@ -1,0 +1,213 @@
+name: MFL Recovery Exact Validator
+
+on:
+  workflow_dispatch:
+    inputs:
+      final_index_key:
+        description: Final canonical index cache key
+        required: true
+        type: string
+      final_chunk_key:
+        description: Final canonical chunk cache key
+        required: true
+        type: string
+      final_overlay_key:
+        description: Final canonical research overlay cache key
+        required: true
+        type: string
+      baseline_index_key:
+        description: Baseline canonical index before this recovery
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Restore baseline index
+        uses: actions/cache/restore@v5
+        with:
+          path: expected/baseline
+          key: ${{ inputs.baseline_index_key }}
+          fail-on-cache-miss: true
+      - name: Restore source index 2006
+        uses: actions/cache/restore@v5
+        with:
+          path: expected/source-2006
+          key: mfl-fetch-wave-v9-2006-b-index-0-250
+          fail-on-cache-miss: true
+      - name: Restore source index 2007
+        uses: actions/cache/restore@v5
+        with:
+          path: expected/source-2007
+          key: mfl-fetch-wave-v9-2007-b-index-0-250
+          fail-on-cache-miss: true
+      - name: Restore source index 2008
+        uses: actions/cache/restore@v5
+        with:
+          path: expected/source-2008
+          key: mfl-fetch-wave-v9-2008-b-index-0-250
+          fail-on-cache-miss: true
+      - name: Restore source index 2009
+        uses: actions/cache/restore@v5
+        with:
+          path: expected/source-2009
+          key: mfl-fetch-wave-v9-2009-b-index-0-250
+          fail-on-cache-miss: true
+      - name: Restore source index 2013
+        uses: actions/cache/restore@v5
+        with:
+          path: expected/source-2013
+          key: mfl-fetch-wave-v9-2013-b-index-0-250
+          fail-on-cache-miss: true
+      - name: Restore source index 2016
+        uses: actions/cache/restore@v5
+        with:
+          path: expected/source-2016
+          key: mfl-fetch-wave-v9-2016-b-index-0-250
+          fail-on-cache-miss: true
+      - name: Restore source index 2017
+        uses: actions/cache/restore@v5
+        with:
+          path: expected/source-2017
+          key: mfl-fetch-wave-v9-2017-b-index-0-250
+          fail-on-cache-miss: true
+      - name: Restore source index 2018
+        uses: actions/cache/restore@v5
+        with:
+          path: expected/source-2018
+          key: mfl-fetch-wave-v9-2018-b-index-0-250
+          fail-on-cache-miss: true
+      - name: Restore source index c41
+        uses: actions/cache/restore@v5
+        with:
+          path: expected/source-c41
+          key: mfl-fetch-wave-v11-31927195335-c41-index-10496-256
+          fail-on-cache-miss: true
+      - name: Restore source index v12
+        uses: actions/cache/restore@v5
+        with:
+          path: expected/source-v12
+          key: mfl-fetch-wave-v12-capacity-probe-31927195335-index-25600-1
+          fail-on-cache-miss: true
+      - name: Restore final canonical index
+        uses: actions/cache/restore@v5
+        with:
+          path: final/index
+          key: ${{ inputs.final_index_key }}
+          fail-on-cache-miss: true
+      - name: Restore final canonical chunk
+        uses: actions/cache/restore@v5
+        with:
+          path: final/chunk
+          key: ${{ inputs.final_chunk_key }}
+          fail-on-cache-miss: true
+      - name: Restore final research overlay
+        uses: actions/cache/restore@v5
+        with:
+          path: final/overlay
+          key: ${{ inputs.final_overlay_key }}
+          fail-on-cache-miss: true
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install DuckDB
+        run: pip install duckdb
+      - name: Validate exact recovery set and live caches
+        env:
+          FINAL_INDEX_KEY: ${{ inputs.final_index_key }}
+          FINAL_CHUNK_KEY: ${{ inputs.final_chunk_key }}
+          FINAL_OVERLAY_KEY: ${{ inputs.final_overlay_key }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import duckdb
+
+          def read_index(path):
+              return json.loads(Path(path).read_text(encoding='utf-8'))
+
+          def records(index):
+              return {
+                  (int(row['season']), str(row['league_id']))
+                  for row in index.get('leagues', [])
+              }
+
+          baseline = read_index('expected/baseline/mfl_register_all_runs.json')
+          final = read_index('final/index/mfl_register_all_runs.json')
+          baseline_records = records(baseline)
+          expected = set(baseline_records)
+          source_dirs = sorted(Path('expected').glob('source-*'))
+          for directory in source_dirs:
+              expected |= records(read_index(directory / 'mfl_register_all_runs.json'))
+
+          final_records = records(final)
+          if len(final_records) != len(final.get('leagues', [])):
+              raise SystemExit('final canonical index contains duplicate season/league keys')
+          if final_records != expected:
+              missing = sorted(expected - final_records)
+              extra = sorted(final_records - expected)
+              raise SystemExit(f'exact set mismatch: missing={missing[:10]} ({len(missing)}), extra={extra[:10]} ({len(extra)})')
+          added = final_records - baseline_records
+          if len(added) != 3539:
+              raise SystemExit(f'expected exactly 3539 recovered records, got {len(added)}')
+          if len(final_records) != 25314:
+              raise SystemExit(f'expected final canonical count 25314, got {len(final_records)}')
+          for pilot in ((2018, '47348'), (2018, '47351')):
+              if pilot not in final_records:
+                  raise SystemExit(f'missing recovered pilot record: {pilot}')
+          if final.get('league_count') != 25314:
+              raise SystemExit(f'final league_count mismatch: {final.get("league_count")}')
+          if not final.get('chunks'):
+              raise SystemExit('final canonical index has no chunk lineage')
+          proof_path = Path('final/chunk/cache_append_proof.json')
+          proof = json.loads(proof_path.read_text(encoding='utf-8'))
+          if proof.get('final_league_count') != 25314:
+              raise SystemExit(f'final proof count mismatch: {proof.get("final_league_count")}')
+          if proof.get('chunk_cache_key') != os.environ['FINAL_CHUNK_KEY']:
+              raise SystemExit('final chunk proof key mismatch')
+          for key, value in {
+              'schema_unchanged': True,
+              'prior_rows_preserved': True,
+              'new_lineage': False,
+              'duplicate_league_year_keys': False,
+          }.items():
+              if proof.get(key) != value:
+                  raise SystemExit(f'final proof gate failed: {key}={proof.get(key)!r}')
+
+          def table_counts(db_path):
+              con = duckdb.connect(str(db_path), read_only=True)
+              counts = {}
+              for table in ('league_settings', 'matchup', 'player_fantasy'):
+                  exists = con.execute(
+                      "select count(*) from information_schema.tables "
+                      "where table_schema='main' and table_name=?", [table]
+                  ).fetchone()[0]
+                  counts[table] = int(con.execute(f'select count(*) from "{table}"').fetchone()[0]) if exists else 0
+              con.close()
+              return counts
+
+          chunk_counts = table_counts('final/chunk/mfl_register_chunk.duckdb')
+          if chunk_counts != proof.get('added_rows'):
+              raise SystemExit(f'final chunk row counts mismatch: actual={chunk_counts} proof={proof.get("added_rows")}')
+          overlay_counts = table_counts('final/overlay/mfl_research_overlay.duckdb')
+          if any(value <= 0 for value in overlay_counts.values()):
+              raise SystemExit(f'final research overlay has empty tables: {overlay_counts}')
+          print(json.dumps({
+              'exact_validation': 'PASS',
+              'baseline_count': len(baseline_records),
+              'recovered_count': len(added),
+              'final_count': len(final_records),
+              'final_index_key': os.environ['FINAL_INDEX_KEY'],
+              'final_chunk_key': os.environ['FINAL_CHUNK_KEY'],
+              'final_overlay_key': os.environ['FINAL_OVERLAY_KEY'],
+              'chunk_rows': chunk_counts,
+              'overlay_rows': overlay_counts,
+          }, sort_keys=True))
+          PY
