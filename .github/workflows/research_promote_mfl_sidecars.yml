@@ -36,7 +36,7 @@ jobs:
           path: research_public_lake
           key: ${{ env.CANONICAL_CACHE_KEY }}
           fail-on-cache-miss: false
-      - name: Restore canonical release backup when cache is absent
+      - name: Restore canonical base and prefer the verified corpus-only asset
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -47,6 +47,18 @@ jobs:
             gh release download "$CANONICAL_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
               --pattern 'research-public-lake.tar.part-*' --dir release_parts
             cat release_parts/research-public-lake.tar.part-* | tar -xf - -C research_public_lake
+          fi
+          mkdir -p corpus_parts
+          if gh release download "$CANONICAL_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --pattern 'corpus_snapshot.duckdb.part-*' --dir corpus_parts; then
+            test -n "$(find corpus_parts -name 'corpus_snapshot.duckdb.part-*' -print -quit)"
+            gh release download "$CANONICAL_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --pattern 'corpus_snapshot.duckdb.sha256' --dir corpus_parts
+            cat corpus_parts/corpus_snapshot.duckdb.part-* > research_public_lake/corpus_snapshot.duckdb
+            (cd research_public_lake && sha256sum -c ../corpus_parts/corpus_snapshot.duckdb.sha256)
+            echo "[corpus] restored verified corpus-only release asset"
+          else
+            echo "[corpus] corpus-only release asset is absent; using the legacy bundle corpus"
           fi
           test -s research_public_lake/corpus_snapshot.duckdb
       - name: Restore immutable ops seed without changing its cache or release
