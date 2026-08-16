@@ -243,6 +243,7 @@ jobs:
             /corpus_seed/
             /fantasy_football_data_scripts/
             /scripts/extraplatform_corpus/
+            /scripts/research_cohorts/build_mfl_research_overlay.py
             /requirements.txt
             /pyproject.toml
       - name: Setup Python
@@ -494,6 +495,12 @@ jobs:
             --output-index mfl_register_all_runs.json \
             --proof cache_append_proof.json \
             --chunk-key "$CHUNK_KEY"
+      - name: Build exact research-lake source overlay
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
+        run: |
+          python3 code/scripts/research_cohorts/build_mfl_research_overlay.py \
+            --chunk mfl_register_chunk.duckdb \
+            --output mfl_research_overlay.duckdb
       - name: Stage cumulative register state
         if: ${{ inputs.storage_mode == 'snapshot' }}
         shell: bash
@@ -523,6 +530,12 @@ jobs:
           cp cache_append_proof.json chunk_state/
           cp mfl_register_all_runs.json index_state/
           cp cache_append_proof.json index_state/
+      - name: Stage research-lake overlay cache
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
+        shell: bash
+        run: |
+          mkdir -p research_overlay_state
+          cp mfl_research_overlay.duckdb research_overlay_state/
       - name: Save immutable chunk cache
         if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
         uses: actions/cache/save@v5
@@ -535,6 +548,12 @@ jobs:
         with:
           path: index_state
           key: ${{ inputs.cache_namespace }}-index-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
+      - name: Save research-lake overlay cache
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
+        uses: actions/cache/save@v5
+        with:
+          path: research_overlay_state
+          key: ${{ inputs.cache_namespace }}-research-overlay-${{ inputs.batch_start }}-${{ inputs.batch_count }}${{ inputs.attempt_suffix }}
       - name: Upload batch snapshot
         if: ${{ inputs.storage_mode == 'snapshot' }}
         uses: actions/upload-artifact@v4
@@ -553,6 +572,7 @@ jobs:
           retention-days: 90
           path: |
             mfl_register_chunk.duckdb
+            mfl_research_overlay.duckdb
             mfl_register_all_runs.json
             cache_append_proof.json
   verify_cache:

@@ -72,6 +72,7 @@ jobs:
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             /scripts/extraplatform_corpus/merge_mfl_saved_chunk.py
+            /scripts/research_cohorts/build_mfl_research_overlay.py
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
@@ -99,6 +100,13 @@ jobs:
           if p.get('added_league_count', 0) <= 0: raise SystemExit('reducer added no leagues')
           print(json.dumps(p, sort_keys=True))
           PY
+      - name: Build exact research-lake source overlay
+        run: |
+          python code/scripts/research_cohorts/build_mfl_research_overlay.py \
+            --chunk mfl_register_chunk.duckdb \
+            --output mfl_research_overlay.duckdb
+          mkdir -p research_overlay_state
+          cp mfl_research_overlay.duckdb research_overlay_state/
       - name: Stage successor caches
         run: |
           mkdir -p chunk_state index_state
@@ -114,6 +122,11 @@ jobs:
         with:
           path: index_state
           key: ${{ inputs.cache_namespace }}-index-${{ inputs.output_suffix }}
+      - name: Save research-lake overlay cache
+        uses: actions/cache/save@v5
+        with:
+          path: research_overlay_state
+          key: ${{ inputs.cache_namespace }}-research-overlay-${{ inputs.output_suffix }}
       - name: Upload reducer proof
         uses: actions/upload-artifact@v4
         with:
@@ -122,3 +135,4 @@ jobs:
           path: |
             mfl_register_all_runs.json
             cache_append_proof.json
+            mfl_research_overlay.duckdb
