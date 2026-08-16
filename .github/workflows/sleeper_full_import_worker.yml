@@ -433,7 +433,8 @@ jobs:
         run: |
           cd fantasy_football_data_scripts
           python ../scripts/refresh_aggregates.py \
-            --db "${{ steps.parse.outputs.database_name }}"
+            --db "${{ steps.parse.outputs.database_name }}" \
+            --data-dir "${{ github.workspace }}/fantasy_football_data/sleeper_${{ steps.parse.outputs.database_name }}"
 
       # ==================== REVALIDATE + WARM VERCEL CACHE ====================
       - name: Revalidate and warm Vercel cache
