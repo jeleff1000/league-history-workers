@@ -87,9 +87,11 @@ jobs:
           EXPECTED_PATH: ${{ github.workspace }}/pending_work/pending_manifest.json
           CHUNK_KEY: ${{ inputs.cache_namespace }}-chunk-${{ inputs.batch_start }}-${{ inputs.batch_count }}-${{ inputs.output_suffix }}
         run: |
+          printf '{}' > empty_prior_index.json
           python code/scripts/extraplatform_corpus/merge_mfl_chunk.py \
             --receipts receipts \
             --expected "$EXPECTED_PATH" \
+            --prior-index empty_prior_index.json \
             --output-db mfl_register_chunk.duckdb \
             --output-index mfl_register_all_runs.json \
             --proof cache_append_proof.json \
