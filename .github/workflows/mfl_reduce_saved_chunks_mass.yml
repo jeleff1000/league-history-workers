@@ -68,9 +68,13 @@ jobs:
       - name: Restore canonical prior index
         uses: actions/cache/restore@v5
         with:
-          path: prior_index
+          path: index_state
           key: ${{ inputs.prior_index_key }}
           fail-on-cache-miss: true
+      - name: Preserve canonical prior index
+        run: |
+          mkdir -p prior_index
+          cp index_state/mfl_register_all_runs.json prior_index/
       - name: Checkout canonical merger and overlay builder
         uses: actions/checkout@v5
         with:
