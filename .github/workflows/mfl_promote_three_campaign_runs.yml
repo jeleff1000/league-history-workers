@@ -65,7 +65,7 @@ jobs:
       - name: Restore current canonical MFL index
         uses: actions/cache/restore@v5
         with:
-          path: prior_index
+          path: index_state
           key: ${{ inputs.prior_index_key }}
           fail-on-cache-miss: true
       - name: Set up Python and DuckDB
@@ -120,7 +120,7 @@ jobs:
           python code/scripts/extraplatform_corpus/merge_mfl_saved_chunk.py \
             --source-db source_chunk.duckdb \
             --source-index source_index.json \
-            --prior-index prior_index/mfl_register_all_runs.json \
+            --prior-index index_state/mfl_register_all_runs.json \
             --output-db mfl_register_chunk.duckdb \
             --output-index mfl_register_all_runs.json \
             --proof cache_append_proof.json \
