@@ -105,6 +105,24 @@ jobs:
           python code/scripts/research_cohorts/build_mfl_research_overlay.py \
             --chunk mfl_register_chunk.duckdb \
             --output mfl_research_overlay.duckdb
+          python - <<'PY'
+          import json, duckdb
+          expected={
+            'league_settings': ['db_name','year','num_teams','is_dynasty','max_keepers','sleeper_best_ball','waiver_budget','waiver_type','roster_QB','roster_RB','roster_WR','roster_TE','roster_FLX','roster_SUPER_FLEX','roster_IDP','roster_DL','roster_LB','roster_DB','roster_DB_LB','roster_DL_LB','scoring_rec','scoring_pass_td','playoff_start_week','playoff_teams','regular_season_weeks','end_week','has_multiweek_championship','roster_K','roster_DEF','roster_BN','roster_TAXI','roster_IR','platform','league_key'],
+            'player_fantasy': ['db_name','year','week','NFL_player_id','player','position','fantasy_position','platform','team_key','team_name','nfl_team_api','yahoo_player_id','sleeper_player_id','espn_player_id','fleaflicker_player_id','mfl_player_id','is_started','is_rostered','fantasy_points','win','champion','clutch_equity','manager_lamar','manager','team_points','final_playoff_seed','is_playoffs','made_po_bf','is_playoffs_bf','made_po','has_po_signal'],
+            'matchup': ['db_name','year','week','manager','franchise_id','opponent','team_points','opponent_points','win','loss','tie','is_playoffs','playoff_seed','final_playoff_seed','champion','is_championship','p_champ'],
+          }
+          c=duckdb.connect('mfl_research_overlay.duckdb',read_only=True)
+          rows={}; schemas={}
+          for table, cols in expected.items():
+              actual=[r[0] for r in c.execute(f'DESCRIBE "{table}"').fetchall()]
+              if actual != cols: raise SystemExit(f'{table} research schema mismatch: {actual}')
+              rows[table]=c.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+              schemas[table]=actual
+              if rows[table] <= 0: raise SystemExit(f'{table} overlay is empty')
+          json.dump({'schema_unchanged':True,'rows':rows,'columns':schemas,'new_lineage':False},open('mfl_research_overlay_proof.json','w'),indent=2,sort_keys=True)
+          print(json.dumps({'rows':rows,'schema_unchanged':True},sort_keys=True))
+          PY
           mkdir -p research_overlay_state
           cp mfl_research_overlay.duckdb research_overlay_state/
       - name: Stage successor caches
@@ -136,3 +154,4 @@ jobs:
             mfl_register_all_runs.json
             cache_append_proof.json
             mfl_research_overlay.duckdb
+            mfl_research_overlay_proof.json
