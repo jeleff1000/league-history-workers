@@ -926,7 +926,7 @@ jobs:
           ATTEMPT_SUFFIX: ${{ inputs.attempt_suffix }}
           STORAGE_MODE: ${{ inputs.storage_mode }}
         run: |
-          if [ "$STORAGE_MODE" = chunked ]; then ROOT=index_state; else ROOT=prior_state; fi
+          if [ "$STORAGE_MODE" = chunked ] || [ "$STORAGE_MODE" = fetch_only ]; then ROOT=index_state; else ROOT=prior_state; fi
           export ROOT
           state=$(python3 -c 'import json,os; print(json.dumps(json.load(open(os.path.join(os.environ["ROOT"],"mfl_register_all_runs.json"),encoding="utf-8")).get("accepted_by_year",{}),separators=(",",":")))')
           complete=$(python3 -c 'import json,os; d=json.load(open(os.path.join(os.environ["ROOT"],"mfl_register_all_runs.json"),encoding="utf-8")); print("true" if d.get("complete_targets") else "false")')

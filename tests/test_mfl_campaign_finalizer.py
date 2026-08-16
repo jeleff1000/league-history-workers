@@ -20,3 +20,9 @@ def test_finalizer_proof_is_required_before_canonical_save():
     text = WORKFLOW.read_text(encoding="utf-8")
     assert "canonical_append_proof.json" in text
     assert "fail-on-cache-miss: true" in text
+
+
+def test_fetch_only_continuation_reads_the_chunk_index():
+    text = WORKFLOW.read_text(encoding="utf-8")
+    assert '"$STORAGE_MODE" = fetch_only' in text
+    assert "ROOT=index_state" in text
