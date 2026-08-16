@@ -334,6 +334,7 @@ jobs:
           sparse-checkout: |
             /fantasy_football_data_scripts/multi_league/core/canonical_player.py
             /scripts/extraplatform_corpus/merge_mfl_chunk.py
+            /scripts/research_cohorts/build_mfl_research_overlay.py
             /corpus_seed/
       - name: Restore prior MFL player catalog cache
         uses: actions/cache/restore@v5
