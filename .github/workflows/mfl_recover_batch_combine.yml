@@ -120,6 +120,7 @@ jobs:
           json.dump(proof,open('mfl_research_overlay_proof.json','w'),indent=2,sort_keys=True)
           print(json.dumps({'rows':rows,'schema_unchanged':True},sort_keys=True))
           c.close()
+          PY
           python - <<'PY'
           import json
           proof=json.load(open('cache_append_proof.json'))
