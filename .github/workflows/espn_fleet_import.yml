@@ -520,7 +520,7 @@ jobs:
         run: |
           cd fantasy_football_data_scripts
           python ../scripts/refresh_aggregates.py \
-            --db ${{ env.DB_NAME }} \
+            --db ${{ matrix.database_name }} \
             --data-dir ${{ steps.import.outputs.data_dir }}
 
       # ==================== UPLOAD ====================

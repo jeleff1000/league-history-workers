@@ -419,7 +419,7 @@ jobs:
         run: |
           cd fantasy_football_data_scripts
           python ../scripts/refresh_aggregates.py \
-            --db ${{ env.DB_NAME }} \
+            --db ${{ steps.parse.outputs.database_name }} \
             --data-dir ${{ env.DATA_DIR }}
 
       # ==================== UPLOAD LEAGUE DATA ====================

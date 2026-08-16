@@ -494,7 +494,7 @@ jobs:
         if: steps.import.outputs.exit_code == '0'
         run: |
           python scripts/refresh_aggregates.py \
-            --db "$DB_NAME"
+            --db "${{ steps.parse.outputs.database_name }}"
 
       # ==================== REVALIDATE + WARM VERCEL CACHE ====================
       - name: Revalidate and warm Vercel cache

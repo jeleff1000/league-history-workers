@@ -403,7 +403,7 @@ jobs:
         run: |
           cd fantasy_football_data_scripts
           python ../scripts/refresh_aggregates.py \
-            --db ${{ env.DB_NAME }} \
+            --db ${{ steps.parse.outputs.database_name }} \
             --data-dir ${{ env.DATA_DIR }}
 
       # ==================== UPLOAD LEAGUE DATA ====================
@@ -432,7 +432,7 @@ jobs:
         if: steps.import.outputs.exit_code == '0'
         run: |
           python scripts/refresh_aggregates.py \
-            --db "$DB_NAME"
+            --db "${{ steps.parse.outputs.database_name }}"
 
       # ==================== REVALIDATE + WARM VERCEL CACHE ====================
       - name: Revalidate and warm Vercel cache

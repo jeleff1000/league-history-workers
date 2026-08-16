@@ -526,7 +526,7 @@ jobs:
         run: |
           cd fantasy_football_data_scripts
           python ../scripts/refresh_aggregates.py \
-            --db ${DB_NAME} \
+            --db ${{ steps.parse.outputs.database_name }} \
             --data-dir ${DATA_DIR}
 
       # ==================== UPLOAD LEAGUE DATA ====================
