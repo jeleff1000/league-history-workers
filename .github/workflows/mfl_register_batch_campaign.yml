@@ -203,6 +203,60 @@ jobs:
           print('batches='+json.dumps(batches,separators=(',',':')))
           print('max_parallel='+str(min(max(1,int(os.environ['MAX'])),len(batches))))
           PY
+      - name: Write durable batch plan
+        env:
+          MANIFEST: ${{ inputs.storage_mode == 'fetch_only' && 'pending_manifest.json' || format('code/{0}', inputs.manifest_path) }}
+          BATCH_START: ${{ inputs.batch_start }}
+          BATCH_COUNT: ${{ inputs.batch_count }}
+          BATCH_SIZE: ${{ inputs.batch_size }}
+          MAX_PARALLEL: ${{ inputs.max_parallel }}
+          CACHE_NAMESPACE: ${{ inputs.cache_namespace }}
+          ATTEMPT_SUFFIX: ${{ inputs.attempt_suffix }}
+          STORAGE_MODE: ${{ inputs.storage_mode }}
+          PRIOR_INDEX_KEY: ${{ inputs.prior_index_key }}
+          TARGET_YEARS: ${{ inputs.target_years }}
+          TARGET_PER_YEAR: ${{ inputs.target_per_year }}
+          COLLECT_ALL: ${{ inputs.collect_all }}
+          RETRY_REJECTED: ${{ inputs.retry_rejected }}
+          SOURCE_RUN_ID: ${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          rows=json.load(open(os.environ['MANIFEST'], encoding='utf-8'))
+          rows=rows.get('rows', rows.get('leagues', rows))
+          start=int(os.environ['BATCH_START']); count=int(os.environ['BATCH_COUNT']); size=int(os.environ['BATCH_SIZE'])
+          selected=rows[start*size:min(len(rows),(start+count)*size)]
+          ns=os.environ['CACHE_NAMESPACE']; suffix=os.environ['ATTEMPT_SUFFIX']
+          plan={
+            'schema_version':'mfl_batch_plan_v1',
+            'source_run_id':os.environ['SOURCE_RUN_ID'],
+            'created_at':os.environ.get('GITHUB_RUN_ATTEMPT',''),
+            'storage_mode':os.environ['STORAGE_MODE'],
+            'batch_start':start,'batch_count':count,'batch_size':size,
+            'max_parallel':int(os.environ['MAX_PARALLEL']),
+            'cache_namespace':ns,'attempt_suffix':suffix,
+            'prior_index_key':os.environ['PRIOR_INDEX_KEY'],
+            'target_years':[x.strip() for x in os.environ['TARGET_YEARS'].split(',') if x.strip()],
+            'target_per_year':int(os.environ['TARGET_PER_YEAR']),
+            'collect_all':os.environ['COLLECT_ALL'].lower()=='true',
+            'retry_rejected':os.environ['RETRY_REJECTED'].lower()=='true',
+            'planned_league_years':[{'season':int(r['season']),'league_id':str(r['league_id'])} for r in selected],
+            'source_cache_keys':{
+              'chunk':f'{ns}-chunk-{start}-{count}{suffix}',
+              'index':f'{ns}-index-{start}-{count}{suffix}',
+              'research_overlay':f'{ns}-research-overlay-{start}-{count}{suffix}',
+            },
+          }
+          Path('batch_plan.json').write_text(json.dumps(plan,indent=2,sort_keys=True),encoding='utf-8')
+          PY
+      - name: Publish durable batch plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-batch-plan-${{ github.run_id }}
+          retention-days: 90
+          if-no-files-found: ignore
+          path: batch_plan.json
 
   ingest:
     needs: prepare

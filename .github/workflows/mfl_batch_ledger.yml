@@ -1,0 +1,84 @@
+name: MFL Batch Ledger
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  ledger:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout ledger builder
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            /scripts/extraplatform_corpus/build_mfl_batch_ledger.py
+          sparse-checkout-cone-mode: false
+      - name: Collect workflow run inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p runs plans canonical
+          gh run list --workflow mfl_register_batch_campaign.yml --limit 1000 --json databaseId,status,conclusion,createdAt,updatedAt,headSha > runs/mfl_register_batch_campaign.json
+          gh run list --workflow mfl_recover_batch_combine.yml --limit 1000 --json databaseId,status,conclusion,createdAt,updatedAt,headSha > runs/mfl_recover_batch_combine.json
+          gh run list --workflow mfl_reduce_saved_chunk.yml --limit 1000 --json databaseId,status,conclusion,createdAt,updatedAt,headSha > runs/mfl_reduce_saved_chunk.json
+      - name: Download durable plans from campaign runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          from pathlib import Path
+          rows=json.loads(Path('runs/mfl_register_batch_campaign.json').read_text())
+          for row in rows:
+              run_id=str(row['databaseId'])
+              out=Path('plans')/run_id
+              out.mkdir(parents=True,exist_ok=True)
+              subprocess.run(['gh','run','download',run_id,'--name',f'mfl-batch-plan-{run_id}','--dir',str(out)],check=False)
+          PY
+      - name: Restore latest canonical index cache
+        id: canonical_cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          key=$(gh cache list --limit 200 --sort created_at --order desc --json key --jq '[.[] | select(.key | startswith("mfl-registered-2004-2018-v2-index-"))][0].key')
+          test -n "$key" && test "$key" != null
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+      - name: Restore canonical index
+        uses: actions/cache/restore@v5
+        with:
+          path: canonical/index_state
+          key: ${{ steps.canonical_cache.outputs.key }}
+          fail-on-cache-miss: true
+      - name: Collect Actions cache inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh cache list --limit 1000 --sort created_at --order desc --json key,sizeInBytes,createdAt,lastAccessedAt > caches.json
+      - name: Build ledger snapshot
+        run: |
+          python3 scripts/extraplatform_corpus/build_mfl_batch_ledger.py \
+            --plans-root plans \
+            --runs-root runs \
+            --caches caches.json \
+            --canonical-index canonical/index_state/mfl_register_all_runs.json \
+            --output mfl_batch_ledger.json
+      - name: Upload latest ledger snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-batch-ledger-${{ github.run_id }}
+          retention-days: 90
+          path: |
+            mfl_batch_ledger.json
+            runs/
+            caches.json
+      - name: Save immutable ledger snapshot cache
+        uses: actions/cache/save@v5
+        with:
+          path: mfl_batch_ledger.json
+          key: mfl-batch-ledger-v1-${{ github.run_id }}
