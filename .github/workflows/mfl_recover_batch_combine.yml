@@ -1,0 +1,154 @@
+name: MFL Recover Batch Combine
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 'Failed campaign run whose ingest artifacts should be recombined'
+        required: true
+        type: string
+      yahoo_oauth_ref:
+        description: 'Private pipeline ref containing the canonical transformer'
+        required: false
+        type: string
+        default: codex/mfl-gates
+      cache_namespace:
+        description: 'Immutable cache namespace used by the source campaign'
+        required: true
+        type: string
+      batch_start:
+        description: 'Source campaign batch start'
+        required: true
+        type: string
+      batch_count:
+        description: 'Source campaign batch count'
+        required: true
+        type: string
+      output_suffix:
+        description: 'New immutable suffix for recovered chunk/index/overlay caches'
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  combine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Download successful ingest artifacts from source run
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          pattern: mfl-register-batch-*
+          path: receipts
+          merge-multiple: false
+      - name: Download source pending manifest
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          name: mfl-pending-manifest-${{ inputs.source_run_id }}
+          path: pending_work
+      - name: Checkout canonical schema and overlay transformer
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref }}
+          path: code
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /fantasy_football_data_scripts/multi_league/core/canonical_player.py
+            /scripts/extraplatform_corpus/merge_mfl_chunk.py
+            /scripts/research_cohorts/build_mfl_research_overlay.py
+      - name: Merge player catalogs from successful ingest artifacts
+        shell: bash
+        run: |
+          mkdir -p mfl_player_cache
+          find receipts -type f -name 'mfl_players_*.json' -print0 | while IFS= read -r -d '' src; do
+            name="$(basename "$src")"
+            test -s "mfl_player_cache/$name" || cp "$src" "mfl_player_cache/$name"
+          done
+      - name: Set up Python and DuckDB
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install DuckDB
+        run: python -m pip install duckdb
+      - name: Build canonical chunk from successful artifacts
+        env:
+          PYTHONPATH: ${{ github.workspace }}/code/fantasy_football_data_scripts
+          EXPECTED_PATH: ${{ github.workspace }}/pending_work/pending_manifest.json
+          CHUNK_KEY: ${{ inputs.cache_namespace }}-chunk-${{ inputs.batch_start }}-${{ inputs.batch_count }}-${{ inputs.output_suffix }}
+        run: |
+          python code/scripts/extraplatform_corpus/merge_mfl_chunk.py \
+            --receipts receipts \
+            --expected "$EXPECTED_PATH" \
+            --output-db mfl_register_chunk.duckdb \
+            --output-index mfl_register_all_runs.json \
+            --proof cache_append_proof.json \
+            --chunk-key "$CHUNK_KEY"
+      - name: Build and prove exact research overlay
+        run: |
+          python code/scripts/research_cohorts/build_mfl_research_overlay.py \
+            --chunk mfl_register_chunk.duckdb \
+            --output mfl_research_overlay.duckdb
+          python - <<'PY'
+          import json, duckdb
+          expected={
+            'league_settings': ['db_name','year','num_teams','is_dynasty','max_keepers','sleeper_best_ball','waiver_budget','waiver_type','roster_QB','roster_RB','roster_WR','roster_TE','roster_FLX','roster_SUPER_FLEX','roster_IDP','roster_DL','roster_LB','roster_DB','roster_DB_LB','roster_DL_LB','scoring_rec','scoring_pass_td','playoff_start_week','playoff_teams','regular_season_weeks','end_week','has_multiweek_championship','roster_K','roster_DEF','roster_BN','roster_TAXI','roster_IR','platform','league_key'],
+            'player_fantasy': ['db_name','year','week','NFL_player_id','player','position','fantasy_position','platform','team_key','team_name','nfl_team_api','yahoo_player_id','sleeper_player_id','espn_player_id','fleaflicker_player_id','mfl_player_id','is_started','is_rostered','fantasy_points','win','champion','clutch_equity','manager_lamar','manager','team_points','final_playoff_seed','is_playoffs','made_po_bf','is_playoffs_bf','made_po','has_po_signal'],
+            'matchup': ['db_name','year','week','manager','franchise_id','opponent','team_points','opponent_points','win','loss','tie','is_playoffs','playoff_seed','final_playoff_seed','champion','is_championship','p_champ'],
+          }
+          c=duckdb.connect('mfl_research_overlay.duckdb',read_only=True)
+          rows={}; schemas={}
+          for table, cols in expected.items():
+              actual=[r[0] for r in c.execute(f'DESCRIBE "{table}"').fetchall()]
+              if actual != cols: raise SystemExit(f'{table} research schema mismatch: {actual}')
+              rows[table]=c.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+              schemas[table]=actual
+              if rows[table] <= 0: raise SystemExit(f'{table} overlay is empty')
+          proof={'schema_unchanged':True,'rows':rows,'columns':schemas,'new_lineage':False,'source_run_id':str('${{ inputs.source_run_id }}')}
+          json.dump(proof,open('mfl_research_overlay_proof.json','w'),indent=2,sort_keys=True)
+          print(json.dumps({'rows':rows,'schema_unchanged':True},sort_keys=True))
+          c.close()
+          python - <<'PY'
+          import json
+          proof=json.load(open('cache_append_proof.json'))
+          if proof.get('new_lineage') is not False or proof.get('schema_unchanged') is not True:
+              raise SystemExit('canonical append proof failed')
+          PY
+      - name: Save recovered canonical chunk
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            mfl_register_chunk.duckdb
+            cache_append_proof.json
+            mfl_register_all_runs.json
+          key: ${{ inputs.cache_namespace }}-chunk-${{ inputs.batch_start }}-${{ inputs.batch_count }}-${{ inputs.output_suffix }}
+      - name: Save recovered chunk index
+        uses: actions/cache/save@v5
+        with:
+          path: mfl_register_all_runs.json
+          key: ${{ inputs.cache_namespace }}-index-${{ inputs.batch_start }}-${{ inputs.batch_count }}-${{ inputs.output_suffix }}
+      - name: Save exact research overlay
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            mfl_research_overlay.duckdb
+            mfl_research_overlay_proof.json
+          key: ${{ inputs.cache_namespace }}-research-overlay-${{ inputs.batch_start }}-${{ inputs.batch_count }}-${{ inputs.output_suffix }}
+      - name: Upload recovery proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-recovery-proof-${{ github.run_id }}
+          path: |
+            mfl_register_all_runs.json
+            cache_append_proof.json
+            mfl_research_overlay_proof.json
