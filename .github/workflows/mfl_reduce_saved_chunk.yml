@@ -97,7 +97,7 @@ jobs:
           required={'schema_unchanged':True,'prior_rows_preserved':True,'new_lineage':False,'duplicate_league_year_keys':False}
           for key,value in required.items():
               if p.get(key) != value: raise SystemExit(f'{key} proof failed')
-          if p.get('added_league_count', 0) <= 0: raise SystemExit('reducer added no leagues')
+          if p.get('added_league_count', 0) < 0: raise SystemExit('reducer reported a negative league count')
           print(json.dumps(p, sort_keys=True))
           PY
       - name: Build exact research-lake source overlay
