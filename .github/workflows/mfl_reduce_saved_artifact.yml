@@ -1,0 +1,151 @@
+name: MFL Reduce Retained Chunk Artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Run containing the retained MFL chunk artifact
+        required: true
+        type: string
+      source_artifact_name:
+        description: Exact retained artifact containing the chunk and index
+        required: true
+        type: string
+      prior_index_key:
+        description: Exact canonical index cache key to extend
+        required: true
+        type: string
+      cache_namespace:
+        description: Canonical immutable cache namespace
+        required: false
+        type: string
+        default: mfl-registered-2004-2018-v2
+      output_suffix:
+        description: Unique immutable successor suffix
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  reduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Download retained source artifact
+        uses: actions/download-artifact@v5
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.source_run_id }}
+          name: ${{ inputs.source_artifact_name }}
+          path: source_artifact
+
+      - name: Restore canonical prior index
+        uses: actions/cache/restore@v5
+        with:
+          path: prior_index
+          key: ${{ inputs.prior_index_key }}
+          fail-on-cache-miss: true
+
+      - name: Checkout reducer
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: codex/mfl-gates
+          path: code
+          filter: blob:none
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/extraplatform_corpus/merge_mfl_saved_chunk.py
+            /scripts/research_cohorts/build_mfl_research_overlay.py
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install DuckDB
+        run: python -m pip install duckdb
+
+      - name: Merge retained artifact and prove append
+        env:
+          OUTPUT_KEY: ${{ inputs.cache_namespace }}-chunk-${{ inputs.output_suffix }}
+        run: |
+          python code/scripts/extraplatform_corpus/merge_mfl_saved_chunk.py \
+            --source-db source_artifact/mfl_register_chunk.duckdb \
+            --source-index source_artifact/mfl_register_all_runs.json \
+            --prior-index prior_index/mfl_register_all_runs.json \
+            --output-db mfl_register_chunk.duckdb \
+            --output-index mfl_register_all_runs.json \
+            --proof cache_append_proof.json \
+            --output-key "$OUTPUT_KEY"
+          python - <<'PY'
+          import json
+          p=json.load(open('cache_append_proof.json', encoding='utf-8'))
+          required={'schema_unchanged':True,'prior_rows_preserved':True,'new_lineage':False,'duplicate_league_year_keys':False}
+          for key,value in required.items():
+              if p.get(key) != value: raise SystemExit(f'{key} proof failed')
+          if p.get('added_league_count', 0) <= 0: raise SystemExit('artifact reducer added no leagues')
+          print(json.dumps(p, sort_keys=True))
+          PY
+
+      - name: Build and prove canonical research overlay
+        run: |
+          python code/scripts/research_cohorts/build_mfl_research_overlay.py \
+            --chunk mfl_register_chunk.duckdb \
+            --output mfl_research_overlay.duckdb
+          python - <<'PY'
+          import json, duckdb
+          expected={
+            'league_settings': ['db_name','year','num_teams','is_dynasty','max_keepers','sleeper_best_ball','waiver_budget','waiver_type','roster_QB','roster_RB','roster_WR','roster_TE','roster_FLX','roster_SUPER_FLEX','roster_IDP','roster_DL','roster_LB','roster_DB','roster_DB_LB','roster_DL_LB','scoring_rec','scoring_pass_td','playoff_start_week','playoff_teams','regular_season_weeks','end_week','has_multiweek_championship','roster_K','roster_DEF','roster_BN','roster_TAXI','roster_IR','platform','league_key'],
+            'player_fantasy': ['db_name','year','week','NFL_player_id','player','position','fantasy_position','platform','team_key','team_name','nfl_team_api','yahoo_player_id','sleeper_player_id','espn_player_id','fleaflicker_player_id','mfl_player_id','is_started','is_rostered','fantasy_points','win','champion','clutch_equity','manager_lamar','manager','team_points','final_playoff_seed','is_playoffs','made_po_bf','is_playoffs_bf','made_po','has_po_signal'],
+            'matchup': ['db_name','year','week','manager','franchise_id','opponent','team_points','opponent_points','win','loss','tie','is_playoffs','playoff_seed','final_playoff_seed','champion','is_championship','p_champ'],
+          }
+          c=duckdb.connect('mfl_research_overlay.duckdb',read_only=True); rows={}
+          for table, cols in expected.items():
+              actual=[r[0] for r in c.execute(f'DESCRIBE "{table}"').fetchall()]
+              if actual != cols: raise SystemExit(f'{table} research schema mismatch')
+              rows[table]=c.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
+              if rows[table] <= 0: raise SystemExit(f'{table} overlay is empty')
+          json.dump({'schema_unchanged':True,'rows':rows,'new_lineage':False},open('mfl_research_overlay_proof.json','w'),indent=2,sort_keys=True)
+          print(json.dumps({'rows':rows,'schema_unchanged':True},sort_keys=True)); c.close()
+          PY
+
+      - name: Stage validated successor caches
+        run: |
+          mkdir -p chunk_state index_state research_overlay_state
+          cp mfl_register_chunk.duckdb cache_append_proof.json chunk_state/
+          cp mfl_register_all_runs.json index_state/
+          cp mfl_research_overlay.duckdb mfl_research_overlay_proof.json research_overlay_state/
+
+      - name: Save recovered canonical chunk
+        uses: actions/cache/save@v5
+        with:
+          path: chunk_state
+          key: ${{ inputs.cache_namespace }}-chunk-${{ inputs.output_suffix }}
+
+      - name: Save recovered canonical index
+        uses: actions/cache/save@v5
+        with:
+          path: index_state
+          key: ${{ inputs.cache_namespace }}-index-${{ inputs.output_suffix }}
+
+      - name: Save recovered canonical research overlay
+        uses: actions/cache/save@v5
+        with:
+          path: research_overlay_state
+          key: ${{ inputs.cache_namespace }}-research-overlay-${{ inputs.output_suffix }}
+
+      - name: Upload recovery proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-artifact-reducer-proof-${{ github.run_id }}
+          retention-days: 90
+          path: |
+            mfl_register_all_runs.json
+            cache_append_proof.json
+            mfl_research_overlay_proof.json
