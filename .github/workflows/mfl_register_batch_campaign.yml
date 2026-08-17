@@ -666,8 +666,8 @@ jobs:
                   raise SystemExit(f'canonical proof failed: {key}={proof.get(key)!r}')
           if proof.get('added_league_count', 0) <= 0:
               raise SystemExit('canonical reducer added no leagues')
-           print(json.dumps(proof, sort_keys=True))
-           PY
+          print(json.dumps(proof, sort_keys=True))
+          PY
       - name: Normalize initial canonical proof
         if: ${{ (inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only') && inputs.prior_index_key == '' }}
         env:
