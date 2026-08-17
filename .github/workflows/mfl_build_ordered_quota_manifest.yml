@@ -29,7 +29,7 @@ jobs:
       - name: Restore live MFL cache read-only
         uses: actions/cache/restore@v5
         with:
-          path: live_cache
+          path: chunk_state
           key: ${{ env.MFL_CHUNK_KEY }}
           restore-keys: |
             mfl-registered-2004-2018-v2-chunk-recover-mass-remaining-v31-r9-20260816-
@@ -38,8 +38,8 @@ jobs:
       - name: Require restored live cache
         run: |
           set -euo pipefail
-          find live_cache -type f -maxdepth 4 -print
-          test -n "$(find live_cache -type f -name '*.duckdb' -print -quit)"
+          find chunk_state -maxdepth 4 -type f -print
+          test -n "$(find chunk_state -type f -name '*.duckdb' -print -quit)"
 
       - uses: actions/setup-python@v6
         with:
@@ -71,7 +71,7 @@ jobs:
               if 2000 <= year <= 2018:
                   discovered[year].add(str(row["league_id"]).zfill(5))
 
-          db_path = next(Path("live_cache").rglob("*.duckdb"), None)
+          db_path = next(Path("chunk_state").rglob("*.duckdb"), None)
           if db_path is None:
               raise SystemExit("live cache did not contain a DuckDB file")
 
