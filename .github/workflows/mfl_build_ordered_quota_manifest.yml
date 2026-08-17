@@ -31,7 +31,15 @@ jobs:
         with:
           path: live_cache
           key: ${{ env.MFL_CHUNK_KEY }}
-          fail-on-cache-miss: true
+          restore-keys: |
+            mfl-registered-2004-2018-v2-chunk-recover-mass-remaining-v31-r9-20260816-
+          fail-on-cache-miss: false
+
+      - name: Require restored live cache
+        run: |
+          set -euo pipefail
+          find live_cache -type f -maxdepth 4 -print
+          test -n "$(find live_cache -type f -name '*.duckdb' -print -quit)"
 
       - uses: actions/setup-python@v6
         with:
