@@ -54,108 +54,53 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
-          import csv
-          import gzip
-          import json
-          import os
+          import csv, gzip, json, os, re
           from collections import defaultdict
           from pathlib import Path
-
           import duckdb
 
+          registry_path = Path(os.environ["REGISTRY_PATH"])
           discovered = defaultdict(set)
-          with gzip.open(os.environ["REGISTRY_PATH"], mode="rt", newline="", encoding="utf-8") as fh:
+          with gzip.open(registry_path, mode="rt", newline="", encoding="utf-8") as fh:
               for row in csv.DictReader(fh):
                   discovered[int(row["season"])].add(str(row["league_id"]).zfill(5))
-
           db_path = next(Path("chunk_state").rglob("*.duckdb"), None)
           if db_path is None:
               raise SystemExit("live cache did not contain a DuckDB file")
-
           con = duckdb.connect(str(db_path), read_only=True)
           tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
           candidates = []
           for table in tables:
               cols = {r[1] for r in con.execute(f'PRAGMA table_info("{table}")').fetchall()}
-              if {"db_name", "year"}.issubset(cols):
-                  candidates.append(table)
-          if not candidates:
-              raise SystemExit(f"live cache has no table with db_name/year; tables={tables}")
+              if {"db_name", "year"}.issubset(cols): candidates.append(table)
+          if not candidates: raise SystemExit(f"live cache has no db_name/year table; tables={tables}")
           table = "league_settings" if "league_settings" in candidates else candidates[0]
           live = defaultdict(set)
-          for year, db_name in con.execute(
-              f'SELECT DISTINCT CAST(year AS INTEGER), CAST(db_name AS VARCHAR) FROM "{table}" WHERE year BETWEEN 2000 AND 2018'
-          ).fetchall():
-              live[int(year)].add(str(db_name).zfill(5))
+          malformed_live = defaultdict(set)
+          for year, db_name in con.execute(f'SELECT DISTINCT CAST(year AS INTEGER), CAST(db_name AS VARCHAR) FROM "{table}" WHERE year BETWEEN 2000 AND 2018').fetchall():
+              raw_id = str(db_name).strip()
+              if re.fullmatch(r"\d{5}", raw_id):
+                  live[int(year)].add(raw_id)
+              else:
+                  malformed_live[int(year)].add(raw_id)
           con.close()
-
-          fetched = {2000: 0, 2001: 0, 2002: 0, 2003: 0, 2004: 4780, 2005: 935,
-                     2006: 7719, 2007: 2136, 2008: 2195, 2009: 2133, 2010: 2155,
-                     2011: 2170, 2012: 1801, 2013: 1288, 2014: 865, 2015: 836,
-                     2016: 9114, 2017: 468, 2018: 773}
-
-          # The supplied 2000 total is the intentional first-stage floor.
-          stage_targets = [
-              (1, 2000, 2000, list(range(2000, 2019))),
-              (2, 5000, 5000, list(range(2002, 2019))),
-              (3, 10000, 10000, list(range(2003, 2019))),
-          ]
-          current = {year: len(live[year]) for year in range(2000, 2019)}
-          # Preserve the known fetched scoreboard where the protected cache does
-          # not cover 2000-2003; the live cache remains authoritative whenever it
-          # has rows for a year.
-          for year in range(2000, 2019):
-              if current[year] == 0:
-                  current[year] = fetched[year]
-
-          rows = []
-          used = defaultdict(set)
-          for stage, target, _, years in stage_targets:
+          expected_live = {2004:4780,2005:935,2006:7719,2007:2136,2008:2195,2009:2133,2010:2155,2011:2170,2012:1801,2013:1288,2014:865,2015:836,2016:9114,2017:468,2018:773}
+          actual_live = {y: len(live[y]) for y in expected_live}
+          if actual_live != expected_live:
+              raise SystemExit(f"39k live-cache validation failed: expected={expected_live}, actual={actual_live}, malformed={dict(malformed_live)}")
+          fetched = {2000:0,2001:0,2002:0,2003:0,2004:4780,2005:935,2006:7719,2007:2136,2008:2195,2009:2133,2010:2155,2011:2170,2012:1801,2013:1288,2014:865,2015:836,2016:9114,2017:468,2018:773}
+          current = {y: len(live[y]) or fetched[y] for y in range(2000,2019)}
+          rows=[]; used=defaultdict(set)
+          for stage,target,years in [(1,2000,range(2000,2019)),(2,5000,range(2002,2019)),(3,10000,range(2003,2019))]:
               for year in years:
-                  already = current[year] + len(used[year])
-                  need = max(0, target - already)
-                  available = sorted(discovered[year] - live[year] - used[year], key=lambda x: (int(x), x))
-                  selected = available[:need]
+                  need=max(0,target-(current[year]+len(used[year])))
+                  selected=sorted(discovered[year]-live[year]-used[year], key=lambda x:(int(x),x))[:need]
                   used[year].update(selected)
-                  for ordinal, league_id in enumerate(selected, 1):
-                      rows.append({
-                          "stage": stage,
-                          "target_per_year": target,
-                          "year_order": year,
-                          "year_ordinal": ordinal,
-                          "season": year,
-                          "league_id": league_id,
-                          "source": "registry_minus_live_cache",
-                      })
-
-          out = Path("mfl_ordered_quota_manifest.csv")
-          with out.open("w", newline="", encoding="utf-8") as fh:
-              writer = csv.DictWriter(fh, fieldnames=list(rows[0]) if rows else ["stage", "target_per_year", "year_order", "year_ordinal", "season", "league_id", "source"])
-              writer.writeheader()
-              writer.writerows(rows)
-
-          scoreboard = []
-          for year in range(2000, 2019):
-              scoreboard.append({
-                  "year": year,
-                  "live_cache_ids": len(live[year]),
-                  "effective_current": current[year],
-                  "registry_discovered_ids": len(discovered[year]),
-                  "stage1_needed": max(0, 2000 - current[year]),
-                  "stage2_needed_after_stage1": max(0, 5000 - max(current[year], 2000)),
-                  "stage3_needed_after_stage2": max(0, 10000 - max(current[year], 5000)),
-              })
-          Path("mfl_quota_validation.json").write_text(json.dumps({
-              "live_cache_key": os.environ["MFL_CHUNK_KEY"],
-              "live_table_used": table,
-              "discovered_registry": str(registry_path),
-              "rows_in_manifest": len(rows),
-              "scoreboard": scoreboard,
-          }, indent=2) + "\n", encoding="utf-8")
-          print(f"live table: {table}")
-          print(f"manifest rows: {len(rows)}")
-          for item in scoreboard:
-              print(item)
+                  for ordinal,league_id in enumerate(selected,1): rows.append({"stage":stage,"target_per_year":target,"year_order":year,"year_ordinal":ordinal,"season":year,"league_id":league_id,"source":"registry_minus_live_cache"})
+          with open("mfl_ordered_quota_manifest.csv","w",newline="",encoding="utf-8") as fh:
+              writer=csv.DictWriter(fh,fieldnames=["stage","target_per_year","year_order","year_ordinal","season","league_id","source"]); writer.writeheader(); writer.writerows(rows)
+          Path("mfl_quota_validation.json").write_text(json.dumps({"live_cache_key":os.environ["MFL_CHUNK_KEY"],"live_table_used":table,"live_cache_total_ids":sum(len(live[y]) for y in expected_live),"malformed_live_ids":{str(y):sorted(values) for y,values in malformed_live.items()},"discovered_registry":str(registry_path),"rows_in_manifest":len(rows),"scoreboard":[{"year":y,"live_cache_ids":len(live[y]),"effective_current":current[y],"registry_discovered_ids":len(discovered[y]),"stage1_needed":max(0,2000-current[y]),"stage2_needed_after_stage1":max(0,5000-max(current[y],2000)),"stage3_needed_after_stage2":max(0,10000-max(current[y],5000))} for y in range(2000,2019)]},indent=2)+"\n")
+          print(f"live table: {table}"); print(f"validated live cache IDs: {sum(len(live[y]) for y in expected_live)}"); print(f"malformed live IDs ignored: {sum(len(v) for v in malformed_live.values())}"); print(f"manifest rows: {len(rows)}")
           PY
 
       - name: Upload validated manifest
