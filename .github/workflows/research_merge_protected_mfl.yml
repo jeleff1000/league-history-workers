@@ -43,7 +43,7 @@ jobs:
           ], text=True)
           pages = json.loads(raw)
           caches = [cache for page in pages for cache in page.get("actions_caches", [])]
-          chunk_pattern = re.compile(r"^mfl-population-batch-v1-chunk-0-1-allrun-(\\d+)$")
+          chunk_pattern = re.compile(r"^mfl-population-batch-v1-chunk-0-1-allrun-(\d+)$")
           keys = {str(cache["key"]) for cache in caches}
           include = []
           for key in sorted(keys):
