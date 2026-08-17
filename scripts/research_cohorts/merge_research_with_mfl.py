@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -137,6 +138,7 @@ def main() -> None:
         }
 
         for table in base_tables:
+            table_started = time.monotonic()
             base_schema = table_columns(con, "base", "public", table)
             columns = ", ".join(qi(name) for name, _ in base_schema)
             if table not in TABLES:
@@ -171,6 +173,12 @@ def main() -> None:
                 "ON s.db_name=p.db_name AND CAST(s.year AS INTEGER)=p.year"
             )
             source_pair_count = int(con.execute("SELECT COUNT(*) FROM _mfl_table_pairs").fetchone()[0])
+            print(
+                f"[mfl-merge] phase=table_source table={table} "
+                f"mfl_source_rows={source_rows} source_league_years={source_pair_count} "
+                f"missing_league_years={len(pairs) - source_pair_count}",
+                flush=True,
+            )
             # A registered MFL league-year can legitimately lack one table
             # (notably league_settings).  That is not a deletion signal: only
             # source pairs physically present in this table supersede the base.
@@ -209,6 +217,12 @@ def main() -> None:
                 "preserved_base_rows": base_preserved,
                 "output_rows": int(con.execute(f"SELECT COUNT(*) FROM public.{qi(table)}").fetchone()[0]),
             }
+            print(
+                f"[mfl-merge] phase=table_complete table={table} "
+                f"output_rows={report['tables'][table]['output_rows']} "
+                f"seconds={time.monotonic() - table_started:.3f}",
+                flush=True,
+            )
 
         args.out.with_suffix(".json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(report, indent=2))

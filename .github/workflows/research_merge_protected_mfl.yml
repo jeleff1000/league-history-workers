@@ -102,7 +102,8 @@ jobs:
           )" = "$MFL_EXPECTED_TOTAL"
           mv merged_research.duckdb merged_lake/corpus_snapshot.duckdb
           mv merged_research.json mfl_merge_proof.json
-          python code/scripts/research_cohorts/validate_research_public_lake.py merged_lake
+          python code/scripts/research_cohorts/validate_research_public_lake.py \
+            merged_lake --without-auxiliary-sidecars
 
       - name: Verify protected MFL and immutable ops were unchanged
         run: |

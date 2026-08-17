@@ -8,6 +8,20 @@ from pathlib import Path
 import duckdb
 
 
+def test_merge_validation_input_list_excludes_unrelated_sidecars_only_when_requested(tmp_path: Path) -> None:
+    from scripts.research_cohorts.validate_research_public_lake import required_input_paths
+
+    full = required_input_paths(tmp_path, require_auxiliary_sidecars=True)
+    merge_only = required_input_paths(tmp_path, require_auxiliary_sidecars=False)
+
+    assert tmp_path / "corpus_snapshot.duckdb" in full
+    assert tmp_path / "ops_cache.duckdb" in full
+    assert tmp_path / "nfl_market_adp.parquet" in full
+    assert tmp_path / "ladder_thresholds.json" in full
+    assert tmp_path / "nfl_market_adp.parquet" not in merge_only
+    assert tmp_path / "ladder_thresholds.json" not in merge_only
+
+
 def _create_db(path: Path, rows: list[tuple[str, int, str, int]]) -> None:
     con = duckdb.connect(str(path))
     con.execute("CREATE SCHEMA public")
@@ -125,6 +139,7 @@ def test_merge_projects_wider_mfl_schema_into_canonical_base_schema(tmp_path: Pa
     )
 
     assert result.returncode == 0, result.stderr
+    assert "[mfl-merge] phase=table_complete table=league_settings" in result.stdout
     con = duckdb.connect(str(out), read_only=True)
     assert [row[0] for row in con.execute("DESCRIBE public.league_settings").fetchall()] == [
         "db_name", "year", "marker", "value"
@@ -262,6 +277,7 @@ def test_protected_mfl_merge_workflow_cannot_mutate_any_source_cache_or_ops_seed
     assert "cmp mfl_seed_before.sha256 mfl_seed_after.sha256" in workflow
     assert "ops_seed_before.sha256" in workflow
     assert "cmp ops_seed_before.sha256 ops_seed_after.sha256" in workflow
+    assert "--without-auxiliary-sidecars" in workflow
     assert "actions/cache/save@" not in workflow
     assert "gh cache delete" not in workflow
     assert "gh api --method DELETE" not in workflow
