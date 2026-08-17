@@ -137,6 +137,7 @@ jobs:
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             /corpus_seed/
+            /derived/mfl_register/quota_planning/
             /scripts/extraplatform_corpus/build_mfl_pending_manifest.py
             /requirements.txt
       - name: Setup Python for shared worker environment
