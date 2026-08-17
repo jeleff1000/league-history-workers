@@ -74,20 +74,23 @@ jobs:
       - name: Restore immutable population chunk
         uses: actions/cache/restore@v5
         with:
-          path: source_cache/${{ matrix.id }}/chunk_state
+          path: chunk_state
           key: ${{ matrix.chunk_key }}
           fail-on-cache-miss: true
 
       - name: Restore immutable population index
         uses: actions/cache/restore@v5
         with:
-          path: source_cache/${{ matrix.id }}/index_state
+          path: index_state
           key: ${{ matrix.index_key }}
           fail-on-cache-miss: true
 
       - name: Receipt for immutable population source
         run: |
           set -euo pipefail
+          mkdir -p source_cache/${{ matrix.id }}
+          mv chunk_state source_cache/${{ matrix.id }}/chunk_state
+          mv index_state source_cache/${{ matrix.id }}/index_state
           sha256sum source_cache/${{ matrix.id }}/chunk_state/mfl_register_chunk.duckdb > source_cache/${{ matrix.id }}/source.sha256
           sha256sum source_cache/${{ matrix.id }}/index_state/mfl_register_all_runs.json >> source_cache/${{ matrix.id }}/source.sha256
 
