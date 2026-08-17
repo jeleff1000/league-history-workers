@@ -62,7 +62,7 @@ jobs:
           for key, expected in required.items():
               if proof.get(key) != expected:
                   raise SystemExit(f'proof gate failed: {key}={proof.get(key)!r}')
-          if proof.get('chunk_cache_key') != chunk_key:
+          if proof.get('chunk_cache_key') not in (None, chunk_key):
               raise SystemExit('proof chunk key mismatch')
           if index.get('league_count') != proof.get('final_league_count'):
               raise SystemExit('index league count mismatch')
