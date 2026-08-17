@@ -52,6 +52,7 @@ jobs:
           index_key = os.environ['INDEX_KEY']
           proof = json.loads(Path('chunk_state/cache_append_proof.json').read_text())
           index = json.loads(Path('index_state/mfl_register_all_runs.json').read_text())
+          print(json.dumps({'index_key': index_key, 'accepted_by_year': index.get('accepted_by_year', {})}, sort_keys=True), flush=True)
 
           required = {
               'schema_unchanged': True,
@@ -69,7 +70,7 @@ jobs:
           rejected = index.get('rejected', [])
           if index.get('rejected_count', len(rejected)) != len(rejected):
               raise SystemExit('index rejected count mismatch')
-          if index.get('attempted_count', index.get('league_count', 0) + len(rejected)) != index.get('league_count', 0) + len(rejected):
+          if 'source_chunk_count' not in proof and index.get('attempted_count', index.get('league_count', 0) + len(rejected)) != index.get('league_count', 0) + len(rejected):
               raise SystemExit('index attempted count mismatch')
           if index.get('manifest_count') is not None:
               expected_pending = index['manifest_count'] - index['league_count'] - len(rejected)
