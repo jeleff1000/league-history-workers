@@ -655,19 +655,6 @@ jobs:
             cp mfl_register_chunk.duckdb canonical_mfl_register_chunk.duckdb
             cp mfl_register_all_runs.json canonical_mfl_register_all_runs.json
             cp cache_append_proof.json canonical_append_proof.json
-            python3 - <<'PY'
-            import json, os
-            key=os.environ['CANONICAL_CHUNK_KEY']
-            proof=json.load(open('canonical_append_proof.json', encoding='utf-8'))
-            source_key=proof.get('chunk_cache_key')
-            proof['chunk_cache_key']=key
-            register=json.load(open('canonical_mfl_register_all_runs.json', encoding='utf-8'))
-            for chunk in register.get('chunks', []):
-                if chunk.get('cache_key') == source_key:
-                    chunk['cache_key']=key
-            json.dump(proof,open('canonical_append_proof.json','w'),indent=2,sort_keys=True)
-            json.dump(register,open('canonical_mfl_register_all_runs.json','w'),indent=2,sort_keys=True)
-            PY
           fi
           python3 - <<'PY'
           import json
@@ -678,7 +665,25 @@ jobs:
                   raise SystemExit(f'canonical proof failed: {key}={proof.get(key)!r}')
           if proof.get('added_league_count', 0) <= 0:
               raise SystemExit('canonical reducer added no leagues')
-          print(json.dumps(proof, sort_keys=True))
+           print(json.dumps(proof, sort_keys=True))
+           PY
+      - name: Normalize initial canonical proof
+        if: ${{ (inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only') && inputs.prior_index_key == '' }}
+        env:
+          CANONICAL_CHUNK_KEY: ${{ inputs.canonical_namespace }}-chunk-campaign-${{ github.run_id }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          key=os.environ['CANONICAL_CHUNK_KEY']
+          proof=json.load(open('canonical_append_proof.json', encoding='utf-8'))
+          source_key=proof.get('chunk_cache_key')
+          proof['chunk_cache_key']=key
+          register=json.load(open('canonical_mfl_register_all_runs.json', encoding='utf-8'))
+          for chunk in register.get('chunks', []):
+              if chunk.get('cache_key') == source_key:
+                  chunk['cache_key']=key
+          json.dump(proof,open('canonical_append_proof.json','w'),indent=2,sort_keys=True)
+          json.dump(register,open('canonical_mfl_register_all_runs.json','w'),indent=2,sort_keys=True)
           PY
       - name: Build canonical research overlay
         if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
