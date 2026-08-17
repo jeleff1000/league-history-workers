@@ -37,22 +37,22 @@ jobs:
       - name: Restore protected MFL chunk read-only
         uses: actions/cache/restore@v5
         with:
-          path: protected_mfl/chunk
+          path: chunk_state
           key: ${{ env.MFL_CHUNK_KEY }}
           fail-on-cache-miss: true
 
       - name: Restore protected MFL index read-only
         uses: actions/cache/restore@v5
         with:
-          path: protected_mfl/index
+          path: index_state
           key: ${{ env.MFL_INDEX_KEY }}
           fail-on-cache-miss: true
 
       - name: Fingerprint protected MFL inputs before merge
         run: |
           set -euo pipefail
-          sha256sum protected_mfl/chunk/mfl_register_chunk.duckdb > mfl_seed_before.sha256
-          sha256sum protected_mfl/index/mfl_register_all_runs.json >> mfl_seed_before.sha256
+          sha256sum chunk_state/mfl_register_chunk.duckdb > mfl_seed_before.sha256
+          sha256sum index_state/mfl_register_all_runs.json >> mfl_seed_before.sha256
 
       - name: Restore verified immutable corpus source
         env:
@@ -91,8 +91,8 @@ jobs:
           set -euo pipefail
           python code/scripts/research_cohorts/merge_research_with_mfl.py \
             --base merged_lake/corpus_snapshot.duckdb \
-            --mfl protected_mfl/chunk/mfl_register_chunk.duckdb \
-            --mfl-index protected_mfl/index/mfl_register_all_runs.json \
+            --mfl chunk_state/mfl_register_chunk.duckdb \
+            --mfl-index index_state/mfl_register_all_runs.json \
             --out merged_research.duckdb \
             --expected-ledger "$MFL_EXPECTED_LEDGER"
           test "$(python - <<'PY'
@@ -107,8 +107,8 @@ jobs:
       - name: Verify protected MFL and immutable ops were unchanged
         run: |
           set -euo pipefail
-          sha256sum protected_mfl/chunk/mfl_register_chunk.duckdb > mfl_seed_after.sha256
-          sha256sum protected_mfl/index/mfl_register_all_runs.json >> mfl_seed_after.sha256
+          sha256sum chunk_state/mfl_register_chunk.duckdb > mfl_seed_after.sha256
+          sha256sum index_state/mfl_register_all_runs.json >> mfl_seed_after.sha256
           cmp mfl_seed_before.sha256 mfl_seed_after.sha256
           sha256sum merged_lake/ops_cache.duckdb > ops_seed_after.sha256
           cmp ops_seed_before.sha256 ops_seed_after.sha256
