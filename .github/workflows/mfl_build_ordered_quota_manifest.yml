@@ -9,6 +9,7 @@ permissions:
 
 env:
   MFL_CHUNK_KEY: mfl-registered-2004-2018-v2-chunk-recover-mass-remaining-v31-r9-20260816-1
+  MFL_OVERLAY_KEY: mfl-registered-2004-2018-v2-research-overlay-recover-mass-remaining-v31-r9-20260816-1
   REGISTRY_PATH: code/derived/mfl_register/mfl_discovered_ids_2000_2018.csv.gz
 
 jobs:
@@ -40,6 +41,29 @@ jobs:
           set -euo pipefail
           find chunk_state -maxdepth 4 -type f -print
           test -n "$(find chunk_state -type f -name '*.duckdb' -print -quit)"
+
+      - name: Restore protected 39k research overlay
+        uses: actions/cache/restore@v5
+        with:
+          path: research_overlay_state
+          key: ${{ env.MFL_OVERLAY_KEY }}
+          fail-on-cache-miss: true
+
+      - name: Inspect protected overlay schema
+        run: |
+          set -euo pipefail
+          find research_overlay_state -maxdepth 3 -type f -print
+          python - <<'PY'
+          from pathlib import Path
+          import duckdb
+          for path in Path("research_overlay_state").rglob("*.duckdb"):
+              con = duckdb.connect(str(path), read_only=True)
+              print(f"overlay database: {path}")
+              for table, in con.execute("SHOW TABLES").fetchall():
+                  columns = [row[1] for row in con.execute(f'PRAGMA table_info("{table}")').fetchall()]
+                  print(f"table={table} columns={columns}")
+              con.close()
+          PY
 
       - uses: actions/setup-python@v6
         with:
