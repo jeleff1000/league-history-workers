@@ -72,9 +72,15 @@ jobs:
               raise SystemExit(f"authoritative 39k index total mismatch: {sum(len(ids) for ids in live.values())}")
 
           discovered = defaultdict(set)
+          malformed_discovered = defaultdict(set)
           with gzip.open(os.environ["REGISTRY_PATH"], mode="rt", newline="", encoding="utf-8") as fh:
               for row in csv.DictReader(fh):
-                  discovered[int(row["season"])].add(str(row["league_id"]).zfill(5))
+                  season = int(row["season"])
+                  raw_id = str(row["league_id"]).strip()
+                  if re.fullmatch(r"\d{1,5}", raw_id):
+                      discovered[season].add(raw_id.zfill(5))
+                  else:
+                      malformed_discovered[season].add(raw_id)
 
           current = {year: len(live[year]) for year in range(2000, 2019)}
           rows = []
@@ -95,7 +101,7 @@ jobs:
               writer.writerows(rows)
 
           scoreboard = [{"year": year, "authoritative_39k_ids": len(live[year]), "registry_discovered_ids": len(discovered[year]), "stage1_needed": max(0, 2000 - current[year]), "stage2_needed_after_stage1": max(0, 5000 - max(current[year], 2000)), "stage3_needed_after_stage2": max(0, 10000 - max(current[year], 5000))} for year in range(2000, 2019)]
-          Path("mfl_quota_validation.json").write_text(json.dumps({"authoritative_index_key": os.environ["MFL_INDEX_KEY"], "authoritative_index_path": str(index_path), "authoritative_39k_total": 39368, "rows_in_manifest": len(rows), "scoreboard": scoreboard}, indent=2) + "\n", encoding="utf-8")
+          Path("mfl_quota_validation.json").write_text(json.dumps({"authoritative_index_key": os.environ["MFL_INDEX_KEY"], "authoritative_index_path": str(index_path), "authoritative_39k_total": 39368, "malformed_discovered_ids": {str(y): sorted(values) for y, values in malformed_discovered.items()}, "rows_in_manifest": len(rows), "scoreboard": scoreboard}, indent=2) + "\n", encoding="utf-8")
           print(f"authoritative 39k index pairs: {sum(len(ids) for ids in live.values())}")
           print(f"manifest rows: {len(rows)}")
           for item in scoreboard:
