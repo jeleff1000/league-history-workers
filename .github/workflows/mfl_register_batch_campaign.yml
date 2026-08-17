@@ -73,6 +73,11 @@ on:
         required: false
         type: string
         default: ''
+      prior_index_cache_path:
+        description: 'Path used when the preceding index cache was saved'
+        required: false
+        type: string
+        default: index_state
       reservation_artifact_run_id:
         description: 'Planner run whose reservation artifact excludes already-assigned league-years'
         required: false
@@ -165,9 +170,15 @@ jobs:
         if: ${{ inputs.storage_mode == 'fetch_only' && inputs.prior_index_key != '' }}
         uses: actions/cache/restore@v5
         with:
-          path: index_state
+          path: ${{ inputs.prior_index_cache_path }}
           key: ${{ inputs.prior_index_key }}
           fail-on-cache-miss: true
+      - name: Stage pending queue index at index_state
+        if: ${{ inputs.storage_mode == 'fetch_only' && inputs.prior_index_key != '' && inputs.prior_index_cache_path != 'index_state' }}
+        run: |
+          test -s "${{ inputs.prior_index_cache_path }}/mfl_register_all_runs.json"
+          mkdir -p index_state
+          cp "${{ inputs.prior_index_cache_path }}/mfl_register_all_runs.json" index_state/mfl_register_all_runs.json
       - name: Build disjoint pending manifest
         if: ${{ inputs.storage_mode == 'fetch_only' }}
         env:
@@ -466,9 +477,15 @@ jobs:
         with:
           # The cache version includes the path.  Restore to the same path
           # that is used by the save step, then let the merger read it there.
-          path: index_state
+          path: ${{ inputs.prior_index_cache_path }}
           key: ${{ inputs.prior_index_key }}
           fail-on-cache-miss: true
+      - name: Stage reducer index at index_state
+        if: ${{ (inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only') && inputs.prior_index_key != '' && inputs.prior_index_cache_path != 'index_state' }}
+        run: |
+          test -s "${{ inputs.prior_index_cache_path }}/mfl_register_all_runs.json"
+          mkdir -p index_state
+          cp "${{ inputs.prior_index_cache_path }}/mfl_register_all_runs.json" index_state/mfl_register_all_runs.json
       - name: Stage prior canonical index for finalizer
         if: ${{ (inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only') && inputs.prior_index_key != '' }}
         shell: bash
@@ -956,8 +973,10 @@ jobs:
           if [ "$complete" = true ] || [ "$total" -le 0 ] || [ "$((next*BATCH_SIZE))" -ge "$total" ]; then exit 0; fi
           if [ "$STORAGE_MODE" = chunked ] || [ "$STORAGE_MODE" = fetch_only ]; then
             PRIOR_INDEX_KEY="$CANONICAL_INDEX_KEY"
+            PRIOR_INDEX_CACHE_PATH=canonical_index_state
           else
             PRIOR_INDEX_KEY="$CURRENT_INDEX_KEY"
+            PRIOR_INDEX_CACHE_PATH=index_state
           fi
           gh workflow run mfl_register_batch_campaign.yml --repo "$REPOSITORY" --ref "$REF_NAME" \
             --raw-field manifest_path="$MANIFEST_PATH" --raw-field yahoo_oauth_ref="$YAHOO_OAUTH_REF" \
@@ -969,4 +988,5 @@ jobs:
             --raw-field target_years="$TARGET_YEARS" --raw-field mfl_rate_limit="$MFL_RATE" \
             --raw-field collect_all="$COLLECT_ALL" \
             --raw-field storage_mode="$STORAGE_MODE" --raw-field prior_state_key="$CURRENT_STATE_KEY" \
-            --raw-field prior_index_key="$PRIOR_INDEX_KEY" --raw-field attempt_suffix="$ATTEMPT_SUFFIX"
+            --raw-field prior_index_key="$PRIOR_INDEX_KEY" --raw-field prior_index_cache_path="$PRIOR_INDEX_CACHE_PATH" \
+            --raw-field attempt_suffix="$ATTEMPT_SUFFIX"
