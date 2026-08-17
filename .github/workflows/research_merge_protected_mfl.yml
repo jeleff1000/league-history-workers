@@ -124,16 +124,22 @@ jobs:
       - name: Restore recovered MFL source read-only
         uses: actions/cache/restore@v5
         with:
-          path: recovery_chunk_state
+          path: chunk_state
           key: ${{ env.MFL_RECOVERY_CHUNK_KEY }}
           fail-on-cache-miss: true
 
       - name: Restore recovered MFL index read-only
         uses: actions/cache/restore@v5
         with:
-          path: recovery_index_state
+          path: index_state
           key: ${{ env.MFL_RECOVERY_INDEX_KEY }}
           fail-on-cache-miss: true
+
+      - name: Stage recovered MFL source for runner-local assembly
+        run: |
+          set -euo pipefail
+          mv chunk_state recovery_chunk_state
+          mv index_state recovery_index_state
 
       - name: Download every restored population source
         uses: actions/download-artifact@v5
