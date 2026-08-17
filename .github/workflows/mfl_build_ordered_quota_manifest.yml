@@ -79,8 +79,12 @@ jobs:
           malformed_live = defaultdict(set)
           for year, db_name in con.execute(f'SELECT DISTINCT CAST(year AS INTEGER), CAST(db_name AS VARCHAR) FROM "{table}" WHERE year BETWEEN 2000 AND 2018').fetchall():
               raw_id = str(db_name).strip()
-              if re.fullmatch(r"\d{5}", raw_id):
+              bare = re.fullmatch(r"\d{5}", raw_id)
+              canonical = re.fullmatch(r"mfl_(\d{4})_(\d{5})", raw_id)
+              if bare:
                   live[int(year)].add(raw_id)
+              elif canonical and int(canonical.group(1)) == int(year):
+                  live[int(year)].add(canonical.group(2))
               else:
                   malformed_live[int(year)].add(raw_id)
           con.close()
