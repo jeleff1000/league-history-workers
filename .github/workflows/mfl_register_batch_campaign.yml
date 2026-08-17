@@ -333,7 +333,11 @@ jobs:
     # prevent combine from publishing the successful league databases.
     continue-on-error: true
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    # A single unresponsive MFL league must not hold the entire campaign for
+    # hours.  Batch receipts are uploaded with `if: always()`, and combine is
+    # also guarded with `if: always()`, so timed-out runners remain partial
+    # failures while successful leagues are still merged.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       max-parallel: ${{ fromJSON(needs.prepare.outputs.max_parallel) }}
