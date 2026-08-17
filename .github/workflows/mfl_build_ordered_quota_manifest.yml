@@ -74,20 +74,32 @@ jobs:
               cols = {r[1] for r in con.execute(f'PRAGMA table_info("{table}")').fetchall()}
               if {"db_name", "year"}.issubset(cols): candidates.append(table)
           if not candidates: raise SystemExit(f"live cache has no db_name/year table; tables={tables}")
-          table = "league_settings" if "league_settings" in candidates else candidates[0]
-          live = defaultdict(set)
-          malformed_live = defaultdict(set)
-          for year, db_name in con.execute(f'SELECT DISTINCT CAST(year AS INTEGER), CAST(db_name AS VARCHAR) FROM "{table}" WHERE year BETWEEN 2000 AND 2018').fetchall():
+          def normalize(year, db_name):
               raw_id = str(db_name).strip()
               bare = re.fullmatch(r"\d{5}", raw_id)
               canonical = re.fullmatch(r"mfl_(\d{4})_(\d{5})", raw_id)
               if bare:
-                  live[int(year)].add(raw_id)
-              elif canonical and int(canonical.group(1)) == int(year):
-                  live[int(year)].add(canonical.group(2))
+                  return raw_id
+              if canonical and int(canonical.group(1)) == int(year):
+                  return canonical.group(2)
+              return None
+          candidate_rows = {}
+          candidate_counts = {}
+          for candidate in candidates:
+              rows_for_candidate = con.execute(f'SELECT DISTINCT CAST(year AS INTEGER), CAST(db_name AS VARCHAR) FROM "{candidate}" WHERE year BETWEEN 2000 AND 2018').fetchall()
+              candidate_rows[candidate] = rows_for_candidate
+              candidate_counts[candidate] = sum(normalize(year, db_name) is not None for year, db_name in rows_for_candidate)
+          table = max(candidates, key=lambda candidate: candidate_counts[candidate])
+          live = defaultdict(set)
+          malformed_live = defaultdict(set)
+          for year, db_name in candidate_rows[table]:
+              normalized = normalize(year, db_name)
+              if normalized is not None:
+                  live[int(year)].add(normalized)
               else:
-                  malformed_live[int(year)].add(raw_id)
+                  malformed_live[int(year)].add(str(db_name).strip())
           con.close()
+          print(f"candidate valid ID counts: {candidate_counts}")
           expected_live = {2004:4780,2005:935,2006:7719,2007:2136,2008:2195,2009:2133,2010:2155,2011:2170,2012:1801,2013:1288,2014:865,2015:836,2016:9114,2017:468,2018:773}
           actual_live = {y: len(live[y]) for y in expected_live}
           if actual_live != expected_live:
