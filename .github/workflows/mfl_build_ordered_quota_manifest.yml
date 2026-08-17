@@ -9,7 +9,7 @@ permissions:
 
 env:
   MFL_CHUNK_KEY: mfl-registered-2004-2018-v2-chunk-recover-mass-remaining-v31-r9-20260816-1
-  REGISTRY_PATH: code/derived/mfl_register/mfl_register_all_runs.json
+  REGISTRY_PATH: code/derived/mfl_register/mfl_discovered_ids_2000_2018.csv.gz
 
 jobs:
   build:
@@ -24,7 +24,7 @@ jobs:
           path: code
           sparse-checkout-cone-mode: false
           sparse-checkout: |
-            /derived/mfl_register/mfl_register_all_runs.json
+            /derived/mfl_register/mfl_discovered_ids_2000_2018.csv.gz
 
       - name: Restore live MFL cache read-only
         uses: actions/cache/restore@v5
@@ -62,14 +62,10 @@ jobs:
 
           import duckdb
 
-          registry_path = Path(os.environ["REGISTRY_PATH"])
-          registry = json.loads(registry_path.read_text(encoding="utf-8"))
-
           discovered = defaultdict(set)
-          for row in registry["observations"]:
-              year = int(row["season"])
-              if 2000 <= year <= 2018:
-                  discovered[year].add(str(row["league_id"]).zfill(5))
+          with gzip.open(os.environ["REGISTRY_PATH"], newline="", encoding="utf-8") as fh:
+              for row in csv.DictReader(fh):
+                  discovered[int(row["season"])].add(str(row["league_id"]).zfill(5))
 
           db_path = next(Path("chunk_state").rglob("*.duckdb"), None)
           if db_path is None:
