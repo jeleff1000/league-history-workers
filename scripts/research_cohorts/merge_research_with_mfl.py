@@ -164,43 +164,49 @@ def main() -> None:
                 for name, type_name in base_schema
             )
             source_rows = count_rows_for_pairs(con, mfl_relation)
-            source_pair_count = int(con.execute(
-                f"SELECT COUNT(*) FROM (SELECT DISTINCT s.db_name, CAST(s.year AS INTEGER) AS year "
+            con.execute(
+                "CREATE OR REPLACE TEMP TABLE _mfl_table_pairs AS "
+                f"SELECT DISTINCT s.db_name, CAST(s.year AS INTEGER) AS year "
                 f"FROM {mfl_relation} s JOIN _mfl_pairs p "
-                "ON s.db_name=p.db_name AND CAST(s.year AS INTEGER)=p.year)"
-            ).fetchone()[0])
-            if source_pair_count != len(pairs):
-                raise SystemExit(
-                    f"MFL {table} lacks protected league-years: expected={len(pairs)}, actual={source_pair_count}"
-                )
-            base_unaffected = int(con.execute(
+                "ON s.db_name=p.db_name AND CAST(s.year AS INTEGER)=p.year"
+            )
+            source_pair_count = int(con.execute("SELECT COUNT(*) FROM _mfl_table_pairs").fetchone()[0])
+            # A registered MFL league-year can legitimately lack one table
+            # (notably league_settings).  That is not a deletion signal: only
+            # source pairs physically present in this table supersede the base.
+            base_preserved = int(con.execute(
                 f"SELECT COUNT(*) FROM base.public.{qi(table)} b WHERE NOT EXISTS "
-                "(SELECT 1 FROM _mfl_pairs p WHERE b.db_name=p.db_name "
+                "(SELECT 1 FROM _mfl_table_pairs p WHERE b.db_name=p.db_name "
                 "AND CAST(b.year AS INTEGER)=p.year)"
             ).fetchone()[0])
             con.execute(
                 f"CREATE TABLE public.{qi(table)} AS "
                 f"SELECT {columns} FROM base.public.{qi(table)} b WHERE NOT EXISTS "
-                "(SELECT 1 FROM _mfl_pairs p WHERE b.db_name=p.db_name "
+                "(SELECT 1 FROM _mfl_table_pairs p WHERE b.db_name=p.db_name "
                 "AND CAST(b.year AS INTEGER)=p.year) "
                 "UNION ALL "
                 f"SELECT {source_columns} FROM {mfl_relation} s JOIN _mfl_pairs p "
                 "ON s.db_name=p.db_name AND CAST(s.year AS INTEGER)=p.year"
             )
-            output_source_rows = count_rows_for_pairs(con, f"public.{qi(table)}")
-            output_unaffected = int(con.execute(
+            output_source_rows = int(con.execute(
+                f"SELECT COUNT(*) FROM public.{qi(table)} s JOIN _mfl_table_pairs p "
+                "ON s.db_name=p.db_name AND CAST(s.year AS INTEGER)=p.year"
+            ).fetchone()[0])
+            output_preserved = int(con.execute(
                 f"SELECT COUNT(*) FROM public.{qi(table)} b WHERE NOT EXISTS "
-                "(SELECT 1 FROM _mfl_pairs p WHERE b.db_name=p.db_name "
+                "(SELECT 1 FROM _mfl_table_pairs p WHERE b.db_name=p.db_name "
                 "AND CAST(b.year AS INTEGER)=p.year)"
             ).fetchone()[0])
-            if output_source_rows != source_rows or output_unaffected != base_unaffected:
+            if output_source_rows != source_rows or output_preserved != base_preserved:
                 raise SystemExit(
                     f"row preservation failed for {table}: source={source_rows}/{output_source_rows}, "
-                    f"unaffected={base_unaffected}/{output_unaffected}"
+                    f"preserved={base_preserved}/{output_preserved}"
                 )
             report["tables"][table] = {
                 "mfl_source_rows": source_rows,
-                "unaffected_base_rows": base_unaffected,
+                "mfl_source_league_years": source_pair_count,
+                "mfl_missing_league_years": len(pairs) - source_pair_count,
+                "preserved_base_rows": base_preserved,
                 "output_rows": int(con.execute(f"SELECT COUNT(*) FROM public.{qi(table)}").fetchone()[0]),
             }
 

@@ -133,6 +133,75 @@ def test_merge_projects_wider_mfl_schema_into_canonical_base_schema(tmp_path: Pa
     con.close()
 
 
+def test_merge_preserves_base_rows_when_one_mfl_table_lacks_a_registered_pair(tmp_path: Path) -> None:
+    base = tmp_path / "base.duckdb"
+    mfl = tmp_path / "mfl.duckdb"
+    out = tmp_path / "out.duckdb"
+    index = tmp_path / "mfl_register_all_runs.json"
+    _create_db(
+        base,
+        [
+            ("smpl_mfl_2004_1", 2004, "old-mfl-1", 1),
+            ("smpl_mfl_2004_2", 2004, "old-mfl-2", 2),
+            ("yahoo_2004_1", 2004, "keep-yahoo", 3),
+        ],
+    )
+    _create_mfl_chunk(
+        mfl,
+        [
+            ("smpl_mfl_2004_1", 2004, "new-mfl-1", 11),
+            ("smpl_mfl_2004_2", 2004, "new-mfl-2", 22),
+        ],
+    )
+    con = duckdb.connect(str(mfl))
+    con.execute("DELETE FROM league_settings WHERE db_name='smpl_mfl_2004_2'")
+    con.close()
+    index.write_text(
+        json.dumps(
+            {
+                "leagues": [
+                    {"season": 2004, "league_id": "1", "db_name": "smpl_mfl_2004_1"},
+                    {"season": 2004, "league_id": "2", "db_name": "smpl_mfl_2004_2"},
+                ],
+                "accepted_by_year": {"2004": 2},
+                "league_count": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).with_name("merge_research_with_mfl.py")
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--base",
+            str(base),
+            "--mfl",
+            str(mfl),
+            "--mfl-index",
+            str(index),
+            "--out",
+            str(out),
+            "--expected-ledger",
+            json.dumps({"2004": 2}),
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    con = duckdb.connect(str(out), read_only=True)
+    assert con.execute(
+        "SELECT db_name, marker, value FROM public.league_settings ORDER BY db_name"
+    ).fetchall() == [
+        ("smpl_mfl_2004_1", "new-mfl-1", 11),
+        ("smpl_mfl_2004_2", "old-mfl-2", 2),
+        ("yahoo_2004_1", "keep-yahoo", 3),
+    ]
+    con.close()
+
+
 def test_merge_fails_when_protected_mfl_ledger_is_incomplete(tmp_path: Path) -> None:
     base = tmp_path / "base.duckdb"
     mfl = tmp_path / "mfl.duckdb"
