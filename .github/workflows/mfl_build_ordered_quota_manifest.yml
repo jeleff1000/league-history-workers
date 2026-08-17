@@ -99,11 +99,13 @@ jobs:
               writer = csv.DictWriter(fh, fieldnames=fields)
               writer.writeheader()
               writer.writerows(rows)
+          Path("mfl_ordered_quota_manifest.json").write_text(json.dumps({"rows": rows}, indent=2) + "\n", encoding="utf-8")
 
           scoreboard = [{"year": year, "authoritative_39k_ids": len(live[year]), "registry_discovered_ids": len(discovered[year]), "stage1_needed": max(0, 2000 - current[year]), "stage2_needed_after_stage1": max(0, 5000 - max(current[year], 2000)), "stage3_needed_after_stage2": max(0, 10000 - max(current[year], 5000))} for year in range(2000, 2019)]
           Path("mfl_quota_validation.json").write_text(json.dumps({"authoritative_index_key": os.environ["MFL_INDEX_KEY"], "authoritative_index_path": str(index_path), "authoritative_39k_total": 39368, "malformed_discovered_ids": {str(y): sorted(values) for y, values in malformed_discovered.items()}, "rows_in_manifest": len(rows), "scoreboard": scoreboard}, indent=2) + "\n", encoding="utf-8")
           print(f"authoritative 39k index pairs: {sum(len(ids) for ids in live.values())}")
           print(f"manifest rows: {len(rows)}")
+          print(f"first ordered rows: {rows[:5]}")
           for item in scoreboard:
               print(item)
           PY
@@ -115,4 +117,5 @@ jobs:
           retention-days: 180
           path: |
             mfl_ordered_quota_manifest.csv
+            mfl_ordered_quota_manifest.json
             mfl_quota_validation.json
