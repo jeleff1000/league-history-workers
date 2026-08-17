@@ -64,7 +64,7 @@ jobs:
           import duckdb
 
           discovered = defaultdict(set)
-          with gzip.open(os.environ["REGISTRY_PATH"], newline="", encoding="utf-8") as fh:
+          with gzip.open(os.environ["REGISTRY_PATH"], mode="rt", newline="", encoding="utf-8") as fh:
               for row in csv.DictReader(fh):
                   discovered[int(row["season"])].add(str(row["league_id"]).zfill(5))
 
