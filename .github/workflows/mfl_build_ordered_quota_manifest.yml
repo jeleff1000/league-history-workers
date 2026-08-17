@@ -110,6 +110,26 @@ jobs:
               print(item)
           PY
 
+      - name: File verified quota registry in private repository
+        env:
+          PRIVATE_REPO_PAT: ${{ secrets.PRIVATE_REPO_PAT }}
+        run: |
+          set -euo pipefail
+          mkdir -p code/derived/mfl_register/quota_planning
+          cp mfl_ordered_quota_manifest.csv code/derived/mfl_register/quota_planning/mfl_ordered_quota_manifest.csv
+          cp mfl_ordered_quota_manifest.json code/derived/mfl_register/quota_planning/mfl_ordered_quota_manifest.json
+          cp mfl_quota_validation.json code/derived/mfl_register/quota_planning/mfl_ordered_quota_validation.json
+          cd code
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f derived/mfl_register/quota_planning/mfl_ordered_quota_manifest.csv derived/mfl_register/quota_planning/mfl_ordered_quota_manifest.json derived/mfl_register/quota_planning/mfl_ordered_quota_validation.json
+          if git diff --cached --quiet; then
+            echo "quota registry already filed"
+          else
+            git commit -m "File verified MFL quota order registry"
+            git push origin HEAD:main
+          fi
+
       - name: Upload validated manifest
         uses: actions/upload-artifact@v4
         with:
