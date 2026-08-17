@@ -176,9 +176,11 @@ jobs:
       - name: Stage pending queue index at index_state
         if: ${{ inputs.storage_mode == 'fetch_only' && inputs.prior_index_key != '' && inputs.prior_index_cache_path != 'index_state' }}
         run: |
-          test -s "${{ inputs.prior_index_cache_path }}/mfl_register_all_runs.json"
+          source="${{ inputs.prior_index_cache_path }}/mfl_register_all_runs.json"
+          if [ ! -s "$source" ]; then source="${{ inputs.prior_index_cache_path }}/canonical_mfl_register_all_runs.json"; fi
+          test -s "$source"
           mkdir -p index_state
-          cp "${{ inputs.prior_index_cache_path }}/mfl_register_all_runs.json" index_state/mfl_register_all_runs.json
+          cp "$source" index_state/mfl_register_all_runs.json
       - name: Build disjoint pending manifest
         if: ${{ inputs.storage_mode == 'fetch_only' }}
         env:
@@ -483,9 +485,11 @@ jobs:
       - name: Stage reducer index at index_state
         if: ${{ (inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only') && inputs.prior_index_key != '' && inputs.prior_index_cache_path != 'index_state' }}
         run: |
-          test -s "${{ inputs.prior_index_cache_path }}/mfl_register_all_runs.json"
+          source="${{ inputs.prior_index_cache_path }}/mfl_register_all_runs.json"
+          if [ ! -s "$source" ]; then source="${{ inputs.prior_index_cache_path }}/canonical_mfl_register_all_runs.json"; fi
+          test -s "$source"
           mkdir -p index_state
-          cp "${{ inputs.prior_index_cache_path }}/mfl_register_all_runs.json" index_state/mfl_register_all_runs.json
+          cp "$source" index_state/mfl_register_all_runs.json
       - name: Stage prior canonical index for finalizer
         if: ${{ (inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only') && inputs.prior_index_key != '' }}
         shell: bash
