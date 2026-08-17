@@ -1,4 +1,4 @@
-name: Merge protected MFL source with research corpus
+name: Merge complete protected MFL source with research corpus
 
 on:
   workflow_dispatch:
@@ -13,15 +13,98 @@ concurrency:
 
 env:
   CANONICAL_RELEASE_TAG: research-public-lake-v4-legacy-signal-rescue-canonical
-  MFL_CHUNK_KEY: mfl-registered-2004-2018-v2-chunk-recover-mass-remaining-v31-r9-20260816-1
-  MFL_INDEX_KEY: mfl-registered-2004-2018-v2-index-recover-mass-remaining-v31-r9-20260816-1
+  MFL_RECOVERY_CHUNK_KEY: mfl-registered-2004-2018-v2-chunk-recover-mass-remaining-v31-r9-20260816-1
+  MFL_RECOVERY_INDEX_KEY: mfl-registered-2004-2018-v2-index-recover-mass-remaining-v31-r9-20260816-1
+  MFL_POPULATION_EXPECTED_TOTAL: '30156'
   MFL_EXPECTED_LEDGER: '{"2004":4780,"2005":935,"2006":7719,"2007":2136,"2008":2195,"2009":2133,"2010":2155,"2011":2170,"2012":1801,"2013":1288,"2014":865,"2015":836,"2016":9114,"2017":468,"2018":773}'
   MFL_EXPECTED_TOTAL: '39368'
 
 jobs:
-  merge:
+  discover-population-cache-matrix:
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+    steps:
+      - name: Discover every retained population source cache
+        id: discover
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+
+          raw = subprocess.check_output([
+              "gh", "api", "--paginate", "--slurp",
+              f"/repos/{os.environ['GITHUB_REPOSITORY']}/actions/caches?per_page=100",
+          ], text=True)
+          pages = json.loads(raw)
+          caches = [cache for page in pages for cache in page.get("actions_caches", [])]
+          chunk_pattern = re.compile(r"^mfl-population-batch-v1-chunk-0-1-allrun-(\\d+)$")
+          keys = {str(cache["key"]) for cache in caches}
+          include = []
+          for key in sorted(keys):
+              match = chunk_pattern.fullmatch(key)
+              if not match:
+                  continue
+              run_id = match.group(1)
+              index_key = f"mfl-population-batch-v1-index-0-1-allrun-{run_id}"
+              if index_key not in keys:
+                  raise SystemExit(f"population chunk lacks immutable index cache: {key}")
+              include.append({"id": run_id, "chunk_key": key, "index_key": index_key})
+          if not include:
+              raise SystemExit("no retained MFL population chunk caches found")
+          matrix = json.dumps({"include": include}, separators=(",", ":"))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"matrix={matrix}\\n")
+          print(json.dumps({"population_source_cache_count": len(include), "source_ids": [row["id"] for row in include]}))
+          PY
+
+  restore-population-cache-chunk:
+    needs: discover-population-cache-matrix
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix: ${{ fromJSON(needs.discover-population-cache-matrix.outputs.matrix) }}
+    steps:
+      - name: Restore immutable population chunk
+        uses: actions/cache/restore@v5
+        with:
+          path: source_cache/${{ matrix.id }}/chunk_state
+          key: ${{ matrix.chunk_key }}
+          fail-on-cache-miss: true
+
+      - name: Restore immutable population index
+        uses: actions/cache/restore@v5
+        with:
+          path: source_cache/${{ matrix.id }}/index_state
+          key: ${{ matrix.index_key }}
+          fail-on-cache-miss: true
+
+      - name: Receipt for immutable population source
+        run: |
+          set -euo pipefail
+          sha256sum source_cache/${{ matrix.id }}/chunk_state/mfl_register_chunk.duckdb > source_cache/${{ matrix.id }}/source.sha256
+          sha256sum source_cache/${{ matrix.id }}/index_state/mfl_register_all_runs.json >> source_cache/${{ matrix.id }}/source.sha256
+
+      - name: Transfer restored source to the merge job
+        uses: actions/upload-artifact@v4
+        with:
+          name: protected-mfl-population-${{ matrix.id }}
+          retention-days: 2
+          path: source_cache/${{ matrix.id }}
+          if-no-files-found: error
+
+  merge:
+    needs:
+      - discover-population-cache-matrix
+      - restore-population-cache-chunk
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
     steps:
       - name: Checkout private merge code
         uses: actions/checkout@v5
@@ -31,28 +114,38 @@ jobs:
           path: code
           sparse-checkout-cone-mode: false
           sparse-checkout: |
+            /scripts/research_cohorts/assemble_protected_mfl_sources.py
             /scripts/research_cohorts/merge_research_with_mfl.py
             /scripts/research_cohorts/validate_research_public_lake.py
 
-      - name: Restore protected MFL chunk read-only
+      - name: Restore recovered MFL source read-only
         uses: actions/cache/restore@v5
         with:
-          path: chunk_state
-          key: ${{ env.MFL_CHUNK_KEY }}
+          path: recovery_chunk_state
+          key: ${{ env.MFL_RECOVERY_CHUNK_KEY }}
           fail-on-cache-miss: true
 
-      - name: Restore protected MFL index read-only
+      - name: Restore recovered MFL index read-only
         uses: actions/cache/restore@v5
         with:
-          path: index_state
-          key: ${{ env.MFL_INDEX_KEY }}
+          path: recovery_index_state
+          key: ${{ env.MFL_RECOVERY_INDEX_KEY }}
           fail-on-cache-miss: true
 
-      - name: Fingerprint protected MFL inputs before merge
+      - name: Download every restored population source
+        uses: actions/download-artifact@v5
+        with:
+          pattern: protected-mfl-population-*
+          path: population_sources
+          merge-multiple: false
+
+      - name: Fingerprint all protected MFL inputs before assembly
         run: |
           set -euo pipefail
-          sha256sum chunk_state/mfl_register_chunk.duckdb > mfl_seed_before.sha256
-          sha256sum index_state/mfl_register_all_runs.json >> mfl_seed_before.sha256
+          sha256sum recovery_chunk_state/mfl_register_chunk.duckdb > mfl_seed_before.sha256
+          sha256sum recovery_index_state/mfl_register_all_runs.json >> mfl_seed_before.sha256
+          find population_sources -type f \( -name mfl_register_chunk.duckdb -o -name mfl_register_all_runs.json \) -print0 \
+            | sort -z | xargs -0 sha256sum >> mfl_seed_before.sha256
 
       - name: Restore verified immutable corpus source
         env:
@@ -86,13 +179,33 @@ jobs:
       - name: Install DuckDB validator dependency
         run: python -m pip install duckdb==1.5.1
 
-      - name: Prove protected MFL ledger then merge in runner workspace
+      - name: Assemble complete MFL input then fail fast on the protected ledger
+        run: |
+          set -euo pipefail
+          python code/scripts/research_cohorts/assemble_protected_mfl_sources.py \
+            --recovery recovery_chunk_state/mfl_register_chunk.duckdb \
+            --recovery-index recovery_index_state/mfl_register_all_runs.json \
+            --population-root population_sources \
+            --out full_mfl_source.duckdb \
+            --out-index full_mfl_source_index.json \
+            --expected-ledger "$MFL_EXPECTED_LEDGER" \
+            --expected-population-total "$MFL_POPULATION_EXPECTED_TOTAL"
+          python - <<'PY'
+          import json
+          proof = json.load(open("full_mfl_source_proof.json"))
+          if proof["population_league_years"] != 30156 or proof["recovery_league_years"] != 9212:
+              raise SystemExit(f"unexpected complete-source split: {proof}")
+          if proof["protected_mfl_league_years"] != 39368:
+              raise SystemExit(f"unexpected full MFL total: {proof}")
+          PY
+
+      - name: Merge full protected MFL source in runner workspace
         run: |
           set -euo pipefail
           python code/scripts/research_cohorts/merge_research_with_mfl.py \
             --base merged_lake/corpus_snapshot.duckdb \
-            --mfl chunk_state/mfl_register_chunk.duckdb \
-            --mfl-index index_state/mfl_register_all_runs.json \
+            --mfl full_mfl_source.duckdb \
+            --mfl-index full_mfl_source_index.json \
             --out merged_research.duckdb \
             --expected-ledger "$MFL_EXPECTED_LEDGER"
           test "$(python - <<'PY'
@@ -105,11 +218,13 @@ jobs:
           python code/scripts/research_cohorts/validate_research_public_lake.py \
             merged_lake --without-auxiliary-sidecars
 
-      - name: Verify protected MFL and immutable ops were unchanged
+      - name: Verify protected MFL inputs and immutable ops were unchanged
         run: |
           set -euo pipefail
-          sha256sum chunk_state/mfl_register_chunk.duckdb > mfl_seed_after.sha256
-          sha256sum index_state/mfl_register_all_runs.json >> mfl_seed_after.sha256
+          sha256sum recovery_chunk_state/mfl_register_chunk.duckdb > mfl_seed_after.sha256
+          sha256sum recovery_index_state/mfl_register_all_runs.json >> mfl_seed_after.sha256
+          find population_sources -type f \( -name mfl_register_chunk.duckdb -o -name mfl_register_all_runs.json \) -print0 \
+            | sort -z | xargs -0 sha256sum >> mfl_seed_after.sha256
           cmp mfl_seed_before.sha256 mfl_seed_after.sha256
           sha256sum merged_lake/ops_cache.duckdb > ops_seed_after.sha256
           cmp ops_seed_before.sha256 ops_seed_after.sha256
@@ -120,6 +235,8 @@ jobs:
           name: protected-mfl-merge-proof-${{ github.run_id }}
           retention-days: 180
           path: |
+            full_mfl_source_proof.json
+            full_mfl_source_index.json
             mfl_merge_proof.json
             mfl_seed_before.sha256
             mfl_seed_after.sha256
