@@ -1,0 +1,126 @@
+name: Merge protected MFL source with research corpus
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: protected-mfl-research-merge
+  cancel-in-progress: false
+
+env:
+  CANONICAL_RELEASE_TAG: research-public-lake-v4-legacy-signal-rescue-canonical
+  MFL_CHUNK_KEY: mfl-registered-2004-2018-v2-chunk-recover-mass-remaining-v31-r9-20260816-1
+  MFL_INDEX_KEY: mfl-registered-2004-2018-v2-index-recover-mass-remaining-v31-r9-20260816-1
+  MFL_EXPECTED_LEDGER: '{"2004":4780,"2005":935,"2006":7719,"2007":2136,"2008":2195,"2009":2133,"2010":2155,"2011":2170,"2012":1801,"2013":1288,"2014":865,"2015":836,"2016":9114,"2017":468,"2018":773}'
+  MFL_EXPECTED_TOTAL: '39368'
+
+jobs:
+  merge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Checkout private merge code
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          path: code
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            /scripts/research_cohorts/merge_research_with_mfl.py
+            /scripts/research_cohorts/validate_research_public_lake.py
+
+      - name: Restore protected MFL chunk read-only
+        uses: actions/cache/restore@v5
+        with:
+          path: protected_mfl/chunk
+          key: ${{ env.MFL_CHUNK_KEY }}
+          fail-on-cache-miss: true
+
+      - name: Restore protected MFL index read-only
+        uses: actions/cache/restore@v5
+        with:
+          path: protected_mfl/index
+          key: ${{ env.MFL_INDEX_KEY }}
+          fail-on-cache-miss: true
+
+      - name: Fingerprint protected MFL inputs before merge
+        run: |
+          set -euo pipefail
+          sha256sum protected_mfl/chunk/mfl_register_chunk.duckdb > mfl_seed_before.sha256
+          sha256sum protected_mfl/index/mfl_register_all_runs.json >> mfl_seed_before.sha256
+
+      - name: Restore verified immutable corpus source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p corpus_parts merged_lake
+          gh release download "$CANONICAL_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'corpus_snapshot.duckdb.part-*' --dir corpus_parts
+          gh release download "$CANONICAL_RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern 'corpus_snapshot.duckdb.sha256' --dir corpus_parts
+          cat corpus_parts/corpus_snapshot.duckdb.part-* > merged_lake/corpus_snapshot.duckdb
+          (cd merged_lake && sha256sum -c ../corpus_parts/corpus_snapshot.duckdb.sha256)
+
+      - name: Restore immutable ops seed from durable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p immutable_ops
+          gh release download ops-cache-v6-2000-plus-player-bio \
+            --repo jeleff1000/league-history-workers \
+            --pattern ops_cache.duckdb --dir immutable_ops
+          cp immutable_ops/ops_cache.duckdb merged_lake/ops_cache.duckdb
+          sha256sum merged_lake/ops_cache.duckdb > ops_seed_before.sha256
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install DuckDB validator dependency
+        run: python -m pip install duckdb==1.5.1
+
+      - name: Prove protected MFL ledger then merge in runner workspace
+        run: |
+          set -euo pipefail
+          python code/scripts/research_cohorts/merge_research_with_mfl.py \
+            --base merged_lake/corpus_snapshot.duckdb \
+            --mfl protected_mfl/chunk/mfl_register_chunk.duckdb \
+            --mfl-index protected_mfl/index/mfl_register_all_runs.json \
+            --out merged_research.duckdb \
+            --expected-ledger "$MFL_EXPECTED_LEDGER"
+          test "$(python - <<'PY'
+          import json
+          print(json.load(open('merged_research.json'))['protected_mfl_league_years'])
+          PY
+          )" = "$MFL_EXPECTED_TOTAL"
+          mv merged_research.duckdb merged_lake/corpus_snapshot.duckdb
+          mv merged_research.json mfl_merge_proof.json
+          python code/scripts/research_cohorts/validate_research_public_lake.py merged_lake
+
+      - name: Verify protected MFL and immutable ops were unchanged
+        run: |
+          set -euo pipefail
+          sha256sum protected_mfl/chunk/mfl_register_chunk.duckdb > mfl_seed_after.sha256
+          sha256sum protected_mfl/index/mfl_register_all_runs.json >> mfl_seed_after.sha256
+          cmp mfl_seed_before.sha256 mfl_seed_after.sha256
+          sha256sum merged_lake/ops_cache.duckdb > ops_seed_after.sha256
+          cmp ops_seed_before.sha256 ops_seed_after.sha256
+
+      - name: Upload merge proof only
+        uses: actions/upload-artifact@v4
+        with:
+          name: protected-mfl-merge-proof-${{ github.run_id }}
+          retention-days: 180
+          path: |
+            mfl_merge_proof.json
+            mfl_seed_before.sha256
+            mfl_seed_after.sha256
+            ops_seed_before.sha256
+            ops_seed_after.sha256
