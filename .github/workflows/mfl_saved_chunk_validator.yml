@@ -90,5 +90,5 @@ jobs:
           con.close()
           if actual != proof.get('added_rows'):
               raise SystemExit(f'chunk row counts mismatch: actual={actual} proof={proof.get("added_rows")}')
-          print(json.dumps({'live_cache_validated': True, 'index_key': index_key, 'proof': proof, 'chunk_rows': actual}, sort_keys=True))
+          print(json.dumps({'live_cache_validated': True, 'index_key': index_key, 'accepted_by_year': index.get('accepted_by_year', {}), 'proof': proof, 'chunk_rows': actual}, sort_keys=True))
           PY
