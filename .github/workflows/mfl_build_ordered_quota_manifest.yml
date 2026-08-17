@@ -8,14 +8,13 @@ permissions:
   contents: read
 
 env:
-  MFL_CHUNK_KEY: mfl-registered-2004-2018-v2-chunk-recover-mass-remaining-v31-r9-20260816-1
-  MFL_OVERLAY_KEY: mfl-registered-2004-2018-v2-research-overlay-recover-mass-remaining-v31-r9-20260816-1
+  MFL_INDEX_KEY: mfl-registered-2004-2018-v2-index-recover-mass-remaining-v31-r9-20260816-1
   REGISTRY_PATH: code/derived/mfl_register/mfl_discovered_ids_2000_2018.csv.gz
 
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
     steps:
       - name: Checkout registry source
         uses: actions/checkout@v5
@@ -27,52 +26,14 @@ jobs:
           sparse-checkout: |
             /derived/mfl_register/mfl_discovered_ids_2000_2018.csv.gz
 
-      - name: Restore live MFL cache read-only
+      - name: Restore authoritative 39k MFL index
         uses: actions/cache/restore@v5
         with:
-          path: chunk_state
-          key: ${{ env.MFL_CHUNK_KEY }}
-          restore-keys: |
-            mfl-registered-2004-2018-v2-chunk-recover-mass-remaining-v31-r9-20260816-
-          fail-on-cache-miss: false
-
-      - name: Require restored live cache
-        run: |
-          set -euo pipefail
-          find chunk_state -maxdepth 4 -type f -print
-          test -n "$(find chunk_state -type f -name '*.duckdb' -print -quit)"
-
-      - name: Restore protected 39k research overlay
-        uses: actions/cache/restore@v5
-        with:
-          path: research_overlay_state
-          key: ${{ env.MFL_OVERLAY_KEY }}
+          path: index_state
+          key: ${{ env.MFL_INDEX_KEY }}
           fail-on-cache-miss: true
 
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
-      - name: Install DuckDB
-        run: python -m pip install duckdb==1.5.1
-
-      - name: Inspect protected overlay schema
-        run: |
-          set -euo pipefail
-          find research_overlay_state -maxdepth 3 -type f -print
-          python - <<'PY'
-          from pathlib import Path
-          import duckdb
-          for path in Path("research_overlay_state").rglob("*.duckdb"):
-              con = duckdb.connect(str(path), read_only=True)
-              print(f"overlay database: {path}")
-              for table, in con.execute("SHOW TABLES").fetchall():
-                  columns = [row[1] for row in con.execute(f'PRAGMA table_info("{table}")').fetchall()]
-                  print(f"table={table} columns={columns}")
-              con.close()
-          PY
-
-      - name: Validate live IDs and build ordered manifest
+      - name: Validate index and build ordered manifest
         env:
           REGISTRY_PATH: ${{ env.REGISTRY_PATH }}
         run: |
@@ -81,66 +42,64 @@ jobs:
           import csv, gzip, json, os, re
           from collections import defaultdict
           from pathlib import Path
-          import duckdb
 
-          registry_path = Path(os.environ["REGISTRY_PATH"])
+          expected = {2004:4780,2005:935,2006:7719,2007:2136,2008:2195,2009:2133,2010:2155,2011:2170,2012:1801,2013:1288,2014:865,2015:836,2016:9114,2017:468,2018:773}
+          index_path = Path("index_state/mfl_register_all_runs.json")
+          if not index_path.exists():
+              raise SystemExit(f"authoritative MFL index missing: {index_path}")
+          index = json.loads(index_path.read_text(encoding="utf-8"))
+          accepted = {int(y): int(n) for y, n in index.get("accepted_by_year", {}).items()}
+          if accepted != expected or int(index.get("league_count", -1)) != sum(expected.values()):
+              raise SystemExit(f"authoritative 39k index ledger mismatch: expected={expected}, accepted={accepted}, league_count={index.get('league_count')}")
+
+          def normalize(season, db_name):
+              raw = str(db_name).strip()
+              if re.fullmatch(r"\d{5}", raw):
+                  return raw
+              match = re.fullmatch(r"mfl_(\d{4})_(\d{5})", raw)
+              if match and int(match.group(1)) == int(season):
+                  return match.group(2)
+              raise SystemExit(f"unsupported MFL index db_name: {raw!r} season={season}")
+
+          live = defaultdict(set)
+          for row in index.get("leagues", []):
+              season = int(row["season"])
+              live[season].add(normalize(season, row["db_name"]))
+          actual = {year: len(live[year]) for year in expected}
+          if actual != expected:
+              raise SystemExit(f"authoritative 39k index duplicate/membership mismatch: expected={expected}, actual={actual}")
+          if sum(len(ids) for ids in live.values()) != 39368:
+              raise SystemExit(f"authoritative 39k index total mismatch: {sum(len(ids) for ids in live.values())}")
+
           discovered = defaultdict(set)
-          with gzip.open(registry_path, mode="rt", newline="", encoding="utf-8") as fh:
+          with gzip.open(os.environ["REGISTRY_PATH"], mode="rt", newline="", encoding="utf-8") as fh:
               for row in csv.DictReader(fh):
                   discovered[int(row["season"])].add(str(row["league_id"]).zfill(5))
-          db_path = next(Path("research_overlay_state").rglob("*.duckdb"), None)
-          if db_path is None:
-              raise SystemExit("live cache did not contain a DuckDB file")
-          con = duckdb.connect(str(db_path), read_only=True)
-          tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
-          candidates = []
-          for table in tables:
-              cols = {r[1] for r in con.execute(f'PRAGMA table_info("{table}")').fetchall()}
-              if {"db_name", "year"}.issubset(cols): candidates.append(table)
-          if not candidates: raise SystemExit(f"live cache has no db_name/year table; tables={tables}")
-          def normalize(year, db_name):
-              raw_id = str(db_name).strip()
-              bare = re.fullmatch(r"\d{5}", raw_id)
-              canonical = re.fullmatch(r"mfl_(\d{4})_(\d{5})", raw_id)
-              if bare:
-                  return raw_id
-              if canonical and int(canonical.group(1)) == int(year):
-                  return canonical.group(2)
-              return None
-          candidate_rows = {}
-          candidate_counts = {}
-          for candidate in candidates:
-              rows_for_candidate = con.execute(f'SELECT DISTINCT CAST(year AS INTEGER), CAST(db_name AS VARCHAR) FROM "{candidate}" WHERE year BETWEEN 2000 AND 2018').fetchall()
-              candidate_rows[candidate] = rows_for_candidate
-              candidate_counts[candidate] = sum(normalize(year, db_name) is not None for year, db_name in rows_for_candidate)
-          table = max(candidates, key=lambda candidate: candidate_counts[candidate])
-          live = defaultdict(set)
-          malformed_live = defaultdict(set)
-          for year, db_name in candidate_rows[table]:
-              normalized = normalize(year, db_name)
-              if normalized is not None:
-                  live[int(year)].add(normalized)
-              else:
-                  malformed_live[int(year)].add(str(db_name).strip())
-          con.close()
-          print(f"candidate valid ID counts: {candidate_counts}")
-          expected_live = {2004:4780,2005:935,2006:7719,2007:2136,2008:2195,2009:2133,2010:2155,2011:2170,2012:1801,2013:1288,2014:865,2015:836,2016:9114,2017:468,2018:773}
-          actual_live = {y: len(live[y]) for y in expected_live}
-          if actual_live != expected_live:
-              raise SystemExit(f"39k live-cache validation failed: expected={expected_live}, actual={actual_live}, malformed={dict(malformed_live)}")
-          fetched = {2000:0,2001:0,2002:0,2003:0,2004:4780,2005:935,2006:7719,2007:2136,2008:2195,2009:2133,2010:2155,2011:2170,2012:1801,2013:1288,2014:865,2015:836,2016:9114,2017:468,2018:773}
-          current = {y: len(live[y]) or fetched[y] for y in range(2000,2019)}
-          rows=[]; used=defaultdict(set)
-          for stage,target,years in [(1,2000,range(2000,2019)),(2,5000,range(2002,2019)),(3,10000,range(2003,2019))]:
+
+          current = {year: len(live[year]) for year in range(2000, 2019)}
+          rows = []
+          used = defaultdict(set)
+          for stage, target, years in [(1, 2000, range(2000, 2019)), (2, 5000, range(2002, 2019)), (3, 10000, range(2003, 2019))]:
               for year in years:
-                  need=max(0,target-(current[year]+len(used[year])))
-                  selected=sorted(discovered[year]-live[year]-used[year], key=lambda x:(int(x),x))[:need]
+                  need = max(0, target - current[year] - len(used[year]))
+                  available = sorted(discovered[year] - live[year] - used[year], key=lambda value: (int(value), value))
+                  selected = available[:need]
                   used[year].update(selected)
-                  for ordinal,league_id in enumerate(selected,1): rows.append({"stage":stage,"target_per_year":target,"year_order":year,"year_ordinal":ordinal,"season":year,"league_id":league_id,"source":"registry_minus_live_cache"})
-          with open("mfl_ordered_quota_manifest.csv","w",newline="",encoding="utf-8") as fh:
-              writer=csv.DictWriter(fh,fieldnames=["stage","target_per_year","year_order","year_ordinal","season","league_id","source"]); writer.writeheader(); writer.writerows(rows)
-          Path("mfl_quota_validation.json").write_text(json.dumps({"live_cache_key":os.environ["MFL_CHUNK_KEY"],"live_table_used":table,"live_cache_total_ids":sum(len(live[y]) for y in expected_live),"malformed_live_ids":{str(y):sorted(values) for y,values in malformed_live.items()},"discovered_registry":str(registry_path),"rows_in_manifest":len(rows),"scoreboard":[{"year":y,"live_cache_ids":len(live[y]),"effective_current":current[y],"registry_discovered_ids":len(discovered[y]),"stage1_needed":max(0,2000-current[y]),"stage2_needed_after_stage1":max(0,5000-max(current[y],2000)),"stage3_needed_after_stage2":max(0,10000-max(current[y],5000))} for y in range(2000,2019)]},indent=2)+"\n")
-          print(f"live table: {table}"); print(f"validated live cache IDs: {sum(len(live[y]) for y in expected_live)}"); print(f"malformed live IDs ignored: {sum(len(v) for v in malformed_live.values())}"); print(f"manifest rows: {len(rows)}")
+                  for ordinal, league_id in enumerate(selected, 1):
+                      rows.append({"stage": stage, "target_per_year": target, "year_order": year, "year_ordinal": ordinal, "season": year, "league_id": league_id, "source": "registry_minus_authoritative_39k_index"})
+
+          fields = ["stage", "target_per_year", "year_order", "year_ordinal", "season", "league_id", "source"]
+          with open("mfl_ordered_quota_manifest.csv", "w", newline="", encoding="utf-8") as fh:
+              writer = csv.DictWriter(fh, fieldnames=fields)
+              writer.writeheader()
+              writer.writerows(rows)
+
+          scoreboard = [{"year": year, "authoritative_39k_ids": len(live[year]), "registry_discovered_ids": len(discovered[year]), "stage1_needed": max(0, 2000 - current[year]), "stage2_needed_after_stage1": max(0, 5000 - max(current[year], 2000)), "stage3_needed_after_stage2": max(0, 10000 - max(current[year], 5000))} for year in range(2000, 2019)]
+          Path("mfl_quota_validation.json").write_text(json.dumps({"authoritative_index_key": os.environ["MFL_INDEX_KEY"], "authoritative_index_path": str(index_path), "authoritative_39k_total": 39368, "rows_in_manifest": len(rows), "scoreboard": scoreboard}, indent=2) + "\n", encoding="utf-8")
+          print(f"authoritative 39k index pairs: {sum(len(ids) for ids in live.values())}")
+          print(f"manifest rows: {len(rows)}")
+          for item in scoreboard:
+              print(item)
           PY
 
       - name: Upload validated manifest
