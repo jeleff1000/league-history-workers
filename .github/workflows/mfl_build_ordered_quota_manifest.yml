@@ -49,6 +49,13 @@ jobs:
           key: ${{ env.MFL_OVERLAY_KEY }}
           fail-on-cache-miss: true
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install DuckDB
+        run: python -m pip install duckdb==1.5.1
+
       - name: Inspect protected overlay schema
         run: |
           set -euo pipefail
@@ -64,13 +71,6 @@ jobs:
                   print(f"table={table} columns={columns}")
               con.close()
           PY
-
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
-      - name: Install DuckDB
-        run: python -m pip install duckdb==1.5.1
 
       - name: Validate live IDs and build ordered manifest
         env:
