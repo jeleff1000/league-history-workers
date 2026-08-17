@@ -88,7 +88,7 @@ jobs:
           with gzip.open(registry_path, mode="rt", newline="", encoding="utf-8") as fh:
               for row in csv.DictReader(fh):
                   discovered[int(row["season"])].add(str(row["league_id"]).zfill(5))
-          db_path = next(Path("chunk_state").rglob("*.duckdb"), None)
+          db_path = next(Path("research_overlay_state").rglob("*.duckdb"), None)
           if db_path is None:
               raise SystemExit("live cache did not contain a DuckDB file")
           con = duckdb.connect(str(db_path), read_only=True)
