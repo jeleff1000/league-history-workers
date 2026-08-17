@@ -55,6 +55,7 @@ jobs:
           set -euo pipefail
           python - <<'PY'
           import csv
+          import gzip
           import json
           import os
           from collections import defaultdict
