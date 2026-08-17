@@ -217,6 +217,21 @@ jobs:
           name: mfl-pending-manifest-${{ github.run_id }}
           retention-days: 30
           path: pending_manifest.json
+      - name: Stage selected manifest for ingest runners
+        run: |
+          mkdir -p wave_manifest
+          if [ "${{ inputs.storage_mode }}" = "fetch_only" ]; then
+            cp pending_manifest.json wave_manifest/wave_manifest.json
+          else
+            cp "code/${{ inputs.manifest_path }}" wave_manifest/wave_manifest.json
+          fi
+          test -s wave_manifest/wave_manifest.json
+      - name: Publish selected manifest to ingest runners
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-wave-manifest-${{ github.run_id }}
+          retention-days: 30
+          path: wave_manifest/wave_manifest.json
       - name: Select wave batches
         id: manifest
         env:
@@ -370,15 +385,14 @@ jobs:
           key: ${{ env.MFL_PLAYER_CACHE_KEY }}
           restore-keys: |
             ${{ inputs.cache_namespace }}-players-
-      - name: Download pending work manifest
-        if: ${{ inputs.storage_mode == 'fetch_only' }}
+      - name: Download selected work manifest
         uses: actions/download-artifact@v4
         with:
-          name: mfl-pending-manifest-${{ github.run_id }}
+          name: mfl-wave-manifest-${{ github.run_id }}
           path: pending_work
       - name: Run validated MFL batch
         env:
-          MANIFEST: ${{ inputs.storage_mode == 'fetch_only' && 'pending_work/pending_manifest.json' || format('code/{0}', inputs.manifest_path) }}
+          MANIFEST: pending_work/wave_manifest.json
           BATCH_START: ${{ inputs.batch_start }}
           BATCH: ${{ matrix.batch }}
           BATCH_SIZE: ${{ inputs.batch_size }}
