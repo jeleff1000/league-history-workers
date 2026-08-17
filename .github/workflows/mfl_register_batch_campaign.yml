@@ -467,13 +467,14 @@ jobs:
           # that is used by the save step, then let the merger read it there.
           path: index_state
           key: ${{ inputs.prior_index_key }}
-      - name: Restore prior canonical index for finalizer
-        if: ${{ (inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only') && inputs.prior_index_key != '' }}
-        uses: actions/cache/restore@v5
-        with:
-          path: prior_canonical_index
-          key: ${{ inputs.prior_index_key }}
           fail-on-cache-miss: true
+      - name: Stage prior canonical index for finalizer
+        if: ${{ (inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only') && inputs.prior_index_key != '' }}
+        shell: bash
+        run: |
+          test -s index_state/mfl_register_all_runs.json
+          mkdir -p prior_canonical_index
+          cp index_state/mfl_register_all_runs.json prior_canonical_index/mfl_register_all_runs.json
       - name: Download pending work manifest for combine
         if: ${{ inputs.storage_mode == 'fetch_only' }}
         uses: actions/download-artifact@v4
