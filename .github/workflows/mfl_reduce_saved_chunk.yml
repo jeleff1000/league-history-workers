@@ -15,6 +15,11 @@ on:
         description: Exact cache key for the current canonical index
         required: true
         type: string
+      prior_index_cache_path:
+        description: Path used when the prior canonical index cache was saved
+        required: false
+        type: string
+        default: canonical_index_state
       cache_namespace:
         description: Canonical immutable cache namespace
         required: false
@@ -58,20 +63,20 @@ jobs:
       - name: Restore canonical prior index
         uses: actions/cache/restore@v5
         with:
-          # The campaign finalizer saves canonical indexes under this exact
-          # path. Actions cache versions include the path, so restoring the
-          # same key under index_state would appear as a cache miss.
-          path: canonical_index_state
+          # Actions cache versions include the path. Restore using the exact
+          # path used by the predecessor that created this cache key.
+          path: ${{ inputs.prior_index_cache_path }}
           key: ${{ inputs.prior_index_key }}
           fail-on-cache-miss: true
       - name: Normalize canonical prior index filename
         shell: bash
         run: |
-          test -d canonical_index_state
-          if [ ! -s canonical_index_state/mfl_register_all_runs.json ] && [ -s canonical_index_state/canonical_mfl_register_all_runs.json ]; then
-            cp canonical_index_state/canonical_mfl_register_all_runs.json canonical_index_state/mfl_register_all_runs.json
+          prior_dir='${{ inputs.prior_index_cache_path }}'
+          test -d "$prior_dir"
+          if [ ! -s "$prior_dir/mfl_register_all_runs.json" ] && [ -s "$prior_dir/canonical_mfl_register_all_runs.json" ]; then
+            cp "$prior_dir/canonical_mfl_register_all_runs.json" "$prior_dir/mfl_register_all_runs.json"
           fi
-          test -s canonical_index_state/mfl_register_all_runs.json
+          test -s "$prior_dir/mfl_register_all_runs.json"
       - name: Checkout reducer
         uses: actions/checkout@v5
         with:
@@ -97,7 +102,7 @@ jobs:
           python code/scripts/extraplatform_corpus/merge_mfl_saved_chunk.py \
             --source-db source_chunk/mfl_register_chunk.duckdb \
             --source-index source_index/mfl_register_all_runs.json \
-            --prior-index canonical_index_state/mfl_register_all_runs.json \
+            --prior-index "${{ inputs.prior_index_cache_path }}/mfl_register_all_runs.json" \
             --output-db mfl_register_chunk.duckdb \
             --output-index mfl_register_all_runs.json \
             --proof cache_append_proof.json \
