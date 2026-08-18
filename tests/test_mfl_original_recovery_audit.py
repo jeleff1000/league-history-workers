@@ -1,9 +1,11 @@
 from scripts.extraplatform_corpus.mfl_original_recovery_audit import (
+    build_newest_source_manifest,
     build_expected_registry,
     classify_expected_identities,
     extract_mfl_identities_from_duckdb,
     extract_mfl_identities_from_index,
     normalize_mfl_identity,
+    select_newest_payloads,
     validate_expected_registry,
 )
 
@@ -97,3 +99,43 @@ def test_build_expected_registry_unions_proof_and_source_chunks(tmp_path):
     assert report["source_identity_count"] == 1
     assert report["identity_count"] == 2
     assert report["identities"] == [(2004, "1"), (2004, "2")]
+
+
+def test_select_newest_payloads_uses_timestamp_then_artifact_id_tiebreaker():
+    selected = select_newest_payloads({
+        (2004, "1"): [
+            {"artifact_id": 10, "created_at": "2026-08-14T00:00:00Z", "payload_sha256": "old"},
+            {"artifact_id": 11, "created_at": "2026-08-15T00:00:00Z", "payload_sha256": "new"},
+        ],
+        (2004, "2"): [
+            {"artifact_id": 20, "created_at": "2026-08-15T00:00:00Z", "payload_sha256": "first"},
+            {"artifact_id": 21, "created_at": "2026-08-15T00:00:00Z", "payload_sha256": "second"},
+        ],
+    })
+
+    assert selected[(2004, "1")]["payload_sha256"] == "new"
+    assert selected[(2004, "2")]["payload_sha256"] == "second"
+
+
+def test_build_newest_source_manifest_records_protected_fallbacks():
+    expected = {(2004, "1"), (2016, "2")}
+    candidates = {
+        (2004, "1"): [{"artifact_id": 9, "created_at": "2026-08-15T00:00:00Z", "payload_sha256": "x"}],
+    }
+
+    manifest = build_newest_source_manifest(
+        expected=expected,
+        campaign_candidates=candidates,
+        protected_fallbacks={(2016, "2")},
+        protected_source_run_id=31978502002,
+    )
+
+    assert manifest["campaign_count"] == 1
+    assert manifest["protected_fallback_count"] == 1
+    assert manifest["missing_count"] == 0
+    assert manifest["entries"] == [
+        {"season": 2004, "league_id": "1", "source_type": "campaign_artifact", "artifact_id": 9,
+         "created_at": "2026-08-15T00:00:00Z", "payload_sha256": "x"},
+        {"season": 2016, "league_id": "2", "source_type": "protected_source_chunk",
+         "protected_source_run_id": 31978502002},
+    ]

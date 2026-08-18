@@ -50,7 +50,7 @@ jobs:
               raise SystemExit(f'protected source artifact invariant failed: count={len(sources)} expired={[a["name"] for a in sources if a["expired"]]}')
           output = Path('source_evidence')
           output.mkdir()
-          identities, evidence = set(), []
+          identities, evidence, identity_artifact_map = set(), [], []
           for ordinal, artifact in enumerate(sources):
               if ordinal % 15 != lane:
                   continue
@@ -65,9 +65,14 @@ jobs:
                   raise SystemExit(f'{artifact["name"]} must contain exactly one DuckDB chunk; found {databases}')
               found = extract_mfl_identities_from_duckdb(databases[0])
               identities.update(found)
+              identity_artifact_map.extend({
+                  'season': season, 'league_id': league_id,
+                  'artifact_id': artifact['id'], 'artifact_name': artifact['name'],
+                  'created_at': artifact['created_at'], 'digest': artifact['digest'],
+              } for season, league_id in sorted(found))
               evidence.append({'artifact_id': artifact['id'], 'artifact_name': artifact['name'], 'digest': artifact['digest'], 'size_in_bytes': artifact['size_in_bytes'], 'identity_count': len(found)})
               archive.unlink()
-          (output / f'lane-{lane}.json').write_text(json.dumps({'lane': lane, 'source_artifact_count': len(evidence), 'artifacts': evidence, 'identities': sorted(identities)}, indent=2, sort_keys=True))
+          (output / f'lane-{lane}.json').write_text(json.dumps({'lane': lane, 'source_artifact_count': len(evidence), 'artifacts': evidence, 'identities': sorted(identities), 'identity_artifact_map': identity_artifact_map}, indent=2, sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
         with:

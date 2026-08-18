@@ -84,6 +84,85 @@ def classify_expected_identities(
     }
 
 
+def select_newest_payloads(
+    payloads_by_identity: Mapping[tuple[int, str], list[Mapping[str, Any]]],
+) -> dict[tuple[int, str], Mapping[str, Any]]:
+    """Select the user-approved newest artifact for each identity.
+
+    ``created_at`` must be an ISO-8601 UTC timestamp.  Artifact id provides a
+    stable deterministic tie-breaker when Actions records equal timestamps.
+    Every candidate must carry both fields; absence is an audit error rather
+    than an implicit fallback to iteration order.
+    """
+
+    selected: dict[tuple[int, str], Mapping[str, Any]] = {}
+    for identity, candidates in payloads_by_identity.items():
+        if not candidates:
+            raise ValueError(f"no payload candidates for {identity}")
+        for candidate in candidates:
+            if not candidate.get("created_at") or candidate.get("artifact_id") is None:
+                raise ValueError(f"payload candidate lacks precedence provenance for {identity}: {candidate}")
+        selected[identity] = max(
+            candidates,
+            key=lambda candidate: (str(candidate["created_at"]), int(candidate["artifact_id"])),
+        )
+    return selected
+
+
+def build_newest_source_manifest(
+    *,
+    expected: Set[tuple[int, str]],
+    campaign_candidates: Mapping[tuple[int, str], list[Mapping[str, Any]]],
+    protected_fallbacks: Set[tuple[int, str]],
+    protected_source_run_id: int,
+) -> dict[str, Any]:
+    """Build a complete, provenance-preserving source manifest.
+
+    Campaign duplicates use the user-approved newest-artifact precedence.  A
+    protected-source fallback is valid only for an expected identity with no
+    campaign candidate; it can never silently replace an available campaign
+    payload.
+    """
+
+    unexpected = set(campaign_candidates) - set(expected)
+    if unexpected:
+        raise ValueError(f"campaign candidates outside immutable expected registry: {sorted(unexpected)[:5]}")
+    selected = select_newest_payloads(campaign_candidates)
+    campaign_identities = set(selected)
+    missing_before_fallback = set(expected) - campaign_identities
+    invalid_fallbacks = set(protected_fallbacks) - missing_before_fallback
+    if invalid_fallbacks:
+        raise ValueError(f"protected fallbacks must be missing campaign identities: {sorted(invalid_fallbacks)[:5]}")
+    missing = missing_before_fallback - set(protected_fallbacks)
+
+    entries: list[dict[str, Any]] = []
+    for identity in sorted(campaign_identities):
+        chosen = selected[identity]
+        entry = {
+            "season": identity[0],
+            "league_id": identity[1],
+            "source_type": "campaign_artifact",
+        }
+        entry.update({str(key): value for key, value in chosen.items() if key not in {"season", "league_id"}})
+        entries.append(entry)
+    for season, league_id in sorted(protected_fallbacks):
+        entries.append({
+            "season": season,
+            "league_id": league_id,
+            "source_type": "protected_source_chunk",
+            "protected_source_run_id": protected_source_run_id,
+        })
+    return {
+        "policy": "newest_artifact_created_at_then_artifact_id",
+        "expected_count": len(expected),
+        "campaign_count": len(campaign_identities),
+        "protected_fallback_count": len(protected_fallbacks),
+        "missing_count": len(missing),
+        "missing": sorted(missing),
+        "entries": entries,
+    }
+
+
 def extract_mfl_identities_from_index(path: Path) -> set[tuple[int, str]]:
     """Extract MFL identities from a verbose reducer index using bounded memory.
 
