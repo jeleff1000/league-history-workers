@@ -37,10 +37,16 @@ def main() -> int:
     campaign_workflow = os.environ.get("MFL_CAMPAIGN_WORKFLOW", "mfl_register_batch_campaign.yml")
     planner_workflow = os.environ.get("MFL_PLANNER_WORKFLOW", "mfl_plan_next_wave.yml")
     cooldown = timedelta(minutes=int(os.environ.get("MFL_COOLDOWN_MINUTES", "30")))
+    stale_after = timedelta(minutes=int(os.environ.get("MFL_STALE_CAMPAIGN_MINUTES", "180")))
     now = datetime.now(timezone.utc)
     campaigns = workflow_runs(repo, campaign_workflow)
     planners = workflow_runs(repo, planner_workflow)
     active_campaigns = [r for r in campaigns if r.get("status") in ACTIVE]
+    stale_active_campaigns = [
+        r for r in active_campaigns
+        if r.get("created_at") and now - parse_time(r["created_at"]) >= stale_after
+    ]
+    blocking_active_campaigns = [r for r in active_campaigns if r not in stale_active_campaigns]
     active_planners = [r for r in planners if r.get("status") in ACTIVE]
     created = [parse_time(r["created_at"]) for r in campaigns if r.get("created_at")]
     latest_campaign = max(created, default=None)
@@ -49,13 +55,16 @@ def main() -> int:
         "repo": repo,
         "checked_at": now.isoformat().replace("+00:00", "Z"),
         "cooldown_minutes": cooldown.total_seconds() / 60,
+        "stale_campaign_minutes": stale_after.total_seconds() / 60,
         "latest_campaign_created_at": latest_campaign.isoformat().replace("+00:00", "Z") if latest_campaign else None,
         "active_campaigns": [r.get("id") for r in active_campaigns],
+        "stale_active_campaigns": [r.get("id") for r in stale_active_campaigns],
+        "blocking_active_campaigns": [r.get("id") for r in blocking_active_campaigns],
         "active_planners": [r.get("id") for r in active_planners],
         "quiet_period_elapsed": quiet,
         "dispatched": False,
     }
-    if active_campaigns:
+    if blocking_active_campaigns:
         decision["reason"] = "campaign_runs_active_or_queued"
     elif active_planners:
         decision["reason"] = "planner_run_active_or_queued"
