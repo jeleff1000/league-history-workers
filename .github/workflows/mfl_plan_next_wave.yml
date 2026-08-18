@@ -236,7 +236,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          index_key=$(gh cache list --limit 300 --sort created_at --order desc --json key --jq '[.[] | select(.key | startswith("mfl-registered-2004-2018-v2-index-"))][0].key')
+          index_key=$(gh cache list --limit 300 --sort created_at --order desc --json key --jq '[.[] | select((.key | startswith("mfl-registered-2004-2018-v2-index-")) and ((.key | contains("-campaign-")) | not))][0].key')
           reducer_run_id=$(jq -r '[.[] | select(.conclusion == "success")][0].databaseId' runs/reducers.json)
           test -n "$reducer_run_id" && test "$reducer_run_id" != null
           prior_artifact_run_id=""
