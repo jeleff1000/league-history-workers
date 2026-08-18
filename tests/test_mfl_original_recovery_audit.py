@@ -139,3 +139,48 @@ def test_build_newest_source_manifest_records_protected_fallbacks():
         {"season": 2016, "league_id": "2", "source_type": "protected_source_chunk",
          "protected_source_run_id": 31978502002},
     ]
+
+
+def test_build_newest_source_manifest_requires_exact_protected_artifact_provenance():
+    expected = {(2016, "2")}
+
+    manifest = build_newest_source_manifest(
+        expected=expected,
+        campaign_candidates={},
+        protected_fallbacks={(2016, "2")},
+        protected_source_run_id=31978502002,
+        protected_fallback_provenance={
+            (2016, "2"): {
+                "artifact_id": 9272058815,
+                "artifact_name": "mfl-mass-source-31927415400",
+                "created_at": "2026-08-16T23:43:08Z",
+                "digest": "sha256:source",
+            }
+        },
+    )
+
+    assert manifest["entries"] == [{
+        "season": 2016,
+        "league_id": "2",
+        "source_type": "protected_source_chunk",
+        "protected_source_run_id": 31978502002,
+        "artifact_id": 9272058815,
+        "artifact_name": "mfl-mass-source-31927415400",
+        "created_at": "2026-08-16T23:43:08Z",
+        "digest": "sha256:source",
+    }]
+
+
+def test_build_newest_source_manifest_rejects_incomplete_protected_provenance():
+    try:
+        build_newest_source_manifest(
+            expected={(2016, "2")},
+            campaign_candidates={},
+            protected_fallbacks={(2016, "2")},
+            protected_source_run_id=31978502002,
+            protected_fallback_provenance={},
+        )
+    except ValueError as exc:
+        assert "provenance" in str(exc)
+    else:
+        raise AssertionError("protected fallback without exact provenance must fail")

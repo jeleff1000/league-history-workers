@@ -115,13 +115,15 @@ def build_newest_source_manifest(
     campaign_candidates: Mapping[tuple[int, str], list[Mapping[str, Any]]],
     protected_fallbacks: Set[tuple[int, str]],
     protected_source_run_id: int,
+    protected_fallback_provenance: Mapping[tuple[int, str], Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a complete, provenance-preserving source manifest.
 
     Campaign duplicates use the user-approved newest-artifact precedence.  A
     protected-source fallback is valid only for an expected identity with no
     campaign candidate; it can never silently replace an available campaign
-    payload.
+    payload.  When provenance is supplied, it must cover every protected
+    fallback with the exact immutable Actions artifact that contains it.
     """
 
     unexpected = set(campaign_candidates) - set(expected)
@@ -135,6 +137,22 @@ def build_newest_source_manifest(
         raise ValueError(f"protected fallbacks must be missing campaign identities: {sorted(invalid_fallbacks)[:5]}")
     missing = missing_before_fallback - set(protected_fallbacks)
 
+    if protected_fallback_provenance is not None:
+        provenance_keys = set(protected_fallback_provenance)
+        if provenance_keys != set(protected_fallbacks):
+            raise ValueError(
+                "protected fallback provenance must cover exactly the protected fallbacks: "
+                f"missing={sorted(set(protected_fallbacks) - provenance_keys)[:5]} "
+                f"unexpected={sorted(provenance_keys - set(protected_fallbacks))[:5]}"
+            )
+        required_provenance = {"artifact_id", "artifact_name", "created_at", "digest"}
+        for identity, provenance in protected_fallback_provenance.items():
+            absent = sorted(field for field in required_provenance if not provenance.get(field))
+            if absent:
+                raise ValueError(
+                    f"protected fallback provenance is incomplete for {identity}: missing {absent}"
+                )
+
     entries: list[dict[str, Any]] = []
     for identity in sorted(campaign_identities):
         chosen = selected[identity]
@@ -146,12 +164,19 @@ def build_newest_source_manifest(
         entry.update({str(key): value for key, value in chosen.items() if key not in {"season", "league_id"}})
         entries.append(entry)
     for season, league_id in sorted(protected_fallbacks):
-        entries.append({
+        entry = {
             "season": season,
             "league_id": league_id,
             "source_type": "protected_source_chunk",
             "protected_source_run_id": protected_source_run_id,
-        })
+        }
+        if protected_fallback_provenance is not None:
+            entry.update({
+                str(key): value
+                for key, value in protected_fallback_provenance[(season, league_id)].items()
+                if key not in {"season", "league_id", "source_type", "protected_source_run_id"}
+            })
+        entries.append(entry)
     return {
         "policy": "newest_artifact_created_at_then_artifact_id",
         "expected_count": len(expected),
