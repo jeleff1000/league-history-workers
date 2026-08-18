@@ -1,0 +1,130 @@
+name: MFL Original Recovery Audit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  ORIGINAL_PROOF_RUN_ID: '31971037835'
+  ORIGINAL_MASS_REDUCER_RUN_ID: '31978502002'
+  EXPECTED_TOTAL: '39368'
+
+jobs:
+  source_lane:
+    name: Protected source lane ${{ matrix.lane }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        lane: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            /scripts/extraplatform_corpus/mfl_original_recovery_audit.py
+          sparse-checkout-cone-mode: false
+      - name: Install read-only DuckDB inspector
+        run: python3 -m pip install --disable-pip-version-check duckdb
+      - name: Restore this lane's protected source identities
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LANE: ${{ matrix.lane }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, subprocess, zipfile
+          from pathlib import Path
+          from scripts.extraplatform_corpus.mfl_original_recovery_audit import extract_mfl_identities_from_duckdb
+
+          repo = os.environ['GITHUB_REPOSITORY']
+          lane = int(os.environ['LANE'])
+          raw = subprocess.check_output(['gh', 'api', f'repos/{repo}/actions/runs/{os.environ["ORIGINAL_MASS_REDUCER_RUN_ID"]}/artifacts?per_page=100'])
+          artifacts = json.loads(raw)['artifacts']
+          sources = sorted((a for a in artifacts if a['name'].startswith('mfl-mass-source-')), key=lambda a: a['name'])
+          if len(sources) != 31 or any(a['expired'] for a in sources):
+              raise SystemExit(f'protected source artifact invariant failed: count={len(sources)} expired={[a["name"] for a in sources if a["expired"]]}')
+          output = Path('source_evidence')
+          output.mkdir()
+          identities, evidence = set(), []
+          for ordinal, artifact in enumerate(sources):
+              if ordinal % 15 != lane:
+                  continue
+              archive = output / f'{artifact["id"]}.zip'
+              with archive.open('wb') as handle:
+                  subprocess.run(['gh', 'api', f'repos/{repo}/actions/artifacts/{artifact["id"]}/zip'], check=True, stdout=handle)
+              target = output / str(artifact['id'])
+              with zipfile.ZipFile(archive) as zipped:
+                  zipped.extractall(target)
+              databases = sorted(target.rglob('*.duckdb'))
+              if len(databases) != 1:
+                  raise SystemExit(f'{artifact["name"]} must contain exactly one DuckDB chunk; found {databases}')
+              found = extract_mfl_identities_from_duckdb(databases[0])
+              identities.update(found)
+              evidence.append({'artifact_id': artifact['id'], 'artifact_name': artifact['name'], 'digest': artifact['digest'], 'size_in_bytes': artifact['size_in_bytes'], 'identity_count': len(found)})
+              archive.unlink()
+          (output / f'lane-{lane}.json').write_text(json.dumps({'lane': lane, 'source_artifact_count': len(evidence), 'artifacts': evidence, 'identities': sorted(identities)}, indent=2, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-original-source-identities-${{ matrix.lane }}
+          retention-days: 90
+          path: source_evidence/lane-${{ matrix.lane }}.json
+
+  expected_registry:
+    name: Verify immutable 39,368 registry
+    needs: source_lane
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            /scripts/extraplatform_corpus/mfl_original_recovery_audit.py
+          sparse-checkout-cone-mode: false
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: mfl-original-source-identities-*
+          merge-multiple: true
+          path: source_evidence
+      - name: Download fixed pre-cutoff reducer proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run download "$ORIGINAL_PROOF_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "mfl-reducer-proof-$ORIGINAL_PROOF_RUN_ID" --dir proof
+          test -s proof/mfl_register_all_runs.json
+      - name: Build and validate immutable expected registry
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from scripts.extraplatform_corpus.mfl_original_recovery_audit import extract_mfl_identities_from_index, validate_expected_registry
+          expected_by_year = {2004:4780,2005:935,2006:7719,2007:2136,2008:2195,2009:2133,2010:2155,2011:2170,2012:1801,2013:1288,2014:865,2015:836,2016:9114,2017:468,2018:773}
+          proof = extract_mfl_identities_from_index(Path('proof/mfl_register_all_runs.json'))
+          source, lanes = set(), []
+          for path in sorted(Path('source_evidence').glob('lane-*.json')):
+              lane = json.loads(path.read_text())
+              lanes.append(lane)
+              source.update((int(year), str(league_id)) for year, league_id in lane['identities'])
+          if len(lanes) != 15:
+              raise SystemExit(f'expected 15 source-lane reports, found {len(lanes)}')
+          identities = proof | source
+          by_year = validate_expected_registry(identities, expected_total=39368, expected_by_year=expected_by_year)
+          report = {'source':'pre-2026-08-17 immutable proof plus protected mass-source artifacts','cutoff_exclusive':'2026-08-17T00:00:00Z','proof_run_id':31971037835,'mass_reducer_run_id':31978502002,'proof_identity_count':len(proof),'source_identity_count':len(source),'overlap_identity_count':len(proof & source),'identity_count':len(identities),'by_year':by_year,'identities':sorted(identities),'lanes':lanes}
+          Path('original_registry').mkdir()
+          Path('original_registry/mfl_original_39368_registry.json').write_text(json.dumps(report, indent=2, sort_keys=True))
+          print(json.dumps({'identity_count': len(identities), 'by_year': by_year}, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-original-39368-registry-${{ github.run_id }}
+          retention-days: 90
+          path: |
+            original_registry/mfl_original_39368_registry.json
+            source_evidence/
