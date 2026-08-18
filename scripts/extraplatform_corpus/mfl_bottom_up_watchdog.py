@@ -48,6 +48,11 @@ def main() -> int:
     ]
     blocking_active_campaigns = [r for r in active_campaigns if r not in stale_active_campaigns]
     active_planners = [r for r in planners if r.get("status") in ACTIVE]
+    stale_active_planners = [
+        r for r in active_planners
+        if r.get("created_at") and now - parse_time(r["created_at"]) >= stale_after
+    ]
+    blocking_active_planners = [r for r in active_planners if r not in stale_active_planners]
     created = [parse_time(r["created_at"]) for r in campaigns if r.get("created_at")]
     latest_campaign = max(created, default=None)
     quiet = latest_campaign is None or now - latest_campaign >= cooldown
@@ -61,12 +66,14 @@ def main() -> int:
         "stale_active_campaigns": [r.get("id") for r in stale_active_campaigns],
         "blocking_active_campaigns": [r.get("id") for r in blocking_active_campaigns],
         "active_planners": [r.get("id") for r in active_planners],
+        "stale_active_planners": [r.get("id") for r in stale_active_planners],
+        "blocking_active_planners": [r.get("id") for r in blocking_active_planners],
         "quiet_period_elapsed": quiet,
         "dispatched": False,
     }
     if blocking_active_campaigns:
         decision["reason"] = "campaign_runs_active_or_queued"
-    elif active_planners:
+    elif blocking_active_planners:
         decision["reason"] = "planner_run_active_or_queued"
     elif not quiet:
         decision["reason"] = "campaign_cooldown_not_elapsed"
