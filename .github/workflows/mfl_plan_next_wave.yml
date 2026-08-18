@@ -137,17 +137,32 @@ jobs:
               except subprocess.TimeoutExpired as exc:
                   raise SystemExit(f'artifact download timed out for campaign {run_id} ({artifact})') from exc
 
+          def artifact_names(run_id):
+              command=['gh','api',f'repos/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{run_id}/artifacts?per_page=100']
+              try:
+                  result=subprocess.run(command,capture_output=True,text=True,timeout=30)
+              except subprocess.TimeoutExpired:
+                  raise SystemExit(f'artifact inventory timed out for campaign {run_id}')
+              if result.returncode != 0:
+                  raise SystemExit(f'artifact inventory failed for campaign {run_id}: {(result.stderr or result.stdout).strip()}')
+              try:
+                  return {str(item['name']) for item in json.loads(result.stdout).get('artifacts',[])}
+              except (KeyError,TypeError,json.JSONDecodeError):
+                  raise SystemExit(f'artifact inventory was malformed for campaign {run_id}')
+
           for run in runs:
               if run.get('conclusion') == 'cancelled' or run.get('createdAt','') < os.environ['CUTOFF']:
                   continue
               run_id=str(run['databaseId'])
+              available=artifact_names(run_id)
               # Prefer the durable plan: it contains the exact rows selected for
               # the campaign and avoids scanning the much larger pending manifest.
               plan_out=Path('plans')/run_id
               plan_out.mkdir(parents=True,exist_ok=True)
-              plan_result=download_named(run_id,f'mfl-batch-plan-{run_id}',plan_out)
+              plan_name=f'mfl-batch-plan-{run_id}'
+              plan_result=download_named(run_id,plan_name,plan_out) if plan_name in available else None
               plan_path=plan_out/'batch_plan.json'
-              if plan_result.returncode == 0 and plan_path.is_file():
+              if plan_result is not None and plan_result.returncode == 0 and plan_path.is_file():
                   plan=json.loads(plan_path.read_text())
                   planned_rows=plan.get('planned_league_years',[])
                   for row in planned_rows:
@@ -158,6 +173,8 @@ jobs:
                                    'target_years':plan.get('target_years',[])})
                   continue
               artifact=f'mfl-pending-manifest-{run_id}'
+              if artifact not in available:
+                  continue
               out=Path('run_manifests')/run_id
               out.mkdir(parents=True,exist_ok=True)
               result=download_named(run_id,artifact,out)
@@ -178,21 +195,6 @@ jobs:
                   reserved.add((int(row['season']),str(row['league_id'])))
               evidence.append({'run_id':run_id,'ingest_jobs':ingest,'reserved_count':take,
                                'target_years':payload.get('target_years',[])})
-
-          # Durable plans from newer campaigns are additional reservations.
-          for run in runs:
-              run_id=str(run['databaseId'])
-              if run_id in planned_runs:
-                  continue
-              out=Path('plans')/run_id
-              out.mkdir(parents=True,exist_ok=True)
-              result=download_named(run_id,f'mfl-batch-plan-{run_id}',out)
-              path=out/'batch_plan.json'
-              if result.returncode != 0 or not path.is_file():
-                  continue
-              plan=json.loads(path.read_text())
-              for row in plan.get('planned_league_years',[]):
-                  reserved.add((int(row['season']),str(row['league_id'])))
 
           rows=[]
           seen=set()
