@@ -111,7 +111,15 @@ jobs:
               command=['gh','run','view',run_id,'--repo',os.environ['GITHUB_REPOSITORY'],'--json','jobs']
               last_error=''
               for attempt in range(1, 7):
-                  result=subprocess.run(command,capture_output=True,text=True)
+                  print(f'jobs lookup {run_id} attempt {attempt}/6', flush=True)
+                  try:
+                      result=subprocess.run(command,capture_output=True,text=True,timeout=45)
+                  except subprocess.TimeoutExpired:
+                      last_error='gh run view timed out after 45 seconds'
+                      print(f'jobs lookup timeout for {run_id} attempt {attempt}/6', flush=True)
+                      if attempt < 6:
+                          time.sleep(min(30, 2 ** attempt))
+                      continue
                   if result.returncode == 0:
                       return json.loads(result.stdout).get('jobs',[])
                   last_error=(result.stderr or result.stdout).strip()
@@ -141,6 +149,7 @@ jobs:
                   continue
               payload=json.loads(path.read_text())
               rows=payload.get('rows',[])
+              print(f'processing campaign {run_id}: {len(rows)} pending rows', flush=True)
               # Campaigns in the active v9b wave were launched with 250 batches of 2.
               # Derive the actual matrix width from the workflow's ingest job count.
               jobs=load_jobs(run_id)
