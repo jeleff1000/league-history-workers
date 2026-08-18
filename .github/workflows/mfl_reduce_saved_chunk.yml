@@ -64,6 +64,14 @@ jobs:
           path: canonical_index_state
           key: ${{ inputs.prior_index_key }}
           fail-on-cache-miss: true
+      - name: Normalize canonical prior index filename
+        shell: bash
+        run: |
+          test -d canonical_index_state
+          if [ ! -s canonical_index_state/mfl_register_all_runs.json ] && [ -s canonical_index_state/canonical_mfl_register_all_runs.json ]; then
+            cp canonical_index_state/canonical_mfl_register_all_runs.json canonical_index_state/mfl_register_all_runs.json
+          fi
+          test -s canonical_index_state/mfl_register_all_runs.json
       - name: Checkout reducer
         uses: actions/checkout@v5
         with:
