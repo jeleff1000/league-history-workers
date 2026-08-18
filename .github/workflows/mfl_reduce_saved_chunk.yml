@@ -58,7 +58,10 @@ jobs:
       - name: Restore canonical prior index
         uses: actions/cache/restore@v5
         with:
-          path: index_state
+          # The campaign finalizer saves canonical indexes under this exact
+          # path. Actions cache versions include the path, so restoring the
+          # same key under index_state would appear as a cache miss.
+          path: canonical_index_state
           key: ${{ inputs.prior_index_key }}
           fail-on-cache-miss: true
       - name: Checkout reducer
@@ -86,7 +89,7 @@ jobs:
           python code/scripts/extraplatform_corpus/merge_mfl_saved_chunk.py \
             --source-db source_chunk/mfl_register_chunk.duckdb \
             --source-index source_index/mfl_register_all_runs.json \
-            --prior-index index_state/mfl_register_all_runs.json \
+            --prior-index canonical_index_state/mfl_register_all_runs.json \
             --output-db mfl_register_chunk.duckdb \
             --output-index mfl_register_all_runs.json \
             --proof cache_append_proof.json \
