@@ -38,6 +38,10 @@ permissions:
   actions: write
   contents: read
 
+concurrency:
+  group: mfl-bottom-up-dispatch
+  cancel-in-progress: false
+
 jobs:
   plan:
     runs-on: ubuntu-latest

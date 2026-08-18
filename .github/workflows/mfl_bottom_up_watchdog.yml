@@ -1,0 +1,37 @@
+name: MFL Bottom-Up Watchdog
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Log the decision without dispatching a planner wave'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: mfl-bottom-up-dispatch
+  cancel-in-progress: false
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  watchdog:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout watchdog logic
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            /scripts/extraplatform_corpus/mfl_bottom_up_watchdog.py
+          sparse-checkout-cone-mode: false
+      - name: Evaluate quiet period and dispatch at most three campaigns
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MFL_DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: python3 scripts/extraplatform_corpus/mfl_bottom_up_watchdog.py
