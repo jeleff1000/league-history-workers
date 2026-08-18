@@ -97,7 +97,10 @@ jobs:
         run: |
           set -euo pipefail
           gh run download "$ORIGINAL_PROOF_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "mfl-reducer-proof-$ORIGINAL_PROOF_RUN_ID" --dir proof
-          test -s proof/mfl_register_all_runs.json
+          proof_path="$(find proof -type f -name mfl_register_all_runs.json -print -quit)"
+          test -n "$proof_path" && test -s "$proof_path"
+          mkdir -p canonical
+          cp "$proof_path" canonical/mfl_register_all_runs.json
       - name: Build and validate immutable expected registry
         run: |
           set -euo pipefail
@@ -106,7 +109,7 @@ jobs:
           from pathlib import Path
           from scripts.extraplatform_corpus.mfl_original_recovery_audit import extract_mfl_identities_from_index, validate_expected_registry
           expected_by_year = {2004:4780,2005:935,2006:7719,2007:2136,2008:2195,2009:2133,2010:2155,2011:2170,2012:1801,2013:1288,2014:865,2015:836,2016:9114,2017:468,2018:773}
-          proof = extract_mfl_identities_from_index(Path('proof/mfl_register_all_runs.json'))
+          proof = extract_mfl_identities_from_index(Path('canonical/mfl_register_all_runs.json'))
           source, lanes = set(), []
           for path in sorted(Path('source_evidence').glob('lane-*.json')):
               lane = json.loads(path.read_text())
