@@ -78,6 +78,16 @@ on:
         required: false
         type: string
         default: index_state
+      prior_index_artifact_run_id:
+        description: 'Retained reducer run to use if the predecessor cache was evicted'
+        required: false
+        type: string
+        default: ''
+      prior_index_artifact_name:
+        description: 'Artifact containing mfl_register_all_runs.json from the predecessor reducer'
+        required: false
+        type: string
+        default: ''
       reservation_artifact_run_id:
         description: 'Planner run whose reservation artifact excludes already-assigned league-years'
         required: false
@@ -173,8 +183,18 @@ jobs:
           path: ${{ inputs.prior_index_cache_path }}
           key: ${{ inputs.prior_index_key }}
           fail-on-cache-miss: true
+      - name: Restore canonical index from retained reducer proof
+        if: ${{ inputs.storage_mode == 'fetch_only' && inputs.prior_index_key == '' && inputs.prior_index_artifact_run_id != '' && inputs.prior_index_artifact_name != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          timeout 240s gh run download "${{ inputs.prior_index_artifact_run_id }}" \
+            --repo "${{ github.repository }}" \
+            --name "${{ inputs.prior_index_artifact_name }}" \
+            --dir canonical_index_state
+          test -s canonical_index_state/mfl_register_all_runs.json
       - name: Stage pending queue index at index_state
-        if: ${{ inputs.storage_mode == 'fetch_only' && inputs.prior_index_key != '' && inputs.prior_index_cache_path != 'index_state' }}
+        if: ${{ inputs.storage_mode == 'fetch_only' && (inputs.prior_index_key != '' || inputs.prior_index_artifact_run_id != '') && inputs.prior_index_cache_path != 'index_state' }}
         run: |
           source="${{ inputs.prior_index_cache_path }}/mfl_register_all_runs.json"
           if [ ! -s "$source" ]; then source="${{ inputs.prior_index_cache_path }}/canonical_mfl_register_all_runs.json"; fi
