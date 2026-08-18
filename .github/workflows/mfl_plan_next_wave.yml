@@ -261,6 +261,7 @@ jobs:
               -f cache_namespace="mfl-fetch-wave-v11-${{ github.run_id }}-c${campaign}" \
               -f storage_mode=fetch_only \
               -f prior_index_key="$index_key" \
+              -f prior_index_cache_path=canonical_index_state \
               -f prior_index_artifact_run_id="$prior_artifact_run_id" \
               -f prior_index_artifact_name="$prior_artifact_name" \
               -f reservation_artifact_run_id="${{ github.run_id }}" \
