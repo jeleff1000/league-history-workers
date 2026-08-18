@@ -111,7 +111,7 @@ jobs:
           expected_by_year = {2004:4780,2005:935,2006:7719,2007:2136,2008:2195,2009:2133,2010:2155,2011:2170,2012:1801,2013:1288,2014:865,2015:836,2016:9114,2017:468,2018:773}
           proof = extract_mfl_identities_from_index(Path('canonical/mfl_register_all_runs.json'))
           source, lanes = set(), []
-          for path in sorted(Path('source_evidence').glob('lane-*.json')):
+          for path in sorted(Path('source_evidence').rglob('lane-*.json')):
               lane = json.loads(path.read_text())
               lanes.append(lane)
               source.update((int(year), str(league_id)) for year, league_id in lane['identities'])
