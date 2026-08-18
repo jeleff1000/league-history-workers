@@ -120,6 +120,14 @@ jobs:
                       time.sleep(min(30, 2 ** attempt))
               raise SystemExit(f'cannot safely determine ingest width for campaign {run_id}: {last_error}')
 
+          def download_named(run_id, artifact, out):
+              command=['gh','run','download',run_id,'--repo',os.environ['GITHUB_REPOSITORY'],
+                      '--name',artifact,'--dir',str(out)]
+              try:
+                  return subprocess.run(command,capture_output=True,text=True,timeout=120)
+              except subprocess.TimeoutExpired as exc:
+                  raise SystemExit(f'artifact download timed out for campaign {run_id} ({artifact})') from exc
+
           for run in runs:
               if run.get('conclusion') == 'cancelled' or run.get('createdAt','') < os.environ['CUTOFF']:
                   continue
@@ -127,8 +135,7 @@ jobs:
               artifact=f'mfl-pending-manifest-{run_id}'
               out=Path('run_manifests')/run_id
               out.mkdir(parents=True,exist_ok=True)
-              result=subprocess.run(['gh','run','download',run_id,'--repo',os.environ['GITHUB_REPOSITORY'],
-                                     '--name',artifact,'--dir',str(out)],capture_output=True,text=True)
+              result=download_named(run_id,artifact,out)
               path=out/'pending_manifest.json'
               if result.returncode != 0 or not path.is_file():
                   continue
@@ -151,8 +158,7 @@ jobs:
               run_id=str(run['databaseId'])
               out=Path('plans')/run_id
               out.mkdir(parents=True,exist_ok=True)
-              result=subprocess.run(['gh','run','download',run_id,'--repo',os.environ['GITHUB_REPOSITORY'],
-                                     '--name',f'mfl-batch-plan-{run_id}','--dir',str(out)],capture_output=True)
+              result=download_named(run_id,f'mfl-batch-plan-{run_id}',out)
               path=out/'batch_plan.json'
               if result.returncode != 0 or not path.is_file():
                   continue
