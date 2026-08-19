@@ -9,7 +9,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 
-def gh_json(args: list[str]) -> dict:
+def gh_json(args: list[str]) -> dict | list:
     result = subprocess.run(["gh", "api", *args], check=True, capture_output=True, text=True)
     return json.loads(result.stdout)
 
@@ -19,8 +19,11 @@ def parse_time(value: str) -> datetime:
 
 
 def workflow_runs(repo: str, workflow: str) -> list[dict]:
-    payload = gh_json([f"repos/{repo}/actions/workflows/{workflow}/runs", "--method", "GET", "-f", "per_page=100"])
-    return payload.get("workflow_runs", [])
+    pages = gh_json([f"repos/{repo}/actions/workflows/{workflow}/runs", "--method", "GET", "-f", "per_page=100", "--paginate", "--slurp"])
+    runs: list[dict] = []
+    for page in pages:
+        runs.extend(page.get("workflow_runs", []))
+    return runs
 
 
 def dispatch(repo: str, workflow: str, values: dict[str, str]) -> None:
