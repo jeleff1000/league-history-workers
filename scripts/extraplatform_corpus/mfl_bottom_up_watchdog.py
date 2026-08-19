@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Dispatch the next reserved MFL wave after a quiet period."""
+"""Dispatch three fresh ordered-manifest MFL waves every cooldown period."""
 from __future__ import annotations
 
 import json
@@ -7,8 +7,6 @@ import os
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
-
-ACTIVE = {"queued", "in_progress", "waiting", "requested", "pending"}
 
 
 def gh_json(args: list[str]) -> dict:
@@ -35,65 +33,58 @@ def dispatch(repo: str, workflow: str, values: dict[str, str]) -> None:
 def main() -> int:
     repo = os.environ.get("MFL_REPO", "league-history-workers/mfl-league-fetcher")
     campaign_workflow = os.environ.get("MFL_CAMPAIGN_WORKFLOW", "mfl_register_batch_campaign.yml")
-    planner_workflow = os.environ.get("MFL_PLANNER_WORKFLOW", "mfl_plan_next_wave.yml")
     cooldown = timedelta(minutes=int(os.environ.get("MFL_COOLDOWN_MINUTES", "40")))
-    stale_after = timedelta(minutes=int(os.environ.get("MFL_STALE_CAMPAIGN_MINUTES", "180")))
+    epoch = parse_time(os.environ.get("MFL_SCHEDULER_EPOCH", "2026-08-19T03:00:00Z"))
     now = datetime.now(timezone.utc)
     campaigns = workflow_runs(repo, campaign_workflow)
-    planners = workflow_runs(repo, planner_workflow)
-    active_campaigns = [r for r in campaigns if r.get("status") in ACTIVE]
-    stale_active_campaigns = [
-        r for r in active_campaigns
-        if r.get("created_at") and now - parse_time(r["created_at"]) >= stale_after
-    ]
-    blocking_active_campaigns = [r for r in active_campaigns if r not in stale_active_campaigns]
-    active_planners = [r for r in planners if r.get("status") in ACTIVE]
-    stale_active_planners = [
-        r for r in active_planners
-        if r.get("created_at") and now - parse_time(r["created_at"]) >= stale_after
-    ]
-    blocking_active_planners = [r for r in active_planners if r not in stale_active_planners]
-    created = [parse_time(r["created_at"]) for r in campaigns if r.get("created_at")]
-    latest_campaign = max(created, default=None)
-    quiet = latest_campaign is None or now - latest_campaign >= cooldown
+    direct = [r for r in campaigns if r.get("created_at") and parse_time(r["created_at"]) >= epoch]
+    direct.sort(key=lambda r: (r.get("created_at", ""), int(r.get("id", 0))))
+    latest_direct = parse_time(direct[-1]["created_at"]) if direct else None
+    quiet = latest_direct is None or now - latest_direct >= cooldown
+
+    manifest_path = os.environ.get("MFL_ORDERED_MANIFEST", "derived/mfl_register/quota_planning/mfl_ordered_quota_manifest.json")
+    batch_size = int(os.environ.get("MFL_ORDERED_BATCH_SIZE", "2"))
+    batches_per_campaign = int(os.environ.get("MFL_BATCHES_PER_CAMPAIGN", "250"))
+    campaigns_per_wave = int(os.environ.get("MFL_CAMPAIGNS_PER_WAVE", "3"))
+    total_rows = int(os.environ.get("MFL_ORDERED_TOTAL_ROWS", "128940"))
+    total_batch_slots = (total_rows + batch_size - 1) // batch_size
+    next_slot = len(direct)
+    exhausted = next_slot * batches_per_campaign >= total_batch_slots
     decision = {
-        "repo": repo,
+        "mode": "ordered_manifest_cursor", "repo": repo,
         "checked_at": now.isoformat().replace("+00:00", "Z"),
+        "scheduler_epoch": epoch.isoformat().replace("+00:00", "Z"),
         "cooldown_minutes": cooldown.total_seconds() / 60,
-        "stale_campaign_minutes": stale_after.total_seconds() / 60,
-        "latest_campaign_created_at": latest_campaign.isoformat().replace("+00:00", "Z") if latest_campaign else None,
-        "active_campaigns": [r.get("id") for r in active_campaigns],
-        "stale_active_campaigns": [r.get("id") for r in stale_active_campaigns],
-        "blocking_active_campaigns": [r.get("id") for r in blocking_active_campaigns],
-        "active_planners": [r.get("id") for r in active_planners],
-        "stale_active_planners": [r.get("id") for r in stale_active_planners],
-        "blocking_active_planners": [r.get("id") for r in blocking_active_planners],
-        "quiet_period_elapsed": quiet,
-        "dispatched": False,
+        "manifest_path": manifest_path, "direct_campaigns_seen": len(direct),
+        "latest_direct_campaign_created_at": latest_direct.isoformat().replace("+00:00", "Z") if latest_direct else None,
+        "quiet_period_elapsed": quiet, "next_batch_start": next_slot * batches_per_campaign,
+        "batch_size": batch_size, "batches_per_campaign": batches_per_campaign,
+        "campaigns_per_wave": campaigns_per_wave, "total_rows": total_rows,
+        "total_batch_slots": total_batch_slots, "exhausted": exhausted, "dispatched": [],
     }
-    # Campaigns may overlap: durable batch plans reserve their IDs, and the planner
-    # uses those reservations to choose the next unused IDs. Only one planner
-    # may run at a time because it advances the reservation cursor.
-    if blocking_active_planners:
-        decision["reason"] = "planner_run_active_or_queued"
+    if exhausted:
+        decision["reason"] = "ordered_manifest_exhausted"
     elif not quiet:
-        decision["reason"] = "campaign_cooldown_not_elapsed"
+        decision["reason"] = "40_minute_cooldown_not_elapsed"
     else:
-        values = {
-            "campaign_count": "3",
-            "batches_per_campaign": "250",
-            "batch_size": "2",
-            "max_parallel": "75",
-            "target_years": "2004,2005,2006,2007,2008,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018",
-            "campaign_cutoff": "2000-01-01T00:00:00Z",
-        }
-        decision["dispatch_inputs"] = values
-        if os.environ.get("MFL_DRY_RUN", "false").lower() == "true":
-            decision["reason"] = "eligible_dry_run"
-        else:
-            dispatch(repo, planner_workflow, values)
-            decision["dispatched"] = True
-            decision["reason"] = "three_campaign_planner_dispatched"
+        remaining = total_batch_slots - next_slot * batches_per_campaign
+        dispatch_count = min(campaigns_per_wave, (remaining + batches_per_campaign - 1) // batches_per_campaign)
+        for slot in range(next_slot, next_slot + dispatch_count):
+            values = {
+                "manifest_path": manifest_path,
+                "yahoo_oauth_ref": os.environ.get("MFL_YAHOO_OAUTH_REF", "codex/mfl-gates"),
+                "batch_start": str(slot * batches_per_campaign), "batch_count": str(batches_per_campaign),
+                "batch_size": str(batch_size), "max_parallel": os.environ.get("MFL_MAX_PARALLEL", "75"),
+                "cache_namespace": os.environ.get("MFL_CACHE_NAMESPACE", "mfl-ordered-schedule-v1"),
+                "canonical_namespace": os.environ.get("MFL_CANONICAL_NAMESPACE", "mfl-ordered-schedule-canonical-v1"),
+                "attempt_suffix": f"-ordered-slot-{slot}", "continue_population": "false",
+                "collect_all": "true", "storage_mode": "chunked",
+                "target_years": os.environ.get("MFL_TARGET_YEARS", "2000,2001,2002,2003,2004,2005,2006,2007,2008,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018"),
+            }
+            if os.environ.get("MFL_DRY_RUN", "false").lower() != "true":
+                dispatch(repo, campaign_workflow, values)
+            decision["dispatched"].append({"slot": slot, "batch_start": int(values["batch_start"]), "batch_count": batches_per_campaign, "attempt_suffix": values["attempt_suffix"]})
+        decision["reason"] = "three_fresh_ordered_campaigns_dispatched" if dispatch_count == campaigns_per_wave else "final_ordered_campaigns_dispatched"
     print(json.dumps(decision, sort_keys=True))
     return 0
 
