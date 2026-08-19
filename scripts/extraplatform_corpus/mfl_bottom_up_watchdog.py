@@ -42,6 +42,7 @@ def main() -> int:
     campaigns = workflow_runs(repo, campaign_workflow)
     direct = [r for r in campaigns if r.get("created_at") and parse_time(r["created_at"]) >= epoch and r.get("conclusion") != "cancelled"]
     direct.sort(key=lambda r: (r.get("created_at", ""), int(r.get("id", 0))))
+    queued_direct = [r for r in direct if r.get("status") == "queued"]
     latest_direct = parse_time(direct[-1]["created_at"]) if direct else None
     quiet = latest_direct is None or now - latest_direct >= cooldown
 
@@ -60,13 +61,15 @@ def main() -> int:
         "cooldown_minutes": cooldown.total_seconds() / 60,
         "manifest_path": manifest_path, "direct_campaigns_seen": len(direct),
         "latest_direct_campaign_created_at": latest_direct.isoformat().replace("+00:00", "Z") if latest_direct else None,
-        "quiet_period_elapsed": quiet, "next_batch_start": next_slot * batches_per_campaign,
+        "quiet_period_elapsed": quiet, "queued_direct_runs": [int(r["id"]) for r in queued_direct], "next_batch_start": next_slot * batches_per_campaign,
         "batch_size": batch_size, "batches_per_campaign": batches_per_campaign,
         "campaigns_per_wave": campaigns_per_wave, "total_rows": total_rows,
         "total_batch_slots": total_batch_slots, "exhausted": exhausted, "dispatched": [],
     }
     if exhausted:
         decision["reason"] = "ordered_manifest_exhausted"
+    elif queued_direct:
+        decision["reason"] = "queued_campaigns_pending"
     elif not quiet:
         decision["reason"] = "40_minute_cooldown_not_elapsed"
     else:
