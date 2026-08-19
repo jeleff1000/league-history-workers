@@ -77,7 +77,7 @@ def main() -> int:
                 "manifest_path": manifest_path,
                 "yahoo_oauth_ref": os.environ.get("MFL_YAHOO_OAUTH_REF", "codex/mfl-gates"),
                 "batch_start": str(slot * batches_per_campaign), "batch_count": str(batches_per_campaign),
-                "batch_size": str(batch_size), "max_parallel": os.environ.get("MFL_MAX_PARALLEL", "75"),
+                "batch_size": str(batch_size), "max_parallel": os.environ.get("MFL_MAX_PARALLEL", "60"),
                 "cache_namespace": os.environ.get("MFL_CACHE_NAMESPACE", "mfl-ordered-schedule-v1"),
                 "canonical_namespace": os.environ.get("MFL_CANONICAL_NAMESPACE", "mfl-ordered-schedule-canonical-v1"),
                 "attempt_suffix": f"-ordered-slot-{slot}", "continue_population": "false",
