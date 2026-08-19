@@ -36,7 +36,7 @@ def main() -> int:
     repo = os.environ.get("MFL_REPO", "league-history-workers/mfl-league-fetcher")
     campaign_workflow = os.environ.get("MFL_CAMPAIGN_WORKFLOW", "mfl_register_batch_campaign.yml")
     planner_workflow = os.environ.get("MFL_PLANNER_WORKFLOW", "mfl_plan_next_wave.yml")
-    cooldown = timedelta(minutes=int(os.environ.get("MFL_COOLDOWN_MINUTES", "30")))
+    cooldown = timedelta(minutes=int(os.environ.get("MFL_COOLDOWN_MINUTES", "40")))
     stale_after = timedelta(minutes=int(os.environ.get("MFL_STALE_CAMPAIGN_MINUTES", "180")))
     now = datetime.now(timezone.utc)
     campaigns = workflow_runs(repo, campaign_workflow)
@@ -71,9 +71,10 @@ def main() -> int:
         "quiet_period_elapsed": quiet,
         "dispatched": False,
     }
-    if blocking_active_campaigns:
-        decision["reason"] = "campaign_runs_active_or_queued"
-    elif blocking_active_planners:
+    # Campaigns may overlap: durable batch plans reserve their IDs, and the planner
+    # uses those reservations to choose the next unused IDs. Only one planner
+    # may run at a time because it advances the reservation cursor.
+    if blocking_active_planners:
         decision["reason"] = "planner_run_active_or_queued"
     elif not quiet:
         decision["reason"] = "campaign_cooldown_not_elapsed"
