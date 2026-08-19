@@ -43,7 +43,7 @@ def main() -> int:
     direct = [r for r in campaigns if r.get("created_at") and parse_time(r["created_at"]) >= epoch and r.get("conclusion") != "cancelled"]
     direct.sort(key=lambda r: (r.get("created_at", ""), int(r.get("id", 0))))
     queued_direct = [r for r in direct if r.get("status") == "queued"]
-    queue_grace = timedelta(minutes=int(os.environ.get("MFL_QUEUE_GRACE_MINUTES", "60")))
+    queue_grace = timedelta(minutes=int(os.environ.get("MFL_QUEUE_GRACE_MINUTES", "30")))
     stale_queued = [
         r for r in queued_direct
         if r.get("created_at") and now - parse_time(r["created_at"]) >= queue_grace
