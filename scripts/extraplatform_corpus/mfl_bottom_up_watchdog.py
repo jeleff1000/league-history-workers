@@ -40,7 +40,7 @@ def main() -> int:
     epoch = parse_time(os.environ.get("MFL_SCHEDULER_EPOCH", "2026-08-19T03:10:00Z"))
     now = datetime.now(timezone.utc)
     campaigns = workflow_runs(repo, campaign_workflow)
-    direct = [r for r in campaigns if r.get("created_at") and parse_time(r["created_at"]) >= epoch]
+    direct = [r for r in campaigns if r.get("created_at") and parse_time(r["created_at"]) >= epoch and r.get("conclusion") != "cancelled"]
     direct.sort(key=lambda r: (r.get("created_at", ""), int(r.get("id", 0))))
     latest_direct = parse_time(direct[-1]["created_at"]) if direct else None
     quiet = latest_direct is None or now - latest_direct >= cooldown
