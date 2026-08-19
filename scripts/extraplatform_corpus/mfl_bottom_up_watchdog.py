@@ -34,7 +34,7 @@ def main() -> int:
     repo = os.environ.get("MFL_REPO", "league-history-workers/mfl-league-fetcher")
     campaign_workflow = os.environ.get("MFL_CAMPAIGN_WORKFLOW", "mfl_register_batch_campaign.yml")
     cooldown = timedelta(minutes=int(os.environ.get("MFL_COOLDOWN_MINUTES", "40")))
-    epoch = parse_time(os.environ.get("MFL_SCHEDULER_EPOCH", "2026-08-19T03:00:00Z"))
+    epoch = parse_time(os.environ.get("MFL_SCHEDULER_EPOCH", "2026-08-19T03:10:00Z"))
     now = datetime.now(timezone.utc)
     campaigns = workflow_runs(repo, campaign_workflow)
     direct = [r for r in campaigns if r.get("created_at") and parse_time(r["created_at"]) >= epoch]
