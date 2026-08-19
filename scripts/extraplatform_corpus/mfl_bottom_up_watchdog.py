@@ -40,7 +40,14 @@ def main() -> int:
     epoch = parse_time(os.environ.get("MFL_SCHEDULER_EPOCH", "2026-08-19T03:10:00Z"))
     now = datetime.now(timezone.utc)
     campaigns = workflow_runs(repo, campaign_workflow)
-    direct = [r for r in campaigns if r.get("created_at") and parse_time(r["created_at"]) >= epoch and r.get("conclusion") != "cancelled"]
+    # Failed prepare/control runs did not consume their ledger slots.
+    unusable = {"failure", "cancelled", "timed_out", "startup_failure", "action_required"}
+    direct = [
+        r for r in campaigns
+        if r.get("created_at")
+        and parse_time(r["created_at"]) >= epoch
+        and r.get("conclusion") not in unusable
+    ]
     direct.sort(key=lambda r: (r.get("created_at", ""), int(r.get("id", 0))))
     queued_direct = [r for r in direct if r.get("status") == "queued"]
     queue_grace = timedelta(minutes=int(os.environ.get("MFL_QUEUE_GRACE_MINUTES", "30")))
@@ -65,7 +72,7 @@ def main() -> int:
         "checked_at": now.isoformat().replace("+00:00", "Z"),
         "scheduler_epoch": epoch.isoformat().replace("+00:00", "Z"),
         "cooldown_minutes": cooldown.total_seconds() / 60,
-        "manifest_path": manifest_path, "direct_campaigns_seen": len(direct),
+        "manifest_path": manifest_path, "direct_campaigns_seen": len(direct), "excluded_control_runs": len([r for r in campaigns if r.get("created_at") and parse_time(r["created_at"]) >= epoch and r.get("conclusion") in unusable]),
         "latest_direct_campaign_created_at": latest_direct.isoformat().replace("+00:00", "Z") if latest_direct else None,
         "quiet_period_elapsed": quiet, "queue_grace_minutes": queue_grace.total_seconds() / 60,
         "queued_direct_runs": [int(r["id"] ) for r in queued_direct],
