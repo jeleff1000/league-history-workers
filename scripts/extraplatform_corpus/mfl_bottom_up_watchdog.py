@@ -33,6 +33,27 @@ def dispatch(repo: str, workflow: str, values: dict[str, str]) -> None:
     subprocess.run(command, check=True)
 
 
+def batch_start_from_plan_artifact(repo: str, run_id: int) -> int | None:
+    """Read the campaign's authoritative batch_plan.json when available."""
+    with tempfile.TemporaryDirectory() as tmp:
+        result = subprocess.run(
+            [
+                "gh", "run", "download", str(run_id), "--repo", repo,
+                "--name", f"mfl-batch-plan-{run_id}", "--dir", tmp,
+            ],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            return None
+        plan_path = Path(tmp) / "batch_plan.json"
+        if not plan_path.is_file():
+            return None
+        try:
+            plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            return int(plan["batch_start"])
+        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return None
+
 def main() -> int:
     repo = os.environ.get("MFL_REPO", "league-history-workers/mfl-league-fetcher")
     campaign_workflow = os.environ.get("MFL_CAMPAIGN_WORKFLOW", "mfl_register_batch_campaign.yml")
@@ -65,14 +86,22 @@ def main() -> int:
     campaigns_per_wave = int(os.environ.get("MFL_CAMPAIGNS_PER_WAVE", "3"))
     total_rows = int(os.environ.get("MFL_ORDERED_TOTAL_ROWS", "128940"))
     total_batch_slots = (total_rows + batch_size - 1) // batch_size
-    next_slot = len(direct)
+    cursor_starts = [
+        start for start in (
+            batch_start_from_plan_artifact(repo, int(r["id"])) for r in direct
+        )
+        if start is not None and start % (batches_per_campaign) == 0
+    ]
+    # Artifacts are authoritative; run count is only a bootstrap fallback for
+    # legacy runs that never produced a batch plan.
+    next_slot = max((start // batches_per_campaign for start in cursor_starts), default=len(direct) - 1) + 1
     exhausted = next_slot * batches_per_campaign >= total_batch_slots
     decision = {
         "mode": "ordered_manifest_cursor", "repo": repo,
         "checked_at": now.isoformat().replace("+00:00", "Z"),
         "scheduler_epoch": epoch.isoformat().replace("+00:00", "Z"),
         "cooldown_minutes": cooldown.total_seconds() / 60,
-        "manifest_path": manifest_path, "direct_campaigns_seen": len(direct), "excluded_control_runs": len([r for r in campaigns if r.get("created_at") and parse_time(r["created_at"]) >= epoch and r.get("conclusion") in unusable]),
+        "manifest_path": manifest_path, "direct_campaigns_seen": len(direct), "cursor_batch_starts": sorted(set(cursor_starts)), "excluded_control_runs": len([r for r in campaigns if r.get("created_at") and parse_time(r["created_at"]) >= epoch and r.get("conclusion") in unusable]),
         "latest_direct_campaign_created_at": latest_direct.isoformat().replace("+00:00", "Z") if latest_direct else None,
         "quiet_period_elapsed": quiet, "queue_grace_minutes": queue_grace.total_seconds() / 60,
         "queued_direct_runs": [int(r["id"] ) for r in queued_direct],
