@@ -167,8 +167,13 @@ jobs:
                   names.update(str(item['name']) for item in page_items if isinstance(item,dict) and 'name' in item)
               return names
 
+          unusable_conclusions={'cancelled','failure','timed_out','startup_failure','action_required','skipped','stale','neutral'}
           for run in runs:
-              if run.get('conclusion') == 'cancelled' or run.get('createdAt','') < os.environ['CUTOFF']:
+              conclusion=str(run.get('conclusion') or '').lower()
+              # Failed/cancelled campaigns did not publish a validated chunk.
+              # Their planned rows must return to the queue for retry; reserving
+              # them permanently would silently advance the ledger without data.
+              if conclusion in unusable_conclusions or run.get('createdAt','') < os.environ['CUTOFF']:
                   continue
               run_id=str(run['databaseId'])
               available=artifact_names(run_id)
