@@ -420,6 +420,80 @@ def test_finalize_lanes_requires_all_proven_candidates_and_writes_merge_index(tm
     con.close()
 
 
+def test_finalize_completed_lanes_writes_terminal_receipt(tmp_path: Path, monkeypatch) -> None:
+    from scripts.extraplatform_corpus import finalize_completed_mfl_reconstruction as module
+
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+    (run_root / "ALL_LANES_OK.json").write_text(
+        json.dumps({"ok": True, "identity_count": 39_368, "lane_count": 15}),
+        encoding="utf-8",
+    )
+    candidate = tmp_path / "final" / "candidate.duckdb"
+    index = tmp_path / "final" / "index.json"
+    proof = tmp_path / "final" / "proof.json"
+    calls: list[tuple[Path, Path, Path, Path, Path]] = []
+
+    def fake_finalize(
+        observed_run_root: Path,
+        observed_plan: Path,
+        observed_candidate: Path,
+        observed_index: Path,
+        observed_proof: Path,
+    ) -> dict[str, object]:
+        calls.append((observed_run_root, observed_plan, observed_candidate, observed_index, observed_proof))
+        proof.parent.mkdir(parents=True, exist_ok=True)
+        proof.write_text(json.dumps({"ok": True}), encoding="utf-8")
+        return {"ok": True, "identity_count": 39_368, "candidate_sha256": "a" * 64}
+
+    monkeypatch.setattr(module, "finalize_lanes", fake_finalize)
+    report = module.finalize_completed_lanes(
+        run_root=run_root,
+        lane_plan_path=tmp_path / "plan.json",
+        candidate_path=candidate,
+        index_path=index,
+        proof_path=proof,
+    )
+
+    assert calls == [(run_root, tmp_path / "plan.json", candidate, index, proof)]
+    assert report["ok"] is True
+    assert json.loads((run_root / "FINALIZATION_OK.json").read_text(encoding="utf-8"))["identity_count"] == 39_368
+
+
+def test_finalize_completed_lanes_rejects_failed_or_incomplete_run(tmp_path: Path) -> None:
+    from scripts.extraplatform_corpus.finalize_completed_mfl_reconstruction import finalize_completed_lanes
+
+    run_root = tmp_path / "run"
+    run_root.mkdir()
+
+    try:
+        finalize_completed_lanes(
+            run_root=run_root,
+            lane_plan_path=tmp_path / "plan.json",
+            candidate_path=tmp_path / "candidate.duckdb",
+            index_path=tmp_path / "index.json",
+            proof_path=tmp_path / "proof.json",
+        )
+    except RuntimeError as error:
+        assert "not complete" in str(error)
+    else:
+        raise AssertionError("incomplete lane run must not finalize")
+
+    (run_root / "RUN_FAILED.json").write_text(json.dumps({"ok": False}), encoding="utf-8")
+    try:
+        finalize_completed_lanes(
+            run_root=run_root,
+            lane_plan_path=tmp_path / "plan.json",
+            candidate_path=tmp_path / "candidate.duckdb",
+            index_path=tmp_path / "index.json",
+            proof_path=tmp_path / "proof.json",
+        )
+    except RuntimeError as error:
+        assert "failed" in str(error)
+    else:
+        raise AssertionError("failed lane run must not finalize")
+
+
 def test_assemble_campaign_group_writes_validated_payloads_once(tmp_path: Path) -> None:
     from scripts.extraplatform_corpus.reconstruct_mfl_recovery_candidate import assemble_campaign_group
 
