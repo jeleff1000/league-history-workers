@@ -1,0 +1,122 @@
+name: Archive Original MFL Recovery Artifacts
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/mfl_archive_original_artifacts.yml
+      - scripts/extraplatform_corpus/mfl_original_archive_lanes.py
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: mfl-original-artifact-archive
+  cancel-in-progress: false
+
+env:
+  INVENTORY_RUN_ID: '32386058235'
+  INVENTORY_ARTIFACT_NAME: 'mfl-original-177-artifact-inventory-32386058235'
+  LANE_COUNT: '15'
+
+jobs:
+  archive:
+    name: Archive original source lane ${{ matrix.lane }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 15
+      matrix:
+        lane: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            /scripts/extraplatform_corpus/mfl_original_archive_lanes.py
+          sparse-checkout-cone-mode: false
+      - name: Download immutable 177-run inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh run download "$INVENTORY_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$INVENTORY_ARTIFACT_NAME" --dir inventory
+          inventory_file="$(find inventory -type f -name mfl_original_177_artifact_inventory.json -print -quit)"
+          test -n "$inventory_file" && test -s "$inventory_file"
+          cp "$inventory_file" inventory.json
+      - name: Plan and verify this byte-balanced lane
+        env:
+          LANE: ${{ matrix.lane }}
+        run: |
+          set -euo pipefail
+          python3 scripts/extraplatform_corpus/mfl_original_archive_lanes.py \
+            --inventory inventory.json --lanes "$LANE_COUNT" --output full_lane_plan.json
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          plan = json.loads(Path('full_lane_plan.json').read_text(encoding='utf-8'))
+          lane_number = int(os.environ['LANE'])
+          if plan['lane_count'] != int(os.environ['LANE_COUNT']):
+              raise SystemExit('lane-count mismatch')
+          if lane_number < 0 or lane_number >= plan['lane_count']:
+              raise SystemExit(f'invalid lane {lane_number}')
+          lane = plan['lanes'][lane_number]
+          if not lane['artifacts']:
+              raise SystemExit(f'lane {lane_number} has no source artifacts')
+          Path('payload').mkdir()
+          Path('payload/artifacts').mkdir()
+          Path('selected_artifacts.json').write_text(json.dumps(lane['artifacts'], indent=2, sort_keys=True), encoding='utf-8')
+          Path('payload/lane-manifest.json').write_text(
+              json.dumps({
+                  'inventory_run_id': int(os.environ['INVENTORY_RUN_ID']),
+                  'lane': lane_number,
+                  'lane_count': plan['lane_count'],
+                  'artifact_count': len(lane['artifacts']),
+                  'bytes': lane['bytes'],
+                  'artifacts': lane['artifacts'],
+              }, indent=2, sort_keys=True),
+              encoding='utf-8',
+          )
+          print(json.dumps({'lane': lane_number, 'artifact_count': len(lane['artifacts']), 'bytes': lane['bytes']}, sort_keys=True))
+          PY
+      - name: Download and verify every original artifact archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          repo = os.environ['GITHUB_REPOSITORY']
+          artifacts = json.loads(Path('selected_artifacts.json').read_text(encoding='utf-8'))
+          for ordinal, artifact in enumerate(artifacts, 1):
+              artifact_id = int(artifact['artifact_id'])
+              expected = str(artifact['digest']).removeprefix('sha256:')
+              target = Path('payload/artifacts') / f'{artifact_id}.zip'
+              with target.open('xb') as output:
+                  subprocess.run(
+                      ['gh', 'api', f'repos/{repo}/actions/artifacts/{artifact_id}/zip'],
+                      check=True,
+                      stdout=output,
+                  )
+              actual = subprocess.check_output(['sha256sum', str(target)], text=True).split()[0]
+              if actual != expected:
+                  raise SystemExit(f'artifact {artifact_id} SHA-256 mismatch: expected={expected} actual={actual}')
+              subprocess.run(['unzip', '-tq', str(target)], check=True, stdout=subprocess.DEVNULL)
+              print(json.dumps({'ordinal': ordinal, 'artifact_id': artifact_id, 'bytes': target.stat().st_size}, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-original-source-archives-lane-${{ matrix.lane }}-${{ github.run_id }}
+          retention-days: 90
+          compression-level: 0
+          if-no-files-found: error
+          path: payload/

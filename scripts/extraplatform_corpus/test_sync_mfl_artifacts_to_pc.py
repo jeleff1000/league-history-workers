@@ -171,3 +171,23 @@ def test_gh_cli_archive_download_writes_the_requested_artifact_to_the_staging_pa
     )
 
     assert archive.read_bytes() == b"zip-bytes"
+
+
+def test_multi_artifact_layout_keeps_same_run_artifacts_in_distinct_verified_landings(tmp_path: Path) -> None:
+    archive = tmp_path / "source.zip"
+    digest = _archive(archive, {"lane-manifest.json": b"{}"})
+    artifact = _artifact(digest)
+    artifact["id"] = 789
+    artifact["name"] = "mfl-original-source-archives-lane-0-456"
+    destination = tmp_path / "D" / "pc_artifacts"
+
+    result = land_artifact(
+        artifact,
+        destination=destination,
+        download=lambda _url, target: target.write_bytes(archive.read_bytes()),
+        required_files={"lane-manifest.json"},
+        multi_artifact_layout=True,
+    )
+
+    assert result["path"] == str(destination / "campaigns" / "456" / "789")
+    assert (destination / "campaigns" / "456" / "789" / "lane-manifest.json").is_file()

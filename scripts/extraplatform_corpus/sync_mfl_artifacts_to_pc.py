@@ -130,6 +130,7 @@ def land_artifact(
     destination: Path,
     download: Callable[[str, Path], None],
     required_files: set[str] | frozenset[str],
+    multi_artifact_layout: bool = False,
 ) -> dict[str, object]:
     """Download, verify, and atomically land exactly one artifact.
 
@@ -147,6 +148,8 @@ def land_artifact(
         raise ArtifactLandingError(f"artifact {artifact_id} has no archive download URL")
 
     final_dir = destination / "campaigns" / str(run_id)
+    if multi_artifact_layout:
+        final_dir = final_dir / str(artifact_id)
     receipt_path = final_dir / ".landed.json"
     if final_dir.exists():
         if not receipt_path.is_file():
@@ -293,6 +296,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("--artifact-prefix", default=DEFAULT_ARTIFACT_PREFIX)
     parser.add_argument("--required-file", action="append", default=[])
     parser.add_argument("--token-env", default="GH_TOKEN")
+    parser.add_argument("--multi-artifact-layout", action="store_true")
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     require_d_destination(args.destination)
@@ -322,6 +326,7 @@ def main(argv: Iterable[str] | None = None) -> int:
                         target=target,
                     ),
                     required_files=required_files,
+                    multi_artifact_layout=args.multi_artifact_layout,
                 )
             )
     print(json.dumps({"artifacts": reports}, sort_keys=True))
