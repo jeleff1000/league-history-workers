@@ -413,6 +413,16 @@ jobs:
       - name: Verify prepared Python environment
         shell: bash
         run: |
+          if [ ! -x .venv/bin/python ]; then
+            candidate=$(find .venv/bin -maxdepth 1 \( -type f -o -type l \) -name 'python*' | head -n 1 || true)
+            if [ -n "$candidate" ]; then
+              ln -sf "$candidate" .venv/bin/python
+            else
+              rm -rf .venv
+              python -m venv .venv
+              .venv/bin/python -m pip install -r code/requirements.txt
+            fi
+          fi
           if ! .venv/bin/python -c 'import pandas, duckdb'; then
             .venv/bin/python -m pip install -r code/requirements.txt
           fi
