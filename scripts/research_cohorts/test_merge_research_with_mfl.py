@@ -144,6 +144,104 @@ def test_merge_retains_one_canonical_copy_of_identical_overlap(tmp_path: Path) -
     con.close()
 
 
+def test_merge_normalizes_mfl_identity_across_different_db_name_prefixes(tmp_path: Path) -> None:
+    base = tmp_path / "base.duckdb"
+    mfl = tmp_path / "mfl.duckdb"
+    out = tmp_path / "out.duckdb"
+    index = tmp_path / "mfl_register_all_runs.json"
+    con = duckdb.connect(str(base))
+    con.execute("CREATE SCHEMA public")
+    con.execute(
+        "CREATE TABLE public.league_settings (db_name VARCHAR, year INTEGER, league_key VARCHAR, platform VARCHAR, marker VARCHAR)"
+    )
+    con.execute("INSERT INTO public.league_settings VALUES ('smpl_mfl_legacy', 2004, '10005', 'mfl', 'same')")
+    for table in ("matchup", "player_fantasy"):
+        con.execute(f"CREATE TABLE public.{table} (db_name VARCHAR, year INTEGER, marker VARCHAR)")
+        con.execute(f"INSERT INTO public.{table} VALUES ('smpl_mfl_legacy', 2004, 'same')")
+    con.close()
+    con = duckdb.connect(str(mfl))
+    con.execute(
+        "CREATE TABLE league_settings (db_name VARCHAR, year INTEGER, league_key VARCHAR, platform VARCHAR, marker VARCHAR)"
+    )
+    con.execute("INSERT INTO league_settings VALUES ('mfl_2004_10005', 2004, '10005', 'mfl', 'same')")
+    for table in ("matchup", "player_fantasy"):
+        con.execute(f"CREATE TABLE {table} (db_name VARCHAR, year INTEGER, marker VARCHAR)")
+        con.execute(f"INSERT INTO {table} VALUES ('mfl_2004_10005', 2004, 'same')")
+    con.close()
+    index.write_text(
+        json.dumps({
+            "leagues": [{"season": 2004, "league_id": "10005", "db_name": "mfl_2004_10005"}],
+            "accepted_by_year": {"2004": 1},
+            "league_count": 1,
+        }),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).with_name("merge_research_with_mfl.py")
+    result = subprocess.run(
+        [
+            sys.executable, str(script), "--base", str(base), "--mfl", str(mfl),
+            "--mfl-index", str(index), "--out", str(out), "--expected-ledger", json.dumps({"2004": 1}),
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    con = duckdb.connect(str(out), read_only=True)
+    for table in ("league_settings", "matchup", "player_fantasy"):
+        assert con.execute(f"SELECT db_name FROM public.{table}").fetchall() == [("smpl_mfl_legacy",)]
+    con.close()
+
+
+def test_merge_rejects_conflict_after_normalizing_different_mfl_db_names(tmp_path: Path) -> None:
+    base = tmp_path / "base.duckdb"
+    mfl = tmp_path / "mfl.duckdb"
+    out = tmp_path / "out.duckdb"
+    index = tmp_path / "mfl_register_all_runs.json"
+    con = duckdb.connect(str(base))
+    con.execute("CREATE SCHEMA public")
+    con.execute(
+        "CREATE TABLE public.league_settings (db_name VARCHAR, year INTEGER, league_key VARCHAR, platform VARCHAR, marker VARCHAR)"
+    )
+    con.execute("INSERT INTO public.league_settings VALUES ('smpl_mfl_legacy', 2004, '10005', 'mfl', 'base')")
+    for table in ("matchup", "player_fantasy"):
+        con.execute(f"CREATE TABLE public.{table} (db_name VARCHAR, year INTEGER, marker VARCHAR)")
+        con.execute(f"INSERT INTO public.{table} VALUES ('smpl_mfl_legacy', 2004, 'base')")
+    con.close()
+    con = duckdb.connect(str(mfl))
+    con.execute(
+        "CREATE TABLE league_settings (db_name VARCHAR, year INTEGER, league_key VARCHAR, platform VARCHAR, marker VARCHAR)"
+    )
+    con.execute("INSERT INTO league_settings VALUES ('mfl_2004_10005', 2004, '10005', 'mfl', 'recovered')")
+    for table in ("matchup", "player_fantasy"):
+        con.execute(f"CREATE TABLE {table} (db_name VARCHAR, year INTEGER, marker VARCHAR)")
+        con.execute(f"INSERT INTO {table} VALUES ('mfl_2004_10005', 2004, 'recovered')")
+    con.close()
+    index.write_text(
+        json.dumps({
+            "leagues": [{"season": 2004, "league_id": "10005", "db_name": "mfl_2004_10005"}],
+            "accepted_by_year": {"2004": 1},
+            "league_count": 1,
+        }),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).with_name("merge_research_with_mfl.py")
+    result = subprocess.run(
+        [
+            sys.executable, str(script), "--base", str(base), "--mfl", str(mfl),
+            "--mfl-index", str(index), "--out", str(out), "--expected-ledger", json.dumps({"2004": 1}),
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert "conflicting overlap payload" in (result.stdout + result.stderr)
+    assert not out.exists()
+
+
 def test_merge_projects_wider_mfl_schema_into_canonical_base_schema(tmp_path: Path) -> None:
     base = tmp_path / "base.duckdb"
     mfl = tmp_path / "mfl.duckdb"
