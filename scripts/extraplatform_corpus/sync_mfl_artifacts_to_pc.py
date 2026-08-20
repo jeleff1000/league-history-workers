@@ -1,0 +1,254 @@
+"""Land immutable GitHub Actions MFL artifacts on D: without touching caches.
+
+This is intentionally a receiver, not a merger or cache writer.  It downloads
+one already-complete Actions artifact at a time, verifies GitHub's archive
+digest, checks its required files, then atomically publishes it below the
+user's local artifact root with a provenance receipt.  A matching receipt
+makes reruns no-ops; an incomplete or conflicting landing fails closed.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path, PurePosixPath
+import shutil
+import sys
+import tempfile
+from typing import Any, Callable, Iterable
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
+import zipfile
+
+
+DEFAULT_ARTIFACT_PREFIX = "mfl-register-chunk-"
+DEFAULT_REQUIRED_FILES = frozenset(
+    {
+        "mfl_register_chunk.duckdb",
+        "mfl_register_all_runs.json",
+        "cache_append_proof.json",
+        "mfl_research_overlay.duckdb",
+        "mfl_research_overlay_proof.json",
+    }
+)
+
+
+class ArtifactLandingError(RuntimeError):
+    """An artifact cannot be safely admitted to the local evidence store."""
+
+
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while chunk := handle.read(8 * 1024 * 1024):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _expected_digest(artifact: dict[str, object]) -> str:
+    digest = str(artifact.get("digest", "")).removeprefix("sha256:").lower()
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+        raise ArtifactLandingError(f"artifact has no valid SHA-256 digest: {artifact.get('id')!r}")
+    return digest
+
+
+def _artifact_id(artifact: dict[str, object]) -> int:
+    try:
+        return int(artifact["id"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ArtifactLandingError("artifact has no numeric id") from exc
+
+
+def _run_id(artifact: dict[str, object]) -> int:
+    workflow_run = artifact.get("workflow_run")
+    if not isinstance(workflow_run, dict):
+        raise ArtifactLandingError(f"artifact {_artifact_id(artifact)} has no workflow run provenance")
+    try:
+        return int(workflow_run["id"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ArtifactLandingError(f"artifact {_artifact_id(artifact)} has no numeric workflow run id") from exc
+
+
+def _safe_archive_members(archive: zipfile.ZipFile) -> list[zipfile.ZipInfo]:
+    members: list[zipfile.ZipInfo] = []
+    names: set[str] = set()
+    for member in archive.infolist():
+        name = member.filename.replace("\\", "/")
+        path = PurePosixPath(name)
+        if not name or path.is_absolute() or ".." in path.parts:
+            raise ArtifactLandingError(f"archive contains unsafe path: {member.filename!r}")
+        if name in names:
+            raise ArtifactLandingError(f"archive contains duplicate path: {name!r}")
+        names.add(name)
+        if not member.is_dir():
+            members.append(member)
+    return members
+
+
+def _extract_archive(archive_path: Path, payload_dir: Path, required_files: set[str]) -> dict[str, dict[str, object]]:
+    with zipfile.ZipFile(archive_path) as archive:
+        members = _safe_archive_members(archive)
+        names = {member.filename.replace("\\", "/") for member in members}
+        missing = sorted(required_files - names)
+        if missing:
+            raise ArtifactLandingError(f"artifact is missing required files: {missing}")
+        for member in members:
+            target = payload_dir / PurePosixPath(member.filename.replace("\\", "/"))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as source, target.open("xb") as output:
+                shutil.copyfileobj(source, output, length=8 * 1024 * 1024)
+
+    files: dict[str, dict[str, object]] = {}
+    for path in sorted(payload_dir.rglob("*")):
+        if path.is_file():
+            files[path.relative_to(payload_dir).as_posix()] = {
+                "bytes": path.stat().st_size,
+                "sha256": sha256(path),
+            }
+    return files
+
+
+def land_artifact(
+    artifact: dict[str, object],
+    *,
+    destination: Path,
+    download: Callable[[str, Path], None],
+    required_files: set[str] | frozenset[str],
+) -> dict[str, object]:
+    """Download, verify, and atomically land exactly one artifact.
+
+    ``download`` writes the archive to the supplied D:-rooted staging path.
+    It is injected so the integrity behavior can be exercised without network
+    credentials.  This function never alters an existing finalized landing.
+    """
+
+    destination = Path(destination)
+    artifact_id = _artifact_id(artifact)
+    run_id = _run_id(artifact)
+    expected_digest = _expected_digest(artifact)
+    archive_url = str(artifact.get("archive_download_url", ""))
+    if not archive_url:
+        raise ArtifactLandingError(f"artifact {artifact_id} has no archive download URL")
+
+    final_dir = destination / "campaigns" / str(run_id)
+    receipt_path = final_dir / ".landed.json"
+    if final_dir.exists():
+        if not receipt_path.is_file():
+            raise ArtifactLandingError(f"final landing already exists without receipt: {final_dir}")
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+        if receipt.get("artifact_id") != artifact_id or receipt.get("archive_sha256") != expected_digest:
+            raise ArtifactLandingError(f"final landing conflicts with requested artifact: {final_dir}")
+        return {"status": "already_landed", "artifact_id": artifact_id, "run_id": run_id, "path": str(final_dir)}
+
+    staging_root = destination / "_staging"
+    staging_root.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix=f"artifact-{artifact_id}-", dir=staging_root))
+    archive_path = stage / "artifact.zip"
+    payload_dir = stage / "payload"
+    try:
+        download(archive_url, archive_path)
+        actual_digest = sha256(archive_path)
+        if actual_digest != expected_digest:
+            raise ArtifactLandingError(
+                f"artifact {artifact_id} archive SHA-256 mismatch: expected={expected_digest} actual={actual_digest}"
+            )
+        payload_dir.mkdir()
+        files = _extract_archive(archive_path, payload_dir, set(required_files))
+        receipt = {
+            "artifact_id": artifact_id,
+            "artifact_name": str(artifact.get("name", "")),
+            "workflow_run_id": run_id,
+            "created_at": artifact.get("created_at"),
+            "archive_sha256": actual_digest,
+            "archive_bytes": archive_path.stat().st_size,
+            "files": files,
+        }
+        (payload_dir / ".landed.json").write_text(json.dumps(receipt, indent=2, sort_keys=True), encoding="utf-8")
+        final_dir.parent.mkdir(parents=True, exist_ok=True)
+        if final_dir.exists():
+            raise ArtifactLandingError(f"final landing appeared during staging: {final_dir}")
+        payload_dir.replace(final_dir)
+        return {"status": "landed", "artifact_id": artifact_id, "run_id": run_id, "path": str(final_dir)}
+    finally:
+        if stage.exists():
+            # The staging directory is newly created by this invocation only.
+            # It contains no source cache or prior landing.
+            shutil.rmtree(stage, ignore_errors=True)
+
+
+def _http_json(url: str, token: str | None) -> dict[str, object]:
+    headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    with urlopen(Request(url, headers=headers), timeout=120) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def _download_http(url: str, target: Path, token: str | None) -> None:
+    headers = {"Accept": "application/vnd.github+json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    with urlopen(Request(url, headers=headers), timeout=600) as response, target.open("xb") as output:
+        shutil.copyfileobj(response, output, length=8 * 1024 * 1024)
+
+
+def artifacts_for_run(repo: str, run_id: int, token: str | None) -> list[dict[str, object]]:
+    payload = _http_json(f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100", token)
+    artifacts = payload.get("artifacts")
+    if not isinstance(artifacts, list):
+        raise ArtifactLandingError(f"GitHub returned no artifact list for workflow run {run_id}")
+    return [artifact for artifact in artifacts if isinstance(artifact, dict)]
+
+
+def require_d_destination(destination: Path) -> None:
+    if Path(destination).drive.upper() != "D:":
+        raise ArtifactLandingError("destination must be on D:; no MFL artifact may land on C:")
+
+
+def main(argv: Iterable[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Land verified MFL Actions artifacts directly on D:")
+    parser.add_argument("--repo", default="league-history-workers/mfl-league-fetcher")
+    parser.add_argument("--run-id", type=int, action="append", required=True)
+    parser.add_argument("--destination", type=Path, required=True)
+    parser.add_argument("--artifact-prefix", default=DEFAULT_ARTIFACT_PREFIX)
+    parser.add_argument("--token-env", default="GH_TOKEN")
+    args = parser.parse_args(list(argv) if argv is not None else None)
+
+    require_d_destination(args.destination)
+    token = os.environ.get(args.token_env) or os.environ.get("GITHUB_TOKEN")
+    if not token:
+        raise SystemExit(f"set {args.token_env} or GITHUB_TOKEN before downloading GitHub Actions artifacts")
+
+    reports: list[dict[str, object]] = []
+    for run_id in args.run_id:
+        artifacts = artifacts_for_run(args.repo, run_id, token)
+        selected = [
+            artifact
+            for artifact in artifacts
+            if str(artifact.get("name", "")).startswith(args.artifact_prefix)
+        ]
+        if not selected:
+            raise ArtifactLandingError(f"workflow run {run_id} has no artifact starting {args.artifact_prefix!r}")
+        for artifact in selected:
+            if artifact.get("expired") is True:
+                raise ArtifactLandingError(f"workflow run {run_id} artifact {artifact.get('id')} is expired")
+            reports.append(
+                land_artifact(
+                    artifact,
+                    destination=args.destination,
+                    download=lambda url, target: _download_http(url, target, token),
+                    required_files=DEFAULT_REQUIRED_FILES,
+                )
+            )
+    print(json.dumps({"artifacts": reports}, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (ArtifactLandingError, HTTPError) as error:
+        print(f"artifact landing failed: {error}", file=sys.stderr)
+        raise SystemExit(2)
