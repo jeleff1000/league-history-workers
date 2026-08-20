@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
+from datetime import datetime
 from typing import Any
 
 
@@ -24,6 +25,7 @@ REQUIRED_MANIFEST_FIELDS = {
 }
 _PLAIN_ID = re.compile(r"\d{1,5}")
 _DB_NAME = re.compile(r"mfl_(\d{4})_(\d{5})")
+_SHA256 = re.compile(r"[0-9a-f]{64}")
 TERMINAL_FETCH_STATUSES = {
     "accepted",
     "fetch_failed",
@@ -48,6 +50,37 @@ def require_current_parent(*, expected_parent_snapshot_id: str, current_snapshot
             "stale publisher: expected parent "
             f"{expected_parent_snapshot_id!r}, current snapshot is {current_snapshot_id!r}"
         )
+
+
+def validate_snapshot_metadata(metadata: Mapping[str, Any]) -> None:
+    """Reject an incomplete or unverifiable immutable snapshot receipt."""
+    required_strings = {
+        "snapshot_id",
+        "parent_snapshot_id",
+        "source_snapshot_id",
+        "lineage_proof",
+        "creation_run_id",
+        "publication_timestamp",
+    }
+    missing = sorted(name for name in required_strings if not str(metadata.get(name, "")).strip())
+    if missing:
+        raise PublisherStateError(f"snapshot metadata missing required fields: {missing}")
+    for name in ("row_count", "identity_count"):
+        try:
+            value = int(metadata[name])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise PublisherStateError(f"snapshot metadata has invalid {name}") from exc
+        if value <= 0:
+            raise PublisherStateError(f"snapshot metadata has non-positive {name}")
+    for name in ("schema_checksum", "data_checksum", "seed_ops_checksum"):
+        value = str(metadata.get(name, "")).lower()
+        if not _SHA256.fullmatch(value):
+            raise PublisherStateError(f"snapshot metadata has invalid {name}")
+    try:
+        timestamp = str(metadata["publication_timestamp"]).replace("Z", "+00:00")
+        datetime.fromisoformat(timestamp)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise PublisherStateError("snapshot metadata has invalid publication_timestamp") from exc
 
 
 def normalize_mfl_league_id(season: int, value: object) -> str:

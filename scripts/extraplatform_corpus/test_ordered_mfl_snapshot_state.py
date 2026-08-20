@@ -5,6 +5,7 @@ from ordered_mfl_snapshot_state import (
     finalize_batch_statuses,
     require_current_parent,
     reserve_next_rows,
+    validate_snapshot_metadata,
 )
 
 
@@ -87,3 +88,29 @@ def test_batch_status_ledger_retains_partial_failure_and_retry_rows() -> None:
     assert result["retry_manifest"] == [
         {"manifest_position": 2, "season": 2000, "league_id": "00008", "status": "fetch_failed", "reason": "HTTP 503"}
     ]
+
+
+def test_snapshot_metadata_requires_all_immutable_publication_proofs() -> None:
+    metadata = {
+        "snapshot_id": "mfl-snapshot-20260820-run-12",
+        "parent_snapshot_id": "mfl-snapshot-20260819-run-11",
+        "source_snapshot_id": "local-validated-39k-60k",
+        "row_count": 123,
+        "identity_count": 45,
+        "schema_checksum": "a" * 64,
+        "data_checksum": "b" * 64,
+        "seed_ops_checksum": "c" * 64,
+        "lineage_proof": "lineage-proof.json",
+        "creation_run_id": "12",
+        "publication_timestamp": "2026-08-20T00:00:00Z",
+    }
+
+    validate_snapshot_metadata(metadata)
+
+    metadata.pop("seed_ops_checksum")
+    try:
+        validate_snapshot_metadata(metadata)
+    except PublisherStateError as exc:
+        assert "seed_ops_checksum" in str(exc)
+    else:
+        raise AssertionError("snapshot metadata without Seed Ops proof was accepted")
