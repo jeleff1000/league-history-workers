@@ -494,6 +494,64 @@ def test_finalize_completed_lanes_rejects_failed_or_incomplete_run(tmp_path: Pat
         raise AssertionError("failed lane run must not finalize")
 
 
+def test_run_and_finalize_runs_finalizer_only_after_successful_lanes(tmp_path: Path, monkeypatch) -> None:
+    from scripts.extraplatform_corpus import run_and_finalize_mfl_reconstruction as module
+
+    run_root = tmp_path / "run"
+    calls: list[str] = []
+
+    def fake_run_all_lanes(plan_path: Path, *, run_root: Path, workers: int) -> dict[str, object]:
+        calls.append("lanes")
+        run_root.mkdir()
+        (run_root / "ALL_LANES_OK.json").write_text(
+            json.dumps({"ok": True, "identity_count": 39_368, "lane_count": 15}),
+            encoding="utf-8",
+        )
+        return {"ok": True, "identity_count": 39_368, "lane_count": 15}
+
+    def fake_finalize(**kwargs) -> dict[str, object]:
+        calls.append("finalize")
+        return {"ok": True, "identity_count": 39_368, "candidate_sha256": "b" * 64}
+
+    monkeypatch.setattr(module, "run_all_lanes", fake_run_all_lanes)
+    monkeypatch.setattr(module, "finalize_completed_lanes", fake_finalize)
+    report = module.run_and_finalize(
+        lane_plan_path=tmp_path / "plan.json",
+        run_root=run_root,
+        workers=15,
+        candidate_path=tmp_path / "candidate.duckdb",
+        index_path=tmp_path / "index.json",
+        proof_path=tmp_path / "proof.json",
+    )
+
+    assert calls == ["lanes", "finalize"]
+    assert report["ok"] is True
+    assert report["identity_count"] == 39_368
+
+
+def test_run_and_finalize_does_not_finalize_failed_lanes(tmp_path: Path, monkeypatch) -> None:
+    from scripts.extraplatform_corpus import run_and_finalize_mfl_reconstruction as module
+
+    def fail_lanes(*args, **kwargs) -> dict[str, object]:
+        raise RuntimeError("lane 3 failed")
+
+    monkeypatch.setattr(module, "run_all_lanes", fail_lanes)
+    monkeypatch.setattr(module, "finalize_completed_lanes", lambda **kwargs: (_ for _ in ()).throw(AssertionError("must not finalize")))
+    try:
+        module.run_and_finalize(
+            lane_plan_path=tmp_path / "plan.json",
+            run_root=tmp_path / "run",
+            workers=15,
+            candidate_path=tmp_path / "candidate.duckdb",
+            index_path=tmp_path / "index.json",
+            proof_path=tmp_path / "proof.json",
+        )
+    except RuntimeError as error:
+        assert "lane 3 failed" in str(error)
+    else:
+        raise AssertionError("lane failure must reach the caller")
+
+
 def test_assemble_campaign_group_writes_validated_payloads_once(tmp_path: Path) -> None:
     from scripts.extraplatform_corpus.reconstruct_mfl_recovery_candidate import assemble_campaign_group
 
