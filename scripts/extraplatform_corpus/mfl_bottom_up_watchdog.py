@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Dispatch three fresh ordered-manifest MFL waves every cooldown period."""
+"""Keep three ordered-manifest MFL campaigns in flight and replace slots promptly."""
 from __future__ import annotations
 
 import json
 import os
 import subprocess
-import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
-from datetime import datetime, timedelta, timezone
 
 
 def gh_json(args: list[str]) -> dict | list:
@@ -21,7 +20,10 @@ def parse_time(value: str) -> datetime:
 
 
 def workflow_runs(repo: str, workflow: str) -> list[dict]:
-    pages = gh_json([f"repos/{repo}/actions/workflows/{workflow}/runs", "--method", "GET", "-f", "per_page=100", "--paginate", "--slurp"])
+    pages = gh_json([
+        f"repos/{repo}/actions/workflows/{workflow}/runs",
+        "--method", "GET", "-f", "per_page=100", "--paginate", "--slurp",
+    ])
     runs: list[dict] = []
     for page in pages:
         runs.extend(page.get("workflow_runs", []))
@@ -35,95 +37,86 @@ def dispatch(repo: str, workflow: str, values: dict[str, str]) -> None:
     subprocess.run(command, check=True)
 
 
+def cancel(repo: str, run_id: int) -> None:
+    subprocess.run(["gh", "run", "cancel", str(run_id), "--repo", repo], check=False,
+                   capture_output=True, text=True)
+
+
 def batch_start_from_plan_artifact(repo: str, run_id: int) -> int | None:
-    """Read the campaign's authoritative batch_plan.json when available."""
     with tempfile.TemporaryDirectory() as tmp:
         result = subprocess.run(
-            [
-                "gh", "run", "download", str(run_id), "--repo", repo,
-                "--name", f"mfl-batch-plan-{run_id}", "--dir", tmp,
-            ],
+            ["gh", "run", "download", str(run_id), "--repo", repo,
+             "--name", f"mfl-batch-plan-{run_id}", "--dir", tmp],
             capture_output=True, text=True,
         )
         if result.returncode != 0:
             return None
-        plan_path = Path(tmp) / "batch_plan.json"
-        if not plan_path.is_file():
+        path = Path(tmp) / "batch_plan.json"
+        if not path.is_file():
             return None
         try:
-            plan = json.loads(plan_path.read_text(encoding="utf-8"))
-            return int(plan["batch_start"])
+            return int(json.loads(path.read_text(encoding="utf-8"))["batch_start"])
         except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
             return None
 
+
 def main() -> int:
     repo = os.environ.get("MFL_REPO", "league-history-workers/mfl-league-fetcher")
-    campaign_workflow = os.environ.get("MFL_CAMPAIGN_WORKFLOW", "mfl_register_batch_campaign.yml")
-    cooldown = timedelta(minutes=int(os.environ.get("MFL_COOLDOWN_MINUTES", "40")))
+    workflow = os.environ.get("MFL_CAMPAIGN_WORKFLOW", "mfl_register_batch_campaign.yml")
     epoch = parse_time(os.environ.get("MFL_SCHEDULER_EPOCH", "2026-08-19T03:10:00Z"))
     now = datetime.now(timezone.utc)
-    campaigns = workflow_runs(repo, campaign_workflow)
-    # Failed prepare/control runs did not consume their ledger slots.
+    dry_run = os.environ.get("MFL_DRY_RUN", "false").lower() == "true"
     unusable = {"failure", "cancelled", "timed_out", "startup_failure", "action_required"}
-    direct = [
-        r for r in campaigns
-        if r.get("created_at")
-        and parse_time(r["created_at"]) >= epoch
-        and r.get("conclusion") not in unusable
-    ]
+    campaigns = workflow_runs(repo, workflow)
+    direct = [r for r in campaigns if r.get("created_at") and parse_time(r["created_at"]) >= epoch
+              and r.get("conclusion") not in unusable]
     direct.sort(key=lambda r: (r.get("created_at", ""), int(r.get("id", 0))))
-    queued_direct = [r for r in direct if r.get("status") == "queued"]
-    queue_grace = timedelta(minutes=int(os.environ.get("MFL_QUEUE_GRACE_MINUTES", "30")))
-    stale_queued = [
-        r for r in queued_direct
-        if r.get("created_at") and now - parse_time(r["created_at"]) >= queue_grace
-    ]
-    fresh_queued = [r for r in queued_direct if r not in stale_queued]
-    latest_direct = parse_time(direct[-1]["created_at"]) if direct else None
-    quiet = latest_direct is None or now - latest_direct >= cooldown
+    grace = int(os.environ.get("MFL_QUEUE_GRACE_MINUTES", "30"))
+    stale = [r for r in direct if r.get("status") == "queued" and r.get("created_at")
+             and (now - parse_time(r["created_at"])).total_seconds() >= grace * 60]
+    stale_ids = {int(r["id"]) for r in stale}
+    if not dry_run:
+        for run in stale:
+            cancel(repo, int(run["id"]))
+    direct = [r for r in direct if int(r["id"]) not in stale_ids]
+    active_states = {"queued", "in_progress", "waiting", "requested", "pending"}
+    active = [r for r in direct if r.get("status") in active_states]
 
-    manifest_path = os.environ.get("MFL_ORDERED_MANIFEST", "derived/mfl_register/quota_planning/mfl_ordered_quota_manifest.json")
+    manifest_path = os.environ.get("MFL_ORDERED_MANIFEST",
+                                   "derived/mfl_register/quota_planning/mfl_ordered_quota_manifest.json")
     batch_size = int(os.environ.get("MFL_ORDERED_BATCH_SIZE", "2"))
     batches_per_campaign = int(os.environ.get("MFL_BATCHES_PER_CAMPAIGN", "250"))
-    campaigns_per_wave = int(os.environ.get("MFL_CAMPAIGNS_PER_WAVE", "3"))
+    target_active = int(os.environ.get("MFL_CAMPAIGNS_PER_WAVE", "3"))
     total_rows = int(os.environ.get("MFL_ORDERED_TOTAL_ROWS", "128940"))
-    total_batch_slots = (total_rows + batch_size - 1) // batch_size
-    cursor_starts = [
-        start for start in (
-            batch_start_from_plan_artifact(repo, int(r["id"])) for r in direct
-        )
-        if start is not None and start % (batches_per_campaign) == 0
-    ]
-    # Artifacts are authoritative; run count is only a bootstrap fallback for
-    # legacy runs that never produced a batch plan.
-    next_slot = max((start // batches_per_campaign for start in cursor_starts), default=len(direct) - 1) + 1
-    exhausted = next_slot * batches_per_campaign >= total_batch_slots
+    total_slots = (total_rows + batch_size - 1) // batch_size
+    plans = {int(r["id"]): batch_start_from_plan_artifact(repo, int(r["id"])) for r in direct}
+    starts = [s for s in plans.values() if s is not None and s % batches_per_campaign == 0]
+    known_slots = [s // batches_per_campaign for s in starts]
+    next_slot = max(max(known_slots, default=-1) + 1, len(direct))
+    exhausted = next_slot * batches_per_campaign >= total_slots
+    needed = max(0, target_active - len(active))
+    dispatch_count = min(needed, max(0, total_slots - next_slot * batches_per_campaign))
     decision = {
-        "mode": "ordered_manifest_cursor", "repo": repo,
+        "mode": "ordered_manifest_inflight_controller", "repo": repo,
         "checked_at": now.isoformat().replace("+00:00", "Z"),
-        "scheduler_epoch": epoch.isoformat().replace("+00:00", "Z"),
-        "cooldown_minutes": cooldown.total_seconds() / 60,
-        "manifest_path": manifest_path, "direct_campaigns_seen": len(direct), "cursor_batch_starts": sorted(set(cursor_starts)), "excluded_control_runs": len([r for r in campaigns if r.get("created_at") and parse_time(r["created_at"]) >= epoch and r.get("conclusion") in unusable]),
-        "latest_direct_campaign_created_at": latest_direct.isoformat().replace("+00:00", "Z") if latest_direct else None,
-        "quiet_period_elapsed": quiet, "queue_grace_minutes": queue_grace.total_seconds() / 60,
-        "queued_direct_runs": [int(r["id"] ) for r in queued_direct],
-        "stale_queued_runs": [int(r["id"] ) for r in stale_queued],
-        "fresh_queued_runs": [int(r["id"] ) for r in fresh_queued],
+        "manifest_path": manifest_path, "direct_campaigns_seen": len(direct),
+        "active_campaigns": len(active), "target_active_campaigns": target_active,
+        "active_run_ids": [int(r["id"]) for r in active],
+        "stale_queued_runs": sorted(stale_ids),
+        "cancelled_stale_runs": [] if dry_run else sorted(stale_ids),
+        "cursor_batch_starts": sorted(set(starts)),
         "next_batch_start": next_slot * batches_per_campaign,
         "batch_size": batch_size, "batches_per_campaign": batches_per_campaign,
-        "campaigns_per_wave": campaigns_per_wave, "total_rows": total_rows,
-        "total_batch_slots": total_batch_slots, "exhausted": exhausted, "dispatched": [],
+        "total_rows": total_rows, "total_batch_slots": total_slots,
+        "exhausted": exhausted, "dispatched": [],
     }
     if exhausted:
         decision["reason"] = "ordered_manifest_exhausted"
-    elif fresh_queued:
-        decision["reason"] = "queued_campaigns_pending"
-    elif not quiet:
-        decision["reason"] = "40_minute_cooldown_not_elapsed"
+    elif dispatch_count <= 0:
+        decision["reason"] = "target_active_campaign_count_reached"
     else:
-        remaining = total_batch_slots - next_slot * batches_per_campaign
-        dispatch_count = min(campaigns_per_wave, (remaining + batches_per_campaign - 1) // batches_per_campaign)
-        for slot in range(next_slot, next_slot + dispatch_count):
+        for offset in range(dispatch_count):
+            slot = next_slot + offset
             values = {
                 "manifest_path": manifest_path,
                 "yahoo_oauth_ref": os.environ.get("MFL_YAHOO_OAUTH_REF", "codex/mfl-gates"),
@@ -135,13 +128,15 @@ def main() -> int:
                 "collect_all": "true", "storage_mode": "chunked",
                 "target_years": os.environ.get("MFL_TARGET_YEARS", "2000,2001,2002,2003,2004,2005,2006,2007,2008,2009,2010,2011,2012,2013,2014,2015,2016,2017,2018"),
             }
-            if os.environ.get("MFL_DRY_RUN", "false").lower() != "true":
-                dispatch(repo, campaign_workflow, values)
-            decision["dispatched"].append({"slot": slot, "batch_start": int(values["batch_start"]), "batch_count": batches_per_campaign, "attempt_suffix": values["attempt_suffix"]})
-        decision["reason"] = "three_fresh_ordered_campaigns_dispatched" if dispatch_count == campaigns_per_wave else "final_ordered_campaigns_dispatched"
+            if not dry_run:
+                dispatch(repo, workflow, values)
+            decision["dispatched"].append({"slot": slot, "batch_start": int(values["batch_start"]),
+                                            "batch_count": batches_per_campaign,
+                                            "attempt_suffix": values["attempt_suffix"]})
+        decision["reason"] = "inflight_slots_replenished"
     print(json.dumps(decision, sort_keys=True))
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
