@@ -464,6 +464,25 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
+      - name: Wait for batch artifacts to become visible
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Matrix uploads can become visible after the matrix reports complete.
+          # Wait for the artifact API before invoking download-artifact.
+          for attempt in $(seq 1 24); do
+            count=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+              --jq '[.artifacts[] | select(.name | startswith("mfl-register-batch-"))] | length' 2>/dev/null || echo 0)
+            if [ "${count:-0}" -gt 0 ]; then
+              echo "Found ${count} batch artifacts on attempt ${attempt}"
+              exit 0
+            fi
+            echo "Batch artifacts not visible yet (attempt ${attempt}/24); waiting 5s"
+            sleep 5
+          done
+          echo "No batch artifacts became visible before timeout; combine will report the empty wave"
+
       - name: Download batch artifacts
         uses: actions/download-artifact@v4
         with:
@@ -530,7 +549,7 @@ jobs:
       - name: Merge player catalogs from ingest runners
         shell: bash
         run: |
-          mkdir -p mfl_player_cache
+          mkdir -p receipts mfl_player_cache
           find receipts -type f -name 'mfl_players_*.json' -print0 | while IFS= read -r -d '' src; do
             name="$(basename "$src")"
             test -s "mfl_player_cache/$name" || cp "$src" "mfl_player_cache/$name"
