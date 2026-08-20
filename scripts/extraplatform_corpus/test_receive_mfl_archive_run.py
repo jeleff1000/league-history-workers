@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 
-from receive_mfl_archive_run import wait_for_successful_run
+from pathlib import Path
+
+from receive_mfl_archive_run import payload_audit_command, wait_for_successful_run
 
 
 def test_wait_for_successful_run_only_returns_after_actions_reports_success() -> None:
@@ -66,3 +68,25 @@ def test_wait_for_successful_run_fails_closed_when_actions_fails() -> None:
         assert "failure" in str(exc)
     else:
         raise AssertionError("a failed Actions run was allowed to reach the D: receiver")
+
+
+def test_payload_audit_command_keeps_all_temporary_and_report_paths_on_d_drive() -> None:
+    command = payload_audit_command(
+        python="python",
+        receiver_directory=Path(r"D:\worker\scripts\extraplatform_corpus"),
+        destination=Path(r"D:\yahoo_oauth\derived\mfl_register\pc_artifacts"),
+        run_id=456,
+    )
+
+    assert command == [
+        "python",
+        r"D:\worker\scripts\extraplatform_corpus\audit_mfl_original_payloads.py",
+        "--destination",
+        r"D:\yahoo_oauth\derived\mfl_register\pc_artifacts",
+        "--run-id",
+        "456",
+        "--scratch-directory",
+        r"D:\yahoo_oauth\derived\mfl_register\audit\mfl_original_payload_scratch_456",
+        "--output-directory",
+        r"D:\yahoo_oauth\derived\mfl_register\audit\mfl_original_payload_audit_456",
+    ]

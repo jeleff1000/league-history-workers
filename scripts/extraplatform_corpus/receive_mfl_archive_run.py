@@ -51,6 +51,30 @@ def wait_for_successful_run(
         sleep(poll_seconds)
 
 
+def payload_audit_command(
+    *,
+    python: str,
+    receiver_directory: Path,
+    destination: Path,
+    run_id: int,
+) -> list[str]:
+    """Build the D:-only post-landing payload audit invocation."""
+
+    audit_root = Path(destination).parent / "audit"
+    return [
+        python,
+        str(Path(receiver_directory) / "audit_mfl_original_payloads.py"),
+        "--destination",
+        str(destination),
+        "--run-id",
+        str(run_id),
+        "--scratch-directory",
+        str(audit_root / f"mfl_original_payload_scratch_{run_id}"),
+        "--output-directory",
+        str(audit_root / f"mfl_original_payload_audit_{run_id}"),
+    ]
+
+
 def main(argv: Iterable[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Wait for a verified MFL archive run, then land it on D:")
     parser.add_argument("--run-id", type=int, required=True)
@@ -89,6 +113,14 @@ def main(argv: Iterable[str] | None = None) -> int:
     ]
     print(json.dumps({"event": "receiver_start", "command": command[1:]}, sort_keys=True), flush=True)
     subprocess.run(command, check=True)
+    audit_command = payload_audit_command(
+        python=sys.executable,
+        receiver_directory=Path(__file__).parent,
+        destination=args.destination,
+        run_id=args.run_id,
+    )
+    print(json.dumps({"event": "payload_audit_start", "command": audit_command[1:]}, sort_keys=True), flush=True)
+    subprocess.run(audit_command, check=True)
     print(json.dumps({"event": "receiver_complete", "run_id": args.run_id}, sort_keys=True), flush=True)
     return 0
 
