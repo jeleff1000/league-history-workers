@@ -14,6 +14,8 @@ from pathlib import Path, PureWindowsPath
 from typing import Any
 import zipfile
 
+import duckdb
+
 
 REQUIRED_CAMPAIGN_FIELDS = {
     "season",
@@ -26,6 +28,130 @@ REQUIRED_CAMPAIGN_FIELDS = {
     "payload_sha256",
     "receipt_member",
 }
+CANONICAL_MFL_TABLES = ("league_settings", "matchup", "player_fantasy")
+
+
+def _qi(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
+def canonical_schema(payload_path: Path) -> dict[str, list[tuple[str, str]]]:
+    """Return the exact three-table MFL recovery contract for one payload."""
+    con = duckdb.connect(str(payload_path), read_only=True)
+    try:
+        result: dict[str, list[tuple[str, str]]] = {}
+        for table in CANONICAL_MFL_TABLES:
+            try:
+                result[table] = [
+                    (str(row[0]), str(row[1]))
+                    for row in con.execute(f"DESCRIBE public.{_qi(table)}").fetchall()
+                ]
+            except duckdb.CatalogException as error:
+                raise ValueError(f"payload lacks canonical table {table}: {payload_path}") from error
+        return result
+    finally:
+        con.close()
+
+
+def append_canonical_payload(
+    candidate_path: Path,
+    payload_path: Path,
+    *,
+    expected_schema: dict[str, list[tuple[str, str]]] | None = None,
+) -> dict[str, list[tuple[str, str]]]:
+    """Append a fully validated payload to one new or existing lane candidate.
+
+    A source schema mismatch is detected before a new candidate file is
+    created.  Existing candidates are never replaced.
+    """
+    candidate_path = Path(candidate_path)
+    payload_path = Path(payload_path)
+    source_schema = canonical_schema(payload_path)
+    expected = expected_schema or source_schema
+    if source_schema != expected:
+        raise ValueError("canonical schema mismatch between payload and lane contract")
+
+    candidate_exists = candidate_path.exists()
+    candidate_path.parent.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(candidate_path))
+    try:
+        payload_sql = str(payload_path.resolve()).replace("'", "''")
+        con.execute(f"ATTACH '{payload_sql}' AS payload (READ_ONLY)")
+        if not candidate_exists:
+            con.execute("CREATE SCHEMA public")
+            for table in CANONICAL_MFL_TABLES:
+                con.execute(
+                    f"CREATE TABLE public.{_qi(table)} AS "
+                    f"SELECT * FROM payload.public.{_qi(table)} WHERE FALSE"
+                )
+        for table in CANONICAL_MFL_TABLES:
+            candidate_table_schema = [
+                (str(row[0]), str(row[1]))
+                for row in con.execute(f"DESCRIBE public.{_qi(table)}").fetchall()
+            ]
+            if candidate_table_schema != expected[table]:
+                raise ValueError(f"canonical schema mismatch in candidate table {table}")
+            con.execute(
+                f"INSERT INTO public.{_qi(table)} SELECT * FROM payload.public.{_qi(table)}"
+            )
+        con.execute("DETACH payload")
+    finally:
+        con.close()
+    return expected
+
+
+def assemble_campaign_group(
+    group: dict[str, Any], *, candidate_path: Path, work_dir: Path
+) -> list[dict[str, Any]]:
+    """Extract, validate, and append every selected payload in one archive.
+
+    Payload files are written once under a lane-owned work directory and kept
+    as evidence.  Existing payload paths are treated as a failed rerun rather
+    than being overwritten.
+    """
+    archive_path = Path(str(group["archive_path"]))
+    expected_archive_hash = str(group["archive_sha256"]).lower()
+    actual_archive_hash = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+    if actual_archive_hash != expected_archive_hash:
+        raise ValueError(
+            f"archive SHA-256 mismatch for {archive_path}: "
+            f"expected={expected_archive_hash} actual={actual_archive_hash}"
+        )
+    entries = list(group.get("entries", []))
+    if not entries:
+        raise ValueError(f"campaign group has no entries: {archive_path}")
+    identities = [_identity(entry) for entry in entries]
+    if len(identities) != len(set(identities)):
+        raise ValueError(f"campaign group has duplicate canonical identities: {archive_path}")
+
+    payload_dir = Path(work_dir) / "payloads"
+    payload_dir.mkdir(parents=True, exist_ok=True)
+    expected_schema: dict[str, list[tuple[str, str]]] | None = None
+    records: list[dict[str, Any]] = []
+    for entry in sorted(entries, key=_identity):
+        payload, receipt = read_validated_payload(archive_path, entry)
+        payload_path = payload_dir / f"{int(entry['season'])}_{entry['league_id']}.duckdb"
+        try:
+            with payload_path.open("xb") as handle:
+                handle.write(payload)
+        except FileExistsError as error:
+            raise FileExistsError(f"refusing to overwrite extracted payload evidence: {payload_path}") from error
+        expected_schema = append_canonical_payload(
+            candidate_path, payload_path, expected_schema=expected_schema
+        )
+        records.append(
+            {
+                "season": int(entry["season"]),
+                "league_id": str(entry["league_id"]),
+                "db_name": str(entry["db_name"]),
+                "archive_path": str(archive_path),
+                "archive_sha256": actual_archive_hash,
+                "payload_path": str(payload_path),
+                "payload_sha256": hashlib.sha256(payload).hexdigest(),
+                "receipt": receipt,
+            }
+        )
+    return records
 
 
 def _identity(entry: dict[str, Any]) -> tuple[int, str]:
