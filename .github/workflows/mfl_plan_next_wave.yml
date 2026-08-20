@@ -271,6 +271,7 @@ jobs:
           for ((campaign=0; campaign<${{ inputs.campaign_count }}; campaign++)); do
             start=$((campaign * ${{ inputs.batches_per_campaign }}))
             if ! gh workflow run mfl_register_batch_campaign.yml \
+              -f manifest_path="derived/mfl_register/quota_planning/mfl_ordered_quota_manifest.json" \
               --repo "${{ github.repository }}" --ref main \
               -f batch_start="$start" \
               -f batch_count="${{ inputs.batches_per_campaign }}" \
