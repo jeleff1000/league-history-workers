@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from ordered_mfl_snapshot_state import PublisherStateError, require_current_parent, reserve_next_rows
+from ordered_mfl_snapshot_state import (
+    PublisherStateError,
+    finalize_batch_statuses,
+    require_current_parent,
+    reserve_next_rows,
+)
 
 
 def _row(position: int, season: int, league_id: str, *, ordinal: int | None = None) -> dict[str, object]:
@@ -61,3 +66,24 @@ def test_publisher_rejects_a_stale_parent_snapshot() -> None:
         assert "stale publisher" in str(exc)
     else:
         raise AssertionError("stale publisher was allowed to overwrite the current snapshot")
+
+
+def test_batch_status_ledger_retains_partial_failure_and_retry_rows() -> None:
+    reserved = [
+        {"manifest_position": 0, "season": 2000, "league_id": "00002", "status": "reserved"},
+        {"manifest_position": 1, "season": 2000, "league_id": "00005", "status": "already_present"},
+        {"manifest_position": 2, "season": 2000, "league_id": "00008", "status": "reserved"},
+    ]
+
+    result = finalize_batch_statuses(
+        reserved,
+        outcomes=[
+            {"manifest_position": 0, "status": "accepted", "artifact_id": "artifact-1"},
+            {"manifest_position": 2, "status": "fetch_failed", "reason": "HTTP 503"},
+        ],
+    )
+
+    assert [entry["status"] for entry in result["rows"]] == ["accepted", "already_present", "fetch_failed"]
+    assert result["retry_manifest"] == [
+        {"manifest_position": 2, "season": 2000, "league_id": "00008", "status": "fetch_failed", "reason": "HTTP 503"}
+    ]

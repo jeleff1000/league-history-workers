@@ -24,6 +24,15 @@ REQUIRED_MANIFEST_FIELDS = {
 }
 _PLAIN_ID = re.compile(r"\d{1,5}")
 _DB_NAME = re.compile(r"mfl_(\d{4})_(\d{5})")
+TERMINAL_FETCH_STATUSES = {
+    "accepted",
+    "fetch_failed",
+    "validation_failed",
+    "malformed",
+    "skipped",
+    "unavailable_source",
+}
+RETRY_STATUSES = TERMINAL_FETCH_STATUSES - {"accepted", "skipped"}
 
 
 class PublisherStateError(ValueError):
@@ -131,3 +140,62 @@ def reserve_next_rows(
             "status": "already_present" if identity in existing else "reserved",
         })
     return {"reserved": entries, "next_position": start + len(entries)}
+
+
+def finalize_batch_statuses(
+    reserved: Iterable[Mapping[str, Any]], *, outcomes: Iterable[Mapping[str, Any]]
+) -> dict[str, list[dict[str, Any]]]:
+    """Require exactly one terminal disposition for each fetchable reservation."""
+    reservations = [dict(row) for row in reserved]
+    by_position: dict[int, dict[str, Any]] = {}
+    for row in reservations:
+        try:
+            position = int(row["manifest_position"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise PublisherStateError("reservation lacks a valid manifest_position") from exc
+        if position in by_position:
+            raise PublisherStateError(f"duplicate reservation at manifest position {position}")
+        if row.get("status") not in {"reserved", "already_present"}:
+            raise PublisherStateError(f"invalid reservation status at position {position}: {row.get('status')!r}")
+        by_position[position] = row
+
+    by_outcome: dict[int, dict[str, Any]] = {}
+    for outcome in outcomes:
+        row = dict(outcome)
+        try:
+            position = int(row["manifest_position"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise PublisherStateError("outcome lacks a valid manifest_position") from exc
+        if position not in by_position or by_position[position]["status"] != "reserved":
+            raise PublisherStateError(f"outcome does not correspond to a fetchable reservation: {position}")
+        if position in by_outcome:
+            raise PublisherStateError(f"duplicate outcome at manifest position {position}")
+        if row.get("status") not in TERMINAL_FETCH_STATUSES:
+            raise PublisherStateError(f"invalid terminal outcome at position {position}: {row.get('status')!r}")
+        if row["status"] == "accepted" and not str(row.get("artifact_id", "")).strip():
+            raise PublisherStateError(f"accepted outcome at position {position} lacks an immutable artifact_id")
+        by_outcome[position] = row
+
+    rows: list[dict[str, Any]] = []
+    retries: list[dict[str, Any]] = []
+    for position in sorted(by_position):
+        reservation = by_position[position]
+        if reservation["status"] == "already_present":
+            if position in by_outcome:
+                raise PublisherStateError(f"already-present position {position} may not be fetched")
+            rows.append(dict(reservation))
+            continue
+        outcome = by_outcome.get(position)
+        if outcome is None:
+            raise PublisherStateError(f"reserved position {position} has no terminal outcome")
+        entry = {**reservation, **outcome}
+        rows.append(entry)
+        if entry["status"] in RETRY_STATUSES:
+            retries.append({
+                "manifest_position": position,
+                "season": entry["season"],
+                "league_id": entry["league_id"],
+                "status": entry["status"],
+                "reason": str(entry.get("reason", "")),
+            })
+    return {"rows": rows, "retry_manifest": retries}
