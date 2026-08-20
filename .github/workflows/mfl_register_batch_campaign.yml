@@ -443,7 +443,7 @@ jobs:
           mkdir -p batch_output
             # Keep a slow/broken league from holding an entire bulk chunk hostage.
             # Its receipt is retained for the targeted retry queue on the next pass.
-            timeout --signal=TERM --kill-after=30s 600s python code/scripts/extraplatform_corpus/mfl_register_batch.py \
+            timeout --signal=TERM --kill-after=30s 600s .venv/bin/python code/scripts/extraplatform_corpus/mfl_register_batch.py \
             --manifest "$MANIFEST" \
             --offset "$(( (BATCH - BATCH_START) * BATCH_SIZE + BATCH_START * BATCH_SIZE ))" \
             --limit "$BATCH_SIZE" \
@@ -1041,4 +1041,5 @@ jobs:
             --raw-field storage_mode="$STORAGE_MODE" --raw-field prior_state_key="$CURRENT_STATE_KEY" \
             --raw-field prior_index_key="$PRIOR_INDEX_KEY" --raw-field prior_index_cache_path="$PRIOR_INDEX_CACHE_PATH" \
             --raw-field attempt_suffix="$ATTEMPT_SUFFIX"
+
 
