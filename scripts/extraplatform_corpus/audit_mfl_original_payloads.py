@@ -14,10 +14,33 @@ import zipfile
 
 import duckdb
 
-from mfl_original_recovery_audit import normalize_mfl_identity
+from mfl_original_recovery_audit import (
+    classify_expected_identities,
+    extract_mfl_identities_from_duckdb,
+    extract_mfl_identities_from_index,
+    normalize_mfl_identity,
+    validate_expected_registry,
+)
 
 
 REQUIRED_TABLES = ("league_settings", "matchup", "player_fantasy")
+ORIGINAL_EXPECTED_BY_YEAR = {
+    2004: 4780,
+    2005: 935,
+    2006: 7719,
+    2007: 2136,
+    2008: 2195,
+    2009: 2133,
+    2010: 2155,
+    2011: 2170,
+    2012: 1801,
+    2013: 1288,
+    2014: 865,
+    2015: 836,
+    2016: 9114,
+    2017: 468,
+    2018: 773,
+}
 
 
 class PayloadAuditError(RuntimeError):
@@ -209,6 +232,51 @@ def inspect_source_archive(
     }
 
 
+def extract_registry_evidence_from_source_archive(
+    archive_path: Path,
+    *,
+    scratch_directory: Path,
+) -> dict[str, set[tuple[int, str]]]:
+    """Extract immutable registry identities carried by one original archive.
+
+    Reducer indexes and cumulative chunk databases may each contribute part of
+    the expected 39,368 set.  Each member is materialized only to a fresh
+    scratch file, read-only scanned, then removed; neither archive nor cache
+    is modified.
+    """
+
+    scratch_directory.mkdir(parents=True, exist_ok=True)
+    index_identities: set[tuple[int, str]] = set()
+    chunk_identities: set[tuple[int, str]] = set()
+    try:
+        archive = zipfile.ZipFile(archive_path)
+    except (OSError, zipfile.BadZipFile) as exc:
+        raise PayloadAuditError(f"cannot open original source artifact: {archive_path}") from exc
+    with archive:
+        members = _safe_members(archive)
+        for name, member in members.items():
+            basename = PurePosixPath(name).name
+            if basename not in {"mfl_register_all_runs.json", "mfl_register_chunk.duckdb"}:
+                continue
+            suffix = ".json" if basename.endswith(".json") else ".duckdb"
+            with tempfile.NamedTemporaryFile(
+                prefix="mfl-registry-", suffix=suffix, dir=scratch_directory, delete=False
+            ) as temporary:
+                temporary_path = Path(temporary.name)
+                with archive.open(member) as source:
+                    shutil.copyfileobj(source, temporary, length=8 * 1024 * 1024)
+            try:
+                if basename.endswith(".json"):
+                    index_identities.update(extract_mfl_identities_from_index(temporary_path))
+                else:
+                    chunk_identities.update(extract_mfl_identities_from_duckdb(temporary_path))
+            except (RuntimeError, ValueError, duckdb.Error) as exc:
+                raise PayloadAuditError(f"cannot extract registry evidence from {archive_path}:{name}: {exc}") from exc
+            finally:
+                temporary_path.unlink(missing_ok=True)
+    return {"index_identities": index_identities, "chunk_identities": chunk_identities}
+
+
 def audit_landed_source_archives(
     destination: Path,
     *,
@@ -229,6 +297,9 @@ def audit_landed_source_archives(
     valid_payloads: list[dict[str, object]] = []
     invalid_payloads: list[dict[str, object]] = []
     batch_failures: list[dict[str, object]] = []
+    index_identities: set[tuple[int, str]] = set()
+    chunk_identities: set[tuple[int, str]] = set()
+    registry_evidence_errors: list[dict[str, object]] = []
     for landing in sorted(path for path in campaign.iterdir() if path.is_dir()):
         manifest_path = landing / "lane-manifest.json"
         try:
@@ -251,6 +322,15 @@ def audit_landed_source_archives(
             if not raw_archive.is_file():
                 raise PayloadAuditError(f"landed lane artifact is missing its archive: {raw_archive}")
             source_archive_count += 1
+            try:
+                registry_evidence = extract_registry_evidence_from_source_archive(
+                    raw_archive,
+                    scratch_directory=scratch_directory,
+                )
+                index_identities.update(registry_evidence["index_identities"])
+                chunk_identities.update(registry_evidence["chunk_identities"])
+            except PayloadAuditError as exc:
+                registry_evidence_errors.append({"artifact_id": artifact_id, "reason": str(exc)})
             result = inspect_source_archive(
                 raw_archive,
                 provenance={
@@ -277,6 +357,62 @@ def audit_landed_source_archives(
         "invalid_payloads": invalid_payloads,
         "batch_failure_count": len(batch_failures),
         "batch_failures": batch_failures,
+        "index_identity_count": len(index_identities),
+        "chunk_identity_count": len(chunk_identities),
+        "registry_identity_count": len(index_identities | chunk_identities),
+        "registry_identities": sorted(index_identities | chunk_identities),
+        "registry_evidence_errors": registry_evidence_errors,
+    }
+
+
+def reconcile_registry_coverage(
+    report: Mapping[str, Any],
+    *,
+    expected_total: int,
+    expected_by_year: Mapping[int, int],
+) -> dict[str, object]:
+    """Compare validated receipt payloads against the exact recovered registry."""
+
+    errors = report.get("registry_evidence_errors", [])
+    if errors:
+        raise PayloadAuditError(f"registry evidence has unreadable source artifacts: {errors[:3]}")
+    raw_expected = report.get("registry_identities")
+    if not isinstance(raw_expected, list):
+        raise PayloadAuditError("source audit did not produce a registry identity list")
+    try:
+        expected = {normalize_mfl_identity(season, league_id) for season, league_id in raw_expected}
+    except (TypeError, ValueError) as exc:
+        raise PayloadAuditError("source audit produced malformed registry identities") from exc
+    by_year = validate_expected_registry(
+        expected,
+        expected_total=expected_total,
+        expected_by_year=expected_by_year,
+    )
+    observed: dict[tuple[int, str], dict[str, int]] = {}
+    fingerprints: dict[tuple[int, str], set[str]] = {}
+    candidates = report.get("valid_payloads", [])
+    if not isinstance(candidates, list):
+        raise PayloadAuditError("source audit did not produce valid payload candidates")
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            raise PayloadAuditError("source audit produced malformed payload candidate")
+        try:
+            season, league_id = candidate["identity"]
+            identity = normalize_mfl_identity(season, league_id)
+            fingerprint = str(candidate["payload_sha256"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise PayloadAuditError("source audit candidate lacks identity or payload fingerprint") from exc
+        fingerprints.setdefault(identity, set()).add(fingerprint)
+    for identity, values in fingerprints.items():
+        observed[identity] = {
+            "full_schema_payloads": len(values),
+            "conflicting_payloads": int(len(values) > 1),
+        }
+    coverage = classify_expected_identities(expected, observed)
+    return {
+        "expected_identity_count": len(expected),
+        "expected_by_year": by_year,
+        **coverage,
     }
 
 
@@ -303,6 +439,18 @@ def main(argv: Iterable[str] | None = None) -> int:
         run_id=args.run_id,
         scratch_directory=args.scratch_directory,
     )
+    coverage: dict[str, object] | None = None
+    reconciliation_error: str | None = None
+    try:
+        coverage = reconcile_registry_coverage(
+            report,
+            expected_total=39368,
+            expected_by_year=ORIGINAL_EXPECTED_BY_YEAR,
+        )
+    except (PayloadAuditError, ValueError) as exc:
+        reconciliation_error = str(exc)
+    report["registry_coverage"] = coverage
+    report["registry_reconciliation_error"] = reconciliation_error
     args.output_directory.mkdir(parents=True, exist_ok=False)
     (args.output_directory / "artifact_recovery_report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"
@@ -313,6 +461,42 @@ def main(argv: Iterable[str] | None = None) -> int:
     (args.output_directory / "batch_failure_report.json").write_text(
         json.dumps(report["batch_failures"], indent=2, sort_keys=True), encoding="utf-8"
     )
+    (args.output_directory / "missing_data_report.json").write_text(
+        json.dumps(
+            {
+                "missing_full_payload": coverage["missing_full_payload"] if coverage else [],
+                "unexpected_observed": coverage["unexpected_observed"] if coverage else [],
+                "registry_reconciliation_error": reconciliation_error,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (args.output_directory / "conflict_report.json").write_text(
+        json.dumps(
+            {
+                "conflicting_payloads": coverage["conflicting_payloads"] if coverage else [],
+                "registry_reconciliation_error": reconciliation_error,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    (args.output_directory / "recovered_identity_registry.json").write_text(
+        json.dumps(
+            {
+                "identity_count": report["registry_identity_count"],
+                "identities": report["registry_identities"],
+                "by_year_required": ORIGINAL_EXPECTED_BY_YEAR,
+                "registry_reconciliation_error": reconciliation_error,
+            },
+            indent=2,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
     print(
         json.dumps(
             {
@@ -322,6 +506,11 @@ def main(argv: Iterable[str] | None = None) -> int:
             sort_keys=True,
         )
     )
+    if reconciliation_error is not None:
+        return 2
+    assert coverage is not None
+    if coverage["missing_full_payload"] or coverage["conflicting_payloads"] or coverage["unexpected_observed"]:
+        return 2
     return 0
 
 

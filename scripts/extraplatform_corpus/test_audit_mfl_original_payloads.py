@@ -11,8 +11,10 @@ import zipfile
 from audit_mfl_original_payloads import (
     PayloadAuditError,
     audit_landed_source_archives,
+    extract_registry_evidence_from_source_archive,
     inspect_receipt_payload,
     inspect_source_archive,
+    reconcile_registry_coverage,
 )
 
 
@@ -131,3 +133,42 @@ def test_audit_landed_source_archives_preserves_artifact_provenance_for_every_pa
     assert report["valid_payload_count"] == 1
     assert report["valid_payloads"][0]["artifact_id"] == 7
     assert report["valid_payloads"][0]["identity"] == (2006, "26487")
+
+
+def test_registry_evidence_scans_both_reducer_index_and_chunk_database_without_source_mutation(tmp_path: Path) -> None:
+    chunk = tmp_path / "mfl_register_chunk.duckdb"
+    connection = duckdb.connect(str(chunk))
+    connection.execute("CREATE TABLE league_settings(year INTEGER, db_name VARCHAR)")
+    connection.execute("INSERT INTO league_settings VALUES (2004, 'mfl_2004_2')")
+    connection.close()
+    archive = tmp_path / "chunk.zip"
+    with zipfile.ZipFile(archive, "w") as zipped:
+        zipped.writestr("index_state/mfl_register_all_runs.json", '{"leagues":[{"db_name":"mfl_2004_1"}]}')
+        zipped.write(chunk, "mfl_register_chunk.duckdb")
+
+    evidence = extract_registry_evidence_from_source_archive(archive, scratch_directory=tmp_path / "scratch")
+
+    assert evidence == {
+        "index_identities": {(2004, "1")},
+        "chunk_identities": {(2004, "2")},
+    }
+
+
+def test_reconcile_registry_coverage_marks_missing_and_conflicting_payloads_without_counting_them_recovered() -> None:
+    coverage = reconcile_registry_coverage(
+        {
+            "registry_identities": [(2004, "1"), (2004, "2"), (2004, "3")],
+            "registry_evidence_errors": [],
+            "valid_payloads": [
+                {"identity": (2004, "1"), "payload_sha256": "same"},
+                {"identity": (2004, "3"), "payload_sha256": "old"},
+                {"identity": (2004, "3"), "payload_sha256": "new"},
+            ],
+        },
+        expected_total=3,
+        expected_by_year={2004: 3},
+    )
+
+    assert coverage["recovered"] == [(2004, "1")]
+    assert coverage["missing_full_payload"] == [(2004, "2")]
+    assert coverage["conflicting_payloads"] == [(2004, "3")]
