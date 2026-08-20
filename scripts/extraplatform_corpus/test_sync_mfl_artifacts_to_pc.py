@@ -101,3 +101,25 @@ def test_landing_refuses_to_publish_an_incomplete_chunk(tmp_path: Path) -> None:
         raise AssertionError("incomplete artifact was published")
 
     assert not (destination / "campaigns" / "456").exists()
+
+
+def test_existing_bom_legacy_receipt_is_preserved_but_marked_unverified(tmp_path: Path) -> None:
+    archive = tmp_path / "source.zip"
+    digest = _archive(archive, {"mfl_register_chunk.duckdb": b"duckdb"})
+    destination = tmp_path / "D" / "pc_artifacts"
+    landing = destination / "campaigns" / "456"
+    landing.mkdir(parents=True)
+    (landing / "mfl_register_chunk.duckdb").write_bytes(b"duckdb")
+    (landing / ".landed.json").write_text(
+        json.dumps({"run_id": 456, "source": "mfl-register-chunk-456"}),
+        encoding="utf-8-sig",
+    )
+
+    result = land_artifact(
+        _artifact(digest),
+        destination=destination,
+        download=lambda *_: (_ for _ in ()).throw(AssertionError("existing landing downloaded again")),
+        required_files={"mfl_register_chunk.duckdb"},
+    )
+
+    assert result["status"] == "legacy_present_unverified"

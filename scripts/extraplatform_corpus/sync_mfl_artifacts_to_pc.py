@@ -137,10 +137,26 @@ def land_artifact(
     if final_dir.exists():
         if not receipt_path.is_file():
             raise ArtifactLandingError(f"final landing already exists without receipt: {final_dir}")
-        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-        if receipt.get("artifact_id") != artifact_id or receipt.get("archive_sha256") != expected_digest:
+        # Earlier receiver runs wrote Windows BOM-prefixed JSON.  Accept that
+        # immutable receipt format without rewriting the existing landing.
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8-sig"))
+        if receipt.get("artifact_id") == artifact_id and receipt.get("archive_sha256") == expected_digest:
+            return {"status": "already_landed", "artifact_id": artifact_id, "run_id": run_id, "path": str(final_dir)}
+        # Pre-receiver folders carry only run/name provenance.  They are
+        # preserved and explicitly classified as unverified rather than
+        # overwritten or misreported as digest-verified.
+        if receipt.get("run_id") == run_id and receipt.get("source") == artifact.get("name"):
+            missing = sorted(name for name in required_files if not (final_dir / name).is_file())
+            if missing:
+                raise ArtifactLandingError(f"legacy landing lacks required files: {missing}")
+            return {
+                "status": "legacy_present_unverified",
+                "artifact_id": artifact_id,
+                "run_id": run_id,
+                "path": str(final_dir),
+            }
+        else:
             raise ArtifactLandingError(f"final landing conflicts with requested artifact: {final_dir}")
-        return {"status": "already_landed", "artifact_id": artifact_id, "run_id": run_id, "path": str(final_dir)}
 
     staging_root = destination / "_staging"
     staging_root.mkdir(parents=True, exist_ok=True)
