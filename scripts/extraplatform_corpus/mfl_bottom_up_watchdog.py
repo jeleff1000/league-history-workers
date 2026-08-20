@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
@@ -12,8 +13,15 @@ from datetime import datetime, timezone
 
 
 def gh_json(args: list[str]) -> dict | list:
-    result = subprocess.run(["gh", "api", *args], check=True, capture_output=True, text=True)
-    return json.loads(result.stdout)
+    last_error = ""
+    for attempt in range(4):
+        result = subprocess.run(["gh", "api", *args], capture_output=True, text=True)
+        if result.returncode == 0:
+            return json.loads(result.stdout)
+        last_error = (result.stderr or result.stdout).strip()
+        if attempt < 3:
+            time.sleep(2 ** attempt)
+    raise RuntimeError(f"gh api failed after 4 attempts: {' '.join(args)}: {last_error}")
 
 
 def parse_time(value: str) -> datetime:
@@ -22,8 +30,8 @@ def parse_time(value: str) -> datetime:
 
 def workflow_runs(repo: str, workflow: str) -> list[dict]:
     pages = gh_json([
-        f"repos/{repo}/actions/workflows/{workflow}/runs",
-        "--method", "GET", "-f", "per_page=100", "--paginate", "--slurp",
+        f"repos/{repo}/actions/workflows/{workflow}/runs?per_page=100",
+        "--paginate", "--slurp",
     ])
     runs: list[dict] = []
     for page in pages:
@@ -46,8 +54,7 @@ def cancel(repo: str, run_id: int) -> None:
 def batch_start_from_plan_artifact(repo: str, run_id: int) -> int | None:
     try:
         payload = gh_json([
-            f"repos/{repo}/actions/runs/{run_id}/artifacts",
-            "--method", "GET", "-f", "per_page=100",
+            f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100",
         ])
         artifact = next((a for a in payload.get("artifacts", [])
                          if a.get("name") == f"mfl-batch-plan-{run_id}"
