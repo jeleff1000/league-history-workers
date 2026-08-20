@@ -113,9 +113,11 @@ def main() -> int:
     # run. Never reuse one of those slots or a failed league can be dispatched
     # again under a different wave.
     next_slot = max(max(known_slots, default=-1) + 1, len(scheduled))
-    exhausted = next_slot * batches_per_campaign >= total_slots
+    remaining_slots = max(0, total_slots - next_slot * batches_per_campaign)
+    remaining_campaigns = (remaining_slots + batches_per_campaign - 1) // batches_per_campaign
+    exhausted = remaining_campaigns == 0
     needed = max(0, target_active - len(active))
-    dispatch_count = min(needed, max(0, total_slots - next_slot * batches_per_campaign))
+    dispatch_count = min(needed, remaining_campaigns)
     decision = {
         "mode": "ordered_manifest_inflight_controller", "repo": repo,
         "checked_at": now.isoformat().replace("+00:00", "Z"),
