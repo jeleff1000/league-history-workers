@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import zipfile
 
-from sync_mfl_artifacts_to_pc import ArtifactLandingError, land_artifact
+from sync_mfl_artifacts_to_pc import ArtifactLandingError, land_artifact, resolve_required_files
 
 
 def _archive(path: Path, files: dict[str, bytes]) -> str:
@@ -123,3 +123,10 @@ def test_existing_bom_legacy_receipt_is_preserved_but_marked_unverified(tmp_path
     )
 
     assert result["status"] == "legacy_present_unverified"
+
+
+def test_registry_artifact_can_supply_its_own_strict_file_contract() -> None:
+    assert resolve_required_files(["mfl_original_39368_registry.json", "registry_proof.json"]) == {
+        "mfl_original_39368_registry.json",
+        "registry_proof.json",
+    }

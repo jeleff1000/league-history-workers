@@ -1,0 +1,83 @@
+name: Export Protected Original MFL Registry
+
+on:
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: mfl-original-registry-export
+  cancel-in-progress: false
+
+env:
+  PROTECTED_INDEX_CACHE_KEY: mfl-registered-2004-2018-v2-index-recover-mass-remaining-v31-r9-20260816-1
+
+jobs:
+  export:
+    name: Restore and verify 39,368 identity registry
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: |
+            /scripts/extraplatform_corpus/mfl_original_recovery_audit.py
+          sparse-checkout-cone-mode: false
+      - name: Restore immutable protected index cache
+        uses: actions/cache/restore@v5
+        with:
+          path: index_state
+          key: ${{ env.PROTECTED_INDEX_CACHE_KEY }}
+          fail-on-cache-miss: true
+      - name: Build compact immutable registry proof
+        run: |
+          set -euo pipefail
+          test -s index_state/mfl_register_all_runs.json
+          python3 - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          from scripts.extraplatform_corpus.mfl_original_recovery_audit import (
+              extract_mfl_identities_from_index,
+              validate_expected_registry,
+          )
+
+          expected_by_year = {
+              2004: 4780, 2005: 935, 2006: 7719, 2007: 2136, 2008: 2195,
+              2009: 2133, 2010: 2155, 2011: 2170, 2012: 1801, 2013: 1288,
+              2014: 865, 2015: 836, 2016: 9114, 2017: 468, 2018: 773,
+          }
+          index = Path('index_state/mfl_register_all_runs.json')
+          identities = extract_mfl_identities_from_index(index)
+          by_year = validate_expected_registry(
+              identities, expected_total=39368, expected_by_year=expected_by_year,
+          )
+          digest = hashlib.sha256(index.read_bytes()).hexdigest()
+          report = {
+              'identity_count': len(identities),
+              'by_year': by_year,
+              'identities': sorted(identities),
+              'source_cache_key': '${{ env.PROTECTED_INDEX_CACHE_KEY }}',
+              'source_index_sha256': digest,
+              'source_index_bytes': index.stat().st_size,
+              'new_lineage': False,
+          }
+          output = Path('registry')
+          output.mkdir()
+          (output / 'mfl_original_39368_registry.json').write_text(
+              json.dumps(report, indent=2, sort_keys=True), encoding='utf-8',
+          )
+          (output / 'registry_proof.json').write_text(
+              json.dumps({'ok': True, **{key: report[key] for key in ('identity_count', 'by_year', 'source_cache_key', 'source_index_sha256', 'source_index_bytes', 'new_lineage')}}, indent=2, sort_keys=True),
+              encoding='utf-8',
+          )
+          print(json.dumps({'identity_count': len(identities), 'by_year': by_year}, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-original-39368-registry-${{ github.run_id }}
+          retention-days: 90
+          path: registry/

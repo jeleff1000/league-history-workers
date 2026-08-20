@@ -39,6 +39,19 @@ class ArtifactLandingError(RuntimeError):
     """An artifact cannot be safely admitted to the local evidence store."""
 
 
+def resolve_required_files(custom_files: Iterable[str]) -> set[str] | frozenset[str]:
+    """Return a strict archive contract for chunks or another named artifact."""
+
+    requested = {str(name).replace("\\", "/") for name in custom_files if str(name).strip()}
+    if not requested:
+        return DEFAULT_REQUIRED_FILES
+    for name in requested:
+        path = PurePosixPath(name)
+        if path.is_absolute() or ".." in path.parts or name != path.as_posix():
+            raise ArtifactLandingError(f"required artifact file is unsafe: {name!r}")
+    return requested
+
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -229,6 +242,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("--run-id", type=int, action="append", required=True)
     parser.add_argument("--destination", type=Path, required=True)
     parser.add_argument("--artifact-prefix", default=DEFAULT_ARTIFACT_PREFIX)
+    parser.add_argument("--required-file", action="append", default=[])
     parser.add_argument("--token-env", default="GH_TOKEN")
     args = parser.parse_args(list(argv) if argv is not None else None)
 
@@ -236,6 +250,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     token = os.environ.get(args.token_env) or os.environ.get("GITHUB_TOKEN")
     if not token:
         raise SystemExit(f"set {args.token_env} or GITHUB_TOKEN before downloading GitHub Actions artifacts")
+    required_files = resolve_required_files(args.required_file)
 
     reports: list[dict[str, object]] = []
     for run_id in args.run_id:
@@ -255,7 +270,7 @@ def main(argv: Iterable[str] | None = None) -> int:
                     artifact,
                     destination=args.destination,
                     download=lambda url, target: _download_http(url, target, token),
-                    required_files=DEFAULT_REQUIRED_FILES,
+                    required_files=required_files,
                 )
             )
     print(json.dumps({"artifacts": reports}, sort_keys=True))
