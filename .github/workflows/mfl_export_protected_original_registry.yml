@@ -1,6 +1,11 @@
 name: Export Protected Original MFL Registry
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/mfl_export_protected_original_registry.yml
   workflow_dispatch:
 
 permissions:
