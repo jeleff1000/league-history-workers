@@ -410,6 +410,14 @@ jobs:
           fail-on-cache-miss: true
       - name: Activate prepared Python environment
         run: echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+      - name: Verify prepared Python environment
+        shell: bash
+        run: |
+          if ! .venv/bin/python -c 'import pandas, duckdb'; then
+            .venv/bin/python -m pip install -r code/requirements.txt
+          fi
+          .venv/bin/python -c 'import pandas, duckdb'
+
       - name: Restore corpus dependencies
         id: deps
         uses: actions/cache/restore@v5
