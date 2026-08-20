@@ -413,22 +413,15 @@ jobs:
       - name: Verify prepared Python environment
         shell: bash
         run: |
-          if [ ! -x .venv/bin/python ]; then
-            candidate=$(find .venv/bin -maxdepth 1 \( -type f -o -type l \) -name 'python*' | head -n 1 || true)
-            if [ -n "$candidate" ]; then
-              ln -sf "$(basename "$candidate")" .venv/bin/python
-            else
-              rm -rf .venv
-              python -m venv .venv
-              candidate=$(find .venv/bin -maxdepth 1 \( -type f -o -type l \) -name 'python*' | head -n 1 || true)
-              if [ -n "$candidate" ]; then ln -sf "$(basename "$candidate")" .venv/bin/python; fi
-              .venv/bin/python -m pip install -r code/requirements.txt
-            fi
+          VENV_PY=.venv/bin/python3.11
+          if [ ! -x "$VENV_PY" ]; then
+            rm -rf .venv
+            python3.11 -m venv .venv
           fi
-          if ! .venv/bin/python -c 'import pandas, duckdb'; then
-            .venv/bin/python -m pip install -r code/requirements.txt
+          if ! "$VENV_PY" -c 'import pandas, duckdb'; then
+            "$VENV_PY" -m pip install -r code/requirements.txt
           fi
-          .venv/bin/python -c 'import pandas, duckdb'
+          "$VENV_PY" -c 'import pandas, duckdb'
 
       - name: Restore corpus dependencies
         id: deps
@@ -463,7 +456,7 @@ jobs:
           mkdir -p batch_output
             # Keep a slow/broken league from holding an entire bulk chunk hostage.
             # Its receipt is retained for the targeted retry queue on the next pass.
-            timeout --signal=TERM --kill-after=30s 600s .venv/bin/python code/scripts/extraplatform_corpus/mfl_register_batch.py \
+            timeout --signal=TERM --kill-after=30s 600s .venv/bin/python3.11 code/scripts/extraplatform_corpus/mfl_register_batch.py \
             --manifest "$MANIFEST" \
             --offset "$(( (BATCH - BATCH_START) * BATCH_SIZE + BATCH_START * BATCH_SIZE ))" \
             --limit "$BATCH_SIZE" \
