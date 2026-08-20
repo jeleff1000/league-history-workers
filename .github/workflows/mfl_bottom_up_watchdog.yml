@@ -3,6 +3,10 @@ name: MFL Bottom-Up Watchdog
 on:
   schedule:
     - cron: '*/10 * * * *'
+  workflow_run:
+    workflows:
+      - MFL Register Batch Campaign
+    types: [completed]
   workflow_dispatch:
     inputs:
       dry_run:
