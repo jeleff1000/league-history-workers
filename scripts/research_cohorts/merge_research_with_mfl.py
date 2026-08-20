@@ -96,6 +96,98 @@ def count_rows_for_pairs(con: duckdb.DuckDBPyConnection, relation: str) -> int:
     ).fetchone()[0])
 
 
+def canonical_source_projection(base_schema: list[tuple[str, str]], mfl_columns: set[str]) -> str:
+    """Project an MFL relation into the canonical base schema for comparison."""
+    return ", ".join(
+        (
+            f"CAST(s.{qi(name)} AS {type_name}) AS {qi(name)}"
+            if name in mfl_columns
+            else f"CAST(NULL AS {type_name}) AS {qi(name)}"
+        )
+        for name, type_name in base_schema
+    )
+
+
+def validate_no_conflicting_overlap(
+    *, base: Path, mfl: Path, pairs: list[tuple[str, int]]
+) -> None:
+    """Fail before candidate creation when sources disagree on an overlap.
+
+    The existing corpus is canonical.  A same league-year from the recovered
+    MFL source may be omitted only when its canonical-column multiset is
+    identical; a difference is never silently chosen or overwritten.
+    """
+    con = duckdb.connect(":memory:")
+    try:
+        base_path = str(base.resolve()).replace("'", "''")
+        mfl_path = str(mfl.resolve()).replace("'", "''")
+        con.execute(f"ATTACH '{base_path}' AS base (READ_ONLY)")
+        con.execute(f"ATTACH '{mfl_path}' AS mfl (READ_ONLY)")
+        base_tables = public_tables(con, "base")
+        missing = [table for table in TABLES if table not in base_tables]
+        if missing:
+            raise SystemExit(f"base corpus missing required tables: {missing}")
+        mfl_schemas = {table: table_schema(con, "mfl", table) for table in TABLES}
+        missing = [table for table, schema in mfl_schemas.items() if schema is None]
+        if missing:
+            raise SystemExit(f"MFL cache missing required tables: {missing}")
+
+        con.execute("CREATE TEMP TABLE _mfl_pairs (db_name VARCHAR, year INTEGER)")
+        con.executemany("INSERT INTO _mfl_pairs VALUES (?, ?)", pairs)
+        for ordinal, table in enumerate(TABLES):
+            base_schema = table_columns(con, "base", "public", table)
+            columns = ", ".join(qi(name) for name, _ in base_schema)
+            base_columns = ", ".join(f"b.{qi(name)} AS {qi(name)}" for name, _ in base_schema)
+            mfl_schema_name = mfl_schemas[table]
+            assert mfl_schema_name is not None
+            mfl_relation = relation("mfl", mfl_schema_name, table)
+            mfl_columns = {name for name, _ in table_columns(con, "mfl", mfl_schema_name, table)}
+            missing_keys = {"db_name", "year"} - mfl_columns
+            if missing_keys:
+                raise SystemExit(f"MFL {table} is missing required merge keys: {sorted(missing_keys)}")
+            projection = canonical_source_projection(base_schema, mfl_columns)
+            suffix = str(ordinal)
+            con.execute(
+                f"CREATE TEMP TABLE _overlap_pairs_{suffix} AS "
+                f"SELECT DISTINCT s.db_name, CAST(s.year AS INTEGER) AS year "
+                f"FROM {mfl_relation} s JOIN _mfl_pairs p "
+                "ON s.db_name=p.db_name AND CAST(s.year AS INTEGER)=p.year "
+                f"JOIN base.public.{qi(table)} b "
+                "ON b.db_name=s.db_name AND CAST(b.year AS INTEGER)=CAST(s.year AS INTEGER)"
+            )
+            con.execute(
+                f"CREATE TEMP TABLE _overlap_base_{suffix} AS "
+                f"SELECT {base_columns} FROM base.public.{qi(table)} b "
+                f"JOIN _overlap_pairs_{suffix} p "
+                "ON b.db_name=p.db_name AND CAST(b.year AS INTEGER)=p.year"
+            )
+            con.execute(
+                f"CREATE TEMP TABLE _overlap_mfl_{suffix} AS "
+                f"SELECT {projection} FROM {mfl_relation} s "
+                f"JOIN _overlap_pairs_{suffix} p "
+                "ON s.db_name=p.db_name AND CAST(s.year AS INTEGER)=p.year"
+            )
+            difference_rows = int(
+                con.execute(
+                    f"SELECT COUNT(*) FROM ("
+                    f"SELECT {columns} FROM _overlap_base_{suffix} "
+                    f"EXCEPT ALL SELECT {columns} FROM _overlap_mfl_{suffix} "
+                    "UNION ALL "
+                    f"SELECT {columns} FROM _overlap_mfl_{suffix} "
+                    f"EXCEPT ALL SELECT {columns} FROM _overlap_base_{suffix}"
+                    ")"
+                ).fetchone()[0]
+            )
+            if difference_rows:
+                pair_count = int(con.execute(f"SELECT COUNT(*) FROM _overlap_pairs_{suffix}").fetchone()[0])
+                raise SystemExit(
+                    f"conflicting overlap payload in {table}: "
+                    f"{difference_rows} differing canonical rows across {pair_count} league-years"
+                )
+    finally:
+        con.close()
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", type=Path, required=True)
@@ -112,6 +204,7 @@ def main() -> None:
     expected_ledger = parse_ledger(args.expected_ledger)
     index = json.loads(args.mfl_index.read_text(encoding="utf-8"))
     pairs = protected_mfl_pairs(index, expected_ledger)
+    validate_no_conflicting_overlap(base=args.base, mfl=args.mfl, pairs=pairs)
 
     con = duckdb.connect(str(args.out))
     try:
@@ -159,14 +252,7 @@ def main() -> None:
             # name and cast to the corpus type instead of requiring identical
             # physical schemas.  MFL-only fields remain in the protected MFL
             # cache and are intentionally not invented in the research lake.
-            source_columns = ", ".join(
-                (
-                    f"CAST(s.{qi(name)} AS {type_name}) AS {qi(name)}"
-                    if name in mfl_columns
-                    else f"CAST(NULL AS {type_name}) AS {qi(name)}"
-                )
-                for name, type_name in base_schema
-            )
+            source_columns = canonical_source_projection(base_schema, mfl_columns)
             source_rows = count_rows_for_pairs(con, mfl_relation)
             con.execute(
                 "CREATE OR REPLACE TEMP TABLE _mfl_table_pairs AS "
