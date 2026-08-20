@@ -74,8 +74,8 @@ def main() -> int:
     dry_run = os.environ.get("MFL_DRY_RUN", "false").lower() == "true"
     unusable = {"failure", "cancelled", "timed_out", "startup_failure", "action_required"}
     campaigns = workflow_runs(repo, workflow)
-    direct = [r for r in campaigns if r.get("created_at") and parse_time(r["created_at"]) >= epoch
-              and r.get("conclusion") not in unusable]
+    scheduled = [r for r in campaigns if r.get("created_at") and parse_time(r["created_at"]) >= epoch]
+    direct = [r for r in scheduled if r.get("conclusion") not in unusable]
     direct.sort(key=lambda r: (r.get("created_at", ""), int(r.get("id", 0))))
     grace = int(os.environ.get("MFL_QUEUE_GRACE_MINUTES", "30"))
     stale = [r for r in direct if r.get("status") == "queued" and r.get("created_at")
@@ -102,7 +102,10 @@ def main() -> int:
         plans = {int(r["id"]): start for r, start in zip(direct, starts_by_run)}
     starts = [s for s in plans.values() if s is not None and s % batches_per_campaign == 0]
     known_slots = [s // batches_per_campaign for s in starts]
-    next_slot = max(max(known_slots, default=-1) + 1, len(direct))
+    # Every dispatched campaign reserves a slot, including a failed/cancelled
+    # run. Never reuse one of those slots or a failed league can be dispatched
+    # again under a different wave.
+    next_slot = max(max(known_slots, default=-1) + 1, len(scheduled))
     exhausted = next_slot * batches_per_campaign >= total_slots
     needed = max(0, target_active - len(active))
     dispatch_count = min(needed, max(0, total_slots - next_slot * batches_per_campaign))
@@ -111,6 +114,7 @@ def main() -> int:
         "checked_at": now.isoformat().replace("+00:00", "Z"),
         "manifest_path": manifest_path, "direct_campaigns_seen": len(direct),
         "active_campaigns": len(active), "target_active_campaigns": target_active,
+        "scheduled_campaigns_seen": len(scheduled),
         "active_run_ids": [int(r["id"]) for r in active],
         "stale_queued_runs": sorted(stale_ids),
         "cancelled_stale_runs": [] if dry_run else sorted(stale_ids),
