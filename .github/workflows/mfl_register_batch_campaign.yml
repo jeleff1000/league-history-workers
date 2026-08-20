@@ -226,6 +226,9 @@ jobs:
         if: ${{ inputs.storage_mode == 'fetch_only' && inputs.reservation_artifact_run_id != '' && inputs.reservation_artifact_name != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
+          BATCH_START: ${{ inputs.batch_start }}
+          BATCH_COUNT: ${{ inputs.batch_count }}
+          BATCH_SIZE: ${{ inputs.batch_size }}
         run: |
           gh run download "${{ inputs.reservation_artifact_run_id }}" \
             --repo "${{ github.repository }}" \
@@ -233,6 +236,7 @@ jobs:
             --dir reservations
           python3 - <<'PY'
           import json
+          import os
           from pathlib import Path
           reserved={
               (int(row['season']), str(row['league_id']))
@@ -245,8 +249,16 @@ jobs:
               if (int(row['season']), str(row['league_id'])) not in reserved
           ]
           payload['reserved_excluded']=len(reserved)
+          wave_path=Path('reservations/next_wave_plan.json')
+          if wave_path.is_file():
+              wave=json.loads(wave_path.read_text())
+              planned=wave.get('planned_league_years',[])
+              start=int(os.environ['BATCH_START'])*int(os.environ['BATCH_SIZE'])
+              limit=int(os.environ['BATCH_COUNT'])*int(os.environ['BATCH_SIZE'])
+              payload['rows']=planned[start:start+limit]
+              payload['planned_wave_slice']={'start':start,'limit':limit,'total':len(planned)}
           path.write_text(json.dumps(payload, indent=2)+'\n')
-          print(json.dumps({'reserved_excluded':len(reserved),'remaining':len(payload['rows'])},sort_keys=True))
+          print(json.dumps({'reserved_excluded':len(reserved),'remaining':len(payload['rows']),'planned_wave_slice':payload.get('planned_wave_slice')},sort_keys=True))
       - name: Publish pending manifest to ingest runners
         if: ${{ inputs.storage_mode == 'fetch_only' }}
         uses: actions/upload-artifact@v4
