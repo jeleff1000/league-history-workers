@@ -194,9 +194,13 @@ jobs:
             --dir canonical_index_state
           test -s canonical_index_state/mfl_register_all_runs.json
       - name: Stage pending queue index at index_state
-        if: ${{ inputs.storage_mode == 'fetch_only' && (inputs.prior_index_key != '' || inputs.prior_index_artifact_run_id != '') && inputs.prior_index_cache_path != 'index_state' }}
+        if: ${{ inputs.storage_mode == 'fetch_only' && (inputs.prior_index_key != '' || inputs.prior_index_artifact_run_id != '') && (inputs.prior_index_cache_path != 'index_state' || inputs.prior_index_artifact_run_id != '') }}
         run: |
-          source="${{ inputs.prior_index_cache_path }}/mfl_register_all_runs.json"
+          if [ -n "${{ inputs.prior_index_artifact_run_id }}" ]; then
+            source="canonical_index_state/mfl_register_all_runs.json"
+          else
+            source="${{ inputs.prior_index_cache_path }}/mfl_register_all_runs.json"
+          fi
           if [ ! -s "$source" ]; then source="${{ inputs.prior_index_cache_path }}/canonical_mfl_register_all_runs.json"; fi
           test -s "$source"
           mkdir -p index_state
@@ -1037,3 +1041,4 @@ jobs:
             --raw-field storage_mode="$STORAGE_MODE" --raw-field prior_state_key="$CURRENT_STATE_KEY" \
             --raw-field prior_index_key="$PRIOR_INDEX_KEY" --raw-field prior_index_cache_path="$PRIOR_INDEX_CACHE_PATH" \
             --raw-field attempt_suffix="$ATTEMPT_SUFFIX"
+
