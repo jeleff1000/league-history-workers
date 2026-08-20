@@ -15,9 +15,10 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import shutil
+import subprocess
 import sys
 import tempfile
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 import zipfile
@@ -231,6 +232,34 @@ def artifacts_for_run(repo: str, run_id: int, token: str | None) -> list[dict[st
     return [artifact for artifact in artifacts if isinstance(artifact, dict)]
 
 
+def resolve_github_token(
+    token_env: str,
+    *,
+    environment: Mapping[str, str] | None = None,
+    run_command: Callable[[list[str]], str] | None = None,
+) -> str:
+    """Use an explicit token first, then the authenticated local GitHub CLI."""
+
+    environment = os.environ if environment is None else environment
+    token = environment.get(token_env) or environment.get("GITHUB_TOKEN")
+    if token:
+        return token
+    if run_command is None:
+        def run_command(command: list[str]) -> str:
+            return subprocess.check_output(command, text=True, stderr=subprocess.DEVNULL)
+    try:
+        token = run_command(["gh", "auth", "token"]).strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ArtifactLandingError(
+            f"set {token_env} or authenticate the GitHub CLI with 'gh auth login' before downloading artifacts"
+        ) from exc
+    if not token:
+        raise ArtifactLandingError(
+            f"set {token_env} or authenticate the GitHub CLI with 'gh auth login' before downloading artifacts"
+        )
+    return token
+
+
 def require_d_destination(destination: Path) -> None:
     if Path(destination).drive.upper() != "D:":
         raise ArtifactLandingError("destination must be on D:; no MFL artifact may land on C:")
@@ -247,9 +276,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     require_d_destination(args.destination)
-    token = os.environ.get(args.token_env) or os.environ.get("GITHUB_TOKEN")
-    if not token:
-        raise SystemExit(f"set {args.token_env} or GITHUB_TOKEN before downloading GitHub Actions artifacts")
+    token = resolve_github_token(args.token_env)
     required_files = resolve_required_files(args.required_file)
 
     reports: list[dict[str, object]] = []

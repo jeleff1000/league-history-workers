@@ -5,7 +5,12 @@ import json
 from pathlib import Path
 import zipfile
 
-from sync_mfl_artifacts_to_pc import ArtifactLandingError, land_artifact, resolve_required_files
+from sync_mfl_artifacts_to_pc import (
+    ArtifactLandingError,
+    land_artifact,
+    resolve_github_token,
+    resolve_required_files,
+)
 
 
 def _archive(path: Path, files: dict[str, bytes]) -> str:
@@ -130,3 +135,15 @@ def test_registry_artifact_can_supply_its_own_strict_file_contract() -> None:
         "mfl_original_39368_registry.json",
         "registry_proof.json",
     }
+
+
+def test_resolve_github_token_uses_authenticated_gh_cli_when_environment_is_empty() -> None:
+    """Protects unattended D: landing when no token was copied into the shell."""
+
+    token = resolve_github_token(
+        "GH_TOKEN",
+        environment={},
+        run_command=lambda command: "gho_from_existing_cli\n" if command == ["gh", "auth", "token"] else "",
+    )
+
+    assert token == "gho_from_existing_cli"
