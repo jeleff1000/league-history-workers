@@ -7,6 +7,7 @@ import zipfile
 
 from sync_mfl_artifacts_to_pc import (
     ArtifactLandingError,
+    audit_landed_lane_bundles,
     download_artifact_with_gh_cli,
     land_artifact,
     resolve_github_token,
@@ -191,3 +192,49 @@ def test_multi_artifact_layout_keeps_same_run_artifacts_in_distinct_verified_lan
 
     assert result["path"] == str(destination / "campaigns" / "456" / "789")
     assert (destination / "campaigns" / "456" / "789" / "lane-manifest.json").is_file()
+
+
+def test_lane_bundle_audit_requires_exact_lanes_and_verifies_every_inner_archive_digest(tmp_path: Path) -> None:
+    destination = tmp_path / "D" / "pc_artifacts"
+    campaign = destination / "campaigns" / "456"
+    for lane, artifact_id in enumerate((11, 12)):
+        landing = campaign / str(100 + lane)
+        artifacts = landing / "artifacts"
+        artifacts.mkdir(parents=True)
+        archive = artifacts / f"{artifact_id}.zip"
+        _archive(archive, {"batch_receipt.json": b"{}"})
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        manifest = {
+            "inventory_run_id": 9,
+            "lane": lane,
+            "lane_count": 2,
+            "artifact_count": 1,
+            "bytes": archive.stat().st_size,
+            "artifacts": [
+                {
+                    "artifact_id": artifact_id,
+                    "run_id": 1,
+                    "name": "mfl-register-batch",
+                    "size_in_bytes": archive.stat().st_size,
+                    "digest": f"sha256:{digest}",
+                }
+            ],
+        }
+        manifest_path = landing / "lane-manifest.json"
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        (landing / ".landed.json").write_text(
+            json.dumps(
+                {
+                    "artifact_id": 100 + lane,
+                    "archive_sha256": "a" * 64,
+                    "files": {"lane-manifest.json": {"sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest()}},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    report = audit_landed_lane_bundles(destination, run_id=456, expected_lane_count=2)
+
+    assert report["lane_count"] == 2
+    assert report["source_artifact_count"] == 2
+    assert report["source_artifact_ids"] == [11, 12]

@@ -288,6 +288,122 @@ def require_d_destination(destination: Path) -> None:
         raise ArtifactLandingError("destination must be on D:; no MFL artifact may land on C:")
 
 
+def _load_object(path: Path, *, label: str) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ArtifactLandingError(f"cannot read {label}: {path}") from exc
+    if not isinstance(value, dict):
+        raise ArtifactLandingError(f"{label} is not a JSON object: {path}")
+    return value
+
+
+def audit_landed_lane_bundles(
+    destination: Path,
+    *,
+    run_id: int,
+    expected_lane_count: int,
+) -> dict[str, object]:
+    """Verify all landed lane bundles before any source payload is inspected.
+
+    This is deliberately read-only.  It confirms that every outer Actions
+    archive has its receipt, each lane has the expected manifest, and every
+    enclosed original artifact archive still matches the immutable digest
+    recorded by Actions.  It does not merge, extract, or alter source rows.
+    """
+
+    if expected_lane_count <= 0:
+        raise ArtifactLandingError("expected_lane_count must be positive")
+    campaign = Path(destination) / "campaigns" / str(run_id)
+    if not campaign.is_dir():
+        raise ArtifactLandingError(f"landed lane campaign does not exist: {campaign}")
+
+    landings = sorted(path for path in campaign.iterdir() if path.is_dir())
+    if len(landings) != expected_lane_count:
+        raise ArtifactLandingError(
+            f"expected {expected_lane_count} landed lane bundles, found {len(landings)} under {campaign}"
+        )
+
+    lanes: set[int] = set()
+    inventory_run_ids: set[int] = set()
+    source_artifact_ids: set[int] = set()
+    source_bytes = 0
+    for landing in landings:
+        try:
+            outer_artifact_id = int(landing.name)
+        except ValueError as exc:
+            raise ArtifactLandingError(f"lane landing has non-numeric artifact directory: {landing}") from exc
+        receipt = _load_object(landing / ".landed.json", label="outer landing receipt")
+        if int(receipt.get("artifact_id", -1)) != outer_artifact_id:
+            raise ArtifactLandingError(f"outer landing receipt does not match directory: {landing}")
+        if len(str(receipt.get("archive_sha256", ""))) != 64:
+            raise ArtifactLandingError(f"outer landing receipt lacks archive digest: {landing}")
+        files = receipt.get("files")
+        if not isinstance(files, dict) or not isinstance(files.get("lane-manifest.json"), dict):
+            raise ArtifactLandingError(f"outer landing receipt lacks lane-manifest provenance: {landing}")
+        recorded_manifest_digest = str(files["lane-manifest.json"].get("sha256", ""))
+        manifest_path = landing / "lane-manifest.json"
+        if sha256(manifest_path) != recorded_manifest_digest:
+            raise ArtifactLandingError(f"lane manifest changed after outer archive landing: {landing}")
+        manifest = _load_object(manifest_path, label="lane manifest")
+        try:
+            lane = int(manifest["lane"])
+            lane_count = int(manifest["lane_count"])
+            inventory_run_ids.add(int(manifest["inventory_run_id"]))
+            reported_artifact_count = int(manifest["artifact_count"])
+            reported_bytes = int(manifest["bytes"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ArtifactLandingError(f"lane manifest has malformed numeric provenance: {landing}") from exc
+        if lane_count != expected_lane_count or lane < 0 or lane >= expected_lane_count or lane in lanes:
+            raise ArtifactLandingError(f"lane manifest has invalid or duplicate lane: {landing}")
+        lanes.add(lane)
+        manifest_artifacts = manifest.get("artifacts")
+        if not isinstance(manifest_artifacts, list) or len(manifest_artifacts) != reported_artifact_count:
+            raise ArtifactLandingError(f"lane manifest has an incomplete artifact list: {landing}")
+
+        artifact_dir = landing / "artifacts"
+        expected_files: set[str] = set()
+        actual_bytes = 0
+        for artifact in manifest_artifacts:
+            if not isinstance(artifact, dict):
+                raise ArtifactLandingError(f"lane manifest has malformed source artifact: {landing}")
+            try:
+                artifact_id = int(artifact["artifact_id"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ArtifactLandingError(f"lane manifest source artifact has no numeric id: {landing}") from exc
+            if artifact_id <= 0 or artifact_id in source_artifact_ids:
+                raise ArtifactLandingError(f"duplicate or invalid original source artifact id: {artifact_id}")
+            source_artifact_ids.add(artifact_id)
+            expected_file = f"{artifact_id}.zip"
+            expected_files.add(expected_file)
+            archive = artifact_dir / expected_file
+            if not archive.is_file():
+                raise ArtifactLandingError(f"lane is missing original source archive: {archive}")
+            expected_digest = str(artifact.get("digest", "")).removeprefix("sha256:").lower()
+            if sha256(archive) != expected_digest:
+                raise ArtifactLandingError(f"original source archive digest mismatch: {archive}")
+            actual_bytes += archive.stat().st_size
+
+        actual_files = {path.name for path in artifact_dir.glob("*.zip")} if artifact_dir.is_dir() else set()
+        if actual_files != expected_files or actual_bytes != reported_bytes:
+            raise ArtifactLandingError(f"lane source archive inventory does not match its manifest: {landing}")
+        source_bytes += actual_bytes
+
+    if lanes != set(range(expected_lane_count)):
+        raise ArtifactLandingError(f"landed lane set is incomplete: {sorted(lanes)}")
+    if len(inventory_run_ids) != 1:
+        raise ArtifactLandingError(f"landed lanes disagree on their immutable inventory: {sorted(inventory_run_ids)}")
+    return {
+        "run_id": run_id,
+        "lane_count": expected_lane_count,
+        "lanes": sorted(lanes),
+        "inventory_run_id": next(iter(inventory_run_ids)),
+        "source_artifact_count": len(source_artifact_ids),
+        "source_artifact_ids": sorted(source_artifact_ids),
+        "source_bytes": source_bytes,
+    }
+
+
 def main(argv: Iterable[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Land verified MFL Actions artifacts directly on D:")
     parser.add_argument("--repo", default="league-history-workers/mfl-league-fetcher")
@@ -297,9 +413,16 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("--required-file", action="append", default=[])
     parser.add_argument("--token-env", default="GH_TOKEN")
     parser.add_argument("--multi-artifact-layout", action="store_true")
+    parser.add_argument(
+        "--audit-lane-count",
+        type=int,
+        help="after landing, verify this complete number of lane bundles for every requested workflow run",
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
 
     require_d_destination(args.destination)
+    if args.audit_lane_count is not None and args.audit_lane_count <= 0:
+        parser.error("--audit-lane-count must be positive")
     token = resolve_github_token(args.token_env)
     required_files = resolve_required_files(args.required_file)
 
@@ -329,7 +452,17 @@ def main(argv: Iterable[str] | None = None) -> int:
                     multi_artifact_layout=args.multi_artifact_layout,
                 )
             )
-    print(json.dumps({"artifacts": reports}, sort_keys=True))
+    lane_audits = []
+    if args.audit_lane_count is not None:
+        for run_id in args.run_id:
+            lane_audits.append(
+                audit_landed_lane_bundles(
+                    args.destination,
+                    run_id=run_id,
+                    expected_lane_count=args.audit_lane_count,
+                )
+            )
+    print(json.dumps({"artifacts": reports, "lane_audits": lane_audits}, sort_keys=True))
     return 0
 
 
