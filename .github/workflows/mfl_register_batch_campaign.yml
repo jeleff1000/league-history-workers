@@ -164,7 +164,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: .venv
-          key: mfl-python-venv-v1-${{ runner.os }}-py311-${{ hashFiles('code/requirements.txt') }}
+          key: mfl-python-venv-v2-${{ runner.os }}-py311-${{ hashFiles('code/requirements.txt') }}
       - name: Build shared Python environment
         if: steps.python_env.outputs.cache-hit != 'true'
         run: |
@@ -175,7 +175,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: .venv
-          key: mfl-python-venv-v1-${{ runner.os }}-py311-${{ hashFiles('code/requirements.txt') }}
+          key: mfl-python-venv-v2-${{ runner.os }}-py311-${{ hashFiles('code/requirements.txt') }}
       - name: Restore canonical index for pending queue
         if: ${{ inputs.storage_mode == 'fetch_only' && inputs.prior_index_key != '' }}
         uses: actions/cache/restore@v5
@@ -406,7 +406,7 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: .venv
-          key: mfl-python-venv-v1-${{ runner.os }}-py311-${{ hashFiles('code/requirements.txt') }}
+          key: mfl-python-venv-v2-${{ runner.os }}-py311-${{ hashFiles('code/requirements.txt') }}
           fail-on-cache-miss: true
       - name: Activate prepared Python environment
         run: echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
