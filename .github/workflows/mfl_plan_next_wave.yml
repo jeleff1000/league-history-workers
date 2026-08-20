@@ -166,7 +166,7 @@ jobs:
               return names
 
           for run in runs:
-              if run.get('conclusion') == 'cancelled' or run.get('createdAt','') < os.environ['CUTOFF']:
+              if run.get('conclusion') not in (None, 'success') or run.get('createdAt','') < os.environ['CUTOFF']:
                   continue
               run_id=str(run['databaseId'])
               available=artifact_names(run_id)
