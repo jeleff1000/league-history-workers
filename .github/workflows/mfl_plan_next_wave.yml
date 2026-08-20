@@ -23,6 +23,11 @@ on:
         required: false
         type: string
         default: '50'
+      mfl_rate_limit:
+        description: 'Per-runner MFL request rate limit'
+        required: false
+        type: string
+        default: '6'
       target_years:
         description: 'Comma-separated seasons'
         required: false
@@ -245,6 +250,7 @@ jobs:
       - name: Launch exactly the reserved wave
         env:
           GH_TOKEN: ${{ github.token }}
+          MFL_RATE_LIMIT: ${{ inputs.mfl_rate_limit }}
         run: |
           # Fetch-only waves use the retained reducer proof as their immutable
           # predecessor. Do not guess at an Actions cache key: historical
@@ -278,7 +284,7 @@ jobs:
               -f reservation_artifact_name="mfl-reservations-${{ github.run_id }}" \
               -f target_years="${{ inputs.target_years }}" \
               -f target_per_year=10000 \
-              -f mfl_rate_limit=1; then
+              -f mfl_rate_limit="$MFL_RATE_LIMIT"; then
               failures=$((failures + 1))
               echo "dispatch failed for campaign $campaign" >&2
             fi
