@@ -109,8 +109,6 @@ def main() -> int:
     }
     if active_planners:
         decision["reason"] = "unique_reservation_planner_already_running"
-    elif not quiet:
-        decision["reason"] = "cooldown_not_elapsed"
     elif needed <= 0:
         decision["reason"] = "target_active_campaign_count_reached"
     else:
