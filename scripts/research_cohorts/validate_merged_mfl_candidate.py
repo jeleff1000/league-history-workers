@@ -79,6 +79,98 @@ def _schemas(path: Path) -> dict[str, list[tuple[str, str]]]:
         con.close()
 
 
+def _schema_checksum(schema: dict[str, list[tuple[str, str]]]) -> str:
+    """Hash the exact table/column/type/order contract, independent of data bytes."""
+    canonical = json.dumps(schema, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _candidate_inventory(
+    path: Path, expected: set[tuple[int, str]]
+) -> dict[str, Any]:
+    """Return explicit identity, null-key, and per-season evidence for a candidate."""
+    con = duckdb.connect(str(path), read_only=True)
+    try:
+        schemas = {
+            table: [(str(name), str(type_name)) for name, type_name, *_ in con.execute(
+                f'DESCRIBE public."{table}"'
+            ).fetchall()]
+            for table in CANONICAL_MFL_TABLES
+        }
+        all_schemas = {
+            str(table): [(str(name), str(type_name)) for name, type_name, *_ in con.execute(
+                f'DESCRIBE public."{table}"'
+            ).fetchall()]
+            for (table,) in con.execute(
+                "SELECT table_name FROM duckdb_tables() WHERE schema_name='public' ORDER BY table_name"
+            ).fetchall()
+        }
+        required_settings = {"db_name", "year", "league_key"}
+        settings_columns = {name for name, _ in schemas["league_settings"]}
+        if required_settings - settings_columns:
+            raise RuntimeError(
+                "candidate settings lacks canonical identity columns: "
+                f"{sorted(required_settings - settings_columns)}"
+            )
+
+        null_key_counts: dict[str, dict[str, int]] = {}
+        for table, columns in schemas.items():
+            names = {name for name, _ in columns}
+            required = {"db_name", "year"}
+            if table == "league_settings":
+                required.add("league_key")
+            if required - names:
+                raise RuntimeError(f"candidate {table} lacks required key columns: {sorted(required - names)}")
+            null_key_counts[table] = {
+                key: int(con.execute(
+                    f'SELECT COUNT(*) FROM public."{table}" '
+                    f'WHERE "{key}" IS NULL OR TRIM(CAST("{key}" AS VARCHAR))=\'\''
+                ).fetchone()[0])
+                for key in sorted(required)
+            }
+
+        platform_expr = '"platform"' if "platform" in settings_columns else "NULL::VARCHAR"
+        settings_rows = con.execute(
+            f"SELECT db_name, CAST(year AS INTEGER), league_key, {platform_expr} FROM public.league_settings "
+            "WHERE db_name IS NOT NULL AND year IS NOT NULL"
+        ).fetchall()
+        all_identities = {(str(db_name), int(year)) for db_name, year, _, _ in settings_rows}
+        by_season = Counter(year for _, year in all_identities)
+        mfl_counts: Counter[int] = Counter()
+        expected_counts: Counter[tuple[int, str]] = Counter()
+        for db_name, season, league_key, platform in settings_rows:
+            is_mfl = str(platform or "").strip().lower() == "mfl" or "mfl" in str(db_name).lower()
+            if is_mfl and league_key is not None:
+                identity = (int(season), _normalize(league_key))
+                if identity in expected:
+                    expected_counts[identity] += 1
+                    mfl_counts[int(season)] += 1
+
+        table_rows_by_season: dict[str, dict[str, int]] = {}
+        for table, schema in all_schemas.items():
+            columns = {name for name, _ in schema}
+            if "year" not in columns:
+                continue
+            rows = con.execute(
+                f'SELECT CAST(year AS INTEGER), COUNT(*) FROM public."{table}" '
+                "WHERE year IS NOT NULL GROUP BY 1 ORDER BY 1"
+            ).fetchall()
+            table_rows_by_season[table] = {str(year): int(count) for year, count in rows}
+    finally:
+        con.close()
+    return {
+        "candidate_total_league_year_count": len(all_identities),
+        "candidate_league_year_counts_by_season": {str(year): int(count) for year, count in sorted(by_season.items())},
+        "candidate_mfl_identity_counts_by_season": {str(year): int(count) for year, count in sorted(mfl_counts.items())},
+        "candidate_expected_identity_counts": {
+            f"{season}:{league_id}": int(count)
+            for (season, league_id), count in sorted(expected_counts.items())
+        },
+        "candidate_null_key_counts": null_key_counts,
+        "candidate_table_rows_by_season": table_rows_by_season,
+    }
+
+
 def _candidate_expected_identity_counts(path: Path, expected: set[tuple[int, str]]) -> Counter[tuple[int, str]]:
     con = duckdb.connect(str(path), read_only=True)
     try:
@@ -236,6 +328,7 @@ def validate_merged_candidate(
     preservation = _validate_unaffected_base_preservation(
         base=paths["base"], candidate=paths["candidate"], base_schema=base_schema, expected=expected
     )
+    inventory = _candidate_inventory(paths["candidate"], expected)
     ops = _ops_summary(paths["ops"])
     table_rows = {label: _table_counts(path) for label, path in paths.items() if label in {"base", "recovered", "candidate"}}
     schema_proof = {
@@ -243,6 +336,8 @@ def validate_merged_candidate(
         "candidate_schema": candidate_schema,
         "recovered_mfl_schema": {table: recovered_schema[table] for table in CANONICAL_MFL_TABLES},
         "candidate_schema_matches_base_exactly": True,
+        "base_schema_checksum": _schema_checksum(base_schema),
+        "candidate_schema_checksum": _schema_checksum(candidate_schema),
     }
     checksum_manifest = {
         label: {"path": str(path), "bytes": path.stat().st_size, "sha256": _sha256(path)}
@@ -263,6 +358,7 @@ def validate_merged_candidate(
         "expected_identity_count": len(expected),
         "candidate_expected_identity_count": len(found),
         "table_rows": table_rows,
+        **inventory,
         "base_preservation": preservation,
         "seed_ops": ops,
         "schema_matches_base_exactly": True,

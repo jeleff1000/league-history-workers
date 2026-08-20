@@ -7,18 +7,27 @@ import duckdb
 import pytest
 
 
-def _db(path: Path, *, identity: str | None, include_sleeper: bool = True) -> None:
+def _db(
+    path: Path, *, identity: str | None, include_sleeper: bool = True, include_platform: bool = True
+) -> None:
     con = duckdb.connect(str(path))
     con.execute("CREATE SCHEMA public")
-    con.execute("CREATE TABLE public.league_settings (db_name VARCHAR, year INTEGER, league_key VARCHAR, platform VARCHAR)")
+    platform_column = ", platform VARCHAR" if include_platform else ""
+    con.execute(f"CREATE TABLE public.league_settings (db_name VARCHAR, year INTEGER, league_key VARCHAR{platform_column})")
     con.execute("CREATE TABLE public.matchup (db_name VARCHAR, year INTEGER, marker VARCHAR)")
     con.execute("CREATE TABLE public.player_fantasy (db_name VARCHAR, year INTEGER, marker VARCHAR)")
     if identity is not None:
-        con.execute("INSERT INTO public.league_settings VALUES ('smpl_mfl_2004_1', 2004, ?, 'mfl')", [identity])
+        if include_platform:
+            con.execute("INSERT INTO public.league_settings VALUES ('smpl_mfl_2004_1', 2004, ?, 'mfl')", [identity])
+        else:
+            con.execute("INSERT INTO public.league_settings VALUES ('smpl_mfl_2004_1', 2004, ?)", [identity])
         con.execute("INSERT INTO public.matchup VALUES ('smpl_mfl_2004_1', 2004, 'ok')")
         con.execute("INSERT INTO public.player_fantasy VALUES ('smpl_mfl_2004_1', 2004, 'ok')")
     if include_sleeper:
-        con.execute("INSERT INTO public.league_settings VALUES ('smpl_sleeper_1', 2004, 's1', 'sleeper')")
+        if include_platform:
+            con.execute("INSERT INTO public.league_settings VALUES ('smpl_sleeper_1', 2004, 's1', 'sleeper')")
+        else:
+            con.execute("INSERT INTO public.league_settings VALUES ('smpl_sleeper_1', 2004, 's1')")
         con.execute("INSERT INTO public.matchup VALUES ('smpl_sleeper_1', 2004, 'keep')")
         con.execute("INSERT INTO public.player_fantasy VALUES ('smpl_sleeper_1', 2004, 'keep')")
     con.close()
@@ -69,6 +78,13 @@ def test_validate_merged_candidate_writes_complete_fresh_proof_set(tmp_path: Pat
 
     assert report["ok"] is True
     assert report["expected_identity_count"] == 1
+    assert report["candidate_total_league_year_count"] == 2
+    assert report["candidate_mfl_identity_counts_by_season"] == {"2004": 1}
+    assert report["candidate_null_key_counts"] == {
+        "league_settings": {"db_name": 0, "year": 0, "league_key": 0},
+        "matchup": {"db_name": 0, "year": 0},
+        "player_fantasy": {"db_name": 0, "year": 0},
+    }
     assert (proof_dir / "merged_identity_registry.json").is_file()
     assert (proof_dir / "merge_proof.json").is_file()
     assert (proof_dir / "artifact_recovery_report.json").is_file()
@@ -76,6 +92,9 @@ def test_validate_merged_candidate_writes_complete_fresh_proof_set(tmp_path: Pat
     assert (proof_dir / "conflict_report.json").is_file()
     assert (proof_dir / "schema_proof.json").is_file()
     assert (proof_dir / "checksum_manifest.json").is_file()
+    schema_proof = json.loads((proof_dir / "schema_proof.json").read_text(encoding="utf-8"))
+    assert len(schema_proof["base_schema_checksum"]) == 64
+    assert schema_proof["base_schema_checksum"] == schema_proof["candidate_schema_checksum"]
 
 
 def test_validate_merged_candidate_writes_missing_report_then_fails(tmp_path: Path) -> None:
@@ -135,3 +154,32 @@ def test_validate_merged_candidate_rejects_lost_unaffected_base_rows(tmp_path: P
             recovery_proof=recovery,
             proof_dir=tmp_path / "proof",
         )
+
+
+def test_validate_merged_candidate_inventories_mfl_from_db_name_without_platform(tmp_path: Path) -> None:
+    from scripts.research_cohorts.validate_merged_mfl_candidate import validate_merged_candidate
+
+    base = tmp_path / "base.duckdb"
+    recovered = tmp_path / "recovered.duckdb"
+    candidate = tmp_path / "candidate.duckdb"
+    ops = tmp_path / "ops.duckdb"
+    index = tmp_path / "index.json"
+    recovery = tmp_path / "recovery.json"
+    _db(base, identity="001", include_platform=False)
+    _db(recovered, identity="001", include_platform=False)
+    _db(candidate, identity="001", include_platform=False)
+    _ops(ops)
+    _index(index)
+    recovery.write_text(json.dumps({"ok": True, "identity_count": 1}), encoding="utf-8")
+
+    report = validate_merged_candidate(
+        base=base,
+        recovered=recovered,
+        recovered_index=index,
+        candidate=candidate,
+        ops=ops,
+        recovery_proof=recovery,
+        proof_dir=tmp_path / "proof",
+    )
+
+    assert report["candidate_mfl_identity_counts_by_season"] == {"2004": 1}
