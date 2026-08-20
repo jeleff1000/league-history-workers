@@ -49,6 +49,14 @@ def dispatch(repo: str, workflow: str, values: dict[str, str]) -> None:
     subprocess.run(command, check=True)
 
 
+def has_batch_plan_artifact(repo: str, run_id: int) -> bool:
+    payload = gh_json([
+        f"repos/{repo}/actions/runs/{run_id}/artifacts?"
+        f"name=mfl-batch-plan-{run_id}&per_page=10",
+    ])
+    return bool(payload.get("artifacts")) if isinstance(payload, dict) else False
+
+
 def cancel(repo: str, run_id: int) -> None:
     subprocess.run(
         ["gh", "run", "cancel", str(run_id), "--repo", repo],
@@ -87,6 +95,11 @@ def main() -> int:
             cancel(repo, int(run["id"]))
     stale_ids = {int(r["id"]) for r in stale_campaigns}
     active_campaigns = [r for r in active_campaigns if int(r["id"]) not in stale_ids]
+    unplanned_campaign_ids = sorted(
+        int(run["id"])
+        for run in active_campaigns
+        if not has_batch_plan_artifact(repo, int(run["id"]))
+    )
     latest_campaign = max((parse_time(r["created_at"]) for r in campaigns), default=None)
     quiet = latest_campaign is None or now - latest_campaign >= cooldown
     needed = max(0, target_active - len(active_campaigns))
@@ -99,6 +112,7 @@ def main() -> int:
         "planners_seen": len(planners),
         "active_campaigns": len(active_campaigns),
         "active_campaign_ids": [int(r["id"]) for r in active_campaigns],
+        "unplanned_campaign_ids": unplanned_campaign_ids,
         "stale_campaign_ids": sorted(stale_ids),
         "cancelled_stale_campaigns": [] if dry_run else sorted(stale_ids),
         "active_planners": len(active_planners),
@@ -109,6 +123,8 @@ def main() -> int:
     }
     if active_planners:
         decision["reason"] = "unique_reservation_planner_already_running"
+    elif unplanned_campaign_ids:
+        decision["reason"] = "waiting_for_active_campaign_plans"
     elif needed <= 0:
         decision["reason"] = "target_active_campaign_count_reached"
     else:
