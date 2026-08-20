@@ -49,6 +49,15 @@ def dispatch(repo: str, workflow: str, values: dict[str, str]) -> None:
     subprocess.run(command, check=True)
 
 
+def cancel(repo: str, run_id: int) -> None:
+    subprocess.run(
+        ["gh", "run", "cancel", str(run_id), "--repo", repo],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
 def main() -> int:
     repo = os.environ.get("MFL_REPO", "league-history-workers/mfl-league-fetcher")
     campaign_workflow = os.environ.get("MFL_CAMPAIGN_WORKFLOW", "mfl_register_batch_campaign.yml")
@@ -67,6 +76,17 @@ def main() -> int:
     active_campaigns = [r for r in campaigns if r.get("status") in active_states
                         and r.get("conclusion") not in unusable]
     active_planners = [r for r in planners if r.get("status") in active_states]
+    queue_grace = timedelta(minutes=int(os.environ.get("MFL_QUEUE_GRACE_MINUTES", "30")))
+    stale_campaigns = [
+        r for r in active_campaigns
+        if r.get("status") == "queued"
+        and now - parse_time(r["created_at"]) >= queue_grace
+    ]
+    if not dry_run:
+        for run in stale_campaigns:
+            cancel(repo, int(run["id"]))
+    stale_ids = {int(r["id"]) for r in stale_campaigns}
+    active_campaigns = [r for r in active_campaigns if int(r["id"]) not in stale_ids]
     latest_campaign = max((parse_time(r["created_at"]) for r in campaigns), default=None)
     quiet = latest_campaign is None or now - latest_campaign >= cooldown
     needed = max(0, target_active - len(active_campaigns))
@@ -79,6 +99,8 @@ def main() -> int:
         "planners_seen": len(planners),
         "active_campaigns": len(active_campaigns),
         "active_campaign_ids": [int(r["id"]) for r in active_campaigns],
+        "stale_campaign_ids": sorted(stale_ids),
+        "cancelled_stale_campaigns": [] if dry_run else sorted(stale_ids),
         "active_planners": len(active_planners),
         "target_active_campaigns": target_active,
         "quiet_period_elapsed": quiet,
