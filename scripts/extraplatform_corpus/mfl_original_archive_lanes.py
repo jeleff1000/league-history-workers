@@ -31,11 +31,15 @@ def _normalise_artifact(raw: dict[str, object], run_id: int) -> dict[str, object
     }
 
 
-def build_lane_plan(inventory: dict[str, Any], *, lane_count: int) -> dict[str, object]:
+def build_lane_plan(
+    inventory: dict[str, Any], *, lane_count: int, download_wave_size: int = 5
+) -> dict[str, object]:
     """Assign every available source artifact to one deterministic byte-balanced lane."""
 
     if lane_count <= 0:
         raise ValueError("lane_count must be positive")
+    if download_wave_size <= 0:
+        raise ValueError("download_wave_size must be positive")
     if int(inventory.get("run_count", 0)) != 177:
         raise ValueError(f"expected 177 original campaign runs, found {inventory.get('run_count')!r}")
     raw_runs = inventory.get("runs")
@@ -71,7 +75,15 @@ def build_lane_plan(inventory: dict[str, Any], *, lane_count: int) -> dict[str, 
         raise ValueError(
             f"inventory artifact count {reported_count!r} does not match its run entries ({len(artifacts)})"
         )
-    lanes = [{"lane": lane, "bytes": 0, "artifacts": []} for lane in range(lane_count)]
+    lanes = [
+        {
+            "lane": lane,
+            "download_wave": lane // download_wave_size,
+            "bytes": 0,
+            "artifacts": [],
+        }
+        for lane in range(lane_count)
+    ]
     for artifact in sorted(artifacts, key=lambda row: (-int(row["size_in_bytes"]), int(row["run_id"]), int(row["artifact_id"]))):
         lane = min(lanes, key=lambda row: (int(row["bytes"]), int(row["lane"])))
         lane["artifacts"].append(artifact)
@@ -88,10 +100,15 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Plan byte-balanced immutable MFL recovery artifact lanes")
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--lanes", type=int, default=15)
+    parser.add_argument("--download-wave-size", type=int, default=5)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(list(argv) if argv is not None else None)
     inventory = json.loads(args.inventory.read_text(encoding="utf-8"))
-    plan = build_lane_plan(inventory, lane_count=args.lanes)
+    plan = build_lane_plan(
+        inventory,
+        lane_count=args.lanes,
+        download_wave_size=args.download_wave_size,
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(plan, indent=2, sort_keys=True), encoding="utf-8")
     print(json.dumps({key: plan[key] for key in ("lane_count", "artifact_count", "total_bytes")}, sort_keys=True))

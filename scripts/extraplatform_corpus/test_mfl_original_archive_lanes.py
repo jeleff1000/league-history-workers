@@ -58,3 +58,19 @@ def test_build_lane_plan_rejects_a_report_with_an_incorrect_artifact_total() -> 
         assert "artifact count" in str(exc)
     else:
         raise AssertionError("a truncated inventory entered a recovery lane")
+
+
+def test_build_lane_plan_assigns_fifteen_lanes_to_three_non_overlapping_download_waves() -> None:
+    inventory = {
+        "run_count": 177,
+        "runs": [
+            {
+                "run_id": 1,
+                "artifacts": [_artifact(artifact_id, 1) for artifact_id in range(1, 16)],
+            }
+        ],
+    }
+
+    plan = build_lane_plan(inventory, lane_count=15, download_wave_size=5)
+
+    assert [lane["download_wave"] for lane in plan["lanes"]] == [0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2]

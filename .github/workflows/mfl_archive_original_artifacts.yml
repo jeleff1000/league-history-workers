@@ -21,6 +21,8 @@ env:
   INVENTORY_RUN_ID: '32386058235'
   INVENTORY_ARTIFACT_NAME: 'mfl-original-177-artifact-inventory-32386058235'
   LANE_COUNT: '15'
+  DOWNLOAD_WAVE_SIZE: '5'
+  WAVE_DELAY_SECONDS: '3900'
 
 jobs:
   archive:
@@ -53,7 +55,8 @@ jobs:
         run: |
           set -euo pipefail
           python3 scripts/extraplatform_corpus/mfl_original_archive_lanes.py \
-            --inventory inventory.json --lanes "$LANE_COUNT" --output full_lane_plan.json
+            --inventory inventory.json --lanes "$LANE_COUNT" \
+            --download-wave-size "$DOWNLOAD_WAVE_SIZE" --output full_lane_plan.json
           python3 - <<'PY'
           import json
           import os
@@ -75,6 +78,7 @@ jobs:
               json.dumps({
                   'inventory_run_id': int(os.environ['INVENTORY_RUN_ID']),
                   'lane': lane_number,
+                  'download_wave': lane['download_wave'],
                   'lane_count': plan['lane_count'],
                   'artifact_count': len(lane['artifacts']),
                   'bytes': lane['bytes'],
@@ -84,6 +88,28 @@ jobs:
           )
           print(json.dumps({'lane': lane_number, 'artifact_count': len(lane['artifacts']), 'bytes': lane['bytes']}, sort_keys=True))
           PY
+      - name: Wait for this lane's shared API-rate wave
+        env:
+          LANE: ${{ matrix.lane }}
+        run: |
+          set -euo pipefail
+          wave="$(python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          plan = json.loads(Path('full_lane_plan.json').read_text(encoding='utf-8'))
+          print(int(plan['lanes'][int(os.environ['LANE'])]['download_wave']))
+          PY
+          )"
+          delay_seconds=$(( wave * WAVE_DELAY_SECONDS ))
+          echo "lane=${LANE} download_wave=${wave} delay_seconds=${delay_seconds}"
+          while [ "$delay_seconds" -gt 0 ]; do
+            sleep_for=300
+            if [ "$delay_seconds" -lt "$sleep_for" ]; then sleep_for="$delay_seconds"; fi
+            sleep "$sleep_for"
+            delay_seconds=$(( delay_seconds - sleep_for ))
+            echo "lane=${LANE} remaining_delay_seconds=${delay_seconds}"
+          done
       - name: Download and verify every original artifact archive
         env:
           GH_TOKEN: ${{ github.token }}
