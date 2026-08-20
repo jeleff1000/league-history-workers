@@ -1,0 +1,104 @@
+name: MFL Original Artifact Inventory
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/mfl_original_artifact_inventory.yml
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: mfl-original-artifact-inventory
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    name: Inventory the 177 original campaign runs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build read-only artifact recovery inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          WORKFLOW_ID: '334693324'
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+
+          repo = os.environ['REPOSITORY']
+          workflow_id = os.environ['WORKFLOW_ID']
+          runs_by_id = {}
+          for day in ('2026-08-14', '2026-08-15', '2026-08-16'):
+              raw = subprocess.check_output([
+                  'gh', 'api', '--paginate', '--slurp',
+                  f'repos/{repo}/actions/workflows/{workflow_id}/runs?per_page=100&created={day}',
+              ])
+              for page in json.loads(raw):
+                  for run in page.get('workflow_runs', []):
+                      runs_by_id[int(run['id'])] = run
+          runs = sorted(runs_by_id.values(), key=lambda row: int(row['id']))
+          if len(runs) != 177:
+              raise SystemExit(f'expected exactly 177 original campaign runs, found {len(runs)}')
+
+          entries = []
+          for run in runs:
+              run_id = int(run['id'])
+              raw = subprocess.check_output([
+                  'gh', 'api', f'repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100',
+              ])
+              artifacts = json.loads(raw).get('artifacts', [])
+              entries.append({
+                  'run_id': run_id,
+                  'status': run.get('status'),
+                  'conclusion': run.get('conclusion'),
+                  'created_at': run.get('created_at'),
+                  'updated_at': run.get('updated_at'),
+                  'head_sha': run.get('head_sha'),
+                  'html_url': run.get('html_url'),
+                  'artifacts': [
+                      {
+                          'artifact_id': artifact.get('id'),
+                          'name': artifact.get('name'),
+                          'expired': artifact.get('expired'),
+                          'size_in_bytes': artifact.get('size_in_bytes'),
+                          'created_at': artifact.get('created_at'),
+                          'digest': artifact.get('digest'),
+                      }
+                      for artifact in artifacts
+                  ],
+              })
+
+          all_artifacts = [artifact for entry in entries for artifact in entry['artifacts']]
+          report = {
+              'source_workflow_id': int(workflow_id),
+              'run_window_utc': ['2026-08-14', '2026-08-15', '2026-08-16'],
+              'expected_run_count': 177,
+              'run_count': len(entries),
+              'artifact_count': len(all_artifacts),
+              'expired_artifact_count': sum(bool(artifact['expired']) for artifact in all_artifacts),
+              'available_artifact_count': sum(not bool(artifact['expired']) for artifact in all_artifacts),
+              'runs': entries,
+          }
+          output = Path('artifact_inventory')
+          output.mkdir()
+          (output / 'mfl_original_177_artifact_inventory.json').write_text(
+              json.dumps(report, indent=2, sort_keys=True), encoding='utf-8',
+          )
+          print(json.dumps({key: report[key] for key in ('run_count', 'artifact_count', 'expired_artifact_count', 'available_artifact_count')}, sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mfl-original-177-artifact-inventory-${{ github.run_id }}
+          retention-days: 90
+          path: artifact_inventory/mfl_original_177_artifact_inventory.json

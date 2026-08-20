@@ -7,6 +7,7 @@ import zipfile
 
 from sync_mfl_artifacts_to_pc import (
     ArtifactLandingError,
+    download_artifact_with_gh_cli,
     land_artifact,
     resolve_github_token,
     resolve_required_files,
@@ -147,3 +148,26 @@ def test_resolve_github_token_uses_authenticated_gh_cli_when_environment_is_empt
     )
 
     assert token == "gho_from_existing_cli"
+
+
+def test_gh_cli_archive_download_writes_the_requested_artifact_to_the_staging_path(tmp_path: Path) -> None:
+    """Protects artifact landing from GitHub's signed-host redirect behavior."""
+
+    archive = tmp_path / "artifact.zip"
+
+    def run_command(command: list[str], output: Path) -> None:
+        assert command == [
+            "gh",
+            "api",
+            "repos/league-history-workers/mfl-league-fetcher/actions/artifacts/9269839016/zip",
+        ]
+        output.write_bytes(b"zip-bytes")
+
+    download_artifact_with_gh_cli(
+        repo="league-history-workers/mfl-league-fetcher",
+        artifact_id=9269839016,
+        target=archive,
+        run_command=run_command,
+    )
+
+    assert archive.read_bytes() == b"zip-bytes"

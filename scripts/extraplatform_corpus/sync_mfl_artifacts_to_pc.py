@@ -224,6 +224,26 @@ def _download_http(url: str, target: Path, token: str | None) -> None:
         shutil.copyfileobj(response, output, length=8 * 1024 * 1024)
 
 
+def download_artifact_with_gh_cli(
+    *,
+    repo: str,
+    artifact_id: int,
+    target: Path,
+    run_command: Callable[[list[str], Path], None] | None = None,
+) -> None:
+    """Download an Actions archive through ``gh`` so signed redirects stay valid."""
+
+    command = ["gh", "api", f"repos/{repo}/actions/artifacts/{artifact_id}/zip"]
+    if run_command is None:
+        def run_command(command: list[str], output: Path) -> None:
+            with output.open("xb") as handle:
+                subprocess.run(command, check=True, stdout=handle, stderr=subprocess.DEVNULL)
+    try:
+        run_command(command, target)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ArtifactLandingError(f"GitHub CLI could not download artifact {artifact_id}") from exc
+
+
 def artifacts_for_run(repo: str, run_id: int, token: str | None) -> list[dict[str, object]]:
     payload = _http_json(f"https://api.github.com/repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100", token)
     artifacts = payload.get("artifacts")
@@ -296,7 +316,11 @@ def main(argv: Iterable[str] | None = None) -> int:
                 land_artifact(
                     artifact,
                     destination=args.destination,
-                    download=lambda url, target: _download_http(url, target, token),
+                    download=lambda _url, target, artifact_id=int(artifact["id"]): download_artifact_with_gh_cli(
+                        repo=args.repo,
+                        artifact_id=artifact_id,
+                        target=target,
+                    ),
                     required_files=required_files,
                 )
             )
