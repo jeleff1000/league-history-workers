@@ -31,6 +31,14 @@ REQUIRED_CAMPAIGN_FIELDS = {
 CANONICAL_MFL_TABLES = ("league_settings", "matchup", "player_fantasy")
 
 
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def _qi(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
 
@@ -112,9 +120,9 @@ def validate_candidate_identities(
     """
     expected_by_db: dict[str, tuple[int, str]] = {}
     for entry in expected_entries:
-        db_name = str(entry["db_name"])
+        db_name = _entry_db_name(entry)
         identity = _identity(entry)
-        if db_name in expected_by_db or identity in set(expected_by_db.values()):
+        if db_name in expected_by_db or identity in expected_by_db.values():
             raise ValueError(f"duplicate expected lane identity: {identity}")
         expected_by_db[db_name] = identity
 
@@ -150,6 +158,185 @@ def validate_candidate_identities(
         con.close()
 
 
+def append_protected_source_chunk(
+    candidate_path: Path,
+    source_path: Path,
+    entries: list[dict[str, Any]],
+    *,
+    expected_schema: dict[str, list[tuple[str, str]]] | None = None,
+) -> list[str]:
+    """Append only manifest-listed identities from the protected `main` source DB."""
+    candidate_path = Path(candidate_path)
+    source_path = Path(source_path)
+    if not candidate_path.is_file():
+        raise FileNotFoundError(f"protected append requires an existing lane candidate: {candidate_path}")
+    if not entries:
+        raise ValueError("protected append has no manifest identities")
+
+    expected_by_db = {_entry_db_name(entry): _identity(entry) for entry in entries}
+    if len(expected_by_db) != len(entries) or len(set(expected_by_db.values())) != len(entries):
+        raise ValueError("protected append has duplicate manifest identities")
+
+    source_con = duckdb.connect(str(source_path), read_only=True)
+    try:
+        source_schema: dict[str, list[tuple[str, str]]] = {}
+        for table in CANONICAL_MFL_TABLES:
+            source_schema[table] = [
+                (str(row[0]), str(row[1]))
+                for row in source_con.execute(f"DESCRIBE main.{_qi(table)}").fetchall()
+            ]
+        expected = expected_schema or source_schema
+        if source_schema != expected:
+            raise ValueError("protected source canonical schema mismatch")
+        rows = source_con.execute(
+            "SELECT db_name, year, league_key, COUNT(*) "
+            "FROM main.league_settings GROUP BY db_name, year, league_key"
+        ).fetchall()
+        actual_by_db = {str(db_name): (int(year), str(league_key)) for db_name, year, league_key, _ in rows}
+        for db_name, identity in expected_by_db.items():
+            if actual_by_db.get(db_name) != identity:
+                raise ValueError(
+                    f"protected source identity mismatch for {db_name}: "
+                    f"expected={identity} actual={actual_by_db.get(db_name)}"
+                )
+            matching_rows = [row for row in rows if str(row[0]) == db_name and (int(row[1]), str(row[2])) == identity]
+            if len(matching_rows) != 1 or int(matching_rows[0][3]) != 1:
+                raise ValueError(f"protected source has duplicate identity: {db_name}")
+        for table in CANONICAL_MFL_TABLES:
+            placeholders = ", ".join("?" for _ in expected_by_db)
+            source_dbs = {
+                str(row[0])
+                for row in source_con.execute(
+                    f"SELECT DISTINCT db_name FROM main.{_qi(table)} WHERE db_name IN ({placeholders})",
+                    list(expected_by_db),
+                ).fetchall()
+            }
+            if source_dbs != set(expected_by_db):
+                raise ValueError(f"protected source {table} is missing a requested db_name")
+    finally:
+        source_con.close()
+
+    con = duckdb.connect(str(candidate_path))
+    try:
+        source_sql = str(source_path.resolve()).replace("'", "''")
+        con.execute(f"ATTACH '{source_sql}' AS protected (READ_ONLY)")
+        con.execute("BEGIN TRANSACTION")
+        for table in CANONICAL_MFL_TABLES:
+            candidate_table_schema = [
+                (str(row[0]), str(row[1]))
+                for row in con.execute(f"DESCRIBE public.{_qi(table)}").fetchall()
+            ]
+            if candidate_table_schema != expected[table]:
+                raise ValueError(f"canonical schema mismatch in candidate table {table}")
+            placeholders = ", ".join("?" for _ in expected_by_db)
+            con.execute(
+                f"INSERT INTO public.{_qi(table)} "
+                f"SELECT * FROM protected.main.{_qi(table)} WHERE db_name IN ({placeholders})",
+                list(expected_by_db),
+            )
+        con.execute("COMMIT")
+        con.execute("DETACH protected")
+    except Exception:
+        try:
+            con.execute("ROLLBACK")
+        except duckdb.Error:
+            pass
+        raise
+    finally:
+        con.close()
+    return sorted(expected_by_db)
+
+
+def run_lane(
+    lane: dict[str, Any], *, candidate_path: Path, work_dir: Path, proof_path: Path
+) -> dict[str, Any]:
+    """Assemble one fresh lane and write its proof only after validation.
+
+    A partial candidate has no proof and is therefore ineligible for the
+    later all-lane merge.  Re-runs must use a new path; no existing evidence
+    or candidate is ever overwritten.
+    """
+    candidate_path = Path(candidate_path)
+    work_dir = Path(work_dir)
+    proof_path = Path(proof_path)
+    for path, label in (
+        (candidate_path, "candidate"),
+        (work_dir, "work directory"),
+        (proof_path, "proof"),
+    ):
+        if path.exists():
+            raise FileExistsError(f"refusing to reuse existing lane {label}: {path}")
+    items = list(lane.get("items", []))
+    campaign_items = [item for item in items if item.get("kind") == "campaign"]
+    protected_items = [item for item in items if item.get("kind") == "protected"]
+    if len(campaign_items) == 0 or len(protected_items) > 1 or len(campaign_items) + len(protected_items) != len(items):
+        raise ValueError("lane must contain campaign items and at most one protected item")
+
+    candidate_path.parent.mkdir(parents=True, exist_ok=True)
+    work_dir.mkdir(parents=True)
+    records: list[dict[str, Any]] = []
+    expected_entries: list[dict[str, Any]] = []
+    for item in campaign_items:
+        group = {
+            "archive_path": str(item["path"]),
+            "archive_sha256": str(item["sha256"]),
+            "entries": list(item["entries"]),
+        }
+        records.extend(assemble_campaign_group(group, candidate_path=candidate_path, work_dir=work_dir))
+        expected_entries.extend(group["entries"])
+
+    protected_report: dict[str, Any] | None = None
+    if protected_items:
+        item = protected_items[0]
+        protected_archive = Path(str(item["path"]))
+        archive_hash = _sha256_file(protected_archive)
+        if archive_hash != str(item["sha256"]).lower():
+            raise ValueError(
+                f"protected archive SHA-256 mismatch: expected={item['sha256']} actual={archive_hash}"
+            )
+        protected_dir = work_dir / "protected"
+        protected_dir.mkdir()
+        chunk_path = protected_dir / "mfl_register_chunk.duckdb"
+        digest = hashlib.sha256()
+        with zipfile.ZipFile(protected_archive) as archive:
+            with archive.open("chunk_state/mfl_register_chunk.duckdb") as source, chunk_path.open("xb") as target:
+                for block in iter(lambda: source.read(1024 * 1024), b""):
+                    target.write(block)
+                    digest.update(block)
+        protected_entries = list(item["entries"])
+        appended = append_protected_source_chunk(
+            candidate_path,
+            chunk_path,
+            protected_entries,
+            expected_schema=canonical_schema(candidate_path),
+        )
+        expected_entries.extend(protected_entries)
+        protected_report = {
+            "archive_path": str(protected_archive),
+            "archive_sha256": archive_hash,
+            "chunk_path": str(chunk_path),
+            "chunk_sha256": digest.hexdigest(),
+            "appended_db_names": appended,
+        }
+
+    counts = validate_candidate_identities(candidate_path, expected_entries)
+    report = {
+        "ok": True,
+        "lane": lane.get("lane"),
+        "expected_identity_count": len(expected_entries),
+        "campaign_record_count": len(records),
+        "protected": protected_report,
+        "table_rows": counts,
+        "candidate_path": str(candidate_path),
+        "candidate_sha256": _sha256_file(candidate_path),
+        "work_dir": str(work_dir),
+    }
+    proof_path.parent.mkdir(parents=True, exist_ok=True)
+    with proof_path.open("x", encoding="utf-8") as handle:
+        json.dump(report, handle, sort_keys=True, indent=2)
+    return report
+
+
 def assemble_campaign_group(
     group: dict[str, Any], *, candidate_path: Path, work_dir: Path
 ) -> list[dict[str, Any]]:
@@ -161,7 +348,7 @@ def assemble_campaign_group(
     """
     archive_path = Path(str(group["archive_path"]))
     expected_archive_hash = str(group["archive_sha256"]).lower()
-    actual_archive_hash = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+    actual_archive_hash = _sha256_file(archive_path)
     if actual_archive_hash != expected_archive_hash:
         raise ValueError(
             f"archive SHA-256 mismatch for {archive_path}: "
@@ -206,6 +393,10 @@ def assemble_campaign_group(
 
 def _identity(entry: dict[str, Any]) -> tuple[int, str]:
     return int(entry["season"]), str(entry["league_id"])
+
+
+def _entry_db_name(entry: dict[str, Any]) -> str:
+    return str(entry.get("db_name") or f"mfl_{int(entry['season'])}_{entry['league_id']}")
 
 
 def _remote_archive_path(archive: str, remote_campaign_root: str) -> str:
