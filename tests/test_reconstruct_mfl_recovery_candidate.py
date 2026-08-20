@@ -174,6 +174,24 @@ def test_append_canonical_payload_rejects_mismatched_schema_before_candidate_cre
     assert not candidate.exists()
 
 
+def test_validate_candidate_identities_uses_year_and_league_key(tmp_path: Path) -> None:
+    from scripts.extraplatform_corpus.reconstruct_mfl_recovery_candidate import (
+        validate_candidate_identities,
+    )
+
+    candidate = tmp_path / "candidate.duckdb"
+    _canonical_db(candidate, marker="one", db_name="mfl_2004_10005")
+    con = duckdb.connect(str(candidate))
+    con.execute("ALTER TABLE public.league_settings ADD COLUMN league_key VARCHAR")
+    con.execute("UPDATE public.league_settings SET league_key = '10005'")
+    con.close()
+
+    assert validate_candidate_identities(
+        candidate,
+        [{"season": 2004, "league_id": "10005", "db_name": "mfl_2004_10005"}],
+    ) == {"league_settings": 1, "matchup": 1, "player_fantasy": 1}
+
+
 def test_assemble_campaign_group_writes_validated_payloads_once(tmp_path: Path) -> None:
     from scripts.extraplatform_corpus.reconstruct_mfl_recovery_candidate import assemble_campaign_group
 

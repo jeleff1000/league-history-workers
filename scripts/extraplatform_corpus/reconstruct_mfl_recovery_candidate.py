@@ -100,6 +100,56 @@ def append_canonical_payload(
     return expected
 
 
+def validate_candidate_identities(
+    candidate_path: Path, expected_entries: list[dict[str, Any]]
+) -> dict[str, int]:
+    """Fail unless a lane candidate contains exactly its planned MFL leagues.
+
+    The canonical settings schema uses ``year`` and ``league_key`` as the
+    physical identity fields.  The immutable work plan calls them ``season``
+    and ``league_id``; this function bridges those names explicitly and never
+    assumes non-existent columns.
+    """
+    expected_by_db: dict[str, tuple[int, str]] = {}
+    for entry in expected_entries:
+        db_name = str(entry["db_name"])
+        identity = _identity(entry)
+        if db_name in expected_by_db or identity in set(expected_by_db.values()):
+            raise ValueError(f"duplicate expected lane identity: {identity}")
+        expected_by_db[db_name] = identity
+
+    con = duckdb.connect(str(candidate_path), read_only=True)
+    try:
+        rows = con.execute(
+            "SELECT db_name, year, league_key, COUNT(*) "
+            "FROM public.league_settings "
+            "GROUP BY db_name, year, league_key"
+        ).fetchall()
+        actual_by_db = {str(db_name): (int(year), str(league_key)) for db_name, year, league_key, _ in rows}
+        if len(rows) != len(actual_by_db) or any(count != 1 for _, _, _, count in rows):
+            raise ValueError("candidate has duplicate league_settings identities")
+        if actual_by_db != expected_by_db:
+            raise ValueError(
+                f"candidate identity mismatch expected={expected_by_db} actual={actual_by_db}"
+            )
+        counts: dict[str, int] = {}
+        for table in CANONICAL_MFL_TABLES:
+            counts[table] = int(con.execute(f"SELECT COUNT(*) FROM public.{_qi(table)}").fetchone()[0])
+            source_dbs = {
+                str(row[0])
+                for row in con.execute(
+                    f"SELECT DISTINCT db_name FROM public.{_qi(table)}"
+                ).fetchall()
+            }
+            if source_dbs != set(expected_by_db):
+                raise ValueError(
+                    f"candidate {table} db_name population does not match lane plan"
+                )
+        return counts
+    finally:
+        con.close()
+
+
 def assemble_campaign_group(
     group: dict[str, Any], *, candidate_path: Path, work_dir: Path
 ) -> list[dict[str, Any]]:
