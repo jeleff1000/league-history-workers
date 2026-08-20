@@ -70,6 +70,7 @@ jobs:
           sparse-checkout: |
             /corpus_seed/
             /scripts/extraplatform_corpus/build_mfl_pending_manifest.py
+            /derived/mfl_register/quota_planning/mfl_ordered_quota_manifest.json
 
       - name: Collect run inventory and canonical proof
         env:
@@ -96,10 +97,11 @@ jobs:
           BATCHES_PER_CAMPAIGN: ${{ inputs.batches_per_campaign }}
         run: |
           python3 code/scripts/extraplatform_corpus/build_mfl_pending_manifest.py \
-            --manifest code/corpus_seed/mfl_population_manifest_2004_2018_expanded.json \
+            --manifest code/derived/mfl_register/quota_planning/mfl_ordered_quota_manifest.json \
             --index canonical/mfl_register_all_runs.json \
             --output pending_manifest.json \
-            --target-per-year 10000 --target-years "$TARGET_YEARS"
+            --target-per-year 10000 --target-years "$TARGET_YEARS" \
+            --preserve-order
           python3 - <<'PY'
           import json, os, re, subprocess, time
           from pathlib import Path
