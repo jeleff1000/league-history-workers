@@ -354,6 +354,72 @@ def test_run_all_lanes_writes_final_proof_only_after_every_lane_passes(tmp_path:
     assert (run_root / "ALL_LANES_OK.json").is_file()
 
 
+def test_finalize_lanes_requires_all_proven_candidates_and_writes_merge_index(tmp_path: Path) -> None:
+    from scripts.extraplatform_corpus.finalize_mfl_reconstruction_lanes import finalize_lanes
+
+    run_root = tmp_path / "run"
+    candidates = run_root / "candidates"
+    proof_dir = run_root / "proof"
+    candidates.mkdir(parents=True)
+    proof_dir.mkdir()
+    first = candidates / "lane_00.duckdb"
+    second = candidates / "lane_01.duckdb"
+    _canonical_db(first, marker="one", db_name="mfl_2004_10005", include_league_key=True)
+    _canonical_db(
+        second,
+        marker="two",
+        db_name="mfl_2005_10006",
+        include_league_key=True,
+        year=2005,
+        league_key="10006",
+    )
+    first_hash = hashlib.sha256(first.read_bytes()).hexdigest()
+    second_hash = hashlib.sha256(second.read_bytes()).hexdigest()
+    for ordinal, candidate, digest in ((0, first, first_hash), (1, second, second_hash)):
+        (proof_dir / f"lane_{ordinal:02d}.json").write_text(
+            json.dumps({"ok": True, "candidate_path": str(candidate), "candidate_sha256": digest}),
+            encoding="utf-8",
+        )
+    (run_root / "ALL_LANES_OK.json").write_text(
+        json.dumps({
+            "ok": True,
+            "identity_count": 2,
+            "lane_count": 2,
+            "lane_candidates": [
+                {"lane": 0, "path": str(first), "sha256": first_hash},
+                {"lane": 1, "path": str(second), "sha256": second_hash},
+            ],
+        }),
+        encoding="utf-8",
+    )
+    lane_plan = tmp_path / "lane_plan.json"
+    lane_plan.write_text(
+        json.dumps({
+            "expected_identity_count": 2,
+            "lanes": [
+                {"lane": 0, "identity_count": 1, "items": [{"entries": [{"season": 2004, "league_id": "10005", "db_name": "mfl_2004_10005"}]}]},
+                {"lane": 1, "identity_count": 1, "items": [{"entries": [{"season": 2005, "league_id": "10006", "db_name": "mfl_2005_10006"}]}]},
+            ],
+        }),
+        encoding="utf-8",
+    )
+    candidate = tmp_path / "mfl_reconstructed.duckdb"
+    index = tmp_path / "mfl_register_all_runs.json"
+    proof = tmp_path / "finalize_proof.json"
+
+    report = finalize_lanes(run_root, lane_plan, candidate, index, proof)
+
+    assert report["ok"] is True
+    assert report["identity_count"] == 2
+    assert json.loads(index.read_text(encoding="utf-8"))["accepted_by_year"] == {"2004": 1, "2005": 1}
+    con = duckdb.connect(str(candidate), read_only=True)
+    assert con.execute("SELECT db_name FROM public.league_settings ORDER BY db_name").fetchall() == [
+        ("mfl_2004_10005",),
+        ("mfl_2005_10006",),
+    ]
+    con.close()
+
+
 def test_assemble_campaign_group_writes_validated_payloads_once(tmp_path: Path) -> None:
     from scripts.extraplatform_corpus.reconstruct_mfl_recovery_candidate import assemble_campaign_group
 
