@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import tempfile
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO
 from datetime import datetime, timezone
-from pathlib import Path
 
 
 def gh_json(args: list[str]) -> dict | list:
@@ -43,21 +44,26 @@ def cancel(repo: str, run_id: int) -> None:
 
 
 def batch_start_from_plan_artifact(repo: str, run_id: int) -> int | None:
-    with tempfile.TemporaryDirectory() as tmp:
+    try:
+        payload = gh_json([
+            f"repos/{repo}/actions/runs/{run_id}/artifacts",
+            "--method", "GET", "-f", "per_page=100",
+        ])
+        artifact = next((a for a in payload.get("artifacts", [])
+                         if a.get("name") == f"mfl-batch-plan-{run_id}"
+                         and not a.get("expired")), None)
+        if not artifact:
+            return None
         result = subprocess.run(
-            ["gh", "run", "download", str(run_id), "--repo", repo,
-             "--name", f"mfl-batch-plan-{run_id}", "--dir", tmp],
-            capture_output=True, text=True,
+            ["gh", "api", f"repos/{repo}/actions/artifacts/{artifact['id']}/zip"],
+            check=True, capture_output=True,
         )
-        if result.returncode != 0:
-            return None
-        path = Path(tmp) / "batch_plan.json"
-        if not path.is_file():
-            return None
-        try:
-            return int(json.loads(path.read_text(encoding="utf-8"))["batch_start"])
-        except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
-            return None
+        with zipfile.ZipFile(BytesIO(result.stdout)) as archive:
+            raw = archive.read("batch_plan.json")
+        return int(json.loads(raw.decode("utf-8"))["batch_start"])
+    except (subprocess.CalledProcessError, KeyError, TypeError, ValueError,
+            json.JSONDecodeError, zipfile.BadZipFile, OSError):
+        return None
 
 
 def main() -> int:
@@ -89,7 +95,11 @@ def main() -> int:
     target_active = int(os.environ.get("MFL_CAMPAIGNS_PER_WAVE", "3"))
     total_rows = int(os.environ.get("MFL_ORDERED_TOTAL_ROWS", "128940"))
     total_slots = (total_rows + batch_size - 1) // batch_size
-    plans = {int(r["id"]): batch_start_from_plan_artifact(repo, int(r["id"])) for r in direct}
+    with ThreadPoolExecutor(max_workers=min(12, max(1, len(direct)))) as pool:
+        starts_by_run = pool.map(
+            lambda r: batch_start_from_plan_artifact(repo, int(r["id"])), direct
+        )
+        plans = {int(r["id"]): start for r, start in zip(direct, starts_by_run)}
     starts = [s for s in plans.values() if s is not None and s % batches_per_campaign == 0]
     known_slots = [s // batches_per_campaign for s in starts]
     next_slot = max(max(known_slots, default=-1) + 1, len(direct))
