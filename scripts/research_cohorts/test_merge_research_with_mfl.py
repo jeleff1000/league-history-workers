@@ -258,6 +258,41 @@ def test_merge_fails_when_protected_mfl_ledger_is_incomplete(tmp_path: Path) -> 
     assert "protected MFL league-year ledger mismatch" in (result.stdout + result.stderr)
 
 
+def test_merge_refuses_to_replace_an_existing_candidate_output(tmp_path: Path) -> None:
+    base = tmp_path / "base.duckdb"
+    mfl = tmp_path / "mfl.duckdb"
+    out = tmp_path / "candidate.duckdb"
+    index = tmp_path / "mfl_register_all_runs.json"
+    _create_db(base, [("yahoo_2004_1", 2004, "keep", 1)])
+    _create_mfl_chunk(mfl, [("smpl_mfl_2004_1", 2004, "new", 9)])
+    out.write_bytes(b"immutable-prior-candidate-proof")
+    original = out.read_bytes()
+    index.write_text(
+        json.dumps(
+            {
+                "leagues": [{"season": 2004, "league_id": "1", "db_name": "smpl_mfl_2004_1"}],
+                "accepted_by_year": {"2004": 1},
+                "league_count": 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    script = Path(__file__).with_name("merge_research_with_mfl.py")
+    result = subprocess.run(
+        [
+            sys.executable, str(script), "--base", str(base), "--mfl", str(mfl),
+            "--mfl-index", str(index), "--out", str(out), "--expected-ledger", json.dumps({"2004": 1}),
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode != 0
+    assert "candidate output already exists" in (result.stdout + result.stderr)
+    assert out.read_bytes() == original
+
+
 def test_protected_mfl_merge_workflow_cannot_mutate_any_source_cache_or_ops_seed() -> None:
     workflow = (
         Path(__file__).resolve().parents[2]

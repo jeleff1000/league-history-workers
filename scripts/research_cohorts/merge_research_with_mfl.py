@@ -105,8 +105,10 @@ def main() -> None:
     parser.add_argument("--expected-ledger", required=True)
     args = parser.parse_args()
 
-    if args.out.exists():
-        args.out.unlink()
+    proof_out = args.out.with_suffix(".json")
+    if args.out.exists() or proof_out.exists():
+        existing = args.out if args.out.exists() else proof_out
+        raise SystemExit(f"candidate output already exists; refusing to replace evidence: {existing}")
     expected_ledger = parse_ledger(args.expected_ledger)
     index = json.loads(args.mfl_index.read_text(encoding="utf-8"))
     pairs = protected_mfl_pairs(index, expected_ledger)
@@ -224,7 +226,7 @@ def main() -> None:
                 flush=True,
             )
 
-        args.out.with_suffix(".json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        proof_out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(report, indent=2))
     finally:
         con.close()
