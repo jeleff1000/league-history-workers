@@ -206,7 +206,7 @@ jobs:
                           accepted=json.loads(accepted_path.read_text())
                           accepted_rows=accepted.get('rows',[])
                           for row in accepted_rows:
-                              reserved.add((int(row['season']),str(row['league_id'])))
+                              reserved.add((int(row['season']),str(row['league_id']).zfill(5)))
                           evidence.append({'run_id':run_id,'source':'accepted_keys',
                                            'reserved_count':len(accepted_rows)})
                           planned_runs.add(run_id)
@@ -243,14 +243,14 @@ jobs:
                   continue
               take=min(len(rows), ingest*batch_size)
               for row in rows[:take]:
-                  reserved.add((int(row['season']),str(row['league_id'])))
+                  reserved.add((int(row['season']),str(row['league_id']).zfill(5)))
               evidence.append({'run_id':run_id,'ingest_jobs':ingest,'reserved_count':take,
                                'target_years':payload.get('target_years',[])})
 
           rows=[]
           seen=set()
           for row in pending:
-              key=(int(row['season']),str(row['league_id']))
+              key=(int(row['season']),str(row['league_id']).zfill(5))
               if key in reserved or key in seen:
                   continue
               seen.add(key)
