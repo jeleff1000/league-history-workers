@@ -532,6 +532,7 @@ jobs:
             /scripts/extraplatform_corpus/merge_mfl_saved_chunk.py
             /scripts/research_cohorts/build_mfl_research_overlay.py
             /corpus_seed/
+            /requirements.txt
       - name: Restore prior MFL player catalog cache
         uses: actions/cache/restore@v5
         with:
@@ -587,8 +588,19 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.11'
-      - name: Install DuckDB
-        run: pip install duckdb
+      - name: Restore prepared Python environment
+        id: combine_python_env
+        uses: actions/cache/restore@v5
+        with:
+          path: .venv
+          key: mfl-python-venv-v2-${{ runner.os }}-py311-${{ hashFiles('code/requirements.txt') }}
+          fail-on-cache-miss: true
+      - name: Activate and verify cached Python environment
+        shell: bash
+        run: |
+          test -x .venv/bin/python3.11
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+          .venv/bin/python3.11 -c 'import duckdb, pandas'
       - name: Build canonical batch snapshot
         if: ${{ inputs.storage_mode == 'snapshot' }}
         env:
