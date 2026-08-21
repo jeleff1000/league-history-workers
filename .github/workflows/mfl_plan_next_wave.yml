@@ -76,9 +76,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p runs canonical
+          mkdir -p runs canonical prior_reservations
           gh run list --workflow mfl_register_batch_campaign.yml --limit 1000 \
             --json databaseId,status,conclusion,createdAt,updatedAt > runs/campaigns.json
+          gh run list --workflow mfl_plan_next_wave.yml --limit 1000 \
+            --json databaseId,status,conclusion,createdAt,updatedAt > runs/planners.json
           gh run list --workflow mfl_reduce_saved_chunk.yml --limit 1000 \
             --json databaseId,status,conclusion,createdAt,updatedAt > runs/reducers.json
           reducer=$(jq -r '[.[] | select(.conclusion == "success")][0].databaseId' runs/reducers.json)
@@ -86,6 +88,14 @@ jobs:
           gh run download "$reducer" --repo "${{ github.repository }}" \
             --name "mfl-reducer-proof-$reducer" --dir canonical
           test -s canonical/mfl_register_all_runs.json
+          planner=$(jq -r '[.[] | select(.conclusion == "success")][0].databaseId' runs/planners.json)
+          planner_created=$(jq -r --arg id "$planner" '.[] | select((.databaseId|tostring)==$id) | .createdAt' runs/planners.json)
+          test -n "$planner" && test "$planner" != null
+          test -n "$planner_created" && test "$planner_created" != null
+          gh run download "$planner" --repo "${{ github.repository }}" \
+            --name "mfl-reservations-$planner" --dir prior_reservations
+          test -s prior_reservations/reserved_keys.json
+          echo "PRIOR_PLANNER_CREATED_AT=$planner_created" >> "$GITHUB_ENV"
 
       - name: Build pending queue and reserve active assignments
         env:
@@ -109,12 +119,16 @@ jobs:
           from datetime import datetime
 
           runs=json.loads(Path('runs/campaigns.json').read_text())
-          cutoff=datetime.fromisoformat(os.environ['CUTOFF'].replace('Z','+00:00'))
+          reservation_anchor=datetime.fromisoformat(os.environ['PRIOR_PLANNER_CREATED_AT'].replace('Z','+00:00'))
           batch_size=int(os.environ['BATCH_SIZE'])
           pending=json.loads(Path('pending_manifest.json').read_text())['rows']
-          reserved=set()
+          prior=json.loads(Path('prior_reservations/reserved_keys.json').read_text())
+          reserved={(int(row['season']),str(row['league_id']).zfill(5)) for row in prior.get('rows',[])}
           evidence=[]
           planned_runs=set()
+          evidence.append({'source':'prior_reservation_artifact',
+                           'reserved_count':len(reserved),
+                           'reservation_anchor':os.environ['PRIOR_PLANNER_CREATED_AT']})
 
           def load_jobs(run_id):
               command=['gh','run','view',run_id,'--repo',os.environ['GITHUB_REPOSITORY'],'--json','jobs']
@@ -177,7 +191,7 @@ jobs:
           # attempted and must not return to the queue merely because a fetch
           # failed. Keep inventories for failed runs too.
           inventory_runs=[run for run in runs
-                          if run.get('createdAt','') >= os.environ['CUTOFF']]
+                          if run.get('createdAt','') >= os.environ['PRIOR_PLANNER_CREATED_AT']]
           artifacts_by_run={}
           workers=min(16, max(1, len(inventory_runs)))
           with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -189,7 +203,7 @@ jobs:
                   if index % 25 == 0 or index == len(futures):
                       print(f'artifact inventories completed {index}/{len(futures)}', flush=True)
           for run in runs:
-              if run.get('createdAt','') < os.environ['CUTOFF']:
+              if run.get('createdAt','') < os.environ['PRIOR_PLANNER_CREATED_AT']:
                   continue
               conclusion=str(run.get('conclusion') or '').lower()
               run_id=str(run['databaseId'])
