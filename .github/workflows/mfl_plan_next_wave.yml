@@ -146,10 +146,10 @@ jobs:
 
           def artifact_names(run_id):
               names=set()
-              # Campaigns have 250 batch artifacts, so the durable plan is
-              # commonly beyond page 1. Query the two control artifacts by
-              # exact name instead of scanning the entire artifact collection.
-              for artifact in (f'mfl-batch-plan-{run_id}', f'mfl-pending-manifest-{run_id}'):
+              # Query the small control artifacts by exact name instead of
+              # scanning the much larger batch-artifact collection.
+              for artifact in (f'mfl-batch-plan-{run_id}', f'mfl-pending-manifest-{run_id}',
+                               f'mfl-accepted-keys-{run_id}'):
                   command=['gh','api',f'repos/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{run_id}/artifacts?name={artifact}&per_page=10']
                   try:
                       result=subprocess.run(command,capture_output=True,text=True,timeout=30)
@@ -177,23 +177,34 @@ jobs:
                   continue
               run_id=str(run['databaseId'])
               available=artifact_names(run_id)
-              # Prefer the durable plan: it contains the exact rows selected for
-              # the campaign and avoids scanning the much larger pending manifest.
-              plan_out=Path('plans')/run_id
-              plan_out.mkdir(parents=True,exist_ok=True)
-              plan_name=f'mfl-batch-plan-{run_id}'
-              plan_result=download_named(run_id,plan_name,plan_out) if plan_name in available else None
-              plan_path=plan_out/'batch_plan.json'
-              if plan_result is not None and plan_result.returncode == 0 and plan_path.is_file():
-                  plan=json.loads(plan_path.read_text())
-                  planned_rows=plan.get('planned_league_years',[])
-                  for row in planned_rows:
-                      reserved.add((int(row['season']),str(row['league_id'])))
-                  planned_runs.add(run_id)
-                  evidence.append({'run_id':run_id,'source':'batch_plan',
-                                   'reserved_count':len(planned_rows),
-                                   'target_years':plan.get('target_years',[])})
+              if conclusion == 'success':
+                  accepted_name=f'mfl-accepted-keys-{run_id}'
+                  if accepted_name in available:
+                      accepted_out=Path('accepted_keys')/run_id
+                      accepted_out.mkdir(parents=True,exist_ok=True)
+                      accepted_result=download_named(run_id,accepted_name,accepted_out)
+                      accepted_path=accepted_out/'accepted_keys.json'
+                      if accepted_result.returncode == 0 and accepted_path.is_file():
+                          accepted=json.loads(accepted_path.read_text())
+                          accepted_rows=accepted.get('rows',[])
+                          for row in accepted_rows:
+                              reserved.add((int(row['season']),str(row['league_id'])))
+                          evidence.append({'run_id':run_id,'source':'accepted_keys',
+                                           'reserved_count':len(accepted_rows)})
+                          planned_runs.add(run_id)
+                          continue
+                  # A legacy successful campaign has no compact accepted-key
+                  # receipt. Do not reserve all attempted rows: that permanently
+                  # hides rejected league-years from the queue. The canonical
+                  # index remains the authority for accepted keys; absent keys
+                  # are safely retried and deduplicated by the merge gate.
+                  evidence.append({'run_id':run_id,'source':'legacy_success_retryable',
+                                   'reserved_count':0})
                   continue
+
+              # Active campaigns reserve their exact planned rows until they
+              # finish. Failed campaigns are handled by the unusable-conclusion
+              # branch above and return their rows to the queue.
               artifact=f'mfl-pending-manifest-{run_id}'
               if artifact not in available:
                   continue
