@@ -101,10 +101,12 @@ def main() -> int:
     # refuses to launch the replacement planner, and the queued run can never
     # start.  Validate plan artifacts once a campaign has actually started;
     # queued runs still reserve an active slot and are handled by queue_grace.
+    plan_grace = timedelta(minutes=int(os.environ.get("MFL_PLAN_GRACE_MINUTES", "10")))
     unplanned_campaign_ids = sorted(
         int(run["id"])
         for run in active_campaigns
         if run.get("status") in {"in_progress", "waiting", "requested"}
+        and now - parse_time(run["created_at"]) >= plan_grace
         and not has_batch_plan_artifact(repo, int(run["id"]))
     )
     latest_campaign = max((parse_time(r["created_at"]) for r in campaigns), default=None)
