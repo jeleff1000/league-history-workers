@@ -231,8 +231,10 @@ jobs:
           size=int(os.environ['BATCH_SIZE'])
           total_batches=campaign_count*batches_per_campaign
           selected=rows[:total_batches*size]
+          if not selected:
+              raise SystemExit('no unique rows available for next wave')
           if len(selected) < total_batches*size:
-              raise SystemExit(f'only {len(selected)} unique rows available; need {total_batches*size}')
+              print(f'partial final wave: selected {len(selected)} unique rows; requested {total_batches*size}', flush=True)
           Path('reserved_keys.json').write_text(json.dumps({'schema_version':'mfl_reservations_v1',
               'rows':[{'season':s,'league_id':lid} for s,lid in sorted(reserved)]},indent=2)+'\n')
           Path('next_wave_plan.json').write_text(json.dumps({
