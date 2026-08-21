@@ -169,13 +169,12 @@ jobs:
               return names
 
           unusable_conclusions={'cancelled','failure','timed_out','startup_failure','action_required','skipped','stale','neutral'}
-          # Artifact discovery is read-only, but doing it serially makes every
-          # replacement wave wait on three API calls for every historical
-          # successful campaign. Keep the exact-name queries and fail closed,
-          # while performing independent campaign inventories concurrently.
+          # This is an attempt ledger. Every campaign publishes the exact
+          # pending manifest it was assigned; once it starts, those rows are
+          # attempted and must not return to the queue merely because a fetch
+          # failed. Keep inventories for failed runs too.
           inventory_runs=[run for run in runs
-                          if str(run.get('conclusion') or '').lower() not in unusable_conclusions
-                          and run.get('createdAt','') >= os.environ['CUTOFF']]
+                          if run.get('createdAt','') >= os.environ['CUTOFF']]
           artifacts_by_run={}
           workers=min(16, max(1, len(inventory_runs)))
           with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -187,44 +186,35 @@ jobs:
                   if index % 25 == 0 or index == len(futures):
                       print(f'artifact inventories completed {index}/{len(futures)}', flush=True)
           for run in runs:
+              if run.get('createdAt','') < os.environ['CUTOFF']:
+                  continue
               conclusion=str(run.get('conclusion') or '').lower()
-              # Failed/cancelled campaigns did not publish a validated chunk.
-              # Their planned rows must return to the queue for retry; reserving
-              # them permanently would silently advance the ledger without data.
-              if conclusion in unusable_conclusions or run.get('createdAt','') < os.environ['CUTOFF']:
-                  continue
               run_id=str(run['databaseId'])
-              available=artifacts_by_run[run_id]
-              if conclusion == 'success':
-                  accepted_name=f'mfl-accepted-keys-{run_id}'
-                  if accepted_name in available:
-                      accepted_out=Path('accepted_keys')/run_id
-                      accepted_out.mkdir(parents=True,exist_ok=True)
-                      accepted_result=download_named(run_id,accepted_name,accepted_out)
-                      accepted_path=accepted_out/'accepted_keys.json'
-                      if accepted_result.returncode == 0 and accepted_path.is_file():
-                          accepted=json.loads(accepted_path.read_text())
-                          accepted_rows=accepted.get('rows',[])
-                          for row in accepted_rows:
-                              reserved.add((int(row['season']),str(row['league_id']).zfill(5)))
-                          evidence.append({'run_id':run_id,'source':'accepted_keys',
-                                           'reserved_count':len(accepted_rows)})
-                          planned_runs.add(run_id)
-                          continue
-                  # A legacy successful campaign has no compact accepted-key
-                  # receipt. Do not reserve all attempted rows: that permanently
-                  # hides rejected league-years from the queue. The canonical
-                  # index remains the authority for accepted keys; absent keys
-                  # are safely retried and deduplicated by the merge gate.
-                  evidence.append({'run_id':run_id,'source':'legacy_success_retryable',
-                                   'reserved_count':0})
-                  continue
-
-              # Active campaigns reserve their exact planned rows until they
-              # finish. Failed campaigns are handled by the unusable-conclusion
-              # branch above and return their rows to the queue.
+              available=artifacts_by_run.get(run_id,set())
               artifact=f'mfl-pending-manifest-{run_id}'
+              # The pending manifest is the authoritative attempted-row
+              # receipt for active, successful, and failed campaigns.
               if artifact not in available:
+                  # Compatibility for legacy successful campaigns that predate
+                  # pending-manifest receipts.
+                  if conclusion == 'success':
+                      accepted_name=f'mfl-accepted-keys-{run_id}'
+                      if accepted_name in available:
+                          accepted_out=Path('accepted_keys')/run_id
+                          accepted_out.mkdir(parents=True,exist_ok=True)
+                          accepted_result=download_named(run_id,accepted_name,accepted_out)
+                          accepted_path=accepted_out/'accepted_keys.json'
+                          if accepted_result.returncode == 0 and accepted_path.is_file():
+                              accepted=json.loads(accepted_path.read_text())
+                              accepted_rows=accepted.get('rows',[])
+                              for row in accepted_rows:
+                                  reserved.add((int(row['season']),str(row['league_id']).zfill(5)))
+                              evidence.append({'run_id':run_id,'source':'legacy_accepted_keys',
+                                               'reserved_count':len(accepted_rows)})
+                              planned_runs.add(run_id)
+                              continue
+                  evidence.append({'run_id':run_id,'source':'attempt_receipt_missing',
+                                   'reserved_count':0,'conclusion':conclusion})
                   continue
               out=Path('run_manifests')/run_id
               out.mkdir(parents=True,exist_ok=True)
@@ -234,9 +224,8 @@ jobs:
                   continue
               payload=json.loads(path.read_text())
               rows=payload.get('rows',[])
-              print(f'processing campaign {run_id}: {len(rows)} pending rows', flush=True)
-              # Campaigns in the active v9b wave were launched with 250 batches of 2.
-              # Derive the actual matrix width from the workflow's ingest job count.
+              print(f'processing attempted campaign {run_id}: {len(rows)} planned rows; conclusion={conclusion or "active"}', flush=True)
+              # Derive the exact attempted width from the ingest job count.
               jobs=load_jobs(run_id)
               ingest=sum(1 for job in jobs if str(job.get('name','')).startswith('ingest ('))
               if ingest <= 0:
@@ -244,7 +233,9 @@ jobs:
               take=min(len(rows), ingest*batch_size)
               for row in rows[:take]:
                   reserved.add((int(row['season']),str(row['league_id']).zfill(5)))
-              evidence.append({'run_id':run_id,'ingest_jobs':ingest,'reserved_count':take,
+              evidence.append({'run_id':run_id,'source':'attempted_rows',
+                               'ingest_jobs':ingest,'reserved_count':take,
+                               'conclusion':conclusion or 'active',
                                'target_years':payload.get('target_years',[])})
 
           rows=[]
