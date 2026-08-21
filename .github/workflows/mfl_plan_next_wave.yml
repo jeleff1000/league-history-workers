@@ -147,9 +147,10 @@ jobs:
 
           def artifact_names(run_id):
               names=set()
-              # Query the small control artifacts by exact name instead of
-              # scanning the much larger batch-artifact collection.
-              for artifact in (f'mfl-batch-plan-{run_id}', f'mfl-pending-manifest-{run_id}',
+              # Query the authoritative pending receipt first.  Only make a
+              # second lookup for the legacy accepted-key fallback; do not
+              # scan every artifact for every campaign.
+              for artifact in (f'mfl-pending-manifest-{run_id}',
                                f'mfl-accepted-keys-{run_id}'):
                   command=['gh','api',f'repos/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{run_id}/artifacts?name={artifact}&per_page=10']
                   try:
@@ -166,6 +167,8 @@ jobs:
                   if not isinstance(page_items,list):
                       raise SystemExit(f'artifact inventory had invalid items for campaign {run_id} ({artifact})')
                   names.update(str(item['name']) for item in page_items if isinstance(item,dict) and 'name' in item)
+                  if f'mfl-pending-manifest-{run_id}' in names:
+                      break
               return names
 
           unusable_conclusions={'cancelled','failure','timed_out','startup_failure','action_required','skipped','stale','neutral'}
