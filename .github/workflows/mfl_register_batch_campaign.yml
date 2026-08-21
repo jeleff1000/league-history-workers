@@ -904,6 +904,41 @@ jobs:
             mfl_research_overlay_proof.json
             mfl_register_all_runs.json
             cache_append_proof.json
+
+      - name: Build compact accepted league-year receipt
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          register=json.loads(Path('mfl_register_all_runs.json').read_text(encoding='utf-8'))
+          rows=[]
+          seen=set()
+          for item in register.get('leagues', []):
+              key=(int(item['season']), str(item['league_id']))
+              if key in seen:
+                  continue
+              seen.add(key)
+              rows.append({'season':key[0], 'league_id':key[1]})
+          if not rows:
+              raise SystemExit('accepted league-year receipt is empty')
+          Path('accepted_keys.json').write_text(json.dumps({
+              'schema_version':'mfl_accepted_keys_v1',
+              'source_run_id':int('${{ github.run_id }}'),
+              'rows':sorted(rows, key=lambda row:(row['season'], row['league_id'])),
+          }, indent=2, sort_keys=True)+'\n', encoding='utf-8')
+          print(json.dumps({'accepted_keys':len(rows)}, sort_keys=True))
+          PY
+
+      - name: Upload compact accepted league-year receipt
+        if: ${{ inputs.storage_mode == 'chunked' || inputs.storage_mode == 'fetch_only' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: mfl-accepted-keys-${{ github.run_id }}
+          retention-days: 90
+          path: accepted_keys.json
   verify_cache:
     needs: [combine]
     if: ${{ always() && needs.combine.result == 'success' }}
