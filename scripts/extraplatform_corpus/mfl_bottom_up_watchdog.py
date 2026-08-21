@@ -95,10 +95,17 @@ def main() -> int:
             cancel(repo, int(run["id"]))
     stale_ids = {int(r["id"]) for r in stale_campaigns}
     active_campaigns = [r for r in active_campaigns if int(r["id"]) not in stale_ids]
+    # A queued campaign cannot publish its durable batch-plan artifact until
+    # GitHub assigns it a runner and the prepare job starts.  Treating queued
+    # runs as "unplanned" creates a deadlock: the watchdog counts the slot,
+    # refuses to launch the replacement planner, and the queued run can never
+    # start.  Validate plan artifacts once a campaign has actually started;
+    # queued runs still reserve an active slot and are handled by queue_grace.
     unplanned_campaign_ids = sorted(
         int(run["id"])
         for run in active_campaigns
-        if not has_batch_plan_artifact(repo, int(run["id"]))
+        if run.get("status") in {"in_progress", "waiting", "requested"}
+        and not has_batch_plan_artifact(repo, int(run["id"]))
     )
     latest_campaign = max((parse_time(r["created_at"]) for r in campaigns), default=None)
     quiet = latest_campaign is None or now - latest_campaign >= cooldown
