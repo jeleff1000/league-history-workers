@@ -104,6 +104,7 @@ jobs:
             --preserve-order
           python3 - <<'PY'
           import json, os, re, subprocess, time
+          from concurrent.futures import ThreadPoolExecutor, as_completed
           from pathlib import Path
           from datetime import datetime
 
@@ -168,6 +169,23 @@ jobs:
               return names
 
           unusable_conclusions={'cancelled','failure','timed_out','startup_failure','action_required','skipped','stale','neutral'}
+          # Artifact discovery is read-only, but doing it serially makes every
+          # replacement wave wait on three API calls for every historical
+          # successful campaign. Keep the exact-name queries and fail closed,
+          # while performing independent campaign inventories concurrently.
+          inventory_runs=[run for run in runs
+                          if str(run.get('conclusion') or '').lower() not in unusable_conclusions
+                          and run.get('createdAt','') >= os.environ['CUTOFF']]
+          artifacts_by_run={}
+          workers=min(16, max(1, len(inventory_runs)))
+          with ThreadPoolExecutor(max_workers=workers) as pool:
+              futures={pool.submit(artifact_names, str(run['databaseId'])): str(run['databaseId'])
+                       for run in inventory_runs}
+              for index, future in enumerate(as_completed(futures), start=1):
+                  run_id=futures[future]
+                  artifacts_by_run[run_id]=future.result()
+                  if index % 25 == 0 or index == len(futures):
+                      print(f'artifact inventories completed {index}/{len(futures)}', flush=True)
           for run in runs:
               conclusion=str(run.get('conclusion') or '').lower()
               # Failed/cancelled campaigns did not publish a validated chunk.
@@ -176,7 +194,7 @@ jobs:
               if conclusion in unusable_conclusions or run.get('createdAt','') < os.environ['CUTOFF']:
                   continue
               run_id=str(run['databaseId'])
-              available=artifact_names(run_id)
+              available=artifacts_by_run[run_id]
               if conclusion == 'success':
                   accepted_name=f'mfl-accepted-keys-{run_id}'
                   if accepted_name in available:
