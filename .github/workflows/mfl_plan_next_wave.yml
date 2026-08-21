@@ -229,7 +229,13 @@ jobs:
           campaign_count=int(os.environ['CAMPAIGN_COUNT'])
           batches_per_campaign=int(os.environ['BATCHES_PER_CAMPAIGN'])
           size=int(os.environ['BATCH_SIZE'])
-          total_batches=campaign_count*batches_per_campaign
+          capacity_per_campaign=batches_per_campaign*size
+          # The final wave may contain fewer rows than three full campaigns.
+          # Dispatch only the number of campaigns that have real reserved rows;
+          # empty campaigns create false failures and can make the watchdog
+          # re-plan the same reservation.
+          effective_campaign_count=max(1, min(campaign_count, (len(rows)+capacity_per_campaign-1)//capacity_per_campaign))
+          total_batches=effective_campaign_count*batches_per_campaign
           selected=rows[:total_batches*size]
           if not selected:
               raise SystemExit('no unique rows available for next wave')
@@ -239,11 +245,13 @@ jobs:
               'rows':[{'season':s,'league_id':lid} for s,lid in sorted(reserved)]},indent=2)+'\n')
           Path('next_wave_plan.json').write_text(json.dumps({
               'schema_version':'mfl_next_wave_plan_v1','source_run_id':os.environ['GITHUB_RUN_ID'],
-              'campaign_count':campaign_count,'batches_per_campaign':batches_per_campaign,
+              'campaign_count':effective_campaign_count,'requested_campaign_count':campaign_count,
+              'batches_per_campaign':batches_per_campaign,
               'batch_size':size,'planned_league_years':selected,
               'reserved_by_prior_work':len(reserved)},indent=2)+'\n')
           Path('reservation_evidence.json').write_text(json.dumps(evidence,indent=2)+'\n')
           print(json.dumps({'prior_reserved':len(reserved),'selected':len(selected),
+                            'campaign_count':effective_campaign_count,
                             'first':selected[0],'last':selected[-1]},sort_keys=True))
           PY
       - name: Publish reservation plan before launch
@@ -274,8 +282,9 @@ jobs:
             prior_artifact_name="mfl-reducer-proof-$reducer_run_id"
             echo "canonical index cache absent; using retained reducer artifact $prior_artifact_name"
           fi
+          effective_campaign_count=$(python3 -c "import json; print(json.load(open('next_wave_plan.json'))['campaign_count'])")
           failures=0
-          for ((campaign=0; campaign<${{ inputs.campaign_count }}; campaign++)); do
+          for ((campaign=0; campaign<effective_campaign_count; campaign++)); do
             start=$((campaign * ${{ inputs.batches_per_campaign }}))
             if ! gh workflow run mfl_register_batch_campaign.yml \
               -f manifest_path="derived/mfl_register/quota_planning/mfl_ordered_quota_manifest.json" \
@@ -300,7 +309,7 @@ jobs:
             fi
           done
           printf '{"campaign_count":%s,"batches_per_campaign":%s,"dispatch_failures":%s}\n' \
-            "${{ inputs.campaign_count }}" "${{ inputs.batches_per_campaign }}" "$failures" > campaign_dispatches.json
+            "$effective_campaign_count" "${{ inputs.batches_per_campaign }}" "$failures" > campaign_dispatches.json
           test "$failures" -eq 0
       - name: Publish dispatch manifest
         uses: actions/upload-artifact@v4
