@@ -141,9 +141,10 @@ def main() -> int:
             "campaign_count": str(needed),
             "batches_per_campaign": os.environ.get("MFL_BATCHES_PER_CAMPAIGN", "250"),
             "batch_size": os.environ.get("MFL_ORDERED_BATCH_SIZE", "2"),
-            # Three campaigns at 60 runners consume the available ~180-runner
-            # budget without leaving later campaigns permanently queued.
-            "max_parallel": os.environ.get("MFL_MAX_PARALLEL", "60"),
+            # Leave runner headroom for each campaign's prepare/combine jobs.
+            # Three 60-wide matrices can make the third campaign sit queued
+            # even though the controller sees three campaigns in flight.
+            "max_parallel": os.environ.get("MFL_MAX_PARALLEL", "50"),
             "target_years": os.environ.get(
                 "MFL_TARGET_YEARS",
                 "2000,2001,2002,2003,2004,2005,2006,2007,2008,2009,"
