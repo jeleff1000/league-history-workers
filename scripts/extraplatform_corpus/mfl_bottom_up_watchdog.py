@@ -142,9 +142,9 @@ def main() -> int:
             "batches_per_campaign": os.environ.get("MFL_BATCHES_PER_CAMPAIGN", "250"),
             "batch_size": os.environ.get("MFL_ORDERED_BATCH_SIZE", "2"),
             # Leave runner headroom for each campaign's prepare/combine jobs.
-            # Three 60-wide matrices can make the third campaign sit queued
+            # Three 50-wide matrices can make the third campaign sit queued
             # even though the controller sees three campaigns in flight.
-            "max_parallel": os.environ.get("MFL_MAX_PARALLEL", "50"),
+            "max_parallel": os.environ.get("MFL_MAX_PARALLEL", "40"),
             "target_years": os.environ.get(
                 "MFL_TARGET_YEARS",
                 "2000,2001,2002,2003,2004,2005,2006,2007,2008,2009,"
