@@ -38,4 +38,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           MFL_DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          MFL_MAX_PARALLEL: '40'
         run: python3 scripts/extraplatform_corpus/mfl_bottom_up_watchdog.py
