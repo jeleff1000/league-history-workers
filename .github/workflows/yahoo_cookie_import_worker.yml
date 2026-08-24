@@ -36,7 +36,7 @@ on:
       throttle_retries:
         description: "Retries after Yahoo HTTP 999 responses"
         required: false
-        default: "3"
+        default: "1"
         type: string
       import_mode:
         description: "Shared Yahoo import mode"
