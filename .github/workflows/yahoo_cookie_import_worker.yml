@@ -80,6 +80,7 @@ jobs:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
           ref: ${{ inputs.yahoo_oauth_ref }}
+          path: yahoo_oauth
 
       - name: Setup Python
         uses: actions/setup-python@v6
