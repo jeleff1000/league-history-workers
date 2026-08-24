@@ -43,11 +43,6 @@ on:
         required: false
         default: "1"
         type: string
-      skip_history:
-        description: "Skip slow roster and transaction history pages for a compact validation import"
-        required: false
-        default: "true"
-        type: string
 
 permissions:
   contents: read
@@ -120,7 +115,6 @@ jobs:
           --draft-global-source "${DRAFT_GLOBAL_SOURCE_PATH}"
           --request-delay "${{ inputs.request_delay }}"
           --throttle-retries "${{ inputs.throttle_retries }}"
-          ${{ inputs.skip_history == 'true' && '--skip-history' || '' }}
           --output-dir "${{ inputs.output_dir }}"
 
       - name: Write redacted summary
