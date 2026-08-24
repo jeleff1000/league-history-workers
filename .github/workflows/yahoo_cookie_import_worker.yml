@@ -43,6 +43,16 @@ on:
         required: false
         default: "180"
         type: string
+      throttle_recovery_retries:
+        description: "Retries for a throttled year using cached pages"
+        required: false
+        default: "1"
+        type: string
+      throttle_recovery_cooldown:
+        description: "Seconds to wait before retrying a throttled year"
+        required: false
+        default: "300"
+        type: string
       import_mode:
         description: "Shared Yahoo import mode"
         required: false
@@ -128,4 +138,6 @@ jobs:
           --request-delay "${{ inputs.request_delay }}"
           --throttle-retries "${{ inputs.throttle_retries }}"
           --year-throttle-cooldown "${{ inputs.year_throttle_cooldown }}"
+          --throttle-recovery-retries "${{ inputs.throttle_recovery_retries }}"
+          --throttle-recovery-cooldown "${{ inputs.throttle_recovery_cooldown }}"
           --output-dir "cookie_worker_output"
