@@ -24,19 +24,14 @@ on:
         required: true
         type: string
       yahoo_oauth_ref:
-        description: "Importer branch containing the cookie worker"
+        description: "yahoo_oauth ref containing the cookie worker"
         required: false
-        default: "main"
-        type: string
-      output_dir:
-        description: "Local worker output directory"
-        required: false
-        default: "cookie_worker_output"
+        default: main
         type: string
       request_delay:
         description: "Seconds between Yahoo web requests"
         required: false
-        default: "3.0"
+        default: "0.5"
         type: string
       throttle_retries:
         description: "Retries after Yahoo HTTP 999 responses"
@@ -69,6 +64,9 @@ jobs:
       FLY_PUBLISH_FORMAT: delta
       FLY_FINALIZE_INVENTORY: "1"
     steps:
+      - name: Checkout worker
+        uses: actions/checkout@v5
+
       - name: Checkout importer
         uses: actions/checkout@v5
         with:
@@ -115,12 +113,4 @@ jobs:
           --draft-global-source "${DRAFT_GLOBAL_SOURCE_PATH}"
           --request-delay "${{ inputs.request_delay }}"
           --throttle-retries "${{ inputs.throttle_retries }}"
-          --output-dir "${{ inputs.output_dir }}"
-
-      - name: Write redacted summary
-        if: always()
-        run: |
-          echo "# Yahoo Cookie Import" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Database: `${{ inputs.database_name }}`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Mode: `cookie`" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Cookie values: not logged or uploaded" >> "$GITHUB_STEP_SUMMARY"
+          --output-dir "cookie_worker_output"
