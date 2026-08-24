@@ -38,6 +38,11 @@ on:
         required: false
         default: "1"
         type: string
+      year_throttle_cooldown:
+        description: "Seconds to wait between live Yahoo seasons"
+        required: false
+        default: "180"
+        type: string
       import_mode:
         description: "Shared Yahoo import mode"
         required: false
@@ -122,4 +127,5 @@ jobs:
           --draft-global-source "${DRAFT_GLOBAL_SOURCE_PATH}"
           --request-delay "${{ inputs.request_delay }}"
           --throttle-retries "${{ inputs.throttle_retries }}"
+          --year-throttle-cooldown "${{ inputs.year_throttle_cooldown }}"
           --output-dir "cookie_worker_output"
