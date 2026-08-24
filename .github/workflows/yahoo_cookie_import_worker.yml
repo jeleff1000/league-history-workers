@@ -48,7 +48,7 @@ jobs:
           path: corpus_dependencies
           key: ${{ env.CORPUS_DEPENDENCY_KEY }}
       - shell: bash
-        run: test -s "${{ DRAFT_GLOBAL_SOURCE_PATH }}"
+        run: test -s "${DRAFT_GLOBAL_SOURCE_PATH}"
       - working-directory: yahoo_oauth
         run: >-
           python scripts/yahoo_cookie_worker.py
@@ -57,6 +57,6 @@ jobs:
           --start-year "${{ inputs.start_year }}"
           --end-year "${{ inputs.end_year }}"
           --league-keys-json '${{ inputs.league_keys_json }}'
-          --ops-cache "${{ OPS_CACHE_PATH }}"
-          --draft-global-source "${{ DRAFT_GLOBAL_SOURCE_PATH }}"
+          --ops-cache "${OPS_CACHE_PATH}"
+          --draft-global-source "${DRAFT_GLOBAL_SOURCE_PATH}"
           --output-dir cookie_worker_output
