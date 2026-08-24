@@ -123,6 +123,14 @@ jobs:
         shell: bash
         run: test -s "${DRAFT_GLOBAL_SOURCE_PATH}"
 
+      - name: Restore Yahoo cookie capture cache
+        uses: actions/cache/restore@v4
+        with:
+          path: yahoo_oauth/${{ inputs.output_dir }}
+          key: yahoo-cookie-pages-v2-${{ inputs.database_name }}-${{ inputs.start_year }}-${{ inputs.end_year }}-${{ github.run_id }}
+          restore-keys: |
+            yahoo-cookie-pages-v2-${{ inputs.database_name }}-${{ inputs.start_year }}-${{ inputs.end_year }}-
+
       - name: Run Yahoo cookie track
         working-directory: yahoo_oauth
         run: >-
@@ -141,3 +149,10 @@ jobs:
           --throttle-recovery-retries "${{ inputs.throttle_recovery_retries }}"
           --throttle-recovery-cooldown "${{ inputs.throttle_recovery_cooldown }}"
           --output-dir "cookie_worker_output"
+
+      - name: Save Yahoo cookie capture cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: yahoo_oauth/${{ inputs.output_dir }}
+          key: yahoo-cookie-pages-v2-${{ inputs.database_name }}-${{ inputs.start_year }}-${{ inputs.end_year }}-${{ github.run_id }}
