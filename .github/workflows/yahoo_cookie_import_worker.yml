@@ -24,6 +24,7 @@ jobs:
       DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
       FLY_PRIMARY_MACHINE_ID: ${{ secrets.FLY_PRIMARY_MACHINE_ID }}
       CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+      CREDENTIAL_ENCRYPTION_KEY_NEW: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY_NEW }}
       OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
       DRAFT_GLOBAL_SOURCE_PATH: ${{ github.workspace }}/corpus_dependencies/draft_global_source.parquet
       CORPUS_DEPENDENCY_KEY: corpus-dependencies-v1-Linux-20260717
