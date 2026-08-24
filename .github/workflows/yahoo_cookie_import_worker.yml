@@ -1,0 +1,158 @@
+name: Yahoo Cookie Import Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      database_name:
+        description: "Registered Yahoo database name"
+        required: true
+        type: string
+      league_name:
+        description: "Yahoo league display name"
+        required: true
+        type: string
+      start_year:
+        description: "First Yahoo season"
+        required: true
+        type: string
+      end_year:
+        description: "Last Yahoo season"
+        required: true
+        type: string
+      league_keys_json:
+        description: "JSON object mapping each Yahoo season to its league key"
+        required: true
+        type: string
+      yahoo_oauth_ref:
+        description: "yahoo_oauth ref containing the cookie worker"
+        required: false
+        default: main
+        type: string
+      request_delay:
+        description: "Seconds between Yahoo web requests"
+        required: false
+        default: "0.5"
+        type: string
+      throttle_retries:
+        description: "Retries after Yahoo HTTP 999 responses"
+        required: false
+        default: "1"
+        type: string
+      year_throttle_cooldown:
+        description: "Seconds to wait between live Yahoo seasons"
+        required: false
+        default: "180"
+        type: string
+      throttle_recovery_retries:
+        description: "Retries for a throttled year using cached pages"
+        required: false
+        default: "1"
+        type: string
+      throttle_recovery_cooldown:
+        description: "Seconds to wait before retrying a throttled year"
+        required: false
+        default: "300"
+        type: string
+      import_mode:
+        description: "Shared Yahoo import mode"
+        required: false
+        default: full
+        type: choice
+        options:
+          - quick
+          - full
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yahoo-cookie-${{ inputs.database_name }}
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      PYTHONUNBUFFERED: "1"
+      DATABASE_BACKEND: fly
+      DATABASE_SERVER_URL: ${{ secrets.DATABASE_SERVER_URL }}
+      DATABASE_READ_TOKEN: ${{ secrets.DATABASE_READ_TOKEN }}
+      DATABASE_ADMIN_TOKEN: ${{ secrets.DATABASE_ADMIN_TOKEN }}
+      FLY_PRIMARY_MACHINE_ID: ${{ secrets.FLY_PRIMARY_MACHINE_ID }}
+      CREDENTIAL_ENCRYPTION_KEY: ${{ secrets.CREDENTIAL_ENCRYPTION_KEY }}
+      OPS_CACHE_PATH: ${{ github.workspace }}/research_public_lake/ops_cache.duckdb
+      DRAFT_GLOBAL_SOURCE_PATH: ${{ github.workspace }}/corpus_dependencies/draft_global_source.parquet
+      CORPUS_DEPENDENCY_KEY: corpus-dependencies-v1-Linux-20260717
+      FLY_PUBLISH_FORMAT: delta
+      FLY_FINALIZE_INVENTORY: "1"
+    steps:
+      - name: Checkout worker
+        uses: actions/checkout@v5
+
+      - name: Checkout importer
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref }}
+          path: yahoo_oauth
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: yahoo_oauth
+        run: python -m pip install -r requirements.txt
+
+      - name: Restore canonical research public lake
+        uses: ./yahoo_oauth/.github/actions/restore-research-ops-cache
+        with:
+          cache-key: research-public-lake-v5-Linux-2000-plus-player-bio
+          release-tag: ops-cache-v6-2000-plus-player-bio
+
+      - name: Restore draft baseline bundle
+        uses: actions/cache/restore@v5
+        with:
+          path: corpus_dependencies
+          key: ${{ env.CORPUS_DEPENDENCY_KEY }}
+
+      - name: Verify draft baseline
+        shell: bash
+        run: test -s "${DRAFT_GLOBAL_SOURCE_PATH}"
+
+      - name: Restore Yahoo cookie capture cache
+        uses: actions/cache/restore@v4
+        with:
+          path: yahoo_oauth/cookie_worker_output
+          key: yahoo-cookie-pages-v3-${{ inputs.database_name }}-${{ inputs.start_year }}-${{ inputs.end_year }}-${{ github.run_id }}
+          restore-keys: |
+            yahoo-cookie-pages-v3-${{ inputs.database_name }}-${{ inputs.start_year }}-${{ inputs.end_year }}-
+
+      - name: Run Yahoo cookie track
+        working-directory: yahoo_oauth
+        run: >-
+          python scripts/yahoo_cookie_worker.py
+          --db-name "${{ inputs.database_name }}"
+          --league-name "${{ inputs.league_name }}"
+          --start-year "${{ inputs.start_year }}"
+          --end-year "${{ inputs.end_year }}"
+          --league-keys-json '${{ inputs.league_keys_json }}'
+          --import-mode "${{ inputs.import_mode }}"
+          --ops-cache "${OPS_CACHE_PATH}"
+          --draft-global-source "${DRAFT_GLOBAL_SOURCE_PATH}"
+          --request-delay "${{ inputs.request_delay }}"
+          --throttle-retries "${{ inputs.throttle_retries }}"
+          --year-throttle-cooldown "${{ inputs.year_throttle_cooldown }}"
+          --throttle-recovery-retries "${{ inputs.throttle_recovery_retries }}"
+          --throttle-recovery-cooldown "${{ inputs.throttle_recovery_cooldown }}"
+          --output-dir "cookie_worker_output"
+
+      - name: Save Yahoo cookie capture cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: yahoo_oauth/cookie_worker_output
+          key: yahoo-cookie-pages-v3-${{ inputs.database_name }}-${{ inputs.start_year }}-${{ inputs.end_year }}-${{ github.run_id }}
