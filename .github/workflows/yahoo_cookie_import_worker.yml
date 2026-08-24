@@ -126,10 +126,10 @@ jobs:
       - name: Restore Yahoo cookie capture cache
         uses: actions/cache/restore@v4
         with:
-          path: yahoo_oauth/cookie_worker_output
-          key: yahoo-cookie-pages-v3-${{ inputs.database_name }}-${{ inputs.start_year }}-${{ inputs.end_year }}-${{ github.run_id }}
+          path: yahoo_oauth/cookie_worker_output/[0-9][0-9][0-9][0-9]
+          key: yahoo-cookie-pages-v4-${{ inputs.database_name }}-${{ inputs.start_year }}-${{ inputs.end_year }}-${{ github.run_id }}
           restore-keys: |
-            yahoo-cookie-pages-v3-${{ inputs.database_name }}-${{ inputs.start_year }}-${{ inputs.end_year }}-
+            yahoo-cookie-pages-v4-${{ inputs.database_name }}-${{ inputs.start_year }}-${{ inputs.end_year }}-
 
       - name: Run Yahoo cookie track
         working-directory: yahoo_oauth
@@ -154,5 +154,5 @@ jobs:
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: yahoo_oauth/cookie_worker_output
-          key: yahoo-cookie-pages-v3-${{ inputs.database_name }}-${{ inputs.start_year }}-${{ inputs.end_year }}-${{ github.run_id }}
+          path: yahoo_oauth/cookie_worker_output/[0-9][0-9][0-9][0-9]
+          key: yahoo-cookie-pages-v4-${{ inputs.database_name }}-${{ inputs.start_year }}-${{ inputs.end_year }}-${{ github.run_id }}
