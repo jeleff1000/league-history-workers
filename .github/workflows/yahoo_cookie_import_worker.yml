@@ -92,7 +92,7 @@ jobs:
         run: python -m pip install -r requirements.txt
 
       - name: Restore canonical research public lake
-        uses: ./.github/actions/restore-research-ops-cache
+        uses: ./yahoo_oauth/.github/actions/restore-research-ops-cache
         with:
           cache-key: research-public-lake-v5-Linux-2000-plus-player-bio
           release-tag: ops-cache-v6-2000-plus-player-bio
