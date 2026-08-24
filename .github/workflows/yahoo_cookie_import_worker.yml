@@ -23,6 +23,11 @@ on:
         description: "JSON object mapping each Yahoo season to its league key"
         required: true
         type: string
+      yahoo_oauth_ref:
+        description: "Importer branch containing the cookie worker"
+        required: false
+        default: "main"
+        type: string
       output_dir:
         description: "Local worker output directory"
         required: false
@@ -74,7 +79,7 @@ jobs:
         with:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
-          ref: main
+          ref: ${{ inputs.yahoo_oauth_ref }}
 
       - name: Setup Python
         uses: actions/setup-python@v6
