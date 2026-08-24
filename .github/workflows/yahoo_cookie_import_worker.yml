@@ -38,6 +38,14 @@ on:
         required: false
         default: "3"
         type: string
+      import_mode:
+        description: "Shared Yahoo import mode"
+        required: false
+        default: full
+        type: choice
+        options:
+          - quick
+          - full
 
 permissions:
   contents: read
@@ -109,6 +117,7 @@ jobs:
           --start-year "${{ inputs.start_year }}"
           --end-year "${{ inputs.end_year }}"
           --league-keys-json '${{ inputs.league_keys_json }}'
+          --import-mode "${{ inputs.import_mode }}"
           --ops-cache "${OPS_CACHE_PATH}"
           --draft-global-source "${DRAFT_GLOBAL_SOURCE_PATH}"
           --request-delay "${{ inputs.request_delay }}"
