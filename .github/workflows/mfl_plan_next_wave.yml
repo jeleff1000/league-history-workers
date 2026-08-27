@@ -345,7 +345,7 @@ jobs:
               -f reservation_artifact_run_id="${{ github.run_id }}" \
               -f reservation_artifact_name="mfl-reservations-${{ github.run_id }}" \
               -f target_years="${{ inputs.target_years }}" \
-              -f yahoo_oauth_ref=main  \
+              -f yahoo_oauth_ref=codex/mfl-gates  \
               -f collect_all="${{ inputs.collect_all }}" \
               -f target_per_year=10000 \
               -f mfl_rate_limit="$MFL_RATE_LIMIT"; then
