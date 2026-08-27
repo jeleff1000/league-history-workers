@@ -344,7 +344,7 @@ jobs:
               -f prior_index_artifact_name="$prior_artifact_name" \
               -f reservation_artifact_run_id="${{ github.run_id }}" \
               -f reservation_artifact_name="mfl-reservations-${{ github.run_id }}" \
-              -f target_years="${{ inputs.target_years }}" \\
+              -f target_years="${{ inputs.target_years }}"  \
               -f collect_all="${{ inputs.collect_all }}" \
               -f target_per_year=10000 \
               -f mfl_rate_limit="$MFL_RATE_LIMIT"; then
