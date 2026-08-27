@@ -141,6 +141,7 @@ def main() -> int:
             "campaign_count": str(needed),
             "batches_per_campaign": os.environ.get("MFL_BATCHES_PER_CAMPAIGN", "250"),
             "batch_size": os.environ.get("MFL_ORDERED_BATCH_SIZE", "2"),
+            "collect_all": "true",
             # Leave runner headroom for each campaign's prepare/combine jobs.
             # Three 50-wide matrices can make the third campaign sit queued
             # even though the controller sees three campaigns in flight.
