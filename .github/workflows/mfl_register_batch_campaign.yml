@@ -296,9 +296,15 @@ jobs:
           d=json.load(open(os.environ['MANIFEST'], encoding='utf-8'))
           rows=d.get('rows', d.get('leagues', d))
           start=int(os.environ['START']); count=int(os.environ['COUNT']); size=int(os.environ['SIZE'])
-          end=min(len(rows), (start+count)*size)
-          selected=rows[start*size:end]
-          batches=list(range(start, start+((len(selected)+size-1)//size)))
+          if os.environ['STORAGE_MODE'] == 'fetch_only':
+              # Planner reservations already narrowed this manifest to this campaign slice.
+              selected=rows
+              batch_start=0
+          else:
+              end=min(len(rows), (start+count)*size)
+              selected=rows[start*size:end]
+              batch_start=start
+          batches=list(range(batch_start, batch_start+((len(selected)+size-1)//size)))
           # Chunked combines read the checked-out manifest directly. Avoid
           # serializing thousands of records into a GitHub job output.
           if os.environ['STORAGE_MODE'] in {'chunked', 'fetch_only'}:
@@ -331,7 +337,10 @@ jobs:
           rows=json.load(open(os.environ['MANIFEST'], encoding='utf-8'))
           rows=rows.get('rows', rows.get('leagues', rows))
           start=int(os.environ['BATCH_START']); count=int(os.environ['BATCH_COUNT']); size=int(os.environ['BATCH_SIZE'])
-          selected=rows[start*size:min(len(rows),(start+count)*size)]
+          if os.environ['STORAGE_MODE'] == 'fetch_only':
+              selected=rows
+          else:
+              selected=rows[start*size:min(len(rows),(start+count)*size)]
           ns=os.environ['CACHE_NAMESPACE']; suffix=os.environ['ATTEMPT_SUFFIX']
           plan={
             'schema_version':'mfl_batch_plan_v1',
