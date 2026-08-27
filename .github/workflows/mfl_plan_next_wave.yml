@@ -68,14 +68,14 @@ jobs:
         with:
           repository: jeleff1000/yahoo_oauth
           token: ${{ secrets.PRIVATE_REPO_PAT }}
-          ref: codex/mfl-gates
+          ref: main
           path: code
           filter: blob:none
           sparse-checkout-cone-mode: false
           sparse-checkout: |
             /corpus_seed/
             /scripts/extraplatform_corpus/build_mfl_pending_manifest.py
-            /derived/mfl_register/quota_planning/mfl_ordered_quota_manifest.json
+            /corpus_seed/mfl_missing_execution_manifest_20260826.json
 
       - name: Collect run inventory and canonical proof
         env:
@@ -113,7 +113,7 @@ jobs:
           BATCHES_PER_CAMPAIGN: ${{ inputs.batches_per_campaign }}
         run: |
           python3 code/scripts/extraplatform_corpus/build_mfl_pending_manifest.py \
-            --manifest code/derived/mfl_register/quota_planning/mfl_ordered_quota_manifest.json \
+            --manifest code/corpus_seed/mfl_missing_execution_manifest_20260826.json \
             --index canonical/mfl_register_all_runs.json \
             --output pending_manifest.json \
             --target-per-year 10000 --target-years "$TARGET_YEARS" $([ "$COLLECT_ALL" = true ] && echo --collect-all) \
@@ -330,7 +330,7 @@ jobs:
           for ((campaign=0; campaign<effective_campaign_count; campaign++)); do
             start=$((campaign * ${{ inputs.batches_per_campaign }}))
             if ! gh workflow run mfl_register_batch_campaign.yml \
-              -f manifest_path="derived/mfl_register/quota_planning/mfl_ordered_quota_manifest.json" \
+              -f manifest_path="corpus_seed/mfl_missing_execution_manifest_20260826.json" \
               --repo "${{ github.repository }}" --ref main \
               -f batch_start="$start" \
               -f batch_count="${{ inputs.batches_per_campaign }}" \
@@ -344,7 +344,8 @@ jobs:
               -f prior_index_artifact_name="$prior_artifact_name" \
               -f reservation_artifact_run_id="${{ github.run_id }}" \
               -f reservation_artifact_name="mfl-reservations-${{ github.run_id }}" \
-              -f target_years="${{ inputs.target_years }}"  \
+              -f target_years="${{ inputs.target_years }}" \
+              -f yahoo_oauth_ref=main  \
               -f collect_all="${{ inputs.collect_all }}" \
               -f target_per_year=10000 \
               -f mfl_rate_limit="$MFL_RATE_LIMIT"; then
