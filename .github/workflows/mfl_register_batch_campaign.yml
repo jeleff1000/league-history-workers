@@ -153,7 +153,7 @@ jobs:
           sparse-checkout: |
             /corpus_seed/
             /derived/mfl_register/quota_planning/
-            /scripts/extraplatform_corpus/build_mfl_pending_manifest.py
+            /scripts/extraplatform_corpus/
             /requirements.txt
       - name: Setup Python for shared worker environment
         uses: actions/setup-python@v6
