@@ -11,6 +11,10 @@ on:
         description: "Yahoo league display name"
         required: true
         type: string
+      team_count:
+        description: "Yahoo league team count from discovery"
+        required: true
+        type: string
       start_year:
         description: "First Yahoo season"
         required: true
@@ -137,6 +141,7 @@ jobs:
           python scripts/yahoo_cookie_worker.py
           --db-name "${{ inputs.database_name }}"
           --league-name "${{ inputs.league_name }}"
+          --team-count "${{ inputs.team_count }}"
           --start-year "${{ inputs.start_year }}"
           --end-year "${{ inputs.end_year }}"
           --league-keys-json '${{ inputs.league_keys_json }}'
