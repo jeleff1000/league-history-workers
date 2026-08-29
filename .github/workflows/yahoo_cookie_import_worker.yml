@@ -45,7 +45,7 @@ on:
       year_throttle_cooldown:
         description: "Seconds to wait between live Yahoo seasons"
         required: false
-        default: "180"
+        default: "0"
         type: string
       throttle_recovery_retries:
         description: "Retries for a throttled year using cached pages"
