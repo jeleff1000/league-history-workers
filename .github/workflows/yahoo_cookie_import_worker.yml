@@ -135,6 +135,7 @@ jobs:
           key: yahoo-cookie-pages-v5-${{ inputs.database_name }}-${{ inputs.start_year }}-${{ inputs.end_year }}-${{ github.run_id }}
           restore-keys: |
             yahoo-cookie-pages-v5-${{ inputs.database_name }}-${{ inputs.start_year }}-${{ inputs.end_year }}-
+            yahoo-cookie-pages-v4-${{ inputs.database_name }}-${{ inputs.start_year }}-${{ inputs.end_year }}-
 
       - name: Run Yahoo cookie track
         working-directory: yahoo_oauth
