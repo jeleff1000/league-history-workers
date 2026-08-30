@@ -1,0 +1,58 @@
+name: Refresh League Cache
+
+on:
+  workflow_dispatch:
+    inputs:
+      database_name:
+        description: "Completed league database name to revalidate and warm"
+        required: true
+        type: string
+      import_mode:
+        description: "Warm the quick or full public route surface"
+        required: true
+        default: full
+        type: choice
+        options:
+          - quick
+          - full
+      yahoo_oauth_ref:
+        description: "Importer branch containing the shared cache warmer"
+        required: false
+        default: main
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      REVALIDATION_SECRET: ${{ secrets.REVALIDATION_SECRET }}
+    steps:
+      - name: Checkout importer
+        uses: actions/checkout@v5
+        with:
+          repository: jeleff1000/yahoo_oauth
+          token: ${{ secrets.PRIVATE_REPO_PAT }}
+          ref: ${{ inputs.yahoo_oauth_ref }}
+          path: yahoo_oauth
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Revalidate and warm Vercel cache
+        working-directory: yahoo_oauth
+        run: >-
+          python scripts/warm_vercel_cache.py
+          --db "${{ inputs.database_name }}"
+          --secret "${REVALIDATION_SECRET}"
+          --site-url "https://www.leaguehistory.app"
+          --mode "${{ inputs.import_mode }}"
+          --strategy expire
+          --jitter-seconds 0
+          --strict
+          --verify-hot
