@@ -90,6 +90,7 @@ jobs:
       CORPUS_DEPENDENCY_KEY: corpus-dependencies-v1-Linux-20260717
       FLY_PUBLISH_FORMAT: delta
       FLY_FINALIZE_INVENTORY: "1"
+      REVALIDATION_SECRET: ${{ secrets.REVALIDATION_SECRET }}
     steps:
       - name: Checkout worker
         uses: actions/checkout@v5
@@ -154,6 +155,19 @@ jobs:
           --throttle-recovery-retries "${{ inputs.throttle_recovery_retries }}"
           --throttle-recovery-cooldown "${{ inputs.throttle_recovery_cooldown }}"
           --output-dir "cookie_worker_output"
+
+      - name: Revalidate and warm Vercel cache
+        working-directory: yahoo_oauth
+        run: >-
+          python scripts/warm_vercel_cache.py
+          --db "${{ inputs.database_name }}"
+          --secret "${REVALIDATION_SECRET}"
+          --site-url "https://www.leaguehistory.app"
+          --mode "${{ inputs.import_mode }}"
+          --strategy expire
+          --jitter-seconds 0
+          --strict
+          --verify-hot
 
       - name: Save Yahoo cookie capture cache
         if: always()
