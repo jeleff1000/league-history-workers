@@ -137,39 +137,75 @@ jobs:
             yahoo-cookie-pages-v5-${{ inputs.database_name }}-${{ inputs.start_year }}-${{ inputs.end_year }}-
             yahoo-cookie-pages-v4-${{ inputs.database_name }}-${{ inputs.start_year }}-${{ inputs.end_year }}-
 
-      - name: Run Yahoo cookie track
+      - name: Run quick Yahoo cookie track
+        if: inputs.import_mode == 'quick' || inputs.import_mode == 'full'
         working-directory: yahoo_oauth
         run: >-
           python scripts/yahoo_cookie_worker.py
-          --db-name "${{ inputs.database_name }}"
-          --league-name "${{ inputs.league_name }}"
-          --team-count "${{ inputs.team_count }}"
-          --start-year "${{ inputs.start_year }}"
-          --end-year "${{ inputs.end_year }}"
+          --db-name \"${{ inputs.database_name }}\"
+          --league-name \"${{ inputs.league_name }}\"
+          --team-count \"${{ inputs.team_count }}\"
+          --start-year \"${{ inputs.start_year }}\"
+          --end-year \"${{ inputs.end_year }}\"
           --league-keys-json '${{ inputs.league_keys_json }}'
-          --import-mode "${{ inputs.import_mode }}"
-          --ops-cache "${OPS_CACHE_PATH}"
-          --draft-global-source "${DRAFT_GLOBAL_SOURCE_PATH}"
-          --request-delay "${{ inputs.request_delay }}"
-          --throttle-retries "${{ inputs.throttle_retries }}"
-          --year-throttle-cooldown "${{ inputs.year_throttle_cooldown }}"
-          --throttle-recovery-retries "${{ inputs.throttle_recovery_retries }}"
-          --throttle-recovery-cooldown "${{ inputs.throttle_recovery_cooldown }}"
-          --output-dir "cookie_worker_output"
+          --import-mode \"quick\"
+          --ops-cache \"${{ env.OPS_CACHE_PATH }}\"
+          --draft-global-source \"${{ env.DRAFT_GLOBAL_SOURCE_PATH }}\"
+          --request-delay \"${{ inputs.request_delay }}\"
+          --throttle-retries \"${{ inputs.throttle_retries }}\"
+          --year-throttle-cooldown \"${{ inputs.year_throttle_cooldown }}\"
+          --throttle-recovery-retries \"${{ inputs.throttle_recovery_retries }}\"
+          --throttle-recovery-cooldown \"${{ inputs.throttle_recovery_cooldown }}\"
+          --output-dir \"cookie_worker_output\"
 
-      - name: Revalidate and warm Vercel cache
+      - name: Publish quick cookie import
+        if: inputs.import_mode == 'quick' || inputs.import_mode == 'full'
         working-directory: yahoo_oauth
         run: >-
           python scripts/warm_vercel_cache.py
-          --db "${{ inputs.database_name }}"
-          --secret "${REVALIDATION_SECRET}"
-          --site-url "https://www.leaguehistory.app"
-          --mode "${{ inputs.import_mode }}"
+          --db \"${{ inputs.database_name }}\"
+          --secret \"${{ env.REVALIDATION_SECRET }}\"
+          --site-url \"https://www.leaguehistory.app\"
+          --mode \"quick\"
           --strategy expire
           --jitter-seconds 0
           --strict
           --verify-hot
 
+      - name: Run full Yahoo cookie track
+        if: inputs.import_mode == 'full'
+        working-directory: yahoo_oauth
+        run: >-
+          python scripts/yahoo_cookie_worker.py
+          --db-name \"${{ inputs.database_name }}\"
+          --league-name \"${{ inputs.league_name }}\"
+          --team-count \"${{ inputs.team_count }}\"
+          --start-year \"${{ inputs.start_year }}\"
+          --end-year \"${{ inputs.end_year }}\"
+          --league-keys-json '${{ inputs.league_keys_json }}'
+          --import-mode \"full\"
+          --ops-cache \"${{ env.OPS_CACHE_PATH }}\"
+          --draft-global-source \"${{ env.DRAFT_GLOBAL_SOURCE_PATH }}\"
+          --request-delay \"${{ inputs.request_delay }}\"
+          --throttle-retries \"${{ inputs.throttle_retries }}\"
+          --year-throttle-cooldown \"${{ inputs.year_throttle_cooldown }}\"
+          --throttle-recovery-retries \"${{ inputs.throttle_recovery_retries }}\"
+          --throttle-recovery-cooldown \"${{ inputs.throttle_recovery_cooldown }}\"
+          --output-dir \"cookie_worker_output\"
+
+      - name: Publish full cookie import
+        if: inputs.import_mode == 'full'
+        working-directory: yahoo_oauth
+        run: >-
+          python scripts/warm_vercel_cache.py
+          --db \"${{ inputs.database_name }}\"
+          --secret \"${{ env.REVALIDATION_SECRET }}\"
+          --site-url \"https://www.leaguehistory.app\"
+          --mode \"full\"
+          --strategy expire
+          --jitter-seconds 0
+          --strict
+          --verify-hot
       - name: Save Yahoo cookie capture cache
         if: always()
         uses: actions/cache/save@v4
