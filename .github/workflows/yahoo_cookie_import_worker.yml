@@ -43,7 +43,7 @@ on:
         default: "1"
         type: string
       year_throttle_cooldown:
-        description: "Seconds to wait between live Yahoo seasons"
+        description: "Seconds to wait between live Yahoo seasons; leave at 0 unless Yahoo is throttling"
         required: false
         default: "0"
         type: string
@@ -91,6 +91,8 @@ jobs:
       FLY_PUBLISH_FORMAT: delta
       FLY_FINALIZE_INVENTORY: "1"
       REVALIDATION_SECRET: ${{ secrets.REVALIDATION_SECRET }}
+      DATABASE_NAME: ${{ inputs.database_name }}
+      COOKIE_DATA_DIR: ${{ github.workspace }}/yahoo_oauth/cookie_worker_output
     steps:
       - name: Checkout worker
         uses: actions/checkout@v5
@@ -149,6 +151,7 @@ jobs:
           --end-year "${{ inputs.end_year }}"
           --league-keys-json '${{ inputs.league_keys_json }}'
           --import-mode "quick"
+          --skip-upload
           --ops-cache "${{ env.OPS_CACHE_PATH }}"
           --draft-global-source "${{ env.DRAFT_GLOBAL_SOURCE_PATH }}"
           --request-delay "${{ inputs.request_delay }}"
@@ -157,6 +160,46 @@ jobs:
           --throttle-recovery-retries "${{ inputs.throttle_recovery_retries }}"
           --throttle-recovery-cooldown "${{ inputs.throttle_recovery_cooldown }}"
           --output-dir "cookie_worker_output"
+
+      - name: Run quick cookie post-import calculations
+        if: inputs.import_mode == 'quick' || inputs.import_mode == 'full'
+        working-directory: yahoo_oauth/fantasy_football_data_scripts
+        run: |
+          MATCHUP_ROWS="$(python - <<'PY'
+          import duckdb
+          import os
+          from pathlib import Path
+
+          db_path = Path(os.environ["COOKIE_DATA_DIR"]) / f"{os.environ['DATABASE_NAME']}.duckdb"
+          with duckdb.connect(str(db_path), read_only=True) as conn:
+              print(conn.execute("SELECT COUNT(*) FROM public.matchup").fetchone()[0])
+          PY
+          )"
+          if [ "${MATCHUP_ROWS}" -gt 0 ]; then
+            python -m multi_league.transformations.matchup.expected_record_v2 \
+              --db "${{ inputs.database_name }}" --data-dir "${COOKIE_DATA_DIR}" --n-sims 10000
+            python -m multi_league.transformations.matchup.playoff_odds_import \
+              --db "${{ inputs.database_name }}" --data-dir "${COOKIE_DATA_DIR}" --n-sims 10000
+          fi
+          python ../scripts/refresh_aggregates.py \
+            --db "${{ inputs.database_name }}" --data-dir "${COOKIE_DATA_DIR}"
+
+      - name: Upload quick cookie import
+        if: inputs.import_mode == 'quick' || inputs.import_mode == 'full'
+        working-directory: yahoo_oauth/fantasy_football_data_scripts
+        run: |
+          python - <<'PY'
+          import os
+          from multi_league.core.local_db import LocalLeagueDB
+
+          db_name = os.environ["DATABASE_NAME"]
+          db = LocalLeagueDB(os.environ["COOKIE_DATA_DIR"], db_name)
+          db.connect()
+          try:
+              db.upload_to_fly(db_name)
+          finally:
+              db.close()
+          PY
 
       - name: Publish quick cookie import
         if: inputs.import_mode == 'quick' || inputs.import_mode == 'full'
@@ -184,6 +227,7 @@ jobs:
           --end-year "${{ inputs.end_year }}"
           --league-keys-json '${{ inputs.league_keys_json }}'
           --import-mode "full"
+          --skip-upload
           --ops-cache "${{ env.OPS_CACHE_PATH }}"
           --draft-global-source "${{ env.DRAFT_GLOBAL_SOURCE_PATH }}"
           --request-delay "${{ inputs.request_delay }}"
@@ -192,6 +236,46 @@ jobs:
           --throttle-recovery-retries "${{ inputs.throttle_recovery_retries }}"
           --throttle-recovery-cooldown "${{ inputs.throttle_recovery_cooldown }}"
           --output-dir "cookie_worker_output"
+
+      - name: Run full cookie post-import calculations
+        if: inputs.import_mode == 'full'
+        working-directory: yahoo_oauth/fantasy_football_data_scripts
+        run: |
+          MATCHUP_ROWS="$(python - <<'PY'
+          import duckdb
+          import os
+          from pathlib import Path
+
+          db_path = Path(os.environ["COOKIE_DATA_DIR"]) / f"{os.environ['DATABASE_NAME']}.duckdb"
+          with duckdb.connect(str(db_path), read_only=True) as conn:
+              print(conn.execute("SELECT COUNT(*) FROM public.matchup").fetchone()[0])
+          PY
+          )"
+          if [ "${MATCHUP_ROWS}" -gt 0 ]; then
+            python -m multi_league.transformations.matchup.expected_record_v2 \
+              --db "${{ inputs.database_name }}" --data-dir "${COOKIE_DATA_DIR}" --n-sims 10000
+            python -m multi_league.transformations.matchup.playoff_odds_import \
+              --db "${{ inputs.database_name }}" --data-dir "${COOKIE_DATA_DIR}" --n-sims 10000
+          fi
+          python ../scripts/refresh_aggregates.py \
+            --db "${{ inputs.database_name }}" --data-dir "${COOKIE_DATA_DIR}"
+
+      - name: Upload full cookie import
+        if: inputs.import_mode == 'full'
+        working-directory: yahoo_oauth/fantasy_football_data_scripts
+        run: |
+          python - <<'PY'
+          import os
+          from multi_league.core.local_db import LocalLeagueDB
+
+          db_name = os.environ["DATABASE_NAME"]
+          db = LocalLeagueDB(os.environ["COOKIE_DATA_DIR"], db_name)
+          db.connect()
+          try:
+              db.upload_to_fly(db_name)
+          finally:
+              db.close()
+          PY
 
       - name: Publish full cookie import
         if: inputs.import_mode == 'full'
