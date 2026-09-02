@@ -65,6 +65,11 @@ on:
         options:
           - quick
           - full
+      cache_only:
+        description: "Rebuild only from an existing Yahoo page cache; never call Yahoo"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -93,6 +98,7 @@ jobs:
       REVALIDATION_SECRET: ${{ secrets.REVALIDATION_SECRET }}
       DATABASE_NAME: ${{ inputs.database_name }}
       COOKIE_DATA_DIR: ${{ github.workspace }}/yahoo_oauth/cookie_worker_output
+      COOKIE_BACKUP_CACHE_ONLY: ${{ inputs.cache_only && '1' || '0' }}
     steps:
       - name: Checkout worker
         uses: actions/checkout@v5
